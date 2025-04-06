@@ -56,7 +56,7 @@ jobs:
       run: go test -v ./... 
 
     - name: Run Go Tests (/shared)
-      working-directory: ./server
+      working-directory: ./shared
       run: go test -v ./... 
 
     - name: Upload Test Artifacts (Screenshots, Logs)
@@ -123,12 +123,12 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Build and push All-in-One image
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        file: ./all-in-one.dockerfile
-        push: true
-        tags: gate4ai/all-in-one:dev
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+    # - name: Build and push All-in-One image
+    #   uses: docker/build-push-action@v6
+    #   with:
+    #     context: .
+    #     file: ./all-in-one.dockerfile
+    #     push: true
+    #     tags: gate4ai/all-in-one:dev
+    #     cache-from: type=gha
+    #     cache-to: type=gha,mode=max
