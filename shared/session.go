@@ -156,6 +156,7 @@ func (s *BaseSession) Close() error {
 	s.status = StatusNew
 	if s.output == nil {
 		s.Logger.Error("Double close of session")
+		return nil
 	}
 	close(s.output)
 	s.isOutputAcquired = false
