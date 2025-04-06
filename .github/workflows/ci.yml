@@ -75,7 +75,7 @@ jobs:
 
     permissions:
       contents: read
-      packages: write # Needed to push to Docker Hub (or GHCR)
+      packages: write
 
     steps:
     - name: Checkout code
@@ -99,27 +99,27 @@ jobs:
         context: ./portal
         file: ./portal/Dockerfile
         push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/gate4ai-portal:dev # Replace with your DockerHub username
+        tags: gate4ai/portal:dev
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
     - name: Build and push Gateway image
       uses: docker/build-push-action@v6
       with:
-        context: ./gateway
+        context: .
         file: ./gateway/Dockerfile
         push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/gate4ai-gateway:dev # Replace with your DockerHub username
+        tags: gate4ai/gateway:dev
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
     - name: Build and push Example Server image
       uses: docker/build-push-action@v6
       with:
-        context: ./server
+        context: .
         file: ./server/Dockerfile
         push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/gate4ai-example-server:dev # Replace with your DockerHub username
+        tags: gate4ai/example-server:dev
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -127,8 +127,8 @@ jobs:
       uses: docker/build-push-action@v6
       with:
         context: .
-        file: ./all-in-one.dockerfile # Use the root Dockerfile
+        file: ./all-in-one.dockerfile
         push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/gate4ai-all-in-one:dev # Replace with your DockerHub username
+        tags: gate4ai/all-in-one:dev
         cache-from: type=gha
-        cache-to: type=gha,mode=max 
+        cache-to: type=gha,mode=max
