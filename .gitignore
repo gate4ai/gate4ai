@@ -1,0 +1,7 @@
+.vscode
+.idea
+.cursor
+.docs
+
+__debug_bin*
+tester/tester

@@ -1,0 +1,13 @@
+server:
+  address: ":4001"
+  name: "Gate4ai Gateway"
+  version: "0.1.0"
+  log_level: "debug"
+  info_handler: "/info"
+  frontend_address: "http://localhost:3000"
+  authorization: "users_only" # "users_only", "marked_methods", or "none"
+
+users:
+  user1:
+    keys:
+      - "002d3590657193543ca073cbf1f43b51963e3478137a73c150782522cae93875" # SHA-256 hash of "test-key-user1"

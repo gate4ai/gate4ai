@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  
+  <circle fill="#1E3A8A" r="20" cy="100" cx="100"></circle>
+  
+  
+  <circle stroke-width="3" stroke="#1E3A8A" fill="#FFFFFF" r="15" cy="40" cx="40"></circle>
+  <circle stroke-width="3" stroke="#1E3A8A" fill="#FFFFFF" r="15" cy="40" cx="160"></circle>
+  <circle stroke-width="3" stroke="#1E3A8A" fill="#FFFFFF" r="15" cy="160" cx="40"></circle>
+  <circle stroke-width="3" stroke="#1E3A8A" fill="#FFFFFF" r="15" cy="160" cx="160"></circle>
+  
+  
+  <line stroke-width="3" stroke="#1E3A8A" y2="40" x2="40" y1="100" x1="100"></line>
+  <line stroke-width="3" stroke="#1E3A8A" y2="40" x2="160" y1="100" x1="100"></line>
+  <line stroke-width="3" stroke="#1E3A8A" y2="160" x2="40" y1="100" x1="100"></line>
+  <line stroke-width="3" stroke="#1E3A8A" y2="160" x2="160" y1="100" x1="100"></line>
+  
+  
+  <line stroke-width="3" stroke="#1E3A8A" y2="80" x2="50" y1="100" x1="100"></line>
+  <line stroke-width="3" stroke="#1E3A8A" y2="80" x2="150" y1="100" x1="100"></line>
+  <line stroke-width="3" stroke="#1E3A8A" y2="120" x2="50" y1="100" x1="100"></line>
+  <line stroke-width="3" stroke="#1E3A8A" y2="120" x2="150" y1="100" x1="100"></line>
+</svg>

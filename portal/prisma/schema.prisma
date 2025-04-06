@@ -1,0 +1,192 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("GATE4AI_DATABASE_URL")
+}
+
+// User model
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String?
+  name      String?
+  company   String? 
+  emailConfirmationCode String?
+  resetPasswordCode     String?
+
+  // only admin, security and system can update next fields
+  status    Status   @default(EMAIL_NOT_CONFIRMED)
+  comment   String?
+  role      Role     @default(USER)
+  //
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  apiKeys        ApiKey[]
+  ownedServers   ServerOwner[]
+  subscriptions  Subscription[]
+  toolCalls      ToolCall[]
+}
+
+model ServerOwner {
+  serverId String
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  @@id([serverId, userId])
+}
+
+enum Role {
+  USER
+  DEVELOPER
+  ADMIN
+  SECURITY
+}
+
+enum Status {
+  EMAIL_NOT_CONFIRMED
+  ACTIVE               // user confirm email
+  BLOCKED
+}
+
+// API Key model
+model ApiKey {
+  id        String    @id @default(uuid())
+  name      String
+  keyHash   String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  lastUsed  DateTime?
+
+  // Relations
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Server model
+model Server {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  website     String?
+  email       String?
+  imageUrl    String?
+  serverUrl   String // Hidden from non-owners
+  status      ServerStatus @default(DRAFT)
+  availability ServerAvailability @default(SUBSCRIPTION)  // Hidden from non-owners
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  owners        ServerOwner[]   // Hidden from non-owners
+  tools         Tool[]
+  subscriptions Subscription[]  // Hidden from non-owners
+  toolCalls     ToolCall[]      // Hidden from non-owners
+}
+
+enum ServerStatus {
+  DRAFT
+  ACTIVE
+  BLOCKED
+}
+
+enum ServerAvailability {
+  PUBLIC
+  PRIVATE
+  SUBSCRIPTION
+}
+
+// MCP Function model
+model Tool {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  serverId    String
+  server      Server         @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  parameters    ToolParameter[]
+  
+//  calls         ToolCall[]
+    @@unique([name, serverId])
+}
+
+// Tool Parameter model
+model ToolParameter {
+  id          String  @id @default(uuid())
+  name        String
+  type        String   //don't use enum. type can be any string.
+  description String?
+  required    Boolean @default(false)
+
+  // Relations
+  toolId String
+  tool   Tool @relation(fields: [toolId], references: [id], onDelete: Cascade)
+}
+
+// Subscription model (for users or API keys subscribing to servers)
+model Subscription {
+  id        String   @id @default(uuid())
+  status    SubscriptionStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+
+  // Relations - can be associated with either a user or an API key
+  userId   String?
+  user     User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  serverId String?
+  server   Server? @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, serverId])
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  BLOCKED
+}
+
+// Function Call model
+model ToolCall {
+  id        String   @id @default(uuid())
+  sessionId String
+  requestId String?
+  serverRequestId String?
+  request   Json
+  response  Json?
+  latency   Int? // in milliseconds
+  createdAt DateTime @default(now())
+
+  serverId  String?
+  server    Server? @relation(fields: [serverId], references: [id]) //On delete: Do nothing.
+
+  userId    String?
+  user      User?   @relation(fields: [userId], references: [id]) //On delete: Do nothing.
+
+  toolName  String?
+  // Logical relation to Tool using (toolName, serverId) as a composite key.
+  // Prisma does not support composite foreign keys, so queries must manually join Tool using these fields.
+  //tool Tool? @relation(fields: [toolName, serverId], references: [id,id])
+}
+
+// Settings model
+model Settings {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  group       String
+  name        String
+  description String
+  value       Json
+  frontend    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
