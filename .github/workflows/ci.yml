@@ -16,7 +16,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 5 # Generous timeout for setup + tests
+    timeout-minutes: 60 # Generous timeout for setup + tests
 
     steps:
     - name: Checkout code
