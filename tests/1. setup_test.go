@@ -523,6 +523,7 @@ func startPortalServer(ctx context.Context, port int) (*Server, error) {
 	env := append(os.Environ(),
 		fmt.Sprintf("PORT=%d", port),
 		fmt.Sprintf("GATE4AI_DATABASE_URL=%s", DATABASE_URL),
+		fmt.Sprintf("JWT_SECRET=%s", "a-secure-test-secret-key-for-go-tests-needs-to-be-at-least-32-chars"),
 		"NODE_ENV=production",
 	)
 
