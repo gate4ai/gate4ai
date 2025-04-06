@@ -38,9 +38,9 @@ jobs:
       working-directory: ./portal
       run: npm ci
 
-    - name: Install Playwright Browsers # Run where tests are defined
-      working-directory: ./tests # Adjust if Playwright setup is in portal
-      run: npx playwright install --with-deps
+    - name: Install Playwright Browsers & Dependencies (via Go module)
+      working-directory: ./tests
+      run: go run github.com/playwright-community/playwright-go/cmd/playwright install --with-deps
 
     # --- Run Tests ---
     - name: Run e2e Tests (/tests)
