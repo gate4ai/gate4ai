@@ -122,13 +122,3 @@ jobs:
         tags: gate4ai/example-server:dev
         cache-from: type=gha
         cache-to: type=gha,mode=max
-
-    # - name: Build and push All-in-One image
-    #   uses: docker/build-push-action@v6
-    #   with:
-    #     context: .
-    #     file: ./all-in-one.dockerfile
-    #     push: true
-    #     tags: gate4ai/all-in-one:dev
-    #     cache-from: type=gha
-    #     cache-to: type=gha,mode=max
