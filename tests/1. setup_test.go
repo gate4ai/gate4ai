@@ -37,9 +37,20 @@ var (
 	PORTAL_URL         string //in migration set PORTAL_URL = GATEWAY_URL // all test doing over reverse proxy in gateway
 	GATEWAY_URL        string
 	EXAMPLE_SERVER_URL string
-	EMAIL_SMTP_SERVER  string
+	MAILHOG_API_URL    string
+	EMAIL_SMTP_SERVER  SmtpServerType
 	pw                 *playwright.Playwright
 )
+
+type SmtpServerType struct {
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Secure bool   `json:"secure"`
+	Auth   struct {
+		User string `json:"user"`
+		Pass string `json:"pass"`
+	} `json:"auth"`
+}
 
 func TestMain(m *testing.M) {
 	exitCode := 1
@@ -120,7 +131,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// Step 2: Determine all URLs
-	portalPort, err := FindAvailablePort()
+	portalPort, gatewayPort, examplePort, err := FindAvailablePort3()
 	if err != nil {
 		log.Printf("Failed to find available port for portal: %v\n", err)
 		cleanup(ctx, dbContainer, mailhogContainer, nil, nil, nil)
@@ -129,21 +140,9 @@ func TestMain(m *testing.M) {
 	PORTAL_URL = fmt.Sprintf("http://localhost:%d", portalPort)
 	os.Setenv("GATE4AI_PORTAL_URL", PORTAL_URL)
 
-	gatewayPort, err := FindAvailablePort()
-	if err != nil {
-		log.Printf("Failed to find available port for gateway: %v\n", err)
-		cleanup(ctx, dbContainer, mailhogContainer, nil, nil, nil)
-		return
-	}
 	GATEWAY_URL = fmt.Sprintf("http://localhost:%d", gatewayPort)
 	os.Setenv("GATE4AI_GATEWAY_URL", GATEWAY_URL)
 
-	examplePort, err := FindAvailablePort()
-	if err != nil {
-		log.Printf("Failed to find available port for example server: %v\n", err)
-		cleanup(ctx, dbContainer, mailhogContainer, nil, nil, nil)
-		return
-	}
 	EXAMPLE_SERVER_URL = fmt.Sprintf("http://localhost:%d/sse?key=test-key-user1", examplePort)
 	os.Setenv("GATE4AI_EXAMPLE_SERVER_URL", EXAMPLE_SERVER_URL)
 
@@ -346,26 +345,21 @@ func startMailHog(ctx context.Context) (testcontainers.Container, error) {
 	}
 
 	// Set the global EMAIL_SMTP_SERVER for other tests to use
-	EMAIL_SMTP_SERVER = fmt.Sprintf("http://%s:%s", host, uiPort.Port())
+	MAILHOG_API_URL = fmt.Sprintf("http://%s:%s", host, uiPort.Port())
 
 	// Save SMTP server details to be updated in the database
-	smtpServer := map[string]interface{}{
-		"host":   host,
-		"port":   smtpPort.Int(),
-		"secure": false,
-		"auth": map[string]string{
-			"user": "",
-			"pass": "",
+	EMAIL_SMTP_SERVER = SmtpServerType{
+		Host:   host,
+		Port:   smtpPort.Int(),
+		Secure: false,
+		Auth: struct {
+			User string `json:"user"`
+			Pass string `json:"pass"`
+		}{
+			User: "",
+			Pass: "",
 		},
 	}
-
-	// Convert to JSON for later use
-	smtpJSON, err := json.Marshal(smtpServer)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal SMTP server details: %w", err)
-	}
-
-	os.Setenv("GATE4AI_EMAIL_SMTP_SERVER", string(smtpJSON))
 
 	log.Printf("MailHog container started, SMTP: %s:%s, Web UI: %s:%s\n",
 		host, smtpPort.Port(), host, uiPort.Port())
@@ -475,7 +469,7 @@ func verifyTablesExist() error {
 // updateDatabaseSettings updates the settings in the database with our URLs
 func updateDatabaseSettings() error {
 	// Update email SMTP server settings
-	if err := updateSetting("email_smtp_server", json.RawMessage(os.Getenv("GATE4AI_EMAIL_SMTP_SERVER"))); err != nil {
+	if err := updateSetting("email_smtp_server", EMAIL_SMTP_SERVER); err != nil {
 		return fmt.Errorf("failed to update email_smtp_server: %w", err)
 	}
 
@@ -491,6 +485,12 @@ func updateDatabaseSettings() error {
 		return fmt.Errorf("failed to update gateway_frontend_address_for_proxy: %w", err)
 	}
 
+	PORTAL_URL = GATEWAY_URL // all test doing over reverse proxy in gateway
+
+	if err := updateSetting("general_portal_base_url", PORTAL_URL); err != nil {
+		return fmt.Errorf("failed to update gateway_frontend_address_for_proxy: %w", err)
+	}
+
 	// Update general gateway address
 	if err := updateSetting("general_gateway_address", GATEWAY_URL); err != nil {
 		return fmt.Errorf("failed to update general_gateway_address: %w", err)
@@ -500,8 +500,6 @@ func updateDatabaseSettings() error {
 	if err := updateSetting("general_gateway_address_for_backend", GATEWAY_URL); err != nil {
 		return fmt.Errorf("failed to update general_gateway_address_for_backend: %w", err)
 	}
-
-	PORTAL_URL = GATEWAY_URL // all test doing over reverse proxy in gateway
 
 	log.Println("Database settings updated with URLs")
 	return nil

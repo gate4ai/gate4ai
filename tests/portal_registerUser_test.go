@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/playwright-community/playwright-go"
+	"github.com/stretchr/testify/require"
 )
 
 // User represents a user in the portal
@@ -35,6 +36,8 @@ type RegisterResponse struct {
 // createUser creates a new user by registering through the UI
 func createUser(am *ArtifactManager) (*User, error) {
 	am.T.Helper()
+
+	require.NoError(am.T, updateSetting("email_do_not_send_email", true), "Failed to disable email sending for setup")
 
 	// Navigate to registration page
 	am.OpenPageWithURL("/register")

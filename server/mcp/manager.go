@@ -171,7 +171,7 @@ func (m *Manager) NotifyEligibleSessions(method string, params map[string]any) {
 			session.SendNotification(method, params)
 		}
 	} else {
-		m.logger.Debug("No eligible sessions found for notification", zap.String("method", method))
+		//m.logger.Debug("No eligible sessions found for notification", zap.String("method", method))
 	}
 }
 

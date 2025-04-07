@@ -52,24 +52,33 @@ async function main() {
       key: 'email_do_not_send_email',
       group: 'email',
       name: "Don't send email",
-      description: "Do not send any emails. User email verification, password reset, notifications, and other related functionalities are disabled.",
+      description: "If true, disables sending all emails (confirmation, password reset). Users are activated immediately.",
       value: true,
       frontend: true
     },
     {
       key: 'email_smtp_server',
       group: 'email',
-      name: 'Smtp server',
-      description: 'see https://nodemailer.com/smtp/',
+      name: 'SMTP Server Configuration',
+      description: 'Configuration for the outgoing email server (see Nodemailer docs: https://nodemailer.com/smtp/)',
       value: {
         host: "smtp.example.com",
         port: 587,
-        secure: false,
+        secure: false, // use true for port 465, false for other ports
         auth: {
-          user: "username",
-          pass: "password",
+          user: "your-email@example.com",
+          pass: "your-password",
         },
-      }
+      },
+      frontend: false // Keep SMTP credentials backend-only
+    },
+    {
+      key: 'general_portal_base_url',
+      group: 'general',
+      name: 'Portal Base URL',
+      description: 'The base URL where the portal is accessible by users (used for generating links in emails). Example: https://gate4.ai',
+      value: 'http://localhost:8080', // Default to localhost:8080 (Gateway URL)
+      frontend: false // Backend only
     },
     {
       key: 'only_developer_can_post_server',

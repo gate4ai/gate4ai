@@ -1,6 +1,8 @@
 package tests
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -29,15 +31,41 @@ func loginUser(am *ArtifactManager, email, password string) error {
 		return err
 	}
 
-	// Wait for successful login by checking for servers page load
-	err := am.Page.WaitForURL("**/servers")
-	if err != nil {
-		am.SaveScreenshot("login_navigation_error")
-		return err
+	// Wait for either error message or successful navigation
+	for time.Now().Before(time.Now().Add(10 * time.Second)) {
+		// Check for error message in snackbar
+		errorLocator := am.Page.Locator(".v-snackbar__content:has-text('Invalid email or password')")
+		isVisible, err := errorLocator.IsVisible()
+		if err == nil && isVisible {
+			am.SaveScreenshot("login_invalid_credentials")
+			return &errorWithContext{message: "Invalid email or password", context: "login_credentials_error"}
+		}
+
+		// Check if we've reached the servers page
+		currentURL := am.Page.URL()
+		if strings.Contains(currentURL, "/servers") {
+			am.T.Logf("Successfully logged in user: %s", email)
+			return nil
+		}
+
+		// Wait a bit before next check
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	am.T.Logf("Successfully logged in user: %s", email)
-	return nil
+	// If we got here, neither condition was met within the timeout
+	am.SaveScreenshot("login_timeout")
+	return errors.New("login timeout: neither error message nor successful navigation occurred within 10 seconds")
+}
+
+// errorWithContext is a custom error type that includes context information
+type errorWithContext struct {
+	message string
+	context string
+}
+
+// Error implements the error interface
+func (e *errorWithContext) Error() string {
+	return e.message
 }
 
 // TestLogin tests user login

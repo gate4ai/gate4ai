@@ -17,8 +17,10 @@ model User {
   password  String?
   name      String?
   company   String? 
-  emailConfirmationCode String?
-  resetPasswordCode     String?
+  emailConfirmationCode      String?   @unique // Stores the unique code sent for email confirmation
+  emailConfirmationExpires   DateTime? // Optional: When the confirmation code expires
+  resetPasswordCode          String?   @unique // Stores the unique code for password reset
+  resetPasswordExpires       DateTime? // Optional: When the reset code expires
 
   // only admin, security and system can update next fields
   status    Status   @default(EMAIL_NOT_CONFIRMED)

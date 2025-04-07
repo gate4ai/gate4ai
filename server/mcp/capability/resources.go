@@ -116,7 +116,7 @@ func (rc *ResourcesCapability) AddResource(uri string, name string, description 
 		LastModified: time.Now(),
 	}
 
-	rc.logger.Info("Added resource", zap.String("uri", uri))
+	//rc.logger.Info("Added resource", zap.String("uri", uri))
 	go rc.broadcastResourcesListChanged() // Notify clients
 	return nil
 }
@@ -194,7 +194,7 @@ func (rc *ResourcesCapability) AddResourceTemplate(uriTemplate string, name stri
 		Handler: handler, // Handler might be optional for templates
 	}
 
-	rc.logger.Info("Added resource template", zap.String("uriTemplate", uriTemplate))
+	//rc.logger.Info("Added resource template", zap.String("uriTemplate", uriTemplate))
 	// Note: V2025 schema doesn't define a notification for template list changes.
 	// If needed, a custom notification could be implemented.
 	return nil
@@ -239,7 +239,7 @@ func (rc *ResourcesCapability) broadcastResourcesListChanged() {
 		return
 	}
 	rc.manager.NotifyEligibleSessions("notifications/resources/list_changed", nil)
-	rc.logger.Debug("Broadcasted resources list changed notification")
+	//rc.logger.Debug("Broadcasted resources list changed notification")
 }
 
 // NotifyResourceUpdated sends a "notifications/resources/updated" notification to subscribers of a specific URI.
