@@ -9,19 +9,19 @@
 ## Key Features
 
 *   **Centralized Gateway:** Acts as a single entry point for MCP requests and optionally proxies the management Portal UI/API.
+*   **Web Portal:** User-friendly interface (UI and API) for managing servers, users, keys, subscriptions, and settings. Accessed via the Gateway's proxy.
+*   **Server Catalog:** Discover, register, and manage available backend MCP and REST servers (public, private, subscription-based).
 *   **User & API Key Management:** Securely manage users and API keys with role-based access control (RBAC) via the Portal.
-*   **Server Catalog:** Discover, register, and manage available backend MCP servers (public, private, subscription-based).
 *   **Subscription Management:** Control user access to specific servers through subscriptions (pending, active, blocked states).
 *   **Request Routing & Aggregation:** Routes MCP requests to appropriate backend servers based on user subscriptions and handles aggregation for list operations.
-*   **Detailed Logging:** Tracks tool calls and server interactions for auditing and debugging (stored in the database).
-*   **Web Portal:** User-friendly interface (UI and API) for managing servers, users, keys, subscriptions, and settings. Accessed via the Gateway's proxy.
+*   **Detailed Logging:** Tracks tool calls and server interactions for auditing and debugging.
 
 ## Components
 
 1.  **Gateway (`./gateway`):** The core Go application. Handles all incoming requests, performs authentication (API keys), routes MCP calls to backend servers, proxies requests to the Portal, reads configuration, and logs activities.
 2.  **Portal (`./portal`):** A Nuxt.js web application providing the UI and backend API (`/api/...`) for administration and user interaction (user/key/server/subscription management). Interacts with the Database via Prisma. Accessed *through* the Gateway.
-3.  **Example Server (`./server`):** A sample Go MCP server implementation used for testing and demonstration. Represents a potential backend service.
-4.  **Shared Library (`./shared`):** Common Go code (interfaces, MCP definitions, config helpers) used by Gateway and Example Server.
+3.  **Server (`./server`):** MCP server implementation used for implementing custom MCP servers. It is used as a backend in the gateway, and also hosts the MCP servers provided by us. It is separable and can serve as a development framework for third-party MCP servers.
+4.  **Shared Library (`./shared`):** Common Go code (interfaces, MCP definitions, config helpers) used by Gateway and Server.
 5.  **Tests (`./tests`):** End-to-end (Playwright) and integration tests (Go).
 
 ## Technology Stack
@@ -33,50 +33,6 @@
 *   **Testing:** Playwright (E2E), Go testing library, Testcontainers
 *   **Containerization:** Docker, Docker Compose
 *   **CI/CD:** GitHub Actions
-
-## Project Structure
-
-<svg width="450" height="700" viewBox="0 0 450 700" xmlns="http://www.w3.org/2000/svg" font-family="monospace" font-size="14">
-  <text x="10" y="25" font-weight="bold">gate4ai/mcp/</text>
-  <text x="30" y="50">├── .github/</text>
-  <text x="50" y="70">│   └── workflows/</text>
-  <text x="70" y="90">│       └── ci.yml        (CI Pipeline)</text>
-  <text x="30" y="110">├── portal/             (Frontend UI & Backend API)</text>
-  <text x="50" y="130">│   ├── components/   (Vue Components)</text>
-  <text x="50" y="150">│   ├── pages/        (Nuxt Pages)</text>
-  <text x="50" y="170">│   ├── server/       (Nuxt API Routes)</text>
-  <text x="70" y="190">│   │   ├── api/      (API Endpoints)</text>
-  <text x="70" y="210">│   │   ├── middleware/</text>
-  <text x="70" y="230">│   │   └── utils/    (Server Utils)</text>
-  <text x="50" y="250">│   ├── prisma/       (DB Schema, Migrations, Seed)</text>
-  <text x="70" y="270">│   │   └── schema.prisma</text>
-  <text x="50" y="290">│   ├── plugins/      (Nuxt Plugins - Vuetify, Auth, API, Settings)</text>
-  <text x="50" y="310">│   ├── public/       (Static Assets)</text>
-  <text x="50" y="330">│   ├── nuxt.config.ts</text>
-  <text x="50" y="350">│   ├── package.json</text>
-  <text x="50" y="370">│   └── Dockerfile</text>
-  <text x="30" y="390">├── gateway/            (MCP Gateway - Go)</text>
-  <text x="50" y="410">│   ├── cmd/main.go   (Entrypoint)</text>
-  <text x="50" y="430">│   ├── capability/   (MCP Method Handlers)</text>
-  <text x="50" y="450">│   ├── client/       (MCP Client for Backends)</text>
-  <text x="50" y="470">│   ├── extra/        (Proxy, Info Handler)</text>
-  <text x="50" y="490">│   ├── go.mod</text>
-  <text x="50" y="510">│   └── Dockerfile</text>
-  <text x="30" y="530">├── server/             (Example MCP Server - Go)</text>
-  <text x="50" y="550">│   ├── cmd/          (Entrypoint, Config)</text>
-  <text x="50" y="570">│   └── Dockerfile</text>
-  <text x="30" y="590">├── shared/             (Shared Go Code)</text>
-  <text x="50" y="610">│   ├── config/       (Config Interfaces/Impl)</text>
-  <text x="50" y="630">│   └── mcp/          (MCP Schema Structs)</text>
-  <text x="30" y="650">├── tests/              (Integration & E2E Tests)</text>
-  <text x="50" y="670">│   └── *.go          (Test Files)</text>
-  <text x="30" y="690">├── .gitignore</text>
-  <text x="30" y="710">├── README.md</text>
-  <text x="30" y="730">├── docker-compose.yml</text>
-  <text x="30" y="750">├── all-in-one.dockerfile (Demo only)</text>
-  <text x="30" y="770">└── LICENSE</text>
-  <svg height="790"/>
-</svg>
 
 ## Getting Started
 
@@ -134,5 +90,5 @@ This is the easiest way to get all services running locally.
 
 ## Contributing
 
-Contributions are welcome! Please refer to `CONTRIBUTING.md` (if available) or standard GitHub practices (fork, branch, PR).
+We greatly welcome contributors and are ready to assist with onboarding. Don't hesitate to ask questions and make suggestions!
 
