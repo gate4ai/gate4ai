@@ -4,53 +4,7 @@
 
 ## General Architecture
 
-```svg
-<svg width="750" height="400" viewBox="0 0 750 400" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif" font-size="13">
-  <defs>
-    <marker id="arrow_ag" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#333" />
-    </marker>
-  </defs>
-  <rect x="20" y="80" width="100" height="60" rx="5" fill="#e0f7fa" stroke="#00796b"/>
-  <text x="70" y="115" text-anchor="middle">User</text>
-  <rect x="20" y="180" width="100" height="60" rx="5" fill="#e0f7fa" stroke="#00796b"/>
-  <text x="70" y="215" text-anchor="middle">API Client</text>
-  <rect x="590" y="150" width="140" height="100" rx="5" fill="#fffde7" stroke="#fbc02d"/>
-  <text x="660" y="190" text-anchor="middle">Backend Server 1</text>
-  <text x="660" y="210" text-anchor="middle">(MCP)</text>
-  <text x="660" y="230" text-anchor="middle">...</text>
-  <rect x="180" y="100" width="160" height="200" rx="8" fill="#dcedc8" stroke="#689f38" stroke-width="1.5"/>
-  <text x="260" y="130" text-anchor="middle" font-weight="bold">Gateway (Go)</text>
-  <text x="260" y="160" text-anchor="middle">- Entry Point</text>
-  <text x="260" y="180" text-anchor="middle">- Auth (API Key)</text>
-  <text x="260" y="200" text-anchor="middle">- Routing</text>
-  <text x="260" y="220" text-anchor="middle">- MCP Aggregation</text>
-  <text x="260" y="240" text-anchor="middle">- Proxy (UI/API)</text>
-  <text x="260" y="260" text-anchor="middle">- Status Check</text>
-  <text x="260" y="280" text-anchor="middle">- DB Access (Config)</text>
-  <rect x="370" y="20" width="180" height="140" rx="8" fill="#e1f5fe" stroke="#0288d1" stroke-width="1.5"/>
-  <text x="460" y="45" text-anchor="middle" font-weight="bold">Portal (Nuxt.js)</text>
-  <text x="460" y="70" text-anchor="middle">- UI Frontend</text>
-  <text x="460" y="90" text-anchor="middle">- Backend API (/api)</text>
-  <text x="460" y="110" text-anchor="middle">- User/Sub/Key/Server Mgmt</text>
-  <text x="460" y="130" text-anchor="middle">- DB Access (Prisma)</text>
-  <ellipse cx="460" cy="260" rx="90" ry="45" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.5"/>
-  <text x="460" y="265" text-anchor="middle" font-weight="bold">Database</text>
-  <text x="460" y="285" text-anchor="middle">(PostgreSQL)</text>
-  <path d="M 120 110 Q 150 110, 180 150" stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#arrow_ag)"/>
-  <text x="125" y="140" font-size="11">HTTPS (UI Req)</text>
-  <path d="M 120 210 Q 150 210, 180 250" stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#arrow_ag)"/>
-  <text x="125" y="240" font-size="11">MCP/API (Key Auth)</text>
-  <path d="M 340 140 H 370" stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#arrow_ag)" stroke-dasharray="4,4"/>
-  <text x="345" y="135" font-size="11">Proxy UI/API Req</text>
-  <path d="M 460 160 V 215" stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#arrow_ag)"/>
-  <text x="470" y="190" font-size="11">DB (Prisma)</text>
-  <path d="M 340 260 Q 380 260, 400 235" stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#arrow_ag)"/>
-  <text x="350" y="245" font-size="11">DB (Go)</text>
-  <path d="M 340 200 H 590" stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#arrow_ag)"/>
-  <text x="450" y="195" font-size="11">MCP Call</text>
-</svg>
-```
+![arch](https://raw.githubusercontent.com/wiki/gate4ai/mcp/arch/arch.drawio.png)
 
 ## Key Features
 
@@ -82,7 +36,6 @@
 
 ## Project Structure
 
-```svg
 <svg width="450" height="700" viewBox="0 0 450 700" xmlns="http://www.w3.org/2000/svg" font-family="monospace" font-size="14">
   <text x="10" y="25" font-weight="bold">gate4ai/mcp/</text>
   <text x="30" y="50">├── .github/</text>
@@ -124,7 +77,6 @@
   <text x="30" y="770">└── LICENSE</text>
   <svg height="790"/>
 </svg>
-```
 
 ## Getting Started
 

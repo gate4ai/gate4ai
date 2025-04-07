@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   portal:
-    build:
-      context: ./portal
-      dockerfile: Dockerfile
+    image: gate4ai/portal:latest
     container_name: gate4ai-portal
     restart: unless-stopped
     ports:
@@ -28,9 +26,7 @@ services:
     # command: sh -c "npx prisma migrate deploy && node .output/server/index.mjs"
 
   gateway:
-    build:
-      context: ./gateway
-      dockerfile: Dockerfile
+    image: gate4ai/gateway:latest
     container_name: gate4ai-gateway
     restart: unless-stopped
     ports:
@@ -43,6 +39,23 @@ services:
       db:
         condition: service_healthy
       portal: # Optional: wait for portal if gateway proxies to it and needs it running
+        condition: service_started
+    networks:
+      - gate4ai-network
+
+  example-server:
+    image: gate4ai/example-server:latest
+    container_name: gate4ai-example-server
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT:-4000}:4000" # Expose server port
+    environment:
+      # Add any required environment variables for the example server
+      GATE4AI_DATABASE_URL: ${GATE4AI_DATABASE_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+      gateway:
         condition: service_started
     networks:
       - gate4ai-network
@@ -64,16 +77,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - gate4ai-network
-
-  mailhog: # Optional: For catching emails sent by the portal (e.g., verification)
-    image: mailhog/mailhog:latest
-    container_name: gate4ai-mailhog
-    restart: unless-stopped
-    ports:
-      - "${MAILHOG_SMTP_PORT:-1025}:1025" # SMTP port
-      - "${MAILHOG_HTTP_PORT:-8025}:8025" # Web UI port
     networks:
       - gate4ai-network
 
