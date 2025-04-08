@@ -33,6 +33,15 @@ type YamlConfig struct {
 	userSubscribes       map[string][]string          // userID -> serverIDs
 	backends             map[string]*Backend          // serverID -> Server
 
+	// SSL Fields
+	sslEnabled      bool
+	sslMode         string
+	sslCertFile     string
+	sslKeyFile      string
+	sslAcmeDomains  []string
+	sslAcmeEmail    string
+	sslAcmeCacheDir string
+
 	// File watcher for hot reloading
 	watcher      *fsnotify.Watcher
 	watcherDone  chan struct{}
@@ -44,13 +53,22 @@ type YamlConfig struct {
 // YAML configuration structure matching the required format
 type yamlConfig struct {
 	Server struct {
-		Address         string `yaml:"address"`
-		Name            string `yaml:"name"`
-		Version         string `yaml:"version"`
-		LogLevel        string `yaml:"log_level"`
-		InfoHandler     string `yaml:"info_handler"`
-		FrontendAddress string `yaml:"frontend_address"`
-		Authorization   string `yaml:"authorization"` // Can be "users_only", "marked_methods", or "none"
+		Address         string   `yaml:"address"`
+		Name            string   `yaml:"name"`
+		Version         string   `yaml:"version"`
+		LogLevel        string   `yaml:"log_level"`
+		InfoHandler     string   `yaml:"info_handler"`
+		FrontendAddress string   `yaml:"frontend_address"`
+		Authorization   string   `yaml:"authorization"` // Can be "users_only", "marked_methods", or "none"
+		SSL             struct { // New SSL section
+			Enabled      bool     `yaml:"enabled"`
+			Mode         string   `yaml:"mode"`           // "manual" or "acme"
+			CertFile     string   `yaml:"cert_file"`      // Path for manual mode
+			KeyFile      string   `yaml:"key_file"`       // Path for manual mode
+			AcmeDomains  []string `yaml:"acme_domains"`   // Domains for ACME
+			AcmeEmail    string   `yaml:"acme_email"`     // Contact email for ACME
+			AcmeCacheDir string   `yaml:"acme_cache_dir"` // Cache directory for ACME
+		} `yaml:"ssl"`
 	} `yaml:"server"`
 
 	Users map[string]struct {
@@ -104,6 +122,9 @@ func NewYamlConfigWithOptions(configPath string, logger *zap.Logger, options Yam
 		userSubscribes:    make(map[string][]string),
 		backends:          make(map[string]*Backend),
 		authorizationType: AuthorizedUsersOnly, // Default to requiring authorization
+		// Default SSL settings
+		sslMode:         "manual",
+		sslAcmeCacheDir: "./.autocert-cache", // Default cache dir
 	}
 
 	// Load initial configuration
@@ -253,6 +274,22 @@ func (c *YamlConfig) Update() error {
 	c.logLevel = yamlCfg.Server.LogLevel
 	c.infoHandlerValue = yamlCfg.Server.InfoHandler
 	c.frontendAddressValue = yamlCfg.Server.FrontendAddress
+
+	// Process SSL settings
+	c.sslEnabled = yamlCfg.Server.SSL.Enabled
+	c.sslMode = yamlCfg.Server.SSL.Mode
+	c.sslCertFile = yamlCfg.Server.SSL.CertFile
+	c.sslKeyFile = yamlCfg.Server.SSL.KeyFile
+	c.sslAcmeDomains = yamlCfg.Server.SSL.AcmeDomains
+	c.sslAcmeEmail = yamlCfg.Server.SSL.AcmeEmail
+	c.sslAcmeCacheDir = yamlCfg.Server.SSL.AcmeCacheDir
+	// Provide defaults if values are missing
+	if c.sslMode == "" {
+		c.sslMode = "manual"
+	}
+	if c.sslAcmeCacheDir == "" {
+		c.sslAcmeCacheDir = "./.autocert-cache"
+	}
 
 	// Process authorization type
 	switch yamlCfg.Server.Authorization {
@@ -443,4 +480,51 @@ func (c *YamlConfig) FrontendAddressForProxy() (string, error) {
 
 func (c *YamlConfig) Status(ctx context.Context) error {
 	return nil
+}
+
+// --- Implement SSL Methods ---
+
+func (c *YamlConfig) SSLEnabled() (bool, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sslEnabled, nil
+}
+
+func (c *YamlConfig) SSLMode() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sslMode, nil
+}
+
+func (c *YamlConfig) SSLCertFile() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sslCertFile, nil
+}
+
+func (c *YamlConfig) SSLKeyFile() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sslKeyFile, nil
+}
+
+func (c *YamlConfig) SSLAcmeDomains() ([]string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	// Return a copy to prevent modification of the internal slice
+	domainsCopy := make([]string, len(c.sslAcmeDomains))
+	copy(domainsCopy, c.sslAcmeDomains)
+	return domainsCopy, nil
+}
+
+func (c *YamlConfig) SSLAcmeEmail() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sslAcmeEmail, nil
+}
+
+func (c *YamlConfig) SSLAcmeCacheDir() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sslAcmeCacheDir, nil
 }

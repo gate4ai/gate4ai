@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	_ "github.com/lib/pq"
@@ -388,4 +389,138 @@ func (c *DatabaseConfig) getSettingString(key string) (string, error) {
 	}
 
 	return strValue, nil
+}
+
+// --- Implement New SSL Methods ---
+
+func (c *DatabaseConfig) SSLEnabled() (bool, error) {
+	// Default to false if setting not found or error occurs
+	val, err := c.getSettingBool("gateway_ssl_enabled")
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		c.logger.Error("Error reading gateway_ssl_enabled", zap.Error(err))
+	}
+	return val, nil // Return default (false) on error or not found
+}
+
+func (c *DatabaseConfig) SSLMode() (string, error) {
+	// Default to "manual" if not found
+	val, err := c.getSettingString("gateway_ssl_mode")
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		c.logger.Error("Error reading gateway_ssl_mode", zap.Error(err))
+	}
+	if errors.Is(err, ErrNotFound) || val == "" {
+		return "manual", nil
+	}
+	return val, nil
+}
+
+func (c *DatabaseConfig) SSLCertFile() (string, error) {
+	val, err := c.getSettingString("gateway_ssl_cert_file")
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		c.logger.Error("Error reading gateway_ssl_cert_file", zap.Error(err))
+	}
+	return val, nil // Return "" on error or not found
+}
+
+func (c *DatabaseConfig) SSLKeyFile() (string, error) {
+	val, err := c.getSettingString("gateway_ssl_key_file")
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		c.logger.Error("Error reading gateway_ssl_key_file", zap.Error(err))
+	}
+	return val, nil // Return "" on error or not found
+}
+
+func (c *DatabaseConfig) SSLAcmeDomains() ([]string, error) {
+	value, err := c.getSettingJSON("gateway_ssl_acme_domains")
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return []string{}, nil // Return empty slice if not found
+		}
+		c.logger.Error("Error reading gateway_ssl_acme_domains", zap.Error(err))
+		return []string{}, err
+	}
+
+	// Type assert to []interface{} first, then convert to []string
+	if domainsInterface, ok := value.([]interface{}); ok {
+		domains := make([]string, 0, len(domainsInterface))
+		for _, item := range domainsInterface {
+			if domainStr, ok := item.(string); ok {
+				domains = append(domains, domainStr)
+			} else {
+				err := fmt.Errorf("non-string value found in ACME domains list for key 'gateway_ssl_acme_domains'")
+				c.logger.Error(err.Error())
+				return []string{}, err
+			}
+		}
+		return domains, nil
+	}
+	// Handle case where it's already []string (less likely with json.Unmarshal)
+	if domainsStr, ok := value.([]string); ok {
+		return domainsStr, nil
+	}
+
+	err = fmt.Errorf("setting 'gateway_ssl_acme_domains' has invalid format, expected JSON array of strings")
+	c.logger.Error(err.Error())
+	return []string{}, err
+}
+
+func (c *DatabaseConfig) SSLAcmeEmail() (string, error) {
+	val, err := c.getSettingString("gateway_ssl_acme_email")
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		c.logger.Error("Error reading gateway_ssl_acme_email", zap.Error(err))
+	}
+	return val, nil // Return "" on error or not found
+}
+
+func (c *DatabaseConfig) SSLAcmeCacheDir() (string, error) {
+	val, err := c.getSettingString("gateway_ssl_acme_cache_dir")
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		c.logger.Error("Error reading gateway_ssl_acme_cache_dir", zap.Error(err))
+	}
+	if errors.Is(err, ErrNotFound) || val == "" {
+		return "./.autocert-cache", nil // Default cache dir
+	}
+	return val, nil
+}
+
+// --- Helper functions to get typed settings ---
+
+// getSettingJSON retrieves a raw JSON value from the Settings table
+func (c *DatabaseConfig) getSettingJSON(key string) (interface{}, error) {
+	db, err := sql.Open("postgres", c.dbConnectionString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer db.Close()
+
+	query := `SELECT value FROM "Settings" WHERE key = $1 LIMIT 1`
+	var valueStr string
+	// Use context for query cancellation/timeout if StartWatcher is implemented
+	ctx := context.Background() // Replace with c.ctx if watcher is active
+	err = db.QueryRowContext(ctx, query, key).Scan(&valueStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound // Use specific error for not found
+		}
+		return nil, fmt.Errorf("failed to get setting '%s': %w", key, err)
+	}
+
+	var value interface{}
+	if err := json.Unmarshal([]byte(valueStr), &value); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal setting value for '%s': %w", key, err)
+	}
+	return value, nil
+}
+
+// getSettingBool retrieves a boolean setting
+func (c *DatabaseConfig) getSettingBool(key string) (bool, error) {
+	value, err := c.getSettingJSON(key)
+	if err != nil {
+		return false, err // Propagate ErrNotFound or other errors
+	}
+	boolValue, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("setting '%s' value is not a boolean", key)
+	}
+	return boolValue, nil
 }

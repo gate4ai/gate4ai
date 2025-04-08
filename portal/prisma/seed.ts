@@ -159,33 +159,79 @@ async function main() {
       description: '/info  . If clear, then method disabled',
       value: '/info',
       frontend: true
+    },
+    // --- New Gateway SSL Settings ---
+    {
+      key: 'gateway_ssl_enabled',
+      group: 'gateway',
+      name: "Enable SSL/TLS for Gateway",
+      description: "Enable HTTPS for the gateway's main listener.",
+      value: false, // Default to disabled
+      frontend: false
+    },
+    {
+      key: 'gateway_ssl_mode',
+      group: 'gateway',
+      name: "Gateway SSL Mode",
+      description: "Mode for gateway SSL certificate management ('manual' or 'acme').",
+      value: "manual", // Default mode
+      frontend: false
+    },
+    {
+      key: 'gateway_ssl_cert_file',
+      group: 'gateway',
+      name: "Gateway SSL Certificate File",
+      description: "Path to the gateway SSL certificate file (manual mode).",
+      value: "", // No default path
+      frontend: false
+    },
+    {
+      key: 'gateway_ssl_key_file',
+      group: 'gateway',
+      name: "Gateway SSL Private Key File",
+      description: "Path to the gateway SSL private key file (manual mode).",
+      value: "", // No default path
+      frontend: false
+    },
+    {
+      key: 'gateway_ssl_acme_domains',
+      group: 'gateway',
+      name: "Gateway ACME Domains",
+      description: "List of domain names for gateway ACME certificate requests (JSON array).",
+      value: [], // Default empty list
+      frontend: false
+    },
+    {
+      key: 'gateway_ssl_acme_email',
+      group: 'gateway',
+      name: "Gateway ACME Contact Email",
+      description: "Contact email address for Let's Encrypt notifications for the gateway.",
+      value: "", // No default email
+      frontend: false
+    },
+    {
+      key: 'gateway_ssl_acme_cache_dir',
+      group: 'gateway',
+      name: "Gateway ACME Cache Directory",
+      description: "Directory to store ACME certificates and state for the gateway.",
+      value: "./.autocert-cache", // Default relative path
+      frontend: false
     }
   ];
 
   for (const record of settingRecords) {
-    const existingSetting = await prisma.settings.findUnique({
-      where: { key: record.key }
+    await prisma.settings.upsert({
+      where: { key: record.key },
+      update: {
+        group: record.group,
+        name: record.name,
+        description: record.description,
+        value: record.value,
+        frontend: record.frontend || false, // Default to false if not specified
+      },
+      create: record,
     });
-
-    if (existingSetting) {
-      // Update existing setting
-      await prisma.settings.update({
-        where: { key: record.key },
-        data: {
-          group: record.group,
-          name: record.name,
-          description: record.description,
-          value: record.value
-        }
-      });
-      console.log(`Updated setting: ${record.key}`);
-    } else {
-      // Create new setting
-      await prisma.settings.create({
-        data: record
-      });
-      console.log(`Created setting: ${record.key}`);
-    }
+    console.log(`Upserted setting: ${record.key}`);
   }
 }
 

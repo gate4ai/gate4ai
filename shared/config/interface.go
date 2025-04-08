@@ -24,6 +24,7 @@ type Backend struct {
 }
 
 type IConfig interface {
+	// Core Server Settings
 	ListenAddr() (string, error)
 	ServerName() (string, error)
 	ServerVersion() (string, error)
@@ -32,14 +33,24 @@ type IConfig interface {
 	InfoHandler() (string, error)
 	FrontendAddressForProxy() (string, error)
 
+	// User & Auth Settings
 	GetUserIDByKeyHash(keyHash string) (userID string, err error)
-
 	GetUserParams(userID string) (params map[string]string, err error)
-
 	GetUserSubscribes(userID string) (backends []string, err error)
 
+	// Backend & Subscription Settings
 	GetBackend(backendID string) (backendCfg *Backend, err error)
 
+	// SSL Settings
+	SSLEnabled() (bool, error)
+	SSLMode() (string, error)          // Returns "manual" or "acme"
+	SSLCertFile() (string, error)      // Path to certificate file (manual mode)
+	SSLKeyFile() (string, error)       // Path to private key file (manual mode)
+	SSLAcmeDomains() ([]string, error) // List of domains for ACME
+	SSLAcmeEmail() (string, error)     // Contact email for ACME
+	SSLAcmeCacheDir() (string, error)  // Directory to cache ACME certificates
+
+	// Lifecycle & Status
 	Status(ctx context.Context) error
 	Close() error
 }
@@ -49,7 +60,6 @@ func HashAPIKey(key string) string {
 	if key == "" {
 		return ""
 	}
-
 	hasher := sha256.New()
 	hasher.Write([]byte(key))
 	return hex.EncodeToString(hasher.Sum(nil))

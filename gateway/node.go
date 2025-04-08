@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	gwCapabilities "github.com/gate4ai/mcp/gateway/capability"
@@ -23,30 +25,41 @@ type Node struct {
 	cfg             config.IConfig
 	serverTransport *transport.Transport
 	sessionManager  *mcp.Manager
-	done            chan struct{}
+	httpServer      *http.Server   // Store the server instance
+	listenerErrChan <-chan error   // Channel for listener errors
+	shutdownWg      sync.WaitGroup // WaitGroup for shutdown
 }
 
 // NodeOption is a functional option for configuring the Node
 type NodeOption func(*Node) error
 
 // New creates a new gateway node with the provided logger and config
-func New(logger *zap.Logger, cfg config.IConfig) (n *Node, err error) {
-	if logger == nil && cfg == nil {
-		return nil, fmt.Errorf("logger is required")
+func New(logger *zap.Logger, cfg config.IConfig) (*Node, error) {
+	if logger == nil {
+		// Default logger if needed, though Start usually provides one
+		logger, _ = zap.NewProduction()
 	}
-	n = &Node{
-		logger: logger,
+	if cfg == nil {
+		return nil, errors.New("config cannot be nil")
+	}
+	n := &Node{
+		logger: logger.Named("gateway-node"), // Add name for clarity
 		cfg:    cfg,
-		done:   make(chan struct{}),
+		// shutdownWg initialization needed
 	}
+	n.shutdownWg.Add(1) // Initialize WaitGroup counter for the main server loop
+
+	var err error
 	n.sessionManager, err = mcp.NewManager(n.logger, n.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session manager: %w", err)
 	}
+	// Add default validators and gateway-specific capabilities
 	n.sessionManager.AddValidator(validators.CreateDefaultValidators()...)
 	n.sessionManager.AddCapability(
-		serverCapabilities.NewBase(logger, n.sessionManager),
-		gwCapabilities.NewGatewayCapability(n.logger, n.cfg))
+		serverCapabilities.NewBase(n.logger, n.sessionManager), // Base MCP handlers
+		gwCapabilities.NewGatewayCapability(n.logger, n.cfg),   // Gateway routing logic
+	)
 	n.serverTransport, err = transport.New(n.sessionManager, n.logger, n.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create server transport: %w", err)
@@ -55,98 +68,128 @@ func New(logger *zap.Logger, cfg config.IConfig) (n *Node, err error) {
 }
 
 // Start initializes and starts all components of the node
-func (n *Node) Start(ctx context.Context, mux *http.ServeMux, overwriteListenAddr string) (err error) {
-	n.logger.Info("Starting gateway node")
+func (n *Node) Start(ctx context.Context, mux *http.ServeMux, overwriteListenAddr string) error {
+	n.logger.Info("Starting gateway node...")
+
+	// --- Register Handlers ---
 	n.serverTransport.RegisterHandlers(mux)
 
-	// Register info handler if configured
-	infoHandler, err := n.cfg.InfoHandler()
+	infoHandlerPath, err := n.cfg.InfoHandler()
 	if err != nil {
-		n.logger.Error("Failed to get info handler path", zap.Error(err))
-	} else if infoHandler != "" {
-		n.logger.Info("Registering info handler", zap.String("path", infoHandler))
-		mux.HandleFunc(infoHandler, extra.InfoHandler(n.logger))
+		n.logger.Warn("Failed to get info handler path from config", zap.Error(err))
+	} else if infoHandlerPath != "" {
+		n.logger.Info("Registering info handler", zap.String("path", infoHandlerPath))
+		mux.HandleFunc(infoHandlerPath, extra.InfoHandler(n.logger))
 	}
 
-	// Register status handler
 	n.logger.Info("Registering status handler", zap.String("path", "/status"))
 	mux.HandleFunc("/status", serverextra.StatusHandler(n.cfg, n.logger))
 
-	// Get frontend URL for proxy if configured
-	frontendAddressForProxy, err := n.cfg.FrontendAddressForProxy()
+	frontendAddress, err := n.cfg.FrontendAddressForProxy()
 	if err != nil {
-		n.logger.Error("Failed to get frontend address for proxy", zap.Error(err))
-	}
-
-	// Register proxy handler if configured
-	if frontendAddressForProxy != "" {
-		n.logger.Info("Registering proxy handler", zap.String("frontend_address", frontendAddressForProxy))
-		mux.HandleFunc("/", extra.ProxyHandler(frontendAddressForProxy, n.logger))
-	}
-
-	listenAddr := ""
-	if overwriteListenAddr == "" {
-		listenAddr, err = n.cfg.ListenAddr()
-		if err != nil {
-			n.logger.Error("Failed to get listen address", zap.Error(err))
-			return fmt.Errorf("failed to get listen address: %w", err)
+		n.logger.Warn("Failed to get frontend address for proxy from config", zap.Error(err))
+	} else if frontendAddress != "" {
+		n.logger.Info("Registering proxy handler", zap.String("frontend_address", frontendAddress))
+		proxyHandler := extra.ProxyHandler(frontendAddress, n.logger)
+		if proxyHandler != nil {
+			mux.HandleFunc("/", proxyHandler) // Proxy root and unmatched paths
+		} else {
+			n.logger.Error("Failed to create proxy handler")
 		}
-	} else {
-		listenAddr = overwriteListenAddr
 	}
 
-	httpServer := &http.Server{
-		Addr:    listenAddr,
-		Handler: mux,
+	// --- Start HTTP Server using Shared Utility ---
+	serverInstance, listenerErrChan, startErr := transport.StartHTTPServer(
+		ctx,
+		n.logger,
+		n.cfg,
+		mux,
+		overwriteListenAddr,
+	)
+	if startErr != nil {
+		n.shutdownWg.Done() // Decrement counter if startup fails
+		return fmt.Errorf("failed to start HTTP server: %w", startErr)
 	}
+	n.httpServer = serverInstance
+	n.listenerErrChan = listenerErrChan
 
+	// --- Goroutine to handle listener errors ---
 	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			n.logger.Error("HTTP server error", zap.Error(err))
+		defer n.shutdownWg.Done() // Signal completion when this goroutine exits
+		select {
+		case err, ok := <-n.listenerErrChan:
+			if ok && err != nil {
+				// This error occurred *after* successful startup
+				n.logger.Error("Gateway HTTP/S listener failed", zap.Error(err))
+				// Depending on the application, you might want to trigger a shutdown here
+				// or attempt a restart. For now, just log it.
+			}
+		case <-ctx.Done():
+			// Context cancelled, shutdown initiated elsewhere
+			n.logger.Info("Listener error monitor stopped due to context cancellation.")
 		}
 	}()
 
-	// Monitor the parent context for cancellation
+	// --- Graceful Shutdown Logic ---
 	go func() {
-		<-ctx.Done()
+		<-ctx.Done() // Wait for cancellation signal (e.g., from main)
+		n.logger.Info("Shutdown signal received, stopping Gateway node...")
 
-		n.sessionManager.CloseAllSessions()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Create shutdown context with timeout
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second) // Generous timeout
 		defer cancel()
-		if err := httpServer.Shutdown(ctx); err != nil {
-			n.logger.Error("HTTP server shutdown error:", zap.Error(err))
-		}
 
-		n.logger.Info("Gateway node stopped")
-		close(n.done)
+		// Close MCP sessions first
+		n.sessionManager.CloseAllSessions()
+
+		// Shutdown HTTP server using the shared utility function
+		transport.ShutdownHTTPServer(shutdownCtx, n.logger, n.httpServer)
+
+		// The server goroutine started by StartHTTPServer will detect ErrServerClosed
+		// and the listenerErrChan goroutine will then call shutdownWg.Done().
 	}()
 
-	n.logger.Info("Gateway node started successfully", zap.String("addr", listenAddr))
+	listenAddr, _ := n.cfg.ListenAddr() // Get address again for logging
+	sslEnabled, _ := n.cfg.SSLEnabled()
+	n.logger.Info("Gateway node started successfully", zap.String("addr", listenAddr), zap.Bool("sslEnabled", sslEnabled))
 	return nil
 }
 
+// WaitForShutdown waits for the node's main server loop to finish.
 func (n *Node) WaitForShutdown(timeout time.Duration) bool {
+	doneChan := make(chan struct{})
+	go func() {
+		n.shutdownWg.Wait() // Wait for the main server loop goroutine to finish
+		close(doneChan)
+	}()
+
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
-	case <-n.done:
+	case <-doneChan:
+		n.logger.Info("Gateway node shutdown complete.")
 		return true // Clean shutdown completed
 	case <-timer.C:
-		n.logger.Warn("Shutdown timeout reached, forcing exit")
+		n.logger.Warn("Gateway node shutdown timed out.")
 		return false // Timeout occurred
 	}
 }
 
-func Start(ctx context.Context, logger *zap.Logger, cfg config.IConfig, overwriteListenAddr string) (node *Node, err error) {
-	// Create and start the node
-	node, err = New(logger, cfg)
+// Start is a convenience function to create and start the node
+func Start(ctx context.Context, logger *zap.Logger, cfg config.IConfig, overwriteListenAddr string) (*Node, error) {
+	node, err := New(logger, cfg)
 	if err != nil {
-		logger.Fatal("Failed to create node", zap.Error(err))
+		// Use Fatalf only if called directly from main, otherwise return error
+		return nil, fmt.Errorf("failed to create gateway node: %w", err)
 	}
-	// Start the node
-	if err := node.Start(ctx, http.NewServeMux(), overwriteListenAddr); err != nil {
-		logger.Fatal("Node failed to start", zap.Error(err))
+
+	// Use default ServeMux
+	mux := http.NewServeMux()
+
+	if err := node.Start(ctx, mux, overwriteListenAddr); err != nil {
+		// Use Fatalf only if called directly from main
+		return nil, fmt.Errorf("gateway node failed to start: %w", err)
 	}
-	return node, err
+	return node, nil
 }

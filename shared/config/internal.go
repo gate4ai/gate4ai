@@ -23,6 +23,15 @@ type InternalConfig struct {
 	userParams             map[string]map[string]string // userID -> paramName -> paramValue
 	UserSubscribes         map[string][]string          // userID -> BackendIDs
 	Backends               map[string]*Backend          // serverID -> Server
+
+	// SSL Fields
+	SSLEnabledValue      bool
+	SSLModeValue         string
+	SSLCertFileValue     string
+	SSLKeyFileValue      string
+	SSLAcmeDomainsValue  []string
+	SSLAcmeEmailValue    string
+	SSLAcmeCacheDirValue string
 }
 
 // NewInternalConfig creates a new in-memory configuration
@@ -38,6 +47,15 @@ func NewInternalConfig() *InternalConfig {
 		userParams:     make(map[string]map[string]string),
 		UserSubscribes: make(map[string][]string),
 		Backends:       make(map[string]*Backend),
+
+		// Default SSL settings
+		SSLEnabledValue:      false,
+		SSLModeValue:         "manual",
+		SSLCertFileValue:     "",
+		SSLKeyFileValue:      "",
+		SSLAcmeDomainsValue:  []string{},
+		SSLAcmeEmailValue:    "",
+		SSLAcmeCacheDirValue: "./.autocert-cache", // Default cache dir
 	}
 }
 
@@ -227,4 +245,51 @@ func (c *InternalConfig) Close() error {
 
 func (c *InternalConfig) Status(ctx context.Context) error {
 	return nil
+}
+
+// --- Implement SSL Methods ---
+
+func (c *InternalConfig) SSLEnabled() (bool, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.SSLEnabledValue, nil
+}
+
+func (c *InternalConfig) SSLMode() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.SSLModeValue, nil
+}
+
+func (c *InternalConfig) SSLCertFile() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.SSLCertFileValue, nil
+}
+
+func (c *InternalConfig) SSLKeyFile() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.SSLKeyFileValue, nil
+}
+
+func (c *InternalConfig) SSLAcmeDomains() ([]string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	// Return a copy to prevent modification of the internal slice
+	domainsCopy := make([]string, len(c.SSLAcmeDomainsValue))
+	copy(domainsCopy, c.SSLAcmeDomainsValue)
+	return domainsCopy, nil
+}
+
+func (c *InternalConfig) SSLAcmeEmail() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.SSLAcmeEmailValue, nil
+}
+
+func (c *InternalConfig) SSLAcmeCacheDir() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.SSLAcmeCacheDirValue, nil
 }
