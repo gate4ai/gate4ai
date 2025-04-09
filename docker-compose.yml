@@ -1,72 +1,18 @@
-version: '3.8'
-
 services:
-  portal:
-    image: gate4ai/portal:${VERSION:-latest} # Use VERSION from .env
-    container_name: gate4ai-portal-${APP_ENV:-prod} # APP_ENV from .env
-    restart: unless-stopped
-    ports:
-      - "${PORTAL_PORT:-3000}:3000" # PORTAL_PORT from .env
-    environment:
-      # Read DB connection string components from .env
-      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
-      JWT_SECRET: ${JWT_SECRET} # Read from .env
-      HOST: '0.0.0.0'
-      PORT: 3000
-      NODE_ENV: ${NODE_ENV:-production} # Read from .env
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - gate4ai-network
-
-  gateway:
-    image: gate4ai/gateway:${VERSION:-latest} # Use VERSION from .env
-    container_name: gate4ai-gateway-${APP_ENV:-prod} # APP_ENV from .env
-    restart: unless-stopped
-    ports:
-      - "${GATEWAY_PORT:-8080}:8080" # GATEWAY_PORT from .env
-    environment:
-      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?sslmode=disable"
-    depends_on:
-      db:
-        condition: service_healthy
-      portal:
-        condition: service_started # Assuming gateway needs portal API ready
-    networks:
-      - gate4ai-network
-
-  example-server:
-    image: gate4ai/example-server:${VERSION:-latest} # Use VERSION from .env
-    container_name: gate4ai-example-server-${APP_ENV:-prod} # APP_ENV from .env
-    restart: unless-stopped
-    ports:
-      - "${SERVER_PORT:-4000}:4000" # SERVER_PORT from .env (still needed if mapped)
-    environment:
-      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - gate4ai-network
-
-  db:
+  db: # Database service remains the same
     image: postgres:17-alpine
-    container_name: gate4ai-db-${APP_ENV:-prod} # APP_ENV from .env
+    container_name: gate4ai-db-${APP_ENV:-prod}
     restart: unless-stopped
     volumes:
-      # Volume names now also use APP_ENV for separation
       - postgres_data:/var/lib/postgresql/data
-      - db_backups:/backups # Shared backup volume inside container if needed
+      - db_backups:/backups
     environment:
-      # Use variables from .env, providing defaults here as fallback ONLY
       POSTGRES_USER: ${POSTGRES_USER:-gate4ai_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       POSTGRES_DB: ${POSTGRES_DB:-gate4ai_db}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432" # POSTGRES_PORT from .env
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      # Use internal env vars set for the container
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
@@ -74,18 +20,86 @@ services:
     networks:
       - gate4ai-network
 
+  db-init: # New service for initialization
+    image: gate4ai/portal:${VERSION:-latest}
+    container_name: gate4ai-db-init-${APP_ENV:-prod}
+    command: >
+      sh -c '
+      echo "[db-init] Waiting for database..." &&
+      apk add --no-cache postgresql-client &&
+      timeout 120s sh -c "while ! pg_isready -h db -p 5432 -q -U $$POSTGRES_USER; do echo -n "."; sleep 2; done" &&
+      echo "[db-init] Database ready." &&
+      echo "[db-init] Running Prisma migrations..." &&
+      npx prisma migrate deploy &&
+      echo "[db-init] Running Prisma seed..." &&
+      npx prisma db seed &&
+      echo "[db-init] Initialization complete." &&
+      exit 0
+      '
+    environment:
+      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
+      POSTGRES_USER: ${POSTGRES_USER:-gate4ai_user}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - gate4ai-network 
+
+  portal:
+    image: gate4ai/portal:${VERSION:-latest}
+    container_name: gate4ai-portal-${APP_ENV:-prod}
+    restart: unless-stopped
+    ports:
+      - "${PORTAL_PORT:-3000}:3000"
+    environment:
+      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
+      JWT_SECRET: ${JWT_SECRET}
+      HOST: '0.0.0.0'
+      PORT: 3000
+      NODE_ENV: ${NODE_ENV:-production}
+    depends_on:
+      # --- IMPORTANT CHANGE ---
+      db-init:
+        condition: service_completed_successfully
+    networks:
+      - gate4ai-network
+    # The CMD ["node", ".output/server/index.mjs"] from the Dockerfile will run now
+
+  gateway:
+    image: gate4ai/gateway:${VERSION:-latest}
+    container_name: gate4ai-gateway-${APP_ENV:-prod}
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    environment:
+      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?sslmode=disable"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    networks:
+      - gate4ai-network
+
+  example-server: # Example server also needs the DB seeded if it reads config from it
+    image: gate4ai/example-server:${VERSION:-latest}
+    container_name: gate4ai-example-server-${APP_ENV:-prod}
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT:-4000}:4000"
+    networks:
+      - gate4ai-network
+
 networks:
   gate4ai-network:
     driver: bridge
-    name: gate4ai-network-${APP_ENV:-prod} # Network name uses APP_ENV
+    name: gate4ai-network-${APP_ENV:-prod}
 
 volumes:
   postgres_data:
-    name: postgres_data_${APP_ENV:-prod} # Volume name uses APP_ENV
+    name: postgres_data_${APP_ENV:-prod}
   db_backups:
-    name: db_backups_${APP_ENV:-prod} # Volume name uses APP_ENV
+    name: db_backups_${APP_ENV:-prod}
     driver: local
     driver_opts:
       type: none
-      device: ${BACKUP_BASE_DIR}/${APP_ENV} # Map to host backup dir if needed
+      device: ${BACKUP_BASE_DIR}/${APP_ENV}
       o: bind
