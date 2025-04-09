@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
@@ -41,13 +39,6 @@ type YamlConfig struct {
 	sslAcmeDomains  []string
 	sslAcmeEmail    string
 	sslAcmeCacheDir string
-
-	// File watcher for hot reloading
-	watcher      *fsnotify.Watcher
-	watcherDone  chan struct{}
-	lastModified time.Time
-	watcherMu    sync.Mutex
-	isWatching   bool
 }
 
 // YAML configuration structure matching the required format
@@ -82,29 +73,13 @@ type yamlConfig struct {
 	} `yaml:"backends"`
 }
 
-// YamlConfigOptions contains options for creating a new YamlConfig
-type YamlConfigOptions struct {
-	// If true, the configuration will watch for file changes and reload automatically
-	EnableHotReload bool
-	// Minimum interval between reloads to prevent excessive reloads (default: 1 second)
-	HotReloadMinInterval time.Duration
-}
-
-// DefaultYamlConfigOptions returns default options for YamlConfig
-func DefaultYamlConfigOptions() YamlConfigOptions {
-	return YamlConfigOptions{
-		EnableHotReload:      false,
-		HotReloadMinInterval: 1 * time.Second,
-	}
-}
-
 // NewYamlConfig creates a new YAML-based configuration
 func NewYamlConfig(configPath string, logger *zap.Logger) (*YamlConfig, error) {
-	return NewYamlConfigWithOptions(configPath, logger, DefaultYamlConfigOptions())
+	return NewYamlConfigWithOptions(configPath, logger)
 }
 
 // NewYamlConfigWithOptions creates a new YAML-based configuration with specified options
-func NewYamlConfigWithOptions(configPath string, logger *zap.Logger, options YamlConfigOptions) (*YamlConfig, error) {
+func NewYamlConfigWithOptions(configPath string, logger *zap.Logger) (*YamlConfig, error) {
 	if logger == nil {
 		// Create a default logger if none provided
 		var err error
@@ -132,119 +107,7 @@ func NewYamlConfigWithOptions(configPath string, logger *zap.Logger, options Yam
 		return nil, err
 	}
 
-	// Set up file watcher for hot reloading if enabled
-	if options.EnableHotReload {
-		if err := config.StartWatcher(options.HotReloadMinInterval); err != nil {
-			logger.Error("Failed to start file watcher", zap.Error(err))
-			return config, err
-		}
-	}
-
 	return config, nil
-}
-
-// StartWatcher begins watching the configuration file for changes
-func (c *YamlConfig) StartWatcher(minInterval time.Duration) error {
-	c.watcherMu.Lock()
-	defer c.watcherMu.Unlock()
-
-	if c.isWatching {
-		return nil // Already watching
-	}
-
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-
-	c.watcher = watcher
-	c.watcherDone = make(chan struct{})
-	c.isWatching = true
-
-	// Get initial file info for modification time
-	fileInfo, err := os.Stat(c.configPath)
-	if err == nil {
-		c.lastModified = fileInfo.ModTime()
-	}
-
-	// Start the watching goroutine
-	go func() {
-		defer watcher.Close()
-
-		// Add the config file to the watcher
-		if err := watcher.Add(c.configPath); err != nil {
-			c.logger.Error("Failed to add file to watcher",
-				zap.String("path", c.configPath),
-				zap.Error(err))
-			return
-		}
-		c.logger.Info("Started watching configuration file for changes",
-			zap.String("path", c.configPath))
-
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-
-				// Check if this is a modification event
-				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
-					// Check if enough time has passed since the last reload
-					currentTime := time.Now()
-					c.watcherMu.Lock()
-					timeSinceLastModification := currentTime.Sub(c.lastModified)
-					shouldReload := timeSinceLastModification > minInterval
-					if shouldReload {
-						c.lastModified = currentTime
-					}
-					c.watcherMu.Unlock()
-
-					if shouldReload {
-						c.logger.Info("Configuration file modified, reloading",
-							zap.String("path", c.configPath))
-						if err := c.Update(); err != nil {
-							c.logger.Error("Failed to reload configuration",
-								zap.String("path", c.configPath),
-								zap.Error(err))
-						}
-					}
-				}
-
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				c.logger.Error("File watcher error", zap.Error(err))
-
-			case <-c.watcherDone:
-				c.logger.Info("Stopping file watcher")
-				return
-			}
-		}
-	}()
-
-	return nil
-}
-
-// StopWatcher stops watching the configuration file
-func (c *YamlConfig) StopWatcher() {
-	c.watcherMu.Lock()
-	defer c.watcherMu.Unlock()
-
-	if !c.isWatching {
-		return
-	}
-
-	close(c.watcherDone)
-	c.isWatching = false
-}
-
-// IsWatching returns true if the configuration file is being watched
-func (c *YamlConfig) IsWatching() bool {
-	c.watcherMu.Lock()
-	defer c.watcherMu.Unlock()
-	return c.isWatching
 }
 
 // Update reloads configuration from the YAML file
@@ -346,7 +209,6 @@ func (c *YamlConfig) Update() error {
 
 // Close stops the file watcher and cleans up resources
 func (c *YamlConfig) Close() error {
-	c.StopWatcher()
 	return nil
 }
 

@@ -17,10 +17,6 @@ var _ IConfig = (*DatabaseConfig)(nil)
 type DatabaseConfig struct {
 	logger             *zap.Logger
 	dbConnectionString string
-
-	// For watcher
-	ctx        context.Context
-	cancelFunc context.CancelFunc
 }
 
 // DatabaseConfigOptions contains options for configuring the DatabaseConfig
@@ -49,46 +45,8 @@ func NewDatabaseConfigWithOptions(dbConnectionString string, logger *zap.Logger,
 	return config, nil
 }
 
-// StartWatcher starts a goroutine that periodically updates the configuration from the database
-func (c *DatabaseConfig) StartWatcher() error {
-	// Create context for watcher
-	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
-
-	// Open a connection to the database to get the reload interval
-	db, err := sql.Open("postgres", c.dbConnectionString)
-	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
-	}
-	defer db.Close()
-
-	// Get reload interval setting
-	var reloadIntervalSecs int64 = 60 // Default to 60 seconds
-	row := db.QueryRow(`SELECT value FROM "Settings" WHERE key = 'gateway_reload_every_seconds'`)
-	var valueStr string
-	if err := row.Scan(&valueStr); err == nil {
-		var value interface{}
-		if err := json.Unmarshal([]byte(valueStr), &value); err == nil {
-			if floatValue, ok := value.(float64); ok {
-				reloadIntervalSecs = int64(floatValue)
-			}
-		}
-	}
-
-	c.logger.Info("Config watcher started", zap.Int64("intervalSeconds", reloadIntervalSecs))
-	return nil
-}
-
-// Stop the configuration watcher
-func (c *DatabaseConfig) StopWatcher() {
-	if c.cancelFunc != nil {
-		c.cancelFunc()
-		c.cancelFunc = nil
-	}
-}
-
 // Close closes any resources held by the config
 func (c *DatabaseConfig) Close() error {
-	c.StopWatcher()
 	return nil
 }
 
@@ -495,7 +453,7 @@ func (c *DatabaseConfig) getSettingJSON(key string) (interface{}, error) {
 
 	query := `SELECT value FROM "Settings" WHERE key = $1 LIMIT 1`
 	var valueStr string
-	// Use context for query cancellation/timeout if StartWatcher is implemented
+
 	ctx := context.Background() // Replace with c.ctx if watcher is active
 	err = db.QueryRowContext(ctx, query, key).Scan(&valueStr)
 	if err != nil {

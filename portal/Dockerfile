@@ -1,3 +1,4 @@
+# github/portal/Dockerfile
 # Stage 1: Build Environment
 FROM node:lts-alpine AS builder
 
@@ -9,9 +10,10 @@ RUN npm ci --ignore-scripts
 
 COPY prisma ./prisma/
 
-COPY . .
-
+# Generate client in builder stage (still useful for Nuxt build potentially)
 RUN npx prisma generate
+
+COPY . .
 
 RUN npx nuxt prepare
 
@@ -27,24 +29,17 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
 
-# --> ADDED: Install postgresql-client for pg_isready in the entrypoint script
-RUN apk add --no-cache postgresql-client
-
 COPY --from=builder /app/.output ./.output
 
 COPY package.json package-lock.json* ./
+# Install ONLY production dependencies
 RUN npm ci --only=production --ignore-scripts
 
 COPY --from=builder /app/prisma ./prisma
 
-# --> ADDED: Copy and set permissions for the entrypoint script
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+# Explicitly generate the Prisma client in the final stage
+RUN npx prisma generate
 
 EXPOSE 3000
 
-# --> ADDED: Set the entrypoint script
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
-
-# --> Keep the original CMD, it will be passed to the entrypoint script
 CMD ["node", ".output/server/index.mjs"]
