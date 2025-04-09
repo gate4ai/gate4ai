@@ -1,0 +1,98 @@
+name: Deploy to Demo
+
+on:
+  push:
+    branches: [ main ] # Trigger deployment when code is merged/pushed to main
+
+concurrency:
+  group: "deploy-${{ github.ref }}"
+  cancel-in-progress: false
+
+jobs:
+  build_and_push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # Needed to push to GHCR if used, or general good practice
+      id-token: write # If using OIDC for cloud login later
+    outputs:
+      version_tag: ${{ steps.generate_tag.outputs.tag }} # Output the generated tag
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Generate version tag
+      id: generate_tag
+      run: echo "tag=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and push Portal image
+      uses: docker/build-push-action@v6
+      with:
+        context: ./portal
+        file: ./portal/Dockerfile
+        push: true
+        tags: | # Push both latest and the specific version tag
+          gate4ai/portal:latest
+          gate4ai/portal:${{ steps.generate_tag.outputs.tag }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push Gateway image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ./gateway/Dockerfile
+        push: true
+        tags: | # Push both latest and the specific version tag
+          gate4ai/gateway:latest
+          gate4ai/gateway:${{ steps.generate_tag.outputs.tag }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push Example Server image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ./server/Dockerfile
+        push: true
+        tags: | # Push both latest and the specific version tag
+          gate4ai/example-server:latest
+          gate4ai/example-server:${{ steps.generate_tag.outputs.tag }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy_demo:
+    name: Deploy to Demo Server
+    needs: build_and_push # Run after images are pushed
+    runs-on: ubuntu-latest
+    environment:
+      name: demo
+      url: https://demo.gate4.ai
+
+    steps:
+    - name: Deploy to Demo via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST_DEMO }}
+        username: ${{ secrets.SSH_USERNAME_DEMO }}
+        key: ${{ secrets.SSH_PRIVATE_KEY_DEMO }}
+        port: ${{ secrets.SSH_PORT_DEMO || 22 }}
+        script: |
+          set -e
+          # Call the deploy script, passing the version tag generated in the previous job
+          # Assuming scripts are located in /gate4ai/scripts on the server
+          bash /gate4ai/scripts/deploy_demo.sh ${{ needs.build_and_push.outputs.version_tag }}

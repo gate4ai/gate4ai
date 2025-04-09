@@ -2,78 +2,72 @@ version: '3.8'
 
 services:
   portal:
-    image: gate4ai/portal:latest
-    container_name: gate4ai-portal
+    image: gate4ai/portal:${VERSION:-latest} # Use VERSION from .env
+    container_name: gate4ai-portal-${APP_ENV:-prod} # APP_ENV from .env
     restart: unless-stopped
     ports:
-      - "${PORTAL_PORT:-3000}:3000" # Expose portal port
+      - "${PORTAL_PORT:-3000}:3000" # PORTAL_PORT from .env
     environment:
-      # Passed to the Nuxt runtime config and used by Prisma client
-      GATE4AI_DATABASE_URL: ${GATE4AI_DATABASE_URL}
-      # JWT Secret for the portal's internal API
-      JWT_SECRET: ${JWT_SECRET}
-      # Make API base URL configurable if needed, defaults to /api inside container
-      # NUXT_PUBLIC_API_BASE_URL: /api
-      # Ensure HOST is set for Nuxt to listen on all interfaces within the container
+      # Read DB connection string components from .env
+      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
+      JWT_SECRET: ${JWT_SECRET} # Read from .env
       HOST: '0.0.0.0'
       PORT: 3000
-    depends_on:
-      db:
-        condition: service_healthy # Wait for db to be healthy
-    networks:
-      - gate4ai-network
-    # Add entrypoint/command to run migrations if not handled inside Dockerfile CMD
-    # command: sh -c "npx prisma migrate deploy && node .output/server/index.mjs"
-
-  gateway:
-    image: gate4ai/gateway:latest
-    container_name: gate4ai-gateway
-    restart: unless-stopped
-    ports:
-      - "${GATEWAY_PORT:-8080}:8080" # Expose gateway port
-    environment:
-      # Gateway reads DB URL and other settings from the database,
-      # but it needs the DB URL to connect initially.
-      GATE4AI_DATABASE_URL: ${GATE4AI_DATABASE_URL}
+      NODE_ENV: ${NODE_ENV:-production} # Read from .env
     depends_on:
       db:
         condition: service_healthy
-      portal: # Optional: wait for portal if gateway proxies to it and needs it running
-        condition: service_started
+    networks:
+      - gate4ai-network
+
+  gateway:
+    image: gate4ai/gateway:${VERSION:-latest} # Use VERSION from .env
+    container_name: gate4ai-gateway-${APP_ENV:-prod} # APP_ENV from .env
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080" # GATEWAY_PORT from .env
+    environment:
+      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
+    depends_on:
+      db:
+        condition: service_healthy
+      portal:
+        condition: service_started # Assuming gateway needs portal API ready
     networks:
       - gate4ai-network
 
   example-server:
-    image: gate4ai/example-server:latest
-    container_name: gate4ai-example-server
+    image: gate4ai/example-server:${VERSION:-latest} # Use VERSION from .env
+    container_name: gate4ai-example-server-${APP_ENV:-prod} # APP_ENV from .env
     restart: unless-stopped
     ports:
-      - "${SERVER_PORT:-4000}:4000" # Expose server port
+      - "${SERVER_PORT:-4000}:4000" # SERVER_PORT from .env (still needed if mapped)
     environment:
-      # Add any required environment variables for the example server
-      GATE4AI_DATABASE_URL: ${GATE4AI_DATABASE_URL}
+      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
     depends_on:
       db:
         condition: service_healthy
-      gateway:
-        condition: service_started
     networks:
       - gate4ai-network
 
   db:
     image: postgres:17-alpine
-    container_name: gate4ai-db
+    container_name: gate4ai-db-${APP_ENV:-prod} # APP_ENV from .env
     restart: unless-stopped
     volumes:
-      - postgres_data:/var/lib/postgresql/data # Persist data
+      # Volume names now also use APP_ENV for separation
+      - postgres_data:/var/lib/postgresql/data
+      - db_backups:/backups # Shared backup volume inside container if needed
     environment:
+      # Use variables from .env, providing defaults here as fallback ONLY
       POSTGRES_USER: ${POSTGRES_USER:-gate4ai_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       POSTGRES_DB: ${POSTGRES_DB:-gate4ai_db}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432" # Expose DB port (optional, for external access/debug)
+      - "${POSTGRES_PORT:-5432}:5432" # POSTGRES_PORT from .env
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gate4ai_user} -d ${POSTGRES_DB:-gate4ai_db}"]
+      # Use internal env vars set for the container
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -83,7 +77,15 @@ services:
 networks:
   gate4ai-network:
     driver: bridge
+    name: gate4ai-network-${APP_ENV:-prod} # Network name uses APP_ENV
 
 volumes:
   postgres_data:
+    name: postgres_data_${APP_ENV:-prod} # Volume name uses APP_ENV
+  db_backups:
+    name: db_backups_${APP_ENV:-prod} # Volume name uses APP_ENV
     driver: local
+    driver_opts:
+      type: none
+      device: ${BACKUP_BASE_DIR}/${APP_ENV} # Map to host backup dir if needed
+      o: bind
