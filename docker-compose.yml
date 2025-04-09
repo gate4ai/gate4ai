@@ -27,7 +27,7 @@ services:
     ports:
       - "${GATEWAY_PORT:-8080}:8080" # GATEWAY_PORT from .env
     environment:
-      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
+      GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?sslmode=disable"
     depends_on:
       db:
         condition: service_healthy
