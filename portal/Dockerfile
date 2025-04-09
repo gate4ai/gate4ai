@@ -10,13 +10,10 @@ RUN apk add --no-cache python3 make g++
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
+COPY prisma ./prisma/
 
 # Allow build scripts to run (e.g., for bcrypt)
 RUN npm ci
-
-COPY prisma ./prisma/
-# Generate client here if needed by build step, otherwise might move to final stage
-RUN npx prisma generate
 
 COPY . .
 
