@@ -1,18 +1,21 @@
 # github/portal/Dockerfile
+
 # Stage 1: Build Environment
 FROM node:lts-alpine AS builder
+
+RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
 
-RUN npm ci --ignore-scripts
-
 COPY prisma ./prisma/
 
-# Generate client in builder stage (still useful for Nuxt build potentially)
-RUN npx prisma generate
+# Allow build scripts to run (e.g., for bcrypt)
+# The postinstall script (nuxt prepare && prisma generate) will run here.
+RUN npm ci
 
+# Copy the rest of the source code
 COPY . .
 
 RUN npx nuxt prepare
@@ -23,6 +26,9 @@ RUN npm run build
 # Stage 2: Production Environment
 FROM node:lts-alpine
 
+# Needed because the seed script (run by db-init) uses bcrypt from production deps
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -32,13 +38,13 @@ ENV PORT=3000
 COPY --from=builder /app/.output ./.output
 
 COPY package.json package-lock.json* ./
-# Install ONLY production dependencies
-RUN npm ci --only=production --ignore-scripts
 
+# --- COPY prisma BEFORE npm ci ---
 COPY --from=builder /app/prisma ./prisma
 
-# Explicitly generate the Prisma client in the final stage
-RUN npx prisma generate
+# Install ONLY production dependencies, but allow build scripts
+# The postinstall script (nuxt prepare && prisma generate) will run here.
+RUN npm ci --only=production
 
 EXPOSE 3000
 

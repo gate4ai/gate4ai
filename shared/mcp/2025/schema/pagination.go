@@ -13,8 +13,4 @@ type PaginatedRequestParams struct {
 }
 
 // PaginatedResult represents fields in a response supporting pagination.
-type PaginatedResult struct {
-	// An opaque token representing the pagination position after the last returned result.
-	// If present, there may be more results available.
-	NextCursor *Cursor `json:"nextCursor,omitempty"`
-}
+type PaginatedResult = schema2024.PaginatedResult

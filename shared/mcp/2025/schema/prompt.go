@@ -23,11 +23,7 @@ type PromptMessage struct {
 type PromptArgument = schema2024.PromptArgument
 
 // Prompt describes a prompt or prompt template that the server offers.
-type Prompt struct {
-	Name        string           `json:"name"`                  // The name of the prompt or prompt template
-	Description string           `json:"description,omitempty"` // An optional description of what this prompt provides
-	Arguments   []PromptArgument `json:"arguments,omitempty"`   // A list of arguments to use for templating the prompt
-}
+type Prompt = schema2024.Prompt
 
 // ListPromptsRequest requests a list of available prompts.
 // Sent from the client to request a list of prompts and prompt templates the server has.
