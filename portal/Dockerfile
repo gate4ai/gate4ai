@@ -14,11 +14,11 @@ ENV NODE_ENV=production
 # Build the Nuxt application
 RUN npm run build
 
-# Stage 2: DB Initializer Image (Contains ALL dependencies + Prisma CLI)
+# Stage 2: DB Initializer Image (Contains ALL dependencies + Prisma CLI + Init Script)
 # This image is specifically designed to run Prisma commands (migrate, seed)
 FROM node:lts-alpine AS db-initializer
 # Install build tools for potential native dependencies (e.g., bcrypt)
-RUN apk add --no-cache python3 make g++
+RUN apk add --no-cache python3 make g++ postgresql-client
 WORKDIR /app
 COPY package.json package-lock.json* ./
 # Copy the Prisma schema file BEFORE installing dependencies that might trigger postinstall
@@ -29,6 +29,7 @@ RUN npm ci
 # Copy the rest of the application code, including the seed script and generated client
 # This ensures tsx can find the seed script and the generated client is available if needed
 COPY --from=builder /app /app
+COPY init-db.sh /app/init-db.sh
 
 # Stage 3: Runtime Image (Contains the built app + ONLY production dependencies)
 # This is the default final stage

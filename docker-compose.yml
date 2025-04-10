@@ -23,28 +23,15 @@ services:
   db-init: # Service for initialization
     image: gate4ai/portal-db-init:${VERSION:-latest}
     container_name: gate4ai-db-init-${APP_ENV:-prod}
-    command: >
-      sh -c '
-      echo "[db-init] Waiting for database..." &&
-      apk add --no-cache postgresql-client && # postgresql-client needed only for pg_isready inside command
-      timeout 120s sh -c "while ! pg_isready -h db -p 5432 -q -U $$POSTGRES_USER; do echo -n "."; sleep 2; done" &&
-      echo "[db-init] Database ready." &&
-      echo "[db-init] Running Prisma migrations..." &&
-      npx prisma migrate deploy && # Prisma CLI is available in this image
-      echo "[db-init] Running Prisma seed..." &&
-      npx prisma db seed && # Prisma CLI is available in this image
-      echo "[db-init] Initialization complete." &&
-      exit 0 # Exit successfully
-      '
+    command: ["sh", "/app/init-db.sh"]
     environment:
       GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
-      POSTGRES_USER: ${POSTGRES_USER:-gate4ai_user} # Pass user for pg_isready command
+      POSTGRES_USER: ${POSTGRES_USER:-gate4ai_user} # Script uses this for pg_isready
     depends_on:
       db:
         condition: service_healthy # Wait for the DB to be healthy
     networks:
       - gate4ai-network
-    # This service will run its command and then exit.
 
   portal:
     image: gate4ai/portal:${VERSION:-latest} # This now refers to the smaller runtime image
