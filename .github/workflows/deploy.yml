@@ -39,17 +39,31 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build and push Portal image
+    - name: Build and push Portal runtime image
       uses: docker/build-push-action@v6
       with:
         context: ./portal
         file: ./portal/Dockerfile
         push: true
+        # target: runtime # Not needed, default final stage
         tags: | # Push both latest and the specific version tag
           gate4ai/portal:latest
           gate4ai/portal:${{ steps.generate_tag.outputs.tag }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,ref=gate4ai/portal
+        cache-to: type=gha,mode=max,ref=gate4ai/portal
+
+    - name: Build and push Portal db-init image # New step
+      uses: docker/build-push-action@v6
+      with:
+        context: ./portal
+        file: ./portal/Dockerfile
+        push: true
+        target: db-initializer # Build the specific stage
+        tags: | # Push both latest and the specific version tag
+          gate4ai/portal-db-init:latest
+          gate4ai/portal-db-init:${{ steps.generate_tag.outputs.tag }}
+        cache-from: type=gha,ref=gate4ai/portal-db-init
+        cache-to: type=gha,mode=max,ref=gate4ai/portal-db-init
 
     - name: Build and push Gateway image
       uses: docker/build-push-action@v6
@@ -60,8 +74,8 @@ jobs:
         tags: | # Push both latest and the specific version tag
           gate4ai/gateway:latest
           gate4ai/gateway:${{ steps.generate_tag.outputs.tag }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,ref=gate4ai/gateway
+        cache-to: type=gha,mode=max,ref=gate4ai/gateway
 
     - name: Build and push Example Server image
       uses: docker/build-push-action@v6
@@ -72,8 +86,8 @@ jobs:
         tags: | # Push both latest and the specific version tag
           gate4ai/example-server:latest
           gate4ai/example-server:${{ steps.generate_tag.outputs.tag }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,ref=gate4ai/example-server
+        cache-to: type=gha,mode=max,ref=gate4ai/example-server
 
   deploy_demo:
     name: Deploy to Demo Server
