@@ -1,5 +1,5 @@
 services:
-  db: # Database service remains the same
+  db: # Database service
     image: postgres:17-alpine
     container_name: gate4ai-db-${APP_ENV:-prod}
     restart: unless-stopped
@@ -20,33 +20,34 @@ services:
     networks:
       - gate4ai-network
 
-  db-init: # New service for initialization
-    image: gate4ai/portal:${VERSION:-latest}
+  db-init: # Service for initialization
+    image: gate4ai/portal-db-init:${VERSION:-latest}
     container_name: gate4ai-db-init-${APP_ENV:-prod}
     command: >
       sh -c '
       echo "[db-init] Waiting for database..." &&
-      apk add --no-cache postgresql-client &&
+      apk add --no-cache postgresql-client && # postgresql-client needed only for pg_isready inside command
       timeout 120s sh -c "while ! pg_isready -h db -p 5432 -q -U $$POSTGRES_USER; do echo -n "."; sleep 2; done" &&
       echo "[db-init] Database ready." &&
       echo "[db-init] Running Prisma migrations..." &&
-      npx prisma migrate deploy &&
+      npx prisma migrate deploy && # Prisma CLI is available in this image
       echo "[db-init] Running Prisma seed..." &&
-      npx prisma db seed &&
+      npx prisma db seed && # Prisma CLI is available in this image
       echo "[db-init] Initialization complete." &&
-      exit 0
+      exit 0 # Exit successfully
       '
     environment:
       GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
-      POSTGRES_USER: ${POSTGRES_USER:-gate4ai_user}
+      POSTGRES_USER: ${POSTGRES_USER:-gate4ai_user} # Pass user for pg_isready command
     depends_on:
       db:
-        condition: service_healthy
+        condition: service_healthy # Wait for the DB to be healthy
     networks:
-      - gate4ai-network 
+      - gate4ai-network
+    # This service will run its command and then exit.
 
   portal:
-    image: gate4ai/portal:${VERSION:-latest}
+    image: gate4ai/portal:${VERSION:-latest} # This now refers to the smaller runtime image
     container_name: gate4ai-portal-${APP_ENV:-prod}
     restart: unless-stopped
     ports:
@@ -58,12 +59,11 @@ services:
       PORT: 3000
       NODE_ENV: ${NODE_ENV:-production}
     depends_on:
-      # --- IMPORTANT CHANGE ---
       db-init:
         condition: service_completed_successfully
     networks:
       - gate4ai-network
-    # The CMD ["node", ".output/server/index.mjs"] from the Dockerfile will run now
+    # The CMD ["node", ".output/server/index.mjs"] from the Dockerfile will run
 
   gateway:
     image: gate4ai/gateway:${VERSION:-latest}
@@ -74,12 +74,13 @@ services:
     environment:
       GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?sslmode=disable"
     depends_on:
+      # The gateway also depends on the database being initialized.
       db-init:
         condition: service_completed_successfully
     networks:
       - gate4ai-network
 
-  example-server: # Example server also needs the DB seeded if it reads config from it
+  example-server: # Example server can start independently
     image: gate4ai/example-server:${VERSION:-latest}
     container_name: gate4ai-example-server-${APP_ENV:-prod}
     restart: unless-stopped
@@ -101,5 +102,5 @@ volumes:
     driver: local
     driver_opts:
       type: none
-      device: ${BACKUP_BASE_DIR}/${APP_ENV}
+      device: ${BACKUP_BASE_DIR:-./backups}/${APP_ENV} # Provide a default local path for backups
       o: bind

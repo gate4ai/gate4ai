@@ -80,16 +80,29 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Portal image
+    - name: Build Portal runtime image
       uses: docker/build-push-action@v6
       with:
         context: ./portal
         file: ./portal/Dockerfile
         push: false
-        tags: local/gate4ai/portal:dev
+        # target: runtime # Not needed, default final stage
+        tags: local/gate4ai/portal:dev # Image for running the portal
         load: true
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,ref=gate4ai/portal # Use cache from runtime image builds
+        cache-to: type=gha,mode=max,ref=gate4ai/portal
+
+    - name: Build Portal db-init image # New step
+      uses: docker/build-push-action@v6
+      with:
+        context: ./portal
+        file: ./portal/Dockerfile
+        push: false
+        target: db-initializer # Build the specific stage
+        tags: local/gate4ai/portal-db-init:dev # Use a distinct tag for the init image
+        load: true
+        cache-from: type=gha,ref=gate4ai/portal-db-init # Use a separate cache
+        cache-to: type=gha,mode=max,ref=gate4ai/portal-db-init
 
     - name: Build Gateway image
       uses: docker/build-push-action@v6
@@ -99,8 +112,8 @@ jobs:
         push: false
         tags: local/gate4ai/gateway:dev
         load: true
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,ref=gate4ai/gateway
+        cache-to: type=gha,mode=max,ref=gate4ai/gateway
 
     - name: Build Example Server image
       uses: docker/build-push-action@v6
@@ -110,5 +123,5 @@ jobs:
         push: false
         tags: local/gate4ai/example-server:dev
         load: true
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,ref=gate4ai/example-server
+        cache-to: type=gha,mode=max,ref=gate4ai/example-server
