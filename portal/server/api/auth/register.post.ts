@@ -102,7 +102,7 @@ export default defineEventHandler(async (event) => {
     let token: string | null = null;
     if (user.status === Status.ACTIVE) {
          const config = useRuntimeConfig();
-         token = jwt.sign({ userId: user.id }, config.jwtSecret, { expiresIn: '7d' });
+         token = jwt.sign({ userId: user.id }, config.portalJwtSecret, { expiresIn: '7d' });
     }
 
     // Return different responses based on whether confirmation is needed

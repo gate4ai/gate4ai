@@ -33,7 +33,7 @@ export default defineNuxtConfig({
   },
   
   runtimeConfig: {
-    jwtSecret: process.env.JWT_SECRET,
+    portalJwtSecret: process.env.PORTAL_JWT_SECRET,
     public: {
       apiBaseUrl: process.env.API_BASE_URL || '/api',
     }

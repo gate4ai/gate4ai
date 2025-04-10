@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
   try {
     // Verify token
     const config = useRuntimeConfig();
-    const decoded = jwt.verify(token, config.jwtSecret) as { userId: string };
+    const decoded = jwt.verify(token, config.portalJwtSecret) as { userId: string };
     
     // Get user from database
     const user = await prisma.user.findUnique({
