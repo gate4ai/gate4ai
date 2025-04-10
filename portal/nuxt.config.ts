@@ -5,9 +5,14 @@ export default defineNuxtConfig({
   
   modules: [
     '@nuxtjs/google-fonts',
+    'nuxt-gtag',
     // Vuetify will be configured in plugins
   ],
   
+  gtag: { 
+    id: 'G-SVYXLTWN67'
+  },
+
   // Google Fonts configuration
   googleFonts: {
     families: {
