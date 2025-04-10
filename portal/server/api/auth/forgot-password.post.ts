@@ -62,7 +62,7 @@ export default defineEventHandler(async (event) => {
 
     // Get Portal Base URL for the link
     const portalBaseUrlSetting = await prisma.settings.findUnique({
-        where: { key: 'general_portal_base_url'},
+        where: { key: 'url_how_users_connect_to_the_portal'},
         select: { value: true }
     });
      const portalBaseUrl = typeof portalBaseUrlSetting?.value === 'string' ? portalBaseUrlSetting.value : 'http://localhost:8080'; // Fallback

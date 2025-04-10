@@ -1,7 +1,3 @@
-//////////////////////////
-// /home/alex/go-ai/gate4ai/www/plugins/02.api.ts
-//////////////////////////
-// /home/alex/go-ai/gate4ai/www/plugins/02.api.ts
 import { type FetchError, type FetchOptions, $fetch } from 'ofetch';
 import type { H3Error } from 'h3';
 import { useRuntimeConfig, useRequestURL, useNuxtApp } from '#app';
@@ -61,6 +57,9 @@ function formatValidationErrors(errorData: ErrorDataForFormatting): string | nul
  * @returns A user-friendly error message string.
  */
 async function handleApiError(error: unknown): Promise<string> {
+    // Log the raw error object for inspection
+    console.error('[handleApiError] Received raw error:', error);
+
     if (error instanceof Error && 'response' in error && error.response) {
         const fetchError = error as FetchError;
         const response = fetchError.response;
@@ -69,6 +68,7 @@ async function handleApiError(error: unknown): Promise<string> {
         }
         // Attempt to parse error data, be robust against different structures
         const errorData = response._data as ErrorDataForFormatting | null | undefined;
+        console.error('[handleApiError] Parsed _data:', errorData); // Log parsed data
 
         let detailedMessage: string | null = null;
 
@@ -106,7 +106,10 @@ async function handleApiError(error: unknown): Promise<string> {
 
     // Handle generic JavaScript errors
     if (error instanceof Error) {
-        return error.message || 'An unexpected error occurred.'; // Ensure a message is returned
+        // Log the error message directly
+        console.error(`[handleApiError] Handling generic Error: ${error.message}`);
+        // Return the message, or a fallback if empty
+        return error.message || 'An unexpected JavaScript error occurred.';
     }
 
     // Fallback for non-Error types
@@ -211,6 +214,7 @@ export default defineNuxtPlugin(() => {
         // const effectiveUrl = ensureLeadingSlash(url); // Less needed with baseURL
         return await apiFetcher<T>(url, { ...options, method: 'GET' });
       } catch (error: unknown) {
+        console.error(`[Plugin 02.api.ts] Raw error in getJson(${url}):`, error); // Log raw error
         const errorMessage = await handleApiError(error);
         // console.error(`[Plugin 02.api.ts] Error in getJson(${url}): ${errorMessage}`, error instanceof Error ? error : error); // Log full error object
         throw new Error(errorMessage); // Throw a new error with the formatted message
@@ -222,6 +226,7 @@ export default defineNuxtPlugin(() => {
          // const effectiveUrl = ensureLeadingSlash(url);
          return await apiFetcher<T>(url, { method: 'POST', body: data, ...options });
        } catch (error: unknown) {
+         console.error(`[Plugin 02.api.ts] Raw error in postJson(${url}):`, error);
          const errorMessage = await handleApiError(error);
          // console.error(`[Plugin 02.api.ts] Error in postJson(${url}): ${errorMessage}`, error instanceof Error ? error : error);
          throw new Error(errorMessage);
@@ -233,6 +238,7 @@ export default defineNuxtPlugin(() => {
         // const effectiveUrl = ensureLeadingSlash(url);
         return await apiFetcher<T>(url, { method: 'PUT', body: data, ...options });
       } catch (error: unknown) {
+        console.error(`[Plugin 02.api.ts] Raw error in putJson(${url}):`, error);
         const errorMessage = await handleApiError(error);
         // console.error(`[Plugin 02.api.ts] Error in putJson(${url}): ${errorMessage}`, error instanceof Error ? error : error);
         throw new Error(errorMessage);
@@ -256,6 +262,7 @@ export default defineNuxtPlugin(() => {
         return response._data as T;
       } catch (error: unknown) {
          // Let handleApiError format the message, including 404
+         console.error(`[Plugin 02.api.ts] Raw error in deleteJson(${url}):`, error);
          const errorMessage = await handleApiError(error);
          // console.error(`[Plugin 02.api.ts] Error in deleteJson(${url}): ${errorMessage}`, error instanceof Error ? error : error);
          throw new Error(errorMessage);
@@ -268,6 +275,7 @@ export default defineNuxtPlugin(() => {
         // Use the rootFetcher which doesn't have a baseURL
         return await rootFetcher<T>(url, { ...options, method: 'GET' });
       } catch (error: unknown) {
+        console.error(`[Plugin 02.api.ts] Raw error in getJsonByRawURL(${url}):`, error);
         const errorMessage = await handleApiError(error);
         // console.error(`[Plugin 02.api.ts] Error in getJsonByRawURL(${url}): ${errorMessage}`, error instanceof Error ? error : error);
         throw new Error(errorMessage);
@@ -280,6 +288,7 @@ export default defineNuxtPlugin(() => {
          // Use the rootFetcher which doesn't have a baseURL
          return await rootFetcher<T>(url, { method: 'POST', body: data, ...options });
       } catch (error: unknown) {
+        console.error(`[Plugin 02.api.ts] Raw error in postJsonByRawURL(${url}):`, error);
         const errorMessage = await handleApiError(error);
         // console.error(`[Plugin 02.api.ts] Error in postJsonByRawURL(${url}): ${errorMessage}`, error instanceof Error ? error : error);
         throw new Error(errorMessage);

@@ -1,6 +1,4 @@
-// /home/alex/go-ai/gate4ai/www/plugins/03.settings.ts
 import { defineNuxtPlugin, useNuxtApp, useState } from '#app';
-// No need to import 'ref' or 'Ref' when using useState
 
 // Interface for the structure of a single setting from the API
 interface Setting {
@@ -58,7 +56,7 @@ export default defineNuxtPlugin({
         // Explicitly check if $api and its method are available *at the time of execution*
         if (!nuxt.$api || typeof nuxt.$api.getJson !== 'function') {
           const errorMsg = '$api or $api.getJson is not available when loadSettings was called. Check plugin execution order and lifecycle timing.';
-          console.error('[Plugin 03.settings.ts] Prerequisite check failed:', errorMsg);
+          console.error('[Plugin 03.settings.ts] $api check failed:', errorMsg); // Shortened log
           throw new Error(errorMsg); // Throw error to be caught below
         }
 
@@ -78,7 +76,8 @@ export default defineNuxtPlugin({
 
         // Update state reactively - this will trigger updates in components using $settings
         state.value.settings = newSettings;
-        state.value.loaded = true;
+
+        state.value.loaded = true; // Assume success if no exception thrown by $api.getJson
         console.info('[Plugin 03.settings.ts] Frontend settings loaded and state updated successfully.');
 
       } catch (error: unknown) {

@@ -73,12 +73,12 @@ async function main() {
       frontend: false // Keep SMTP credentials backend-only
     },
     {
-      key: 'general_portal_base_url',
+      key: 'url_how_users_connect_to_the_portal',
       group: 'general',
       name: 'Portal Base URL',
       description: 'The base URL where the portal is accessible by users (used for generating links in emails). Example: https://gate4.ai',
-      value: 'http://localhost:8080', // Default to localhost:8080 (Gateway URL)
-      frontend: false // Backend only
+      value: process.env.URL_HOW_USERS_CONNECT_TO_THE_PORTAL ?? 'http://gate4.ai',
+      frontend: false
     },
     {
       key: 'only_developer_can_post_server',
@@ -131,11 +131,11 @@ async function main() {
       value: 60
     },
     {
-      key: 'gateway_frontend_address_for_proxy',
+      key: 'url_how_gateway_proxy_connect_to_the_portal',
       group: 'gateway',
       name: 'Frontend Address for Proxy',
       description: 'Address where the frontend UI is hosted, used by the proxy handler',
-      value: 'http://localhost:3000'
+      value: process.env.URL_HOW_GATEWAY_PROXY_CONNECT_TO_THE_PORTAL ?? 'http://portal:3000'
     },
     {
       key: 'general_gateway_address',
@@ -144,13 +144,6 @@ async function main() {
       description: 'Address where the user can access the gateway. Empty means that the same address as the frontend is used.',
       value: '',
       frontend: true
-    },
-    {
-      key: 'general_gateway_address_for_backend',
-      group: 'general',
-      name: 'Gateway address for portal\'s backend',
-      description: 'Address where the portal\'s backend can access the gateway',
-      value: 'https://gate4.ai'
     },
     {
       key: 'general_gateway_info_handler',

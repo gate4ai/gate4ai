@@ -55,7 +55,7 @@ func TestUserRegistrationWithEmailConfirmation(t *testing.T) {
 	require.Contains(t, confirmationEmail.Content.Headers["Subject"][0], "Confirm your gate4.ai email")
 
 	// --- Verification 3: Extract and Visit Confirmation Link ---
-	// Confirmation link prefix should match `general_portal_base_url` setting
+	// Confirmation link prefix should match `url_how_users_connect_to_the_portal` setting
 	linkPrefix := PORTAL_URL + "/confirm-email/" // Use the determined portal URL
 	confirmationLink, err := findLinkInEmail(t, confirmationEmail, linkPrefix)
 	require.NoError(t, err, "Could not find confirmation link in email")
