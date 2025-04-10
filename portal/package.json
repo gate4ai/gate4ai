@@ -16,11 +16,13 @@
   },
   "dependencies": {
     "@nuxt/kit": "^3.16.0",
+    "@nuxtjs/google-analytics": "^2.4.0",
     "@prisma/client": "^6.5.0",
     "bcrypt": "^5.1.1",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.10.0",
     "nuxt": "^3.16.0",
+    "nuxt-gtag": "^3.0.2",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0",
     "vuetify": "^3.5.6",
