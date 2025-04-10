@@ -39,6 +39,9 @@ export default defineEventHandler(async (event) => {
     
     // Generate JWT token
     const config = useRuntimeConfig();
+    console.log('JWT Secret value INSIDE login handler:', config.jwtSecret);
+    console.log('Type of jwtSecret:', typeof config.jwtSecret);
+    
     const token = jwt.sign(
       { userId: user.id },
       config.jwtSecret,
