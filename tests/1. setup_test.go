@@ -481,24 +481,19 @@ func updateDatabaseSettings() error {
 	}
 
 	// Update frontend proxy address
-	if err := updateSetting("gateway_frontend_address_for_proxy", PORTAL_URL); err != nil {
-		return fmt.Errorf("failed to update gateway_frontend_address_for_proxy: %w", err)
+	if err := updateSetting("url_how_gateway_proxy_connect_to_the_portal", PORTAL_URL); err != nil {
+		return fmt.Errorf("failed to update url_how_gateway_proxy_connect_to_the_portal: %w", err)
 	}
 
 	PORTAL_URL = GATEWAY_URL // all test doing over reverse proxy in gateway
 
-	if err := updateSetting("general_portal_base_url", PORTAL_URL); err != nil {
-		return fmt.Errorf("failed to update gateway_frontend_address_for_proxy: %w", err)
+	if err := updateSetting("url_how_users_connect_to_the_portal", PORTAL_URL); err != nil {
+		return fmt.Errorf("failed to update url_how_gateway_proxy_connect_to_the_portal: %w", err)
 	}
 
 	// Update general gateway address
 	if err := updateSetting("general_gateway_address", GATEWAY_URL); err != nil {
 		return fmt.Errorf("failed to update general_gateway_address: %w", err)
-	}
-
-	// Update general_gateway_address_for_backend
-	if err := updateSetting("general_gateway_address_for_backend", GATEWAY_URL); err != nil {
-		return fmt.Errorf("failed to update general_gateway_address_for_backend: %w", err)
 	}
 
 	log.Println("Database settings updated with URLs")

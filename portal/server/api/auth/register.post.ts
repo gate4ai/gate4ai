@@ -38,7 +38,7 @@ export default defineEventHandler(async (event) => {
         select: { value: true }
     });
     const portalBaseUrlSetting = await prisma.settings.findUnique({
-        where: { key: 'general_portal_base_url'},
+        where: { key: 'url_how_users_connect_to_the_portal'},
         select: { value: true }
     });
 

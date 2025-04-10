@@ -290,7 +290,7 @@ func (c *DatabaseConfig) InfoHandler() (string, error) {
 
 // FrontendAddressForProxy returns the address for the frontend proxy from settings
 func (c *DatabaseConfig) FrontendAddressForProxy() (string, error) {
-	return c.getSettingString("gateway_frontend_address_for_proxy")
+	return c.getSettingString("url_how_gateway_proxy_connect_to_the_portal")
 }
 
 func (c *DatabaseConfig) Status(ctx context.Context) error {

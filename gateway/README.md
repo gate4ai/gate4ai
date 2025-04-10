@@ -135,7 +135,7 @@ The Gateway primarily reads its configuration from the chosen source (Database `
 *   `gateway_listen_address` / `server.address`: The address and port to listen on (e.g., `:8080`).
 *   `gateway_log_level` / `server.log_level`: Logging level (`debug`, `info`, `warn`, `error`).
 *   `gateway_authorization_type` / `server.authorization`: Controls MCP authorization (`users_only`, `marked_methods`, `none`).
-*   `gateway_frontend_address_for_proxy` / `server.frontend_address`: URL of the Portal service for proxying.
+*   `url_how_gateway_proxy_connect_to_the_portal` / `server.frontend_address`: URL of the Portal service for proxying.
 *   API Key Hashes (`ApiKey` table / `users.[].keys` in YAML).
 *   Backend Server Definitions (`Server` table / `backends` in YAML).
 
@@ -147,4 +147,4 @@ The Gateway typically exposes:
 *   `/sse`: Legacy endpoint for V2024 MCP communication (SSE GET, POST).
 *   `/status`: Health check endpoint.
 *   `/info` (Optional): Endpoint to get info about a target MCP server (if configured).
-*   `/` (and other paths): Proxies requests to the Portal service (if `gateway_frontend_address_for_proxy` is set).
+*   `/` (and other paths): Proxies requests to the Portal service (if `url_how_gateway_proxy_connect_to_the_portal` is set).
