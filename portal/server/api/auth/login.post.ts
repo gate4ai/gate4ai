@@ -39,12 +39,9 @@ export default defineEventHandler(async (event) => {
     
     // Generate JWT token
     const config = useRuntimeConfig();
-    console.log('JWT Secret value INSIDE login handler:', config.portalJwtSecret);
-    console.log('Type of jwtSecret:', typeof config.portalJwtSecret);
-    
     const token = jwt.sign(
       { userId: user.id },
-      config.portalJwtSecret,
+      config.jwtSecret,
       { expiresIn: '7d' }
     );
     
