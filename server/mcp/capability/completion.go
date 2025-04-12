@@ -12,18 +12,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// CompletionValue represents a completion suggestion.
-// NOTE: Using 2025 schema.CompletionInfo.Values which is just []string.
-// This simplified structure replaces the 2024 CompletionValue struct.
-// If Label/Description are needed, they must be handled differently, perhaps via _meta.
-
-// CompletionResult is the result of a completion request (using 2025 schema).
-type CompletionResult = schema.CompleteResult
-
-// CompletionReference represents a reference to a completable entity (Prompt or Resource).
-// NOTE: In V2025, this is represented by json.RawMessage in the request params.
-// We will unmarshal it based on the 'type' field inside the JSON.
-
 type completionRefBase struct {
 	Type string `json:"type"`
 }
@@ -40,17 +28,7 @@ type completionResourceRef struct {
 	URI string `json:"uri"` // URI of the resource
 }
 
-// CompletionArgument represents an argument for completion (using 2025 schema).
-type CompletionArgument = schema.CompleteArgument
-
-// CompletionRequest represents a request for completion suggestions (using 2025 schema).
-// Params.Ref needs custom handling.
-type CompletionRequestParams = schema.CompletionRequestParams
-
-// CompletionHandler type for functions that handle completion requests.
-// Takes the message and the specific argument being completed.
-// Returns the completion info (V2025 uses schema.CompletionInfo) and an error.
-type CompletionHandler func(msg *shared.Message, arg CompletionArgument) (*schema.CompletionInfo, error)
+type CompletionHandler func(msg *shared.Message, arg schema.CompleteArgument) (*schema.CompletionInfo, error)
 
 var _ shared.IServerCapability = (*CompletionCapability)(nil)
 
@@ -155,7 +133,7 @@ func (cc *CompletionCapability) handleCompletionComplete(msg *shared.Message) (i
 	logger.Debug("Handling completion request")
 
 	// Parse parameters (V2025)
-	var params CompletionRequestParams
+	var params schema.CompletionRequestParams
 	if msg.Params == nil {
 		logger.Warn("Missing parameters in completion request")
 		return nil, fmt.Errorf("invalid request: missing params")
@@ -232,7 +210,7 @@ func (cc *CompletionCapability) handleCompletionComplete(msg *shared.Message) (i
 	}
 
 	// Construct the V2025 result
-	result := CompletionResult{
+	result := schema.CompleteResult{
 		Completion: *completionInfo,
 		// Meta: Add metadata if needed
 	}
@@ -243,8 +221,8 @@ func (cc *CompletionCapability) handleCompletionComplete(msg *shared.Message) (i
 
 // GetDefaultCompletionResult returns an empty completion result.
 // Useful for handlers that have no suggestions.
-func GetDefaultCompletionResult() *CompletionResult {
-	return &CompletionResult{
+func GetDefaultCompletionResult() *schema.CompleteResult {
+	return &schema.CompleteResult{
 		Completion: schema.CompletionInfo{
 			Values: []string{}, // Empty slice
 			// HasMore and Total can be omitted (nil)
