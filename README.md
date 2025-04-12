@@ -4,7 +4,7 @@
 
 ## General Architecture
 
-![arch](https://raw.githubusercontent.com/wiki/gate4ai/mcp/arch/arch.drawio.png)
+![general-architecture](http://docs.gate4.ai/diagrams/general-architecture.png)
 
 ## Key Features
 
