@@ -21,7 +21,6 @@
           </v-list-item-title>
         </v-list-item>
 
-        <!-- Use optional chaining for potentially missing serverUrl -->
         <v-list-item v-if="server.serverUrl">
           <template #prepend>
             <v-icon color="primary">mdi-server</v-icon>
@@ -30,6 +29,27 @@
             Server URL: {{ server.serverUrl }}
           </v-list-item-title>
         </v-list-item>
+
+         <!-- Display Server Type -->
+         <v-list-item v-if="server.type">
+            <template #prepend>
+              <v-icon color="primary">mdi-protocol</v-icon>
+            </template>
+            <v-list-item-title>
+              Server Type: {{ server.type }}
+            </v-list-item-title>
+          </v-list-item>
+
+          <!-- Display Server Slug -->
+          <v-list-item v-if="server.slug">
+            <template #prepend>
+              <v-icon color="primary">mdi-link-variant</v-icon>
+            </template>
+            <v-list-item-title>
+              Slug: {{ server.slug }}
+            </v-list-item-title>
+          </v-list-item>
+
       </v-list>
 
       <!-- Owners Section -->
@@ -42,8 +62,9 @@
 
       <!-- Subscriptions Section - Pass the counts down -->
       <ServerSubscriptions
-        v-if="server.id"
+        v-if="server.id && server.slug"
         :server-id="server.id"
+        :server-slug="server.slug"
         :counts="server.subscriptionStatusCounts"
         class="mt-4"
       />
@@ -53,13 +74,13 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-// Make sure the imported Server type includes subscriptionStatusCounts
-import type { Server } from '~/utils/server';
+// Make sure the imported Server type includes subscriptionStatusCounts, slug, type
+import type { Server, ServerStatus, ServerAvailability } from '~/utils/server'; // Update import
 import ServerOwners from './ServerOwners.vue';
 import ServerSubscriptions from './ServerSubscriptions.vue';
 
 const props = defineProps<{
-  server: Server; // Type should now include optional subscriptionStatusCounts
+  server: Server; // Type should now include optional subscriptionStatusCounts, slug, type
   isAuthenticated: boolean;
 }>();
 
@@ -73,7 +94,7 @@ const showForOwners = computed(() => {
   if (!user) return false;
 
   // Show for admins and security
-  if (user.role === 'ADMIN' || user.role === 'SECURITY') return true;
+  if ($auth.isSecurityOrAdmin()) return true;
 
   // Show for owners
   // Use optional chaining for owners array
@@ -81,28 +102,24 @@ const showForOwners = computed(() => {
 });
 
 // Format server status for display
-function formatServerStatus(status: string | undefined): string {
+function formatServerStatus(status: ServerStatus | undefined): string { // Use enum type
   if (!status) return 'Unknown';
-
-  const statusMap: Record<string, string> = {
+  const statusMap: Record<ServerStatus, string> = {
     'DRAFT': 'Draft',
     'ACTIVE': 'Active',
     'BLOCKED': 'Blocked'
   };
-
   return statusMap[status] || status;
 }
 
 // Format server availability for display
-function formatServerAvailability(availability: string | undefined): string {
+function formatServerAvailability(availability: ServerAvailability | undefined): string { // Use enum type
   if (!availability) return 'Unknown';
-
-  const availabilityMap: Record<string, string> = {
+  const availabilityMap: Record<ServerAvailability, string> = {
     'PUBLIC': 'Public',
     'PRIVATE': 'Private',
     'SUBSCRIPTION': 'Subscription'
   };
-
   return availabilityMap[availability] || availability;
 }
 </script>

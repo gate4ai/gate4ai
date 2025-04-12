@@ -8,17 +8,18 @@
     >
       <v-card-title class="text-white bg-black bg-opacity-50 w-100">
         {{ server.name }}
+        <v-chip v-if="server.type" size="small" class="ml-2">{{ server.type }}</v-chip>
       </v-card-title>
     </v-img>
-    
+
     <v-card-text>
       <p class="mb-4">{{ server.description }}</p>
-      
+
       Tools:
       <v-chip-group>
         <v-chip
           v-for="tool in (server.tools || []).slice(0, 3)"
-          :key="tool.id"
+          :key="tool.id || tool.name"
           color="primary"
           size="small"
         >
@@ -33,12 +34,12 @@
         </v-chip>
       </v-chip-group>
     </v-card-text>
-    
+
     <v-card-actions>
       <v-btn
         variant="text"
         color="primary"
-        :to="`/servers/${server.id}`"
+        :to="`/servers/${server.slug}`"
       >
         View Details
       </v-btn>
@@ -53,10 +54,10 @@
 </template>
 
 <script setup lang="ts">
-import type { Server } from '~/utils/server';
+import type { ServerInfo } from '~/utils/server'; // Import updated ServerInfo type
 
 defineProps<{
-  server: Server;
+  server: ServerInfo; // Use ServerInfo which now includes slug and type
   isAuthenticated: boolean;
 }>();
 

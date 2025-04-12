@@ -7,6 +7,7 @@ import type { Prisma, SubscriptionStatus, Server as _Server } from '@prisma/clie
 // Note: This is NOT a Prisma select object anymore
 interface _PublicServerData {
   id: string;
+  slug: string;
   name: string;
   description: string | null;
   website: string | null;
@@ -21,6 +22,7 @@ interface _PublicServerData {
 // Define the fields Prisma needs to SELECT to build the public data
 const publicServerSelectFields: Prisma.ServerSelect = {
   id: true,
+  slug: true,
   name: true,
   description: true,
   website: true,
@@ -115,6 +117,7 @@ export default defineEventHandler(async (event) => {
       // Construct the response object
       const responseData = { // Define explicit type if needed
         id: typedServer.id,
+        slug: typedServer.slug,
         name: typedServer.name,
         description: typedServer.description,
         website: typedServer.website,

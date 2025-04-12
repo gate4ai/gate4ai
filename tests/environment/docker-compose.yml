@@ -1,0 +1,63 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: gate4ai-db-test
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: gate4ai
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gate4ai-network
+
+  example-server:
+    build:
+      context: ../../
+      dockerfile: server/Dockerfile
+    container_name: gate4ai-example-server-${APP_ENV:-prod}
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    networks:
+      - gate4ai-network
+
+  node-server:
+    build:
+      context: .
+      dockerfile: node-server.Dockerfile
+    container_name: gate4ai-node-server-${APP_ENV:-prod}
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - gate4ai-network
+
+  a2a-coder:
+    build:
+      context: .
+      dockerfile: a2a-coder.Dockerfile
+    container_name: gate4ai-a2a-coder-${APP_ENV:-prod}
+    restart: unless-stopped
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    ports:
+      - "41241:41241"
+    networks:
+      - gate4ai-network
+
+networks:
+  gate4ai-network:
+    driver: bridge
+    name: gate4ai-network-test
+
+volumes:
+  postgres_data:
+    name: postgres_data_test

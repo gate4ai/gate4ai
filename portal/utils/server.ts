@@ -1,8 +1,14 @@
-// /home/alex/go-ai/gate4ai/www/utils/server.ts
+// gate4ai/portal/utils/server.ts
 /**
  * Shared server and tool interfaces
  */
-import type { SubscriptionStatus, ServerStatus as PrismaServerStatus, ServerAvailability as PrismaServerAvailability } from '@prisma/client';
+// Import necessary enums directly from Prisma types if possible,
+// otherwise redeclare them here based on the schema definition.
+// Assuming Prisma enums are available:
+import type { SubscriptionStatus, ServerStatus, ServerAvailability, ServerType as PrismaServerType } from '@prisma/client';
+
+// Export the ServerType enum for use in components
+export type ServerType = PrismaServerType;
 
 // Basic tool information remains the same
 export interface ToolInfo {
@@ -12,7 +18,7 @@ export interface ToolInfo {
 
 // Detailed tool information with schema remains the same
 export interface Tool extends ToolInfo {
-  description?: string; // Make optional
+  description?: string;
   inputSchema?: InputSchema;
 }
 
@@ -45,7 +51,6 @@ export interface ServerTool {
   id: string;
   name: string;
   description?: string; // Make optional
-  // Update: Ensure parameters match the Tool definition from backend if nested differently
   parameters: ServerParameter[];
 }
 
@@ -53,7 +58,7 @@ export interface ServerTool {
 export interface ServerOwner {
   user: {
     id: string;
-    name?: string; // Optional based on Prisma select
+    name?: string | null; // Allow null from Prisma
     email: string; // Assume email is usually selected
   }
 }
@@ -61,14 +66,16 @@ export interface ServerOwner {
 // Basic server information - Used in lists/cards
 export interface ServerInfo {
   id: string;
+  slug: string;
+  type: ServerType; // Use Prisma enum
   name: string;
-  description: string | null; // Match Prisma optionality
-  imageUrl: string | null; // Match Prisma optionality
-  website?: string | null; // Often included in basic info
-  email?: string | null;   // Often included in basic info
-  createdAt: string; // Dates are usually strings after JSON serialization
-  updatedAt: string;
-  tools: ToolInfo[]; // Keep basic tool info for lists
+  description: string | null;
+  imageUrl: string | null;
+  website?: string | null;
+  email?: string | null;
+  createdAt: string; // Keep as string for simplicity or use Date
+  updatedAt: string; // Keep as string
+  tools: ToolInfo[]; // Use basic ToolInfo for lists
   _count?: {
     tools: number;
     subscriptions: number; // Active subscriptions count
@@ -76,33 +83,31 @@ export interface ServerInfo {
   // Flags added by API based on context
   isCurrentUserSubscribed?: boolean;
   isCurrentUserOwner?: boolean;
-  subscriptionId?: string; // ID of the current user's subscription, if subscribed
+  subscriptionId?: string;
 }
 
-// Complete server information - Used for detailed view ([id].vue)
-// Extends ServerInfo and adds fields for detailed/owner view
+// Complete server information - Used for detailed view ([slug].vue)
 export interface Server extends ServerInfo {
-  status: PrismaServerStatus; // Use imported enum type
-  availability: PrismaServerAvailability; // Use imported enum type
-  serverUrl: string; // URL should be present in detailed view for owners/admins
-  // tools should be more detailed in the full Server view
+  status: ServerStatus; // Use imported enum type
+  availability: ServerAvailability; // Use imported enum type
+  serverUrl: string;
   tools: ServerTool[]; // Use ServerTool with detailed parameters
-  owners: ServerOwner[]; // List of owners (should always be present, maybe empty)
-  // Counts grouped by status (present for users with extended access)
+  owners: ServerOwner[];
   subscriptionStatusCounts?: Record<SubscriptionStatus, number>;
-  // _count might be redundant if subscriptionStatusCounts is present, but keep for consistency if API returns both
 }
 
-// Server data for forms (remains largely the same)
+// Server data for forms (matches ServerFormData in ServerForm.vue)
 export interface ServerData {
-  id?: string; // Include ID for edit forms
+  id?: string; // Optional for create, required for edit
+  slug: string;
+  type: ServerType; // Use Prisma enum
   name: string;
   description?: string | null;
   website?: string | null;
   email?: string | null;
   imageUrl?: string | null;
-  serverUrl: string; // Required for form
-  status: PrismaServerStatus; // Required for form
-  availability: PrismaServerAvailability; // Required for form
+  serverUrl: string;
+  status: ServerStatus; // Use Prisma type
+  availability: ServerAvailability; // Use Prisma type
   // Tools are usually handled separately, not directly in the main form data object
 }

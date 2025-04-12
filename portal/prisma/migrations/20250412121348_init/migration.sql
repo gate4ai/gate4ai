@@ -5,6 +5,9 @@ CREATE TYPE "Role" AS ENUM ('USER', 'DEVELOPER', 'ADMIN', 'SECURITY');
 CREATE TYPE "Status" AS ENUM ('EMAIL_NOT_CONFIRMED', 'ACTIVE', 'BLOCKED');
 
 -- CreateEnum
+CREATE TYPE "ServerType" AS ENUM ('MCP', 'A2A', 'REST');
+
+-- CreateEnum
 CREATE TYPE "ServerStatus" AS ENUM ('DRAFT', 'ACTIVE', 'BLOCKED');
 
 -- CreateEnum
@@ -21,7 +24,9 @@ CREATE TABLE "User" (
     "name" TEXT,
     "company" TEXT,
     "emailConfirmationCode" TEXT,
+    "emailConfirmationExpires" TIMESTAMP(3),
     "resetPasswordCode" TEXT,
+    "resetPasswordExpires" TIMESTAMP(3),
     "status" "Status" NOT NULL DEFAULT 'EMAIL_NOT_CONFIRMED',
     "comment" TEXT,
     "role" "Role" NOT NULL DEFAULT 'USER',
@@ -55,11 +60,13 @@ CREATE TABLE "ApiKey" (
 -- CreateTable
 CREATE TABLE "Server" (
     "id" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "description" TEXT,
     "website" TEXT,
     "email" TEXT,
     "imageUrl" TEXT,
+    "type" "ServerType" NOT NULL DEFAULT 'MCP',
     "serverUrl" TEXT NOT NULL,
     "status" "ServerStatus" NOT NULL DEFAULT 'DRAFT',
     "availability" "ServerAvailability" NOT NULL DEFAULT 'SUBSCRIPTION',
@@ -140,7 +147,16 @@ CREATE TABLE "Settings" (
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "User_emailConfirmationCode_key" ON "User"("emailConfirmationCode");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_resetPasswordCode_key" ON "User"("resetPasswordCode");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "ApiKey_keyHash_key" ON "ApiKey"("keyHash");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Server_slug_key" ON "Server"("slug");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Tool_name_serverId_key" ON "Tool"("name", "serverId");

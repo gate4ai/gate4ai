@@ -146,14 +146,13 @@ async function main() {
       frontend: true
     },
     {
-      key: 'general_gateway_info_handler',
+      key: 'path_for_discovering_handler',
       group: 'general',
       name: 'Gateway address of info_handler',
-      description: '/info  . If clear, then method disabled',
-      value: '/info',
+      description: '/discovering  . If clear, then method disabled',
+      value: '/discovering',
       frontend: true
     },
-    // --- New Gateway SSL Settings ---
     {
       key: 'gateway_ssl_enabled',
       group: 'gateway',

@@ -30,7 +30,7 @@ type IConfig interface {
 	ServerVersion() (string, error)
 	AuthorizationType() (AuthorizationType, error)
 	LogLevel() (string, error)
-	InfoHandler() (string, error)
+	DiscoveringHandlerPath() (string, error)
 	FrontendAddressForProxy() (string, error)
 
 	// User & Auth Settings

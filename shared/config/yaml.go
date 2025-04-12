@@ -19,17 +19,17 @@ type YamlConfig struct {
 	logger     *zap.Logger
 
 	// Parsed configuration
-	serverAddress        string
-	serverName           string
-	serverVersion        string
-	logLevel             string
-	infoHandlerValue     string
-	frontendAddressValue string
-	authorizationType    AuthorizationType
-	userAuthKeys         map[string]string            // authKey -> userID
-	userParams           map[string]map[string]string // userID -> paramName -> paramValue
-	userSubscribes       map[string][]string          // userID -> serverIDs
-	backends             map[string]*Backend          // serverID -> Server
+	serverAddress               string
+	serverName                  string
+	serverVersion               string
+	logLevel                    string
+	DiscoveringHandlerPathValue string
+	frontendAddressValue        string
+	authorizationType           AuthorizationType
+	userAuthKeys                map[string]string            // authKey -> userID
+	userParams                  map[string]map[string]string // userID -> paramName -> paramValue
+	userSubscribes              map[string][]string          // userID -> serverIDs
+	backends                    map[string]*Backend          // serverID -> Server
 
 	// SSL Fields
 	sslEnabled      bool
@@ -44,14 +44,14 @@ type YamlConfig struct {
 // YAML configuration structure matching the required format
 type yamlConfig struct {
 	Server struct {
-		Address         string   `yaml:"address"`
-		Name            string   `yaml:"name"`
-		Version         string   `yaml:"version"`
-		LogLevel        string   `yaml:"log_level"`
-		InfoHandler     string   `yaml:"info_handler"`
-		FrontendAddress string   `yaml:"frontend_address"`
-		Authorization   string   `yaml:"authorization"` // Can be "users_only", "marked_methods", or "none"
-		SSL             struct { // New SSL section
+		Address                string   `yaml:"address"`
+		Name                   string   `yaml:"name"`
+		Version                string   `yaml:"version"`
+		LogLevel               string   `yaml:"log_level"`
+		DiscoveringHandlerPath string   `yaml:"info_handler"`
+		FrontendAddress        string   `yaml:"frontend_address"`
+		Authorization          string   `yaml:"authorization"` // Can be "users_only", "marked_methods", or "none"
+		SSL                    struct { // New SSL section
 			Enabled      bool     `yaml:"enabled"`
 			Mode         string   `yaml:"mode"`           // "manual" or "acme"
 			CertFile     string   `yaml:"cert_file"`      // Path for manual mode
@@ -135,7 +135,7 @@ func (c *YamlConfig) Update() error {
 	c.serverName = yamlCfg.Server.Name
 	c.serverVersion = yamlCfg.Server.Version
 	c.logLevel = yamlCfg.Server.LogLevel
-	c.infoHandlerValue = yamlCfg.Server.InfoHandler
+	c.DiscoveringHandlerPathValue = yamlCfg.Server.DiscoveringHandlerPath
 	c.frontendAddressValue = yamlCfg.Server.FrontendAddress
 
 	// Process SSL settings
@@ -326,11 +326,11 @@ func (c *YamlConfig) LogLevel() (string, error) {
 	return c.logLevel, nil
 }
 
-// InfoHandler returns the configured info handler path
-func (c *YamlConfig) InfoHandler() (string, error) {
+// DiscoveringHandlerPath returns the configured info handler path
+func (c *YamlConfig) DiscoveringHandlerPath() (string, error) {
 	// For YAML config, we don't have this setting
 	// Return a default value or empty string
-	return c.infoHandlerValue, nil
+	return c.DiscoveringHandlerPathValue, nil
 }
 
 // FrontendAddressForProxy returns the frontend address for proxy

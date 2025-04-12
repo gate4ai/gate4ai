@@ -3,21 +3,7 @@ server:
   name: "Gate4ai Example Server"
   version: "0.1.0"
   log_level: "debug"
-  # info_handler: "/info" # Example server doesn't need this by default
-  # frontend_address: "http://localhost:3000" # Not relevant for example server
   authorization: "users_only" # "users_only", "marked_methods", or "none"
-
-  # --- SSL Configuration ---
-  ssl:
-    enabled: false # Set to true to enable HTTPS
-    mode: "manual"  # Can be "manual" or "acme"
-    # --- Manual Mode Settings ---
-    cert_file: "" # /path/to/your/server.crt
-    key_file: ""  # /path/to/your/server.key
-    # --- ACME Mode Settings ---
-    acme_domains: [] # ["your.domain.com", "www.your.domain.com"]
-    acme_email: ""   # your-email@example.com (for Let's Encrypt notifications)
-    acme_cache_dir: "./.autocert-cache-example" # Directory to store certificates
 
 users:
   user1:

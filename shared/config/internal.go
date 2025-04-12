@@ -11,18 +11,18 @@ var ErrNotFound = errors.New("not found")
 
 // InternalConfig implements all configuration interfaces with in-memory storage
 type InternalConfig struct {
-	mu                     sync.RWMutex
-	ServerAddress          string
-	ServerNameValue        string
-	ServerVersionValue     string
-	AuthorizationTypeValue AuthorizationType
-	LogLevelValue          string
-	InfoHandlerValue       string
-	FrontendAddressValue   string
-	UserKeyHashes          map[string]string            // keyHash -> userID (new, secure)
-	userParams             map[string]map[string]string // userID -> paramName -> paramValue
-	UserSubscribes         map[string][]string          // userID -> BackendIDs
-	Backends               map[string]*Backend          // serverID -> Server
+	mu                          sync.RWMutex
+	ServerAddress               string
+	ServerNameValue             string
+	ServerVersionValue          string
+	AuthorizationTypeValue      AuthorizationType
+	LogLevelValue               string
+	DiscoveringHandlerPathValue string
+	FrontendAddressValue        string
+	UserKeyHashes               map[string]string            // keyHash -> userID (new, secure)
+	userParams                  map[string]map[string]string // userID -> paramName -> paramValue
+	UserSubscribes              map[string][]string          // userID -> BackendIDs
+	Backends                    map[string]*Backend          // serverID -> Server
 
 	// SSL Fields
 	SSLEnabledValue      bool
@@ -98,18 +98,18 @@ func (c *InternalConfig) LogLevel() (string, error) {
 	return c.LogLevelValue, nil
 }
 
-// InfoHandler returns the information handler path
-func (c *InternalConfig) InfoHandler() (string, error) {
+// DiscoveringHandlerPath returns the information handler path
+func (c *InternalConfig) DiscoveringHandlerPath() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.InfoHandlerValue, nil
+	return c.DiscoveringHandlerPathValue, nil
 }
 
-// SetInfoHandler sets the info handler path
-func (c *InternalConfig) SetInfoHandler(path string) {
+// SetDiscoveringHandlerPath sets the info handler path
+func (c *InternalConfig) SetDiscoveringHandlerPath(path string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.InfoHandlerValue = path
+	c.DiscoveringHandlerPathValue = path
 }
 
 // FrontendAddressForProxy returns the frontend address for the proxy

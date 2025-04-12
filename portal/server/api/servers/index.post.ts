@@ -1,21 +1,21 @@
-// /home/alex/go-ai/gate4ai/www/server/api/servers/index.post.ts
 import prisma from '../../utils/prisma';
 import { z, ZodError } from 'zod';
 import { defineEventHandler, readBody, createError } from 'h3';
 import { checkServerCreationRights } from '../../utils/serverPermissions';
 import type { User } from '@prisma/client';
-import  { ServerStatus, ServerAvailability } from '@prisma/client';
+// Import enums for validation
+import { ServerStatus, ServerAvailability, ServerType } from '@prisma/client'; // Ensure ServerType is imported
 
-// Schema definition remains the same
+// Updated schema to include slug and type (using ServerType enum)
 const createServerSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100, 'Name must be 100 characters or less'),
+  slug: z.string().min(1, 'Slug is required').regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Invalid slug format'),
+  type: z.nativeEnum(ServerType), // Use the imported Prisma enum for validation
   description: z.string().max(500, "Description too long").optional().nullable(),
   website: z.string().url('Invalid URL format').optional().nullable(),
   email: z.string().email('Invalid email format').optional().nullable(),
   imageUrl: z.string().url('Invalid URL format').optional().nullable(),
   serverUrl: z.string().url('Server URL must be a valid URL'),
-  status: z.nativeEnum(ServerStatus).optional().default('DRAFT'),
-  availability: z.nativeEnum(ServerAvailability).optional().default('SUBSCRIPTION'),
   tools: z.array(
     z.object({
       name: z.string().min(1, 'Tool name is required'),
@@ -33,13 +33,11 @@ const createServerSchema = z.object({
 }).strict();
 
 export default defineEventHandler(async (event) => {
-  let authenticatedUser: User; // Changed: Ensure user is assigned
+  let authenticatedUser: User;
 
   try {
-    // 1. Check creation permissions. Throws if not authorized.
-    // Returns the authenticated user if successful.
-    // Destructure user directly
-    ({ user: authenticatedUser } = await checkServerCreationRights(event)); // Assign user here
+    // 1. Check creation permissions
+    ({ user: authenticatedUser } = await checkServerCreationRights(event));
 
     // 2. Read and validate request body
     const body = await readBody(event);
@@ -59,19 +57,23 @@ export default defineEventHandler(async (event) => {
       const server = await tx.server.create({
         data: {
           name: validatedData.name,
+          slug: validatedData.slug,
+          type: validatedData.type, // Save validated type
           description: validatedData.description,
           website: validatedData.website,
           email: validatedData.email,
           imageUrl: validatedData.imageUrl,
           serverUrl: validatedData.serverUrl,
-          status: validatedData.status,
-          availability: validatedData.availability,
+          // status and availability will use Prisma schema defaults
+          // status: validatedData.status,
+          // availability: validatedData.availability,
           owners: {
             create: [{ userId: authenticatedUser.id }],
           },
         },
-        select: {
+        select: { // Select fields needed for response and navigation
           id: true,
+          slug: true,
           name: true,
           description: true,
           website: true,
@@ -80,13 +82,14 @@ export default defineEventHandler(async (event) => {
           serverUrl: true,
           status: true,
           availability: true,
+          type: true, // Return type
           createdAt: true,
           updatedAt: true,
-          owners: { select: { user: true } }
+          owners: { select: { user: { select: { id: true, name: true, email: true } } } } // Return owner info
         }
       });
 
-      // Create tools and parameters (logic remains the same)
+      // Create tools and parameters (unchanged)
       if (validatedData.tools && validatedData.tools.length > 0) {
         for (const toolData of validatedData.tools) {
           const newTool = await tx.tool.create({
@@ -111,17 +114,21 @@ export default defineEventHandler(async (event) => {
           }
         }
       }
-      return server; // Return the created server data from the transaction
+      return server; // Return the created server data
     });
 
-    // 4. Set status code for successful creation
+    // 4. Set status code and return response
     event.node.res.statusCode = 201;
-    return newServer;
+    return newServer; // Return the created server data including the slug and type
 
   } catch (error: unknown) {
      console.error('Error creating server:', error);
      if (error instanceof ZodError || (error instanceof Error && 'statusCode' in error)) {
        throw error;
+     }
+      // Handle potential Prisma errors (e.g., unique constraint on slug)
+     if (error instanceof Error && 'code' in error && error.code === 'P2002' && (error as any).meta?.target?.includes('slug')) {
+         throw createError({ statusCode: 409, statusMessage: 'A server with this slug already exists.' });
      }
      throw createError({
        statusCode: 500,

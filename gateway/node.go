@@ -9,6 +9,7 @@ import (
 	"time"
 
 	gwCapabilities "github.com/gate4ai/mcp/gateway/capability"
+	"github.com/gate4ai/mcp/gateway/discovering"
 	"github.com/gate4ai/mcp/gateway/extra"
 	serverextra "github.com/gate4ai/mcp/server/extra"
 	"github.com/gate4ai/mcp/server/mcp"
@@ -74,12 +75,12 @@ func (n *Node) Start(ctx context.Context, mux *http.ServeMux, overwriteListenAdd
 	// --- Register Handlers ---
 	n.serverTransport.RegisterHandlers(mux)
 
-	infoHandlerPath, err := n.cfg.InfoHandler()
+	discoveringHandlerPath, err := n.cfg.DiscoveringHandlerPath()
 	if err != nil {
 		n.logger.Warn("Failed to get info handler path from config", zap.Error(err))
-	} else if infoHandlerPath != "" {
-		n.logger.Info("Registering info handler", zap.String("path", infoHandlerPath))
-		mux.HandleFunc(infoHandlerPath, extra.InfoHandler(n.logger))
+	} else if discoveringHandlerPath != "" {
+		n.logger.Info("Registering info handler", zap.String("path", discoveringHandlerPath))
+		mux.HandleFunc(discoveringHandlerPath, discovering.Handler(n.logger))
 	}
 
 	n.logger.Info("Registering status handler", zap.String("path", "/status"))

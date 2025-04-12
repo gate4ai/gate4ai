@@ -253,8 +253,8 @@ func (c *DatabaseConfig) LogLevel() (string, error) {
 	return c.getSettingString("gateway_log_level")
 }
 
-// InfoHandler returns the information handler path from settings
-func (c *DatabaseConfig) InfoHandler() (string, error) {
+// DiscoveringHandlerPath returns the information handler path from settings
+func (c *DatabaseConfig) DiscoveringHandlerPath() (string, error) {
 	// Open a connection to the database
 	db, err := sql.Open("postgres", c.dbConnectionString)
 	if err != nil {
@@ -263,7 +263,7 @@ func (c *DatabaseConfig) InfoHandler() (string, error) {
 	defer db.Close()
 
 	// Query to get info handler setting
-	query := `SELECT value FROM "Settings" WHERE key = 'general_gateway_info_handler'`
+	query := `SELECT value FROM "Settings" WHERE key = 'path_for_discovering_handler'`
 	var valueStr string
 	err = db.QueryRow(query).Scan(&valueStr)
 	if err != nil {
@@ -280,12 +280,12 @@ func (c *DatabaseConfig) InfoHandler() (string, error) {
 	}
 
 	// Convert to string
-	infoHandler, ok := value.(string)
+	DiscoveringHandlerPath, ok := value.(string)
 	if !ok {
 		return "", fmt.Errorf("info handler value is not a string")
 	}
 
-	return infoHandler, nil
+	return DiscoveringHandlerPath, nil
 }
 
 // FrontendAddressForProxy returns the address for the frontend proxy from settings

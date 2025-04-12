@@ -1,8 +1,7 @@
-// /home/alex/go-ai/gate4ai/www/components/ServerSubscriptions.vue
 <template>
   <div>
     <h3 class="text-h6 mb-2">
-      <v-btn variant="text" color="primary" :to="`/servers/${serverId}/subscriptions`">
+      <v-btn variant="text" color="primary" :to="`/servers/${serverSlug}/subscriptions`">
         Subscriptions
         <v-icon class="ml-1">mdi-arrow-right</v-icon>
       </v-btn>
@@ -35,17 +34,12 @@
 </template>
 
 <script setup lang="ts">
-// Removed ref, onMounted as they are no longer needed for fetching
-
-// Add underscore prefix to unused props
+// Added serverSlug prop
 const _props = defineProps<{
-  serverId: string;
+  serverId: string; // Keep ID if needed for internal actions
+  serverSlug: string; // Add slug for navigation
   counts?: Record<string, number>; // Receive counts directly
 }>();
-
-// Removed isLoading and errorMessage refs
-
-// Removed onMounted and fetchSubscriptionCounts function
 
 // Format subscription status for display (remains the same)
 function formatStatus(status: string): string {
@@ -56,5 +50,4 @@ function formatStatus(status: string): string {
   };
   return statusMap[status] || status;
 }
-
 </script>
