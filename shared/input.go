@@ -115,6 +115,11 @@ func (i *Input) Process() {
 					// Optionally send an internal error response back if it was a request
 					if !msgToProcess.ID.IsEmpty() {
 						msgToProcess.Session.SendResponse(msgToProcess.ID, nil, fmt.Errorf("internal server error during processing: %v", r))
+					} else if isA2AMethod(msgToProcess.Method) {
+						// A2A errors might need specific handling even without an ID,
+						// e.g., if a streaming handler panics. How to report back?
+						// Maybe log and close the SSE stream if applicable.
+						// For now, just logging.
 					}
 				}
 				logger.Debug("Processed message",
@@ -129,12 +134,16 @@ func (i *Input) Process() {
 					// Only send a response if the original message had an ID (i.e., it was a request) and wasn't a notification method
 					if !msgToProcess.ID.IsEmpty() && !isNotificationMethod(msgToProcess.Method) {
 						msgToProcess.Session.SendResponse(msgToProcess.ID, response, err)
-					} else if err != nil { // Log errors from notification handlers
-						logger.Error("Error handling notification", zap.String("method", *msgToProcess.Method), zap.Error(err))
+					} else if err != nil {
+						if !isA2AMethod(msgToProcess.Method) {
+							// Log errors from MCP notification handlers
+							logger.Error("Error handling notification", zap.String("method", *msgToProcess.Method), zap.Error(err))
+						}
+						// Errors from A2A methods (especially streaming) might be handled by sending error events over SSE.
 					}
 				} else {
-					// This case should ideally not be reached if AddNotFoundHandle is used correctly
-					errMsg := fmt.Errorf("handler not found for method: %s", *msgToProcess.Method)
+					// Handler not found
+					errMsg := fmt.Errorf("handler not found for method: %s", NilIfNil(msgToProcess.Method))
 					logger.Error(errMsg.Error())
 					if !msgToProcess.ID.IsEmpty() {
 						msgToProcess.Session.SendResponse(msgToProcess.ID, nil, &JSONRPCError{Code: JSONRPCErrorMethodNotFound, Message: fmt.Sprintf("Method not found: %s", *msgToProcess.Method)})
@@ -155,6 +164,10 @@ func (i *Input) Process() {
 
 func isNotificationMethod(method *string) bool {
 	return method != nil && strings.HasPrefix(*method, "notifications/")
+}
+
+func isA2AMethod(method *string) bool {
+	return method != nil && strings.HasPrefix(*method, "tasks/")
 }
 
 // AddNotFoundHandle registers a handler for methods that don't have a specific handler

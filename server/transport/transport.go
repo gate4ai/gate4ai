@@ -16,10 +16,13 @@ import (
 
 const (
 	SESSION_ID_KEY2024 = "session_id"     // Query parameter for session ID (for V2024 compatibility)
-	AUTH_KEY2024       = "key"            // Query parameter for authentication key (for V2024 compatibility)
-	PATH2024           = "/sse"           // Unified endpoint path for V2024 (for V2024 compatibility)
-	PATH               = "/mcp"           // Unified endpoint path
+	MCP2024_AUTH_KEY   = "key"            // Query parameter for authentication key (for V2024 compatibility)
+	A2A_PATH           = "/a2a"           // Dedicated path for A2A protocol
+	MCP2024_PATH       = "/sse"           // Unified endpoint path for V2024 (for V2024 compatibility)
+	MCP2025_PATH       = "/mcp"           // Unified endpoint path
 	MCP_SESSION_HEADER = "Mcp-Session-Id" // Header for session ID
+	//TODO: A2A - move to hendler files ?
+	//TODO: A2A - add well-known agent.json ?
 
 	// Content Types
 	contentTypeJSON = "application/json"
@@ -32,6 +35,8 @@ const (
 	statusUnauthorized        = http.StatusUnauthorized        // 401
 	statusInternalServerError = http.StatusInternalServerError // 500
 )
+
+var responseTimeout = 30 * time.Second // Default timeout for waiting on responses
 
 // Transport manages MCP HTTP connections supporting multiple protocol versions.
 type Transport struct {
@@ -67,6 +72,17 @@ func WithSessionTimeout(timeout time.Duration) TransportOption {
 	}
 }
 
+// WithCleanupInterval sets the interval for checking idle sessions
+func WithCleanupInterval(interval time.Duration) TransportOption {
+	return func(t *Transport) error {
+		if interval <= 0 {
+			return errors.New("cleanup interval must be positive")
+		}
+		t.cleanupInterval = interval
+		return nil
+	}
+}
+
 // New creates a new MCP HTTP transport handler.
 func New(mcpManager mcp.ISessionManager, logger *zap.Logger, cfg config.IConfig, options ...TransportOption) (*Transport, error) {
 	if logger == nil {
@@ -90,15 +106,16 @@ func New(mcpManager mcp.ISessionManager, logger *zap.Logger, cfg config.IConfig,
 
 	transport := &Transport{
 		sessionManager: mcpManager,
-		logger:         logger.Named("mcp-transport"),
+		logger:         logger.Named("transport"),
 		authManager:    NewAuthenticator(cfg, logger), // Default authenticator
 		config:         cfg,
+		//TODO: A2A - need only for mcp
 		serverInfo: schema.Implementation{
 			Name:    serverName,
 			Version: serverVersion,
 		},
-		cleanupInterval: 1 * time.Minute, // Default cleanup interval
-		sessionTimeout:  5 * time.Minute, // Default session timeout
+		cleanupInterval: 5 * time.Minute,  // Default cleanup interval
+		sessionTimeout:  30 * time.Minute, // Default session timeout
 	}
 
 	// Apply configuration options
@@ -128,9 +145,11 @@ func (t *Transport) SetAuthManager(authManager AuthenticationManager) {
 
 // RegisterHandlers registers the unified MCP handler with the HTTP mux.
 func (t *Transport) RegisterHandlers(mux *http.ServeMux) {
-	mux.HandleFunc(PATH2024, t.Handle2024MCP())
-	mux.HandleFunc(PATH, t.HandleMCP())
-	t.logger.Info("Registered MCP handler", zap.String("path", PATH), zap.String("path2024", PATH2024))
+	mux.HandleFunc(MCP2024_PATH, t.Handle2024MCP())
+	mux.HandleFunc(MCP2025_PATH, t.HandleMCP())
+	mux.HandleFunc(A2A_PATH, t.HandleA2A())
+	//TODO: A2A - add well-known agent.json ?
+	t.logger.Info("Registered MCP handler", zap.String("path", MCP2025_PATH), zap.String("path2024", MCP2024_PATH))
 }
 
 func (t *Transport) Handle2024MCP() http.HandlerFunc {
@@ -183,6 +202,33 @@ func (t *Transport) HandleMCP() http.HandlerFunc {
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			logger.Warn("Method not allowed", zap.String("method", r.Method))
+			http.Error(w, "Method Not Allowed", statusMethodNotAllowed)
+		}
+	}
+}
+
+// HandleA2A handles requests on the dedicated /a2a path.
+func (t *Transport) HandleA2A() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		logger := t.logger.With(zap.String("protocol", "a2a"))
+		logger.Debug("Received A2A request",
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+			zap.String("remoteAddr", r.RemoteAddr),
+		)
+
+		// A2A primarily uses POST for task operations
+		switch r.Method {
+		case http.MethodPost:
+			t.handleA2APOST(w, r, logger) // New handler for A2A POST
+		case http.MethodOptions:
+			// Handle CORS preflight requests
+			w.Header().Set("Access-Control-Allow-Origin", "*") // Adjust as needed
+			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization") // Add other headers if needed
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			logger.Warn("Method not allowed for A2A", zap.String("method", r.Method))
 			http.Error(w, "Method Not Allowed", statusMethodNotAllowed)
 		}
 	}
@@ -245,7 +291,7 @@ func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, logger *z
 	if sessionID != "" {
 		session, err := t.sessionManager.GetSession(sessionID)
 		if err != nil {
-			logger.Warn("Session not found for V2 GET stream request", zap.String("sessionId", sessionID), zap.Error(err))
+			logger.Warn("Session not found for MCPv2025 GET stream request", zap.String("sessionId", sessionID), zap.Error(err))
 			http.Error(w, "Not Found: Session expired or invalid", statusNotFound)
 			return nil, err
 		}

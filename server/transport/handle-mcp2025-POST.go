@@ -13,11 +13,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// Timeout for waiting on responses
-	responseTimeout = 5 * time.Second
-)
-
 // handlePOST processes POST requests on the unified MCP endpoint.
 // It handles V2025 message posting according to the 2025-03-26 specification.
 func (t *Transport) handlePOST(w http.ResponseWriter, r *http.Request, logger *zap.Logger) {
@@ -377,9 +372,9 @@ func (t *Transport) responseToStream(w http.ResponseWriter, r *http.Request, ses
 func (t *Transport) extractAuthKey(r *http.Request) string {
 	// Try Authorization header first
 	authHeader := r.Header.Get("Authorization")
-	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+	if strings.HasPrefix(authHeader, "Bearer ") {
 		return strings.TrimPrefix(authHeader, "Bearer ")
 	}
 	// Fallback to query parameter
-	return r.URL.Query().Get(AUTH_KEY2024)
+	return r.URL.Query().Get(MCP2024_AUTH_KEY)
 }

@@ -29,8 +29,13 @@ func NewMethodValidator() *MethodValidator {
 			"resources/unsubscribe":    true,
 			"prompts/get":              true,
 			"tools/call":               true,
-			"logging/setLevel":         true,
-			"completion/complete":      true,
+			// A2A Methods
+			"tasks/send":          true,
+			"tasks/sendSubscribe": true,
+			"tasks/get":           true,
+			"tasks/cancel":        true,
+			"logging/setLevel":    true,
+			"completion/complete": true,
 
 			// Notifications from the client
 			"notifications/initialized":        true,

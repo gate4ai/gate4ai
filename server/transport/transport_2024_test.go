@@ -26,7 +26,7 @@ func Test_SRV_24_SSE_POS_01_ProvidesSseAndPostEndpoints(t *testing.T) {
 	_, _, _, server, cleanup := setupServerTest(t) // Use shared helper
 	defer cleanup()
 	// Test setup registers handlers. Making requests in other tests verifies existence.
-	resp, err := http.Head(server.URL + transport.PATH2024) // Check if path exists
+	resp, err := http.Head(server.URL + transport.MCP2024_PATH) // Check if path exists
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	// StatusMethodNotAllowed is expected for HEAD on the GET/POST handler
@@ -39,7 +39,7 @@ func Test_SRV_24_SSE_POS_02_SendsEndpointEventOnSseConnect(t *testing.T) {
 	defer cleanup()
 
 	// Make GET request to V2024 SSE endpoint
-	resp, err := makeSseGetRequest(t, server.URL+transport.PATH2024+"?key=valid-key", nil) // Use V2024 path
+	resp, err := makeSseGetRequest(t, server.URL+transport.MCP2024_PATH+"?key=valid-key", nil) // Use V2024 path
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -51,7 +51,7 @@ func Test_SRV_24_SSE_POS_02_SendsEndpointEventOnSseConnect(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "endpoint", event, "First event should be 'endpoint'")
 	require.NotEmpty(t, data, "Endpoint data (URI) should not be empty")
-	assert.True(t, strings.HasPrefix(data, transport.PATH2024+"?"+transport.SESSION_ID_KEY2024+"="), "Endpoint URI format mismatch")
+	assert.True(t, strings.HasPrefix(data, transport.MCP2024_PATH+"?"+transport.SESSION_ID_KEY2024+"="), "Endpoint URI format mismatch")
 	t.Logf("Received endpoint event with URI: %s", data)
 }
 
@@ -61,7 +61,7 @@ func Test_SRV_24_SSE_POS_03_AcceptsPostAndSendsSseMessage(t *testing.T) {
 	defer cleanup()
 
 	// 1. Connect SSE & Get Endpoint URI + Session ID
-	sseResp, err := makeSseGetRequest(t, server.URL+transport.PATH2024+"?key=valid-key", nil)
+	sseResp, err := makeSseGetRequest(t, server.URL+transport.MCP2024_PATH+"?key=valid-key", nil)
 	require.NoError(t, err)
 	defer sseResp.Body.Close()
 	require.Equal(t, http.StatusOK, sseResp.StatusCode)
@@ -171,7 +171,7 @@ func Test_SRV_24_SSE_POS_04_HandlesMultipleClients(t *testing.T) {
 		defer clientCancel()
 
 		// 1. Connect SSE & Get Endpoint URI + Session ID
-		sseResp, err := makeSseGetRequest(t, server.URL+transport.PATH2024+"?key=valid-key", nil)
+		sseResp, err := makeSseGetRequest(t, server.URL+transport.MCP2024_PATH+"?key=valid-key", nil)
 		require.NoError(t, err, "Client %d SSE connect failed", clientID)
 		defer sseResp.Body.Close()
 		require.Equal(t, http.StatusOK, sseResp.StatusCode, "Client %d SSE status", clientID)
@@ -317,7 +317,7 @@ func Test_SRV_24_SSE_POS_05_HandlesClientSseDisconnect(t *testing.T) {
 	defer cleanup() // This will call CloseAllSessions eventually
 
 	// Connect client
-	sseResp, err := makeSseGetRequest(t, server.URL+transport.PATH2024+"?key=valid-key", nil)
+	sseResp, err := makeSseGetRequest(t, server.URL+transport.MCP2024_PATH+"?key=valid-key", nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, sseResp.StatusCode)
 
@@ -365,7 +365,7 @@ func Test_SRV_24_SSE_NEG_01_RejectsNonSseMethodOnSseEndpoint(t *testing.T) {
 	_, _, _, server, cleanup := setupServerTest(t)
 	defer cleanup()
 
-	resp, err := makeDeleteRequest(t, server.URL+transport.PATH2024, nil)
+	resp, err := makeDeleteRequest(t, server.URL+transport.MCP2024_PATH, nil)
 
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -378,7 +378,7 @@ func Test_SRV_24_SSE_NEG_04_PostToUriNotAssociatedWithSse(t *testing.T) {
 	defer cleanup()
 
 	// 1. Establish an SSE connection and keep it open
-	sseResp, err := makeSseGetRequest(t, server.URL+transport.PATH2024+"?key=valid-key", nil)
+	sseResp, err := makeSseGetRequest(t, server.URL+transport.MCP2024_PATH+"?key=valid-key", nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, sseResp.StatusCode, "Failed to connect SSE")
 	defer sseResp.Body.Close() // Ensure it's closed eventually
@@ -414,7 +414,7 @@ func Test_SRV_24_SSE_NEG_04_PostToUriNotAssociatedWithSse(t *testing.T) {
 	t.Logf("Obtained valid session ID: %s", validSessionID)
 
 	// 2. Try POSTing with an *invalid* session ID
-	invalidPostURL := server.URL + transport.PATH2024 + "?session_id=invalid-session-id" // Use V2024 path
+	invalidPostURL := server.URL + transport.MCP2024_PATH + "?session_id=invalid-session-id" // Use V2024 path
 	postRespInvalid, err := makePostRequest(t, invalidPostURL, createJsonRpcRequestBody(1, "test", nil), nil)
 	require.NoError(t, err)
 	defer postRespInvalid.Body.Close()
@@ -422,7 +422,7 @@ func Test_SRV_24_SSE_NEG_04_PostToUriNotAssociatedWithSse(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, postRespInvalid.StatusCode, "POST with invalid session ID should be Not Found")
 
 	// 3. Try POSTing with the *valid* session ID (while SSE is still connected) and extra params
-	slightlyWrongPath := server.URL + transport.PATH2024 + "?session_id=" + validSessionID + "&extra=stuff" // Use V2024 path
+	slightlyWrongPath := server.URL + transport.MCP2024_PATH + "?session_id=" + validSessionID + "&extra=stuff" // Use V2024 path
 	postRespWrongPath, err := makePostRequest(t, slightlyWrongPath, createJsonRpcRequestBody(2, "test2", nil), nil)
 	require.NoError(t, err)
 	defer postRespWrongPath.Body.Close()
@@ -436,7 +436,7 @@ func Test_SRV_24_SSE_NEG_05_PostWithInvalidMcpMessage(t *testing.T) {
 	defer cleanup()
 
 	// 1. Establish an SSE connection and keep it open
-	sseResp, err := makeSseGetRequest(t, server.URL+transport.PATH2024+"?key=valid-key", nil)
+	sseResp, err := makeSseGetRequest(t, server.URL+transport.MCP2024_PATH+"?key=valid-key", nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, sseResp.StatusCode, "Failed to connect SSE")
 	defer sseResp.Body.Close() // Ensure connection remains open until test completion

@@ -32,6 +32,7 @@ type ISession interface {
 	SendResponse(msgId *schema.RequestID, result interface{}, err error)
 	SendNotification(method string, params map[string]any)
 	SendRequest(method string, params interface{}, callback RequestCallback) (*schema.RequestID, error)
+	SendA2AStreamEvent(event *A2AStreamEvent) error
 	SendRequestSync(method string, params interface{}) <-chan *Message
 
 	SetNegotiatedVersion(version string)
@@ -382,4 +383,40 @@ func (s *BaseSession) Input() *Input {
 
 func (s *BaseSession) GetLogger() *zap.Logger {
 	return s.Logger
+}
+
+// SendA2AStreamEvent sends an A2A SSE event to the output channel
+func (s *BaseSession) SendA2AStreamEvent(event *A2AStreamEvent) error {
+	if event == nil {
+		return fmt.Errorf("cannot send nil A2A event")
+	}
+
+	msg := &Message{
+		Session:   s,
+		Timestamp: time.Now(),
+		A2AEvent:  event, // Store the event data here
+		// ID, Method, Params, Result, Error are nil for SSE events
+	}
+
+	s.Mu.RLock()
+	outputChan := s.output
+	currentStatus := s.status
+	s.Mu.RUnlock()
+
+	if outputChan == nil {
+		s.Logger.Warn("Cannot send A2A event, session closed")
+		return fmt.Errorf("session closed")
+	}
+	if currentStatus != StatusConnected {
+		s.Logger.Warn("Attempting to send A2A event on non-connected session", zap.Int("status", int(currentStatus)))
+		return fmt.Errorf("session not connected")
+	}
+	select {
+	case outputChan <- msg:
+		s.UpdateLastActivity()
+		return nil
+	default:
+		s.Logger.Error("Failed to send A2A event, output channel full")
+		return fmt.Errorf("output channel full")
+	}
 }

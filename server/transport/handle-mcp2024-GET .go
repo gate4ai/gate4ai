@@ -39,7 +39,7 @@ func (t *Transport) handle2024GET(w http.ResponseWriter, r *http.Request, logger
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	endpointPath := PATH2024 + "?" + SESSION_ID_KEY2024 + "=" + session.GetID()
+	endpointPath := MCP2024_PATH + "?" + SESSION_ID_KEY2024 + "=" + session.GetID()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {

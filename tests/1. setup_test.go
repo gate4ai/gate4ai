@@ -715,7 +715,7 @@ func startExampleServer(ctx context.Context, port int) (*Server, error) {
 	if err != nil {
 		log.Fatalf("Failed to create logger: %v", err)
 	}
-	cfg, err := config.NewYamlConfig(TEST_CONFIG_WORKSPACE_FOLDER+"/server/cmd/config.yaml", logger)
+	cfg, err := config.NewYamlConfig(TEST_CONFIG_WORKSPACE_FOLDER+"/server/cmd/mcp-example-server/config.yaml", logger)
 	if err != nil {
 		log.Fatalf("Failed to create config: %v", err)
 	}

@@ -8,32 +8,33 @@ import (
 	"go.uber.org/zap"
 )
 
-// AuthenticationManager is responsible for validating authorization keys and returning user information
+// AuthenticationManager interface for authenticating users
 type AuthenticationManager interface {
 	// Authenticate validates an authorization key and returns user ID and session parameters
 	// If authKey is empty, it should use remoteAddr for decision making
+	// For A2A, auth might come from AgentCard/HTTP Headers instead of keys.
 	Authenticate(authKey string, remoteAddr string) (userID string, sessionParams *sync.Map, err error)
 }
 
-// Authenticator is an implementation of AuthManager that authorizes requests based on config settings
-type Authenticator struct {
+// DefaultAuthManager implements the AuthenticationManager interface
+type DefaultAuthManager struct {
 	logger *zap.Logger
 	config config.IConfig
 }
 
-var _ AuthenticationManager = (*Authenticator)(nil)
+var _ AuthenticationManager = (*DefaultAuthManager)(nil)
 
 // NewNoAuthorization creates a new NoAuthorization manager with the given config
-func NewAuthenticator(cfg config.IConfig, logger *zap.Logger) *Authenticator {
-	return &Authenticator{
+func NewAuthenticator(cfg config.IConfig, logger *zap.Logger) *DefaultAuthManager {
+	return &DefaultAuthManager{
 		config: cfg,
 		logger: logger,
 	}
 }
 
-// Authenticate handles authorization based on the configuration settings
-func (a *Authenticator) Authenticate(authKey string, remoteAddr string) (string, *sync.Map, error) {
-	sessionParams := &sync.Map{}
+// Authenticate validates the provided key and remote address, returning UID if valid
+func (a *DefaultAuthManager) Authenticate(authKey string, remoteAddr string) (userID string, sessionParams *sync.Map, err error) {
+	sessionParams = &sync.Map{}
 	sessionParams.Store("RemoteAddr", remoteAddr)
 
 	authType, err := a.config.AuthorizationType()
@@ -41,7 +42,6 @@ func (a *Authenticator) Authenticate(authKey string, remoteAddr string) (string,
 		return "", nil, err
 	}
 
-	var userID string
 	// If authentication is not required everywhere
 	if authKey != "" {
 		// Hash the auth key before looking it up
@@ -53,7 +53,7 @@ func (a *Authenticator) Authenticate(authKey string, remoteAddr string) (string,
 	}
 
 	if userID == "" && (authType != config.NotAuthorizedEverywhere && authType != config.NotAuthorizedToMarkedMethods) {
-		a.logger.Info("AuthKey is not set, NotAuthorized")
+		a.logger.Warn("Authorization required but no valid key/token found", zap.String("authType", authType.String()))
 		return "", nil, errors.New("authorization required")
 	}
 
@@ -86,6 +86,7 @@ func SaveAuthKey(sessionParams *sync.Map, authKey string) {
 	sessionParams.Store(AuthKeyKey, authKey)
 }
 
+// GetAuthKey retrieves the auth key from session parameters
 func GetAuthKey(sessionParams *sync.Map) string {
 	authKey, ok := sessionParams.Load(AuthKeyKey)
 	if !ok {

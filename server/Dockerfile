@@ -30,7 +30,7 @@ WORKDIR /app
 # Copy the compiled binary from the builder stage
 COPY --from=builder /app/server/example-server /app/example-server
 
-COPY ./server/cmd/config.yaml /app/config.yaml
+COPY ./server/cmd/mcp-example-server/config.yaml /app/config.yaml
 
 EXPOSE 4000
 

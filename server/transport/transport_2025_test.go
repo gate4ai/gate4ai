@@ -21,7 +21,7 @@ func Test_SRV_25_HTTP_POS_01_ProvidesSingleEndpointForPostGet(t *testing.T) {
 	defer cleanup()
 
 	// Test OPTIONS method
-	req, _ := http.NewRequest("OPTIONS", server.URL+transport.PATH, nil) // Use V2025 path
+	req, _ := http.NewRequest("OPTIONS", server.URL+transport.MCP2025_PATH, nil) // Use V2025 path
 	client := &http.Client{Timeout: 1 * time.Second}
 	resp, err := client.Do(req)
 	require.NoError(t, err)
@@ -45,7 +45,7 @@ func Test_SRV_25_HTTP_POS_02_PostRequestReturnsJsonResponse(t *testing.T) {
 		ClientInfo:      schema2025.Implementation{Name: "test-client", Version: "1.0"},
 		Capabilities:    schema2025.ClientCapabilities{},
 	})
-	resp, err := makePostRequest(t, server.URL+transport.PATH, requestBody, nil) // Use V2025 path
+	resp, err := makePostRequest(t, server.URL+transport.MCP2025_PATH, requestBody, nil) // Use V2025 path
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -83,7 +83,7 @@ func Test_SRV_25_HTTP_POS_03_PostRequestReturnsSseStreamResponse(t *testing.T) {
 		ClientInfo:      schema2025.Implementation{Name: "test-client", Version: "1.0"},
 		Capabilities:    schema2025.ClientCapabilities{},
 	})
-	respInit, err := makePostRequest(t, server.URL+transport.PATH, initBody, nil)
+	respInit, err := makePostRequest(t, server.URL+transport.MCP2025_PATH, initBody, nil)
 	require.NoError(t, err)
 	defer respInit.Body.Close() // Ensure body is closed eventually
 
@@ -126,7 +126,7 @@ readLoop:
 	// 4. Send Ping request on the *same* session via POST, including Session ID header
 	pingBody := createJsonRpcRequestBody(2, "ping", nil)
 	pingHeaders := map[string]string{transport.MCP_SESSION_HEADER: sessionID}
-	respPing, err := makePostRequest(t, server.URL+transport.PATH, pingBody, pingHeaders)
+	respPing, err := makePostRequest(t, server.URL+transport.MCP2025_PATH, pingBody, pingHeaders)
 	require.NoError(t, err)
 	defer respPing.Body.Close()
 	// Server should return 202 Accepted for the POST containing the request,
@@ -187,14 +187,17 @@ func Test_SRV_25_HTTP_POS_04_PostNotificationOrResponseReturnsAccepted(t *testin
 		ClientInfo:      schema2025.Implementation{Name: "test-client", Version: "1.0"},
 		Capabilities:    schema2025.ClientCapabilities{},
 	})
-	respInit, err := makePostRequest(t, server.URL+transport.PATH, initBody, nil)
+	respInit, err := makePostRequest(t, server.URL+transport.MCP2025_PATH, initBody, nil)
+	if err != nil {
+		t.Fatalf("Failed to make POST request: %v", err)
+	}
 	defer respInit.Body.Close() // Ensure body is closed eventually
 	sessionID := respInit.Header.Get(transport.MCP_SESSION_HEADER)
 	sessionIDHeader := map[string]string{transport.MCP_SESSION_HEADER: sessionID}
 
 	// Test with Notification
 	notifBody := createJsonRpcNotificationBody("notifications/test", map[string]bool{"done": true})
-	respNotif, err := makePostRequest(t, server.URL+transport.PATH, notifBody, sessionIDHeader)
+	respNotif, err := makePostRequest(t, server.URL+transport.MCP2025_PATH, notifBody, sessionIDHeader)
 	require.NoError(t, err)
 	defer respNotif.Body.Close()
 	assert.Equal(t, http.StatusAccepted, respNotif.StatusCode, "POST Notification status")
@@ -203,7 +206,7 @@ func Test_SRV_25_HTTP_POS_04_PostNotificationOrResponseReturnsAccepted(t *testin
 
 	// Test with Response
 	respBody := createJsonRpcResponseBody(5, map[string]string{"status": "processed"}) // Response to server request ID 5
-	respResp, err := makePostRequest(t, server.URL+transport.PATH, respBody, sessionIDHeader)
+	respResp, err := makePostRequest(t, server.URL+transport.MCP2025_PATH, respBody, sessionIDHeader)
 	require.NoError(t, err)
 	defer respResp.Body.Close()
 	assert.Equal(t, http.StatusAccepted, respResp.StatusCode, "POST Response status")
@@ -225,7 +228,10 @@ func Test_SRV_25_HTTP_POS_05_PostBatchRequestNotificationReturnsResponse(t *test
 			ClientInfo:      schema2025.Implementation{Name: "test-client", Version: "1.0"},
 			Capabilities:    schema2025.ClientCapabilities{},
 		})
-		respInit, err := makePostRequest(t, server.URL+transport.PATH, initBody, nil)
+		respInit, err := makePostRequest(t, server.URL+transport.MCP2025_PATH, initBody, nil)
+		if err != nil {
+			t.Fatalf("Failed to make POST request: %v", err)
+		}
 		defer respInit.Body.Close() // Ensure body is closed eventually
 		sessionID := respInit.Header.Get(transport.MCP_SESSION_HEADER)
 		sessionIDHeader := map[string]string{transport.MCP_SESSION_HEADER: sessionID}
@@ -235,7 +241,7 @@ func Test_SRV_25_HTTP_POS_05_PostBatchRequestNotificationReturnsResponse(t *test
 		req2 := createJsonRpcRequestBody(11, "ping", nil)
 		batchBody := createJsonRpcBatchRequestBody(req1, notif1, req2)
 
-		resp, err := makePostRequest(t, server.URL+transport.PATH, batchBody, sessionIDHeader)
+		resp, err := makePostRequest(t, server.URL+transport.MCP2025_PATH, batchBody, sessionIDHeader)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -268,7 +274,7 @@ func Test_SRV_25_HTTP_POS_05_PostBatchRequestNotificationReturnsResponse(t *test
 			ClientInfo:      schema2025.Implementation{Name: "test-client", Version: "1.0"},
 			Capabilities:    schema2025.ClientCapabilities{},
 		})
-		respInit, _ := makePostRequest(t, server.URL+transport.PATH, initBody, nil)
+		respInit, _ := makePostRequest(t, server.URL+transport.MCP2025_PATH, initBody, nil)
 		defer respInit.Body.Close() // Ensure body is closed eventually
 		sessionID := respInit.Header.Get(transport.MCP_SESSION_HEADER)
 		sessionIDHeader := map[string]string{transport.MCP_SESSION_HEADER: sessionID}
@@ -278,7 +284,7 @@ func Test_SRV_25_HTTP_POS_05_PostBatchRequestNotificationReturnsResponse(t *test
 		req2 := createJsonRpcRequestBody(21, "ping", nil)
 		batchBody := createJsonRpcBatchRequestBody(req1, notif1, req2)
 
-		resp, err := makePostRequest(t, server.URL+transport.PATH, batchBody, sessionIDHeader)
+		resp, err := makePostRequest(t, server.URL+transport.MCP2025_PATH, batchBody, sessionIDHeader)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 

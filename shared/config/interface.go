@@ -18,6 +18,12 @@ const (
 	NotAuthorizedEverywhere
 )
 
+// Helper method for AuthorizationType string representation
+func (at AuthorizationType) String() string {
+	names := [...]string{"AuthorizedUsersOnly", "NotAuthorizedToMarkedMethods", "NotAuthorizedEverywhere"}
+	return names[at]
+}
+
 type Backend struct {
 	URL    string
 	Bearer string
