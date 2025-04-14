@@ -18,17 +18,15 @@ import (
 
 	"github.com/gate4ai/mcp/gateway"
 	"github.com/gate4ai/mcp/server"
+	exampleCapability "github.com/gate4ai/mcp/server/cmd/mcp-example-server/capability"
 	"github.com/gate4ai/mcp/server/transport"
 	"github.com/gate4ai/mcp/shared/config"
-	"github.com/playwright-community/playwright-go"
-
 	_ "github.com/lib/pq"
-	"go.uber.org/zap"
-
+	"github.com/playwright-community/playwright-go"
+	"github.com/shirou/gopsutil/v3/process"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
-
-	"github.com/shirou/gopsutil/v3/process"
+	"go.uber.org/zap"
 )
 
 const TEST_CONFIG_WORKSPACE_FOLDER = ".."
@@ -787,11 +785,12 @@ func startExampleServer(ctx context.Context, port int) (*Server, error) {
 		cfg.Close()
 	}()
 
-	err = server.StartExample(serverCtx, logger.With(zap.String("s", "example")), cfg, fmt.Sprintf(":%d", port))
+	toolsCapability, resourcesCapability, promptsCapability, completionCapability, err := server.StartServer(serverCtx, logger.With(zap.String("s", "example")), cfg, fmt.Sprintf(":%d", port))
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to start example server: %w", err)
 	}
+	exampleCapability.Add(toolsCapability, resourcesCapability, promptsCapability, completionCapability)
 
 	// Create the server instance (cmd is nil)
 	server := &Server{

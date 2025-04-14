@@ -17,7 +17,7 @@ WORKDIR /app/server
 
 RUN go mod download
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o example-server ./cmd/startExample.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o example-server ./cmd/mcp-example-server/main.go
 
 # Stage 2: Create the final minimal image
 FROM alpine:latest

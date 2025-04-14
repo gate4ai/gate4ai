@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/gate4ai/mcp/server"
+	"github.com/gate4ai/mcp/server/cmd/mcp-example-server/capability"
 	"github.com/gate4ai/mcp/shared/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -57,9 +58,12 @@ func main() {
 		zap.String("address", add),
 		zap.String("config", *configPath))
 
-	if err := server.StartExample(ctx, logger, cfg, ""); err != nil {
+	toolsCapability, resourcesCapability, promptsCapability, completionCapability, err := server.StartServer(ctx, logger, cfg, "")
+	if err != nil {
 		logger.Fatal("Failed to start server", zap.Error(err))
 	}
+
+	capability.Add(toolsCapability, resourcesCapability, promptsCapability, completionCapability)
 
 	<-ctx.Done()
 	logger.Info("Server stopped")

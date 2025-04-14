@@ -10,6 +10,7 @@ import (
 
 	"github.com/gate4ai/mcp/gateway"
 	"github.com/gate4ai/mcp/server"
+	exampleCapability "github.com/gate4ai/mcp/server/cmd/mcp-example-server/capability"
 	"github.com/gate4ai/mcp/shared/config"
 	"github.com/gate4ai/mcp/tests"
 	"go.uber.org/zap"
@@ -45,21 +46,25 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Failed to find available port: %v", err)
 	}
 
-	//запустить Example Server1
+	// run Example Server1
 	cfg1 := config.NewInternalConfig()
 	cfg1.UserKeyHashes[config.HashAPIKey("gateway")] = "gw"
-	err = server.StartExample(ctx, LOGGER.With(zap.String("s", "server1")), cfg1, fmt.Sprintf(":%d", portForExampleServer1))
+	toolsCapability1, resourcesCapability1, promptsCapability1, completionCapability1, err := server.StartServer(ctx, LOGGER.With(zap.String("s", "server1")), cfg1, fmt.Sprintf(":%d", portForExampleServer1))
 	if err != nil {
-		log.Fatalf("Failed to find available port: %v", err)
+		log.Fatalf("Failed to start Example Server1 %v", err)
 	}
-	//запустить Example Server2
+	exampleCapability.Add(toolsCapability1, resourcesCapability1, promptsCapability1, completionCapability1)
+
+	//run Example Server2
 	cfg2 := config.NewInternalConfig()
 	cfg2.UserKeyHashes[config.HashAPIKey("gateway")] = "gw"
-	err = server.StartExample(ctx, LOGGER.With(zap.String("s", "server2")), cfg2, fmt.Sprintf(":%d", portForExampleServer2))
+	toolsCapability2, resourcesCapability2, promptsCapability2, completionCapability2, err := server.StartServer(ctx, LOGGER.With(zap.String("s", "server2")), cfg2, fmt.Sprintf(":%d", portForExampleServer2))
 	if err != nil {
-		log.Fatalf("Failed to find available port: %v", err)
+		log.Fatalf("Failed to start Example Server2 %v", err)
 	}
-	//запустить GW
+	exampleCapability.Add(toolsCapability2, resourcesCapability2, promptsCapability2, completionCapability2)
+
+	//run Gateway
 	cfgGw := config.NewInternalConfig()
 	cfgGw.UserKeyHashes[config.HashAPIKey("key-user0")] = "user0"
 	cfgGw.UserKeyHashes[config.HashAPIKey("key-user1")] = "user1"

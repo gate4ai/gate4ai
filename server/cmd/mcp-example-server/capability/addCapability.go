@@ -1,27 +1,24 @@
-package server
+package capability
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/gate4ai/mcp/server/mcp/capability"
 	"github.com/gate4ai/mcp/shared"
-	"github.com/gate4ai/mcp/shared/config"
 	schema2024 "github.com/gate4ai/mcp/shared/mcp/2024/schema"
 	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
-	"go.uber.org/zap"
 )
 
-// StartExample starts the MCP SSE server with example resources
-func StartExample(ctx context.Context, logger *zap.Logger, cfg config.IConfig, overwriteListenAddr string) error {
-	toolsCapability, resourcesCapability, promptsCapability, _ /*completionCapability*/, err := StartServer(ctx, logger, cfg, overwriteListenAddr)
-	if err != nil {
-		return err
-	}
-
+// Add starts the MCP SSE server with example resources
+func Add(
+	toolsCapability *capability.ToolsCapability,
+	resourcesCapability *capability.ResourcesCapability,
+	promptsCapability *capability.PromptsCapability,
+	completionCapability *capability.CompletionCapability) {
 	// Initialize example tools
 	toolsCapability.AddTool(
 		"echo",
@@ -328,5 +325,4 @@ func StartExample(ctx context.Context, logger *zap.Logger, cfg config.IConfig, o
 		"",
 		nil,
 	)
-	return nil
 }
