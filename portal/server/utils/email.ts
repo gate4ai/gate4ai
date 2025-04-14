@@ -97,6 +97,10 @@ export async function sendEmail(to: string, subject: string, htmlBody: string): 
         host: smtpConfig.host,
         port: smtpConfig.port,
         secure: smtpConfig.secure, // true for 465, false for other ports
+        // Add ignoreTLS option if needed for local testing without valid certs
+        // tls: {
+        //     rejectUnauthorized: false // Use cautiously only for local/testing
+        // }
     };
 
     // Add auth only if it's defined and valid
@@ -106,7 +110,8 @@ export async function sendEmail(to: string, subject: string, htmlBody: string): 
             pass: smtpConfig.auth.pass,
         };
     } else {
-         console.warn("SMTP Auth details missing or incomplete, attempting unauthenticated connection.");
+         // Log structure of auth object if incomplete
+         console.warn("SMTP Auth details missing or incomplete, attempting unauthenticated connection.", { authConfig: smtpConfig.auth });
     }
 
 
@@ -128,4 +133,4 @@ export async function sendEmail(to: string, subject: string, htmlBody: string): 
         // Throw a specific error that can be caught by API handlers
         throw createError({ statusCode: 500, statusMessage: `Failed to send email: ${error instanceof Error ? error.message : 'Unknown SMTP error'}` });
     }
-} 
+}

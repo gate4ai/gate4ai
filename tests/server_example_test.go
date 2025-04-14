@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
+	"time" // Import time for http.Client timeout
+
+	"github.com/stretchr/testify/require" // Use testify for assertions
 )
 
-// JSON-RPC request structure
+// JSON-RPC request structure (keep as is)
 type JSONRPCRequest struct {
 	JSONRPC string                 `json:"jsonrpc"`
 	Method  string                 `json:"method"`
@@ -15,7 +19,7 @@ type JSONRPCRequest struct {
 	ID      int                    `json:"id"`
 }
 
-// JSON-RPC response structure
+// JSON-RPC response structure (keep as is)
 type JSONRPCResponse struct {
 	JSONRPC string                 `json:"jsonrpc"`
 	ID      int                    `json:"id"`
@@ -23,7 +27,7 @@ type JSONRPCResponse struct {
 	Error   *JSONRPCError          `json:"error,omitempty"`
 }
 
-// JSON-RPC error structure
+// JSON-RPC error structure (keep as is)
 type JSONRPCError struct {
 	Code    int         `json:"code"`
 	Message string      `json:"message"`
@@ -47,32 +51,25 @@ func TestSuccessfulToolCall(t *testing.T) {
 
 	// Convert request to JSON
 	requestBody, err := json.Marshal(request)
-	if err != nil {
-		t.Fatalf("Failed to marshal request: %v", err)
-	}
+	require.NoError(t, err, "Failed to marshal request")
 
-	// Create a new HTTP request
-	// Valid API key from config.yaml
-	req, err := http.NewRequest("GET", EXAMPLE_SERVER_URL, bytes.NewBuffer(requestBody))
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
+	req, err := http.NewRequest("POST", EXAMPLE_MCP2025_SERVER_URL, bytes.NewBuffer(requestBody))
+	require.NoError(t, err, "Failed to create request")
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
 
 	// Send the request
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second} // Add timeout
 	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("Failed to send request: %v", err)
-	}
+	require.NoError(t, err, "Failed to send request")
 	defer resp.Body.Close()
 
 	// Check the response status code
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status code %d, got %d", http.StatusOK, resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode, "Expected status code 200")
+	// Note: Verifying the actual result requires setting up an SSE client in the test,
+	// which is more complex. This test now verifies the POST is accepted.
 }
 
 // Test failed tool call without authorization
@@ -92,30 +89,23 @@ func TestUnauthorizedToolCall(t *testing.T) {
 
 	// Convert request to JSON
 	requestBody, err := json.Marshal(request)
-	if err != nil {
-		t.Fatalf("Failed to marshal request: %v", err)
-	}
+	require.NoError(t, err, "Failed to marshal request")
 
-	// Create a new HTTP request
-	// without API key
-	req, err := http.NewRequest("GET", EXAMPLE_SERVER_URL+"doingCodeInvalid", bytes.NewBuffer(requestBody))
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
+	// Create a new HTTP POST request
+	// Construct URL *without* a valid key query parameter
+	invalidURL := strings.Split(EXAMPLE_MCP2025_SERVER_URL, "?")[0] // Get URL part before query string
+	req, err := http.NewRequest("POST", invalidURL, bytes.NewBuffer(requestBody))
+	require.NoError(t, err, "Failed to create request")
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 
 	// Send the request
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second} // Add timeout
 	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("Failed to send request: %v", err)
-	}
+	require.NoError(t, err, "Failed to send request")
 	defer resp.Body.Close()
 
-	// Check the response status code
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("Expected status code %d, got %d", http.StatusOK, resp.StatusCode)
-	}
+	// Check the response status code - Expect 401 Unauthorized because no valid key was provided
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "Expected status code 401 Unauthorized")
 }

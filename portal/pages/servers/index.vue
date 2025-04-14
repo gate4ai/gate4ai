@@ -12,6 +12,7 @@
         v-if="canAddServer"
         color="primary"
         prepend-icon="mdi-plus"
+        id="add-server-button"
         @click="showAddServerDialog = true"
       >
         Add Server

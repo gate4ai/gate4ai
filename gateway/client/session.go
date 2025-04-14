@@ -132,7 +132,6 @@ func (s *Session) Open() chan error {
 	// Reset internal state related to connection (e.g., postEndpoint)
 	s.postEndpoint = ""
 	s.serverInfo = nil
-	// Do NOT reset tools/prompts/resources here, they persist across reconnects unless explicitly updated.
 
 	s.Locker.Unlock() // Unlock before potentially blocking operations
 

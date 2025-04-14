@@ -4,112 +4,124 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/playwright-community/playwright-go"
+	"github.com/stretchr/testify/require"
 )
 
 // editServer edits an existing server using Playwright browser automation
 func editServer(am *ArtifactManager, user *User, server *CatalogServer, newName, newDesc string) error {
 	// First, make sure the user is logged in
-	err := loginUser(am, user.Email, user.Password)
-	if err != nil {
+	if err := loginUser(am, user.Email, user.Password); err != nil {
 		return fmt.Errorf("login failed before editing server: %w", err)
 	}
+	am.SaveScreenshot("after_login_for_edit")
 
-	// Take a screenshot after login
-	am.SaveScreenshot("after_login")
+	// Navigate to the server details page using the SLUG
+	serverDetailURL := fmt.Sprintf("/servers/%s", server.Slug)
+	am.OpenPageWithURL(serverDetailURL)
 
-	// Navigate to the server details page
-	am.OpenPageWithURL("/servers/" + server.ID)
-
-	// Wait for the server details page to load - try different selectors
-	if _, err := am.WaitForLocatorWithDebug("h1:has-text('"+server.Name+"')", "server_details_heading"); err != nil {
-		// Try alternative selectors
-		if _, err := am.WaitForLocatorWithDebug("h1.text-h3", "server_heading_alt"); err != nil {
-			return fmt.Errorf("server details page did not load: %w", err)
+	// Wait for the server details page to load, verifying the *initial* name
+	headingSelector := fmt.Sprintf("h1:has-text('%s')", server.Name)
+	if _, err := am.WaitForLocatorWithDebug(headingSelector, "server_details_initial_heading"); err != nil {
+		// Try alternative selector if the specific one fails
+		if _, errAlt := am.WaitForLocatorWithDebug("h1.text-h3", "server_heading_alt_initial"); errAlt != nil {
+			return fmt.Errorf("server details page did not load (initial name '%s'): %w", server.Name, err) // Use original error
 		}
 	}
-
-	// Take a screenshot of the server details page
-	am.SaveScreenshot("server_details_page")
+	am.SaveScreenshot("server_details_page_before_edit")
 
 	// Click on the Edit button
-	if err := am.ClickWithDebug("button:has-text('Edit')", "edit_button"); err != nil {
+	if err := am.ClickWithDebug("button:has-text('Edit')", "edit_button_click"); err != nil {
 		return fmt.Errorf("could not click Edit button: %w", err)
 	}
 
-	// Wait for edit page to load
-	if err := am.Page.WaitForURL("**/servers/edit/" + server.ID); err != nil {
-		am.SaveScreenshot("navigation_error")
-		return fmt.Errorf("edit page did not load: %w", err)
+	// Wait for edit page URL to contain the SLUG
+	expectedEditURLPattern := fmt.Sprintf("**/servers/edit/%s", server.Slug)
+	if err := am.Page.WaitForURL(expectedEditURLPattern, playwright.PageWaitForURLOptions{
+		Timeout:   playwright.Float(15000),
+		WaitUntil: playwright.WaitUntilStateLoad,
+	}); err != nil {
+		am.SaveScreenshot("edit_page_navigation_error")
+		am.SaveHTML("edit_page_navigation_error")
+		return fmt.Errorf("edit page did not load (URL: %s): %w", am.Page.URL(), err)
 	}
+	am.T.Logf("Navigated to edit page: %s", am.Page.URL())
 
-	// Wait for the form to load
-	if _, err := am.WaitForLocatorWithDebug("h1:has-text('Edit Server')", "edit_server_heading"); err != nil {
-		return fmt.Errorf("edit server form did not load: %w", err)
+	// Wait for the form heading to ensure the page content is ready
+	if _, err := am.WaitForLocatorWithDebug("h1:has-text('Edit Server')", "edit_server_heading_wait"); err != nil {
+		return fmt.Errorf("edit server form heading not found: %w", err)
 	}
+	am.SaveScreenshot("edit_server_form_loaded")
 
-	// Take a screenshot of the edit form
-	am.SaveScreenshot("edit_server_form")
-
-	// Clear and update the name field using ID selector from the artifacts
-	nameFieldSelector := "#input-27"
-	nameField := am.Page.Locator(nameFieldSelector)
+	// Name field - Use a more robust selector targeting the label
+	nameFieldSelector := "div.v-input:has(label:has-text('Server Name')) input" // More flexible selector
+	nameField, err := am.WaitForLocatorWithDebug(nameFieldSelector, "wait_for_name_field")
+	if err != nil {
+		return fmt.Errorf("could not find name field on edit page: %w", err)
+	}
 	if err := nameField.Clear(); err != nil {
-		am.SaveLocatorDebugInfo(nameFieldSelector, "clear_name_field")
+		am.SaveLocatorDebugInfo(nameFieldSelector, "clear_name_field_failed")
 		return fmt.Errorf("could not clear name field: %w", err)
 	}
 	if err := nameField.Fill(newName); err != nil {
-		am.SaveLocatorDebugInfo(nameFieldSelector, "fill_name_field")
+		am.SaveLocatorDebugInfo(nameFieldSelector, "fill_name_field_failed")
 		return fmt.Errorf("could not update name field: %w", err)
 	}
 
-	// Clear and update the description field
-	// Since we don't have the exact ID from artifacts, try using textarea selector
-	descFieldSelector := "textarea"
-	descField := am.Page.Locator(descFieldSelector)
+	// Description field - Target the textarea associated with the "Description" label
+	descFieldSelector := "div.v-textarea:has(label:has-text('Description')) textarea"
+	descField, err := am.WaitForLocatorWithDebug(descFieldSelector, "wait_for_description_field")
+	if err != nil {
+		return fmt.Errorf("could not find description field on edit page: %w", err)
+	}
 	if err := descField.Clear(); err != nil {
-		am.SaveLocatorDebugInfo(descFieldSelector, "clear_desc_field")
+		am.SaveLocatorDebugInfo(descFieldSelector, "clear_desc_field_failed")
 		return fmt.Errorf("could not clear description field: %w", err)
 	}
 	if err := descField.Fill(newDesc); err != nil {
-		am.SaveLocatorDebugInfo(descFieldSelector, "fill_desc_field")
+		am.SaveLocatorDebugInfo(descFieldSelector, "fill_desc_field_failed")
 		return fmt.Errorf("could not update description field: %w", err)
 	}
+	am.SaveScreenshot("edit_server_form_filled")
 
-	// Take a screenshot after filling the form
-	am.SaveScreenshot("after_fill_form")
-
-	// Submit the form - try different selectors
-	if err := am.ClickWithDebug("button:has-text('Update Server')", "update_button"); err != nil {
-		// Try more specific selector
-		if err := am.ClickWithDebug("button[type='submit']:has-text('Update Server')", "update_button_submit"); err != nil {
-			return fmt.Errorf("could not click Update Server button: %w", err)
-		}
+	// --- Submit Form ---
+	submitButtonSelector := "button[type='submit']:has-text('Update Server')"
+	if err := am.ClickWithDebug(submitButtonSelector, "update_button_click"); err != nil {
+		return fmt.Errorf("could not click Update Server button: %w", err)
 	}
 
-	// Wait for navigation back to server details page
-	if err := am.Page.WaitForURL("**/servers/" + server.ID); err != nil {
+	// --- Wait for Navigation and Verification ---
+	// Wait for navigation back to the server details page using the SLUG
+	if err := am.Page.WaitForURL("**"+serverDetailURL, playwright.PageWaitForURLOptions{
+		Timeout:   playwright.Float(15000),
+		WaitUntil: playwright.WaitUntilStateNetworkidle,
+	}); err != nil {
 		am.SaveScreenshot("navigation_error_after_update")
-		return fmt.Errorf("navigation after server update failed: %w", err)
+		am.SaveHTML("navigation_error_after_update")
+		return fmt.Errorf("navigation back to server details page failed (URL: %s): %w", am.Page.URL(), err)
 	}
 
-	// Wait for success message
-	if _, err := am.WaitForLocatorWithDebug(".v-snackbar:has-text('Server updated successfully')", "success_message"); err != nil {
-		// Not fatal if we don't see the success message but will log it
+	// Wait for success message (optional but good)
+	if _, err := am.WaitForLocatorWithDebug(".v-snackbar:has-text('Server updated successfully')", "success_message_wait"); err != nil {
 		am.T.Logf("Warning: Server update success message not found - proceeding anyway")
 	}
 
-	// Verify the updated server name is displayed - try different selectors
-	if _, err := am.WaitForLocatorWithDebug("h1:has-text('"+newName+"')", "updated_server_name"); err != nil {
+	// Verify the updated server name is displayed on the details page
+	updatedHeadingSelector := fmt.Sprintf("h1:has-text('%s')", newName)
+	if _, err := am.WaitForLocatorWithDebug(updatedHeadingSelector, "updated_server_name_heading"); err != nil {
 		// Try alternative selector
-		if _, err := am.WaitForLocatorWithDebug("h1.text-h3", "updated_server_name_alt"); err != nil {
-			return fmt.Errorf("updated server name not found: %w", err)
+		if _, errAlt := am.WaitForLocatorWithDebug("h1.text-h3", "updated_server_name_alt_heading"); errAlt != nil {
+			am.SaveScreenshot("updated_name_not_visible")
+			am.SaveHTML("updated_name_not_visible")
+			// Check current heading text for debugging
+			currentHeading, _ := am.Page.Locator("h1.text-h3").TextContent()
+			return fmt.Errorf("updated server name ('%s') not found on details page. Current heading: '%s'. Error: %w", newName, currentHeading, err)
 		}
 	}
+	am.SaveScreenshot("updated_server_details_verified")
 
-	// Take a screenshot of the updated server details
-	am.SaveScreenshot("updated_server_details")
-
-	// Update the server object with new values
+	// Update the server object passed to the function (optional, depends on test flow)
 	server.Name = newName
 	server.Description = newDesc
 
@@ -123,15 +135,12 @@ func TestEditServer(t *testing.T) {
 
 	// Create a new user
 	user, err := createUser(am)
-	if err != nil {
-		t.Fatalf("Failed to create user: %v", err)
-	}
+	require.NoError(t, err, "Failed to create user")
 
 	// Add a new server
-	server, err := addServer(am, user)
-	if err != nil {
-		t.Fatalf("Failed to add server: %v", err)
-	}
+	server, err := addServer(am, user, "test-edit-server")
+	require.NoError(t, err, "Failed to add server")
+	require.NotNil(t, server)
 
 	// Generate new server details
 	timestamp := time.Now().UnixNano()
@@ -140,9 +149,7 @@ func TestEditServer(t *testing.T) {
 
 	// Edit the server
 	err = editServer(am, user, server, newName, newDesc)
-	if err != nil {
-		t.Fatalf("Failed to edit server: %v", err)
-	}
+	require.NoError(t, err, "Failed to edit server")
 
 	t.Logf("Successfully edited server. New name: %s", newName)
 }

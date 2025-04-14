@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gate4ai/mcp/server/mcp"
@@ -283,34 +284,57 @@ func sendJSONRPCErrorResponse(w http.ResponseWriter, id *schema.RequestID, code 
 }
 
 func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, logger *zap.Logger, allowCreate bool) (shared.ISession, error) {
-	sessionID := r.Header.Get(MCP_SESSION_HEADER)
+	sessionID := r.Header.Get(MCP_SESSION_HEADER) // V2025+
 	if sessionID == "" {
-		sessionID = r.URL.Query().Get(SESSION_ID_KEY2024)
+		sessionID = r.URL.Query().Get(SESSION_ID_KEY2024) // V2024 fallback
 	}
 
 	if sessionID != "" {
 		session, err := t.sessionManager.GetSession(sessionID)
-		if err != nil {
-			logger.Warn("Session not found for MCPv2025 GET stream request", zap.String("sessionId", sessionID), zap.Error(err))
-			http.Error(w, "Not Found: Session expired or invalid", statusNotFound)
-			return nil, err
+		if err == nil {
+			logger.Debug("Retrieved existing session", zap.String("sessionId", sessionID))
+			session.UpdateLastActivity() // Update activity on retrieval
+			return session, nil
 		}
-		return session, nil
-	} else {
-		if !allowCreate {
-			logger.Warn("Session not found for V2 GET stream request", zap.String("sessionId", sessionID))
-			http.Error(w, "Not Found: Session expired or invalid", statusNotFound)
-			return nil, errors.New("session not found")
-		}
-
-		authKey := t.extractAuthKey(r)
-		userID, sessionParams, err := t.authManager.Authenticate(authKey, r.RemoteAddr)
-		if err != nil {
-			logger.Warn("Authentication failed for V2024 SSE connection", zap.String("remoteAddr", r.RemoteAddr), zap.Error(err))
-			http.Error(w, "Authentication failed: "+err.Error(), statusUnauthorized)
-			return nil, err
-		}
-
-		return t.sessionManager.CreateSession(userID, sessionParams), nil
+		// Log specific error if session was looked up but not found
+		logger.Warn("Session lookup failed", zap.String("lookupSessionId", sessionID), zap.Error(err))
+		http.Error(w, "Not Found: Session expired or invalid", statusNotFound)
+		return nil, fmt.Errorf("session %s not found: %w", sessionID, err)
 	}
+
+	// No session ID found in request
+	if !allowCreate {
+		logger.Warn("Session ID missing and creation not allowed for this request type", zap.String("path", r.URL.Path), zap.String("method", r.Method))
+		http.Error(w, "Bad Request: Session ID required", statusBadRequest) // Or 404? Let's use 400 as it's a missing identifier.
+		return nil, errors.New("session id required but not found")
+	}
+
+	// Allow creation - Authenticate and create new session
+	authKey := t.extractAuthKey(r)
+	userID, sessionParams, err := t.authManager.Authenticate(authKey, r.RemoteAddr)
+	if err != nil {
+		logger.Warn("Authentication failed", zap.String("remoteAddr", r.RemoteAddr), zap.Error(err))
+		http.Error(w, "Unauthorized: "+err.Error(), statusUnauthorized)
+		return nil, fmt.Errorf("authentication failed: %w", err)
+	}
+
+	// Add User-Agent and potentially other headers to session params
+	if sessionParams != nil {
+		userAgent := r.Header.Get("User-Agent")
+		if userAgent != "" {
+			sessionParams.Store("UserAgent", userAgent)
+		}
+		// Example: Add X-Forwarded-For if behind a proxy
+		forwardedFor := r.Header.Get("X-Forwarded-For")
+		if forwardedFor != "" {
+			sessionParams.Store("X-Forwarded-For", forwardedFor)
+		}
+	} else {
+		logger.Warn("SessionParams map was nil after authentication")
+		sessionParams = &sync.Map{} // Initialize if nil to avoid panics
+	}
+
+	newSession := t.sessionManager.CreateSession(userID, sessionParams)
+	logger.Info("Created new session", zap.String("newSessionId", newSession.GetID()), zap.String("userId", userID))
+	return newSession, nil
 }

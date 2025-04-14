@@ -11,12 +11,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/gate4ai/mcp/gateway"
 	"github.com/gate4ai/mcp/server"
+	"github.com/gate4ai/mcp/server/transport"
 	"github.com/gate4ai/mcp/shared/config"
 	"github.com/playwright-community/playwright-go"
 
@@ -33,13 +35,15 @@ const TEST_CONFIG_WORKSPACE_FOLDER = ".."
 
 var (
 	// Global variables for use across tests
-	DATABASE_URL       string
-	PORTAL_URL         string //in migration set PORTAL_URL = GATEWAY_URL // all test doing over reverse proxy in gateway
-	GATEWAY_URL        string
-	EXAMPLE_SERVER_URL string
-	MAILHOG_API_URL    string
-	EMAIL_SMTP_SERVER  SmtpServerType
-	pw                 *playwright.Playwright
+	DATABASE_URL               string
+	PORTAL_URL                 string //in migration set PORTAL_URL = GATEWAY_URL // all test doing over reverse proxy in gateway
+	PORTAL_INTERNAL_URL        string // Internal URL for Gateway to connect to Portal
+	GATEWAY_URL                string
+	EXAMPLE_MCP2024_SERVER_URL string
+	EXAMPLE_MCP2025_SERVER_URL string
+	MAILHOG_API_URL            string
+	EMAIL_SMTP_SERVER          SmtpServerType
+	pw                         *playwright.Playwright
 )
 
 type SmtpServerType struct {
@@ -133,18 +137,24 @@ func TestMain(m *testing.M) {
 	// Step 2: Determine all URLs
 	portalPort, gatewayPort, examplePort, err := FindAvailablePort3()
 	if err != nil {
-		log.Printf("Failed to find available port for portal: %v\n", err)
+		log.Printf("Failed to find available ports: %v\n", err)
 		cleanup(ctx, dbContainer, mailhogContainer, nil, nil, nil)
 		return
 	}
-	PORTAL_URL = fmt.Sprintf("http://localhost:%d", portalPort)
-	os.Setenv("GATE4AI_PORTAL_URL", PORTAL_URL)
+	PORTAL_INTERNAL_URL = fmt.Sprintf("http://localhost:%d", portalPort) // Internal URL for gateway proxy
+	os.Setenv("GATE4AI_PORTAL_INTERNAL_URL", PORTAL_INTERNAL_URL)
 
-	GATEWAY_URL = fmt.Sprintf("http://localhost:%d", gatewayPort)
+	GATEWAY_URL = fmt.Sprintf("http://localhost:%d", gatewayPort) // Public gateway URL
 	os.Setenv("GATE4AI_GATEWAY_URL", GATEWAY_URL)
 
-	EXAMPLE_SERVER_URL = fmt.Sprintf("http://localhost:%d/sse?key=test-key-user1", examplePort)
-	os.Setenv("GATE4AI_EXAMPLE_SERVER_URL", EXAMPLE_SERVER_URL)
+	PORTAL_URL = GATEWAY_URL // E2E tests access portal VIA gateway
+	os.Setenv("GATE4AI_PORTAL_URL", PORTAL_URL)
+
+	EXAMPLE_MCP2024_SERVER_URL = fmt.Sprintf("http://localhost:%d%s?key=test-key-user1", examplePort, transport.MCP2024_PATH)
+	os.Setenv("GATE4AI_EXAMPLE_SERVER_URL", EXAMPLE_MCP2024_SERVER_URL)
+
+	EXAMPLE_MCP2025_SERVER_URL = fmt.Sprintf("http://localhost:%d%s?key=test-key-user1", examplePort, transport.MCP2025_PATH)
+	os.Setenv("GATE4AI_EXAMPLE_SERVER_URL", EXAMPLE_MCP2025_SERVER_URL)
 
 	// Step 3: Run Prisma migrations
 	if err := runPrismaMigrations(); err != nil {
@@ -169,6 +179,17 @@ func TestMain(m *testing.M) {
 		}
 		resultChan <- initResult{"portal", portalServer, nil}
 	}()
+
+	// Step 6.5: Wait for Portal to be ready *before* starting Gateway
+	log.Println("Waiting for Portal server to be ready...")
+	portalStatusURL := fmt.Sprintf("%s/api/status", PORTAL_INTERNAL_URL) // Check internal URL
+	if err := waitForServer(portalStatusURL); err != nil {
+		log.Printf("Portal server did not become ready: %v", err)
+		// Attempt cleanup even if portal fails
+		cleanup(ctx, dbContainer, mailhogContainer, nil, nil, nil)
+		return
+	}
+	log.Println("Portal server is ready.")
 
 	// Step 7: Start the gateway server in a goroutine
 	go func() {
@@ -232,18 +253,7 @@ func TestMain(m *testing.M) {
 // cleanup handles graceful termination of all resources
 func cleanup(ctx context.Context, dbContainer, mailhogContainer testcontainers.Container,
 	portalServer, gatewayServer, exampleServer *Server) {
-	if dbContainer != nil {
-		log.Println("Stopping PostgreSQL container...")
-		if err := dbContainer.Terminate(ctx); err != nil {
-			log.Printf("Failed to stop PostgreSQL container: %v\n", err)
-		}
-	}
-	if mailhogContainer != nil {
-		log.Println("Stopping MailHog container...")
-		if err := mailhogContainer.Terminate(ctx); err != nil {
-			log.Printf("Failed to stop MailHog container: %v\n", err)
-		}
-	}
+	// Added check for nil before terminating
 	if portalServer != nil {
 		log.Println("Stopping portal server...")
 		portalServer.Stop()
@@ -255,6 +265,18 @@ func cleanup(ctx context.Context, dbContainer, mailhogContainer testcontainers.C
 	if exampleServer != nil {
 		log.Println("Stopping example server...")
 		exampleServer.Stop()
+	}
+	if dbContainer != nil {
+		log.Println("Stopping PostgreSQL container...")
+		if err := dbContainer.Terminate(ctx); err != nil {
+			log.Printf("Failed to stop PostgreSQL container: %v\n", err)
+		}
+	}
+	if mailhogContainer != nil {
+		log.Println("Stopping MailHog container...")
+		if err := mailhogContainer.Terminate(ctx); err != nil {
+			log.Printf("Failed to stop MailHog container: %v\n", err)
+		}
 	}
 	if pw != nil {
 		log.Println("Stopping Playwright...")
@@ -270,10 +292,10 @@ func startDB(ctx context.Context) (testcontainers.Container, error) {
 		ExposedPorts: []string{"5432/tcp"},
 		Env: map[string]string{
 			"POSTGRES_USER":     "postgres",
-			"POSTGRES_PASSWORD": "postgres",
+			"POSTGRES_PASSWORD": "password", // Use a simple password for testing
 			"POSTGRES_DB":       "gate4ai",
 		},
-		WaitingFor: wait.ForListeningPort("5432/tcp"),
+		WaitingFor: wait.ForListeningPort("5432/tcp").WithStartupTimeout(60 * time.Second), // Added startup timeout
 	}
 
 	// Start the container
@@ -288,21 +310,23 @@ func startDB(ctx context.Context) (testcontainers.Container, error) {
 	// Get the container's mapped port
 	mappedPort, err := container.MappedPort(ctx, "5432")
 	if err != nil {
+		container.Terminate(ctx) // Terminate if port mapping fails
 		return nil, fmt.Errorf("failed to get mapped port: %w", err)
 	}
 
 	// Get the container's host
 	host, err := container.Host(ctx)
 	if err != nil {
+		container.Terminate(ctx)
 		return nil, fmt.Errorf("failed to get host: %w", err)
 	}
 
 	// Build the DSN
-	dsn := fmt.Sprintf("postgresql://postgres:postgres@%s:%s/gate4ai?sslmode=disable", host, mappedPort.Port())
+	dsn := fmt.Sprintf("postgresql://postgres:password@%s:%s/gate4ai?sslmode=disable", host, mappedPort.Port())
 
 	// Set the global DATABASE_URL for other tests to use
 	DATABASE_URL = dsn
-	os.Setenv("GATE4AI_DATABASE_URL", dsn)
+	os.Setenv("GATE4AI_DATABASE_URL", dsn) // Set environment variable
 
 	log.Printf("PostgreSQL container started, DSN: %s\n", dsn)
 	return container, nil
@@ -314,7 +338,7 @@ func startMailHog(ctx context.Context) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
 		Image:        "mailhog/mailhog:latest",
 		ExposedPorts: []string{"1025/tcp", "8025/tcp"},
-		WaitingFor:   wait.ForHTTP("/").WithPort("8025/tcp"),
+		WaitingFor:   wait.ForHTTP("/").WithPort("8025/tcp").WithStartupTimeout(60 * time.Second), // Added startup timeout
 	}
 
 	// Start the container
@@ -329,18 +353,21 @@ func startMailHog(ctx context.Context) (testcontainers.Container, error) {
 	// Get the container's SMTP port
 	smtpPort, err := container.MappedPort(ctx, "1025")
 	if err != nil {
+		container.Terminate(ctx)
 		return nil, fmt.Errorf("failed to get SMTP port: %w", err)
 	}
 
 	// Get the container's UI port
 	uiPort, err := container.MappedPort(ctx, "8025")
 	if err != nil {
+		container.Terminate(ctx)
 		return nil, fmt.Errorf("failed to get UI port: %w", err)
 	}
 
 	// Get the container's host
 	host, err := container.Host(ctx)
 	if err != nil {
+		container.Terminate(ctx)
 		return nil, fmt.Errorf("failed to get host: %w", err)
 	}
 
@@ -439,8 +466,8 @@ func verifyTablesExist() error {
 		var exists bool
 		query := `
 			SELECT EXISTS (
-				SELECT FROM information_schema.tables 
-				WHERE table_schema = 'public' 
+				SELECT FROM information_schema.tables
+				WHERE table_schema = 'public'
 				AND table_name = $1
 			)
 		`
@@ -480,18 +507,17 @@ func updateDatabaseSettings() error {
 		return fmt.Errorf("failed to update gateway_listen_address: %w", err)
 	}
 
-	// Update frontend proxy address
-	if err := updateSetting("url_how_gateway_proxy_connect_to_the_portal", PORTAL_URL); err != nil {
+	// Update frontend proxy address (use the INTERNAL portal URL)
+	if err := updateSetting("url_how_gateway_proxy_connect_to_the_portal", PORTAL_INTERNAL_URL); err != nil {
 		return fmt.Errorf("failed to update url_how_gateway_proxy_connect_to_the_portal: %w", err)
 	}
 
-	PORTAL_URL = GATEWAY_URL // all test doing over reverse proxy in gateway
-
-	if err := updateSetting("url_how_users_connect_to_the_portal", PORTAL_URL); err != nil {
-		return fmt.Errorf("failed to update url_how_gateway_proxy_connect_to_the_portal: %w", err)
+	// Update the base URL users connect to (the PUBLIC gateway URL)
+	if err := updateSetting("url_how_users_connect_to_the_portal", GATEWAY_URL); err != nil {
+		return fmt.Errorf("failed to update url_how_users_connect_to_the_portal (public): %w", err)
 	}
 
-	// Update general gateway address
+	// Update general gateway address (the PUBLIC gateway URL)
 	if err := updateSetting("general_gateway_address", GATEWAY_URL); err != nil {
 		return fmt.Errorf("failed to update general_gateway_address: %w", err)
 	}
@@ -516,7 +542,7 @@ func startPortalServer(ctx context.Context, port int) (*Server, error) {
 	env := append(os.Environ(),
 		fmt.Sprintf("PORT=%d", port),
 		fmt.Sprintf("GATE4AI_DATABASE_URL=%s", DATABASE_URL),
-		fmt.Sprintf("JWT_SECRET=%s", "a-secure-test-secret-key-for-go-tests-needs-to-be-at-least-32-chars"),
+		fmt.Sprintf("NUXT_JWT_SECRET=%s", "a-secure-test-secret-key-for-go-tests-needs-to-be-at-least-32-chars"),
 		"NODE_ENV=production",
 	)
 
@@ -552,24 +578,24 @@ func startPortalServer(ctx context.Context, port int) (*Server, error) {
 	server := &Server{
 		cmd:  cmd,
 		port: port,
-		url:  PORTAL_URL,
+		url:  fmt.Sprintf("http://localhost:%d", port), // Use internal URL
 		ctx:  cancel,
 	}
 
-	// Wait for the server to be ready
-	if err := waitForServer(PORTAL_URL + "/api/status"); err != nil {
-		server.Stop()
-		return nil, err
-	}
+	// Wait for the server to be ready - Handled outside this function now
+	// if err := waitForServer(fmt.Sprintf("http://localhost:%d/api/status", port)); err != nil {
+	// 	server.Stop()
+	// 	return nil, err
+	// }
 
-	log.Printf("Portal server started in production mode on %s\n", PORTAL_URL)
+	log.Printf("Portal server started (PID: %d) in production mode, listening internally on :%d\n", cmd.Process.Pid, port)
 	return server, nil
 }
 
 // waitForServer polls the server until it's responsive
 func waitForServer(url string) error {
 	// Poll with timeout
-	timeout := time.After(120 * time.Second)
+	timeout := time.After(120 * time.Second) // Increased timeout
 	tick := time.Tick(1 * time.Second)
 
 	log.Printf("Waiting for server to become available at %s...\n", url)
@@ -584,9 +610,11 @@ func waitForServer(url string) error {
 				resp.Body.Close()
 				if resp.StatusCode == http.StatusOK {
 					// Server is ready
-					time.Sleep(1 * time.Second)
+					log.Printf("Server at %s is ready.", url)
+					time.Sleep(500 * time.Millisecond) // Small grace period
 					return nil
 				}
+				log.Printf("Server at %s returned status %d, waiting...", url, resp.StatusCode)
 			}
 		}
 	}
@@ -594,32 +622,51 @@ func waitForServer(url string) error {
 
 // Stop stops the portal server
 func (s *Server) Stop() {
-	// Cancel the context to stop the command
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
+		log.Println("Server process is nil, cannot stop.")
+		return
+	}
+	pid := s.cmd.Process.Pid
+	log.Printf("Stopping server process (PID: %d)...", pid)
+
+	// Cancel the context first
 	s.ctx()
 
 	// Get process group ID
-	pgid, err := syscall.Getpgid(s.cmd.Process.Pid)
+	pgid, err := syscall.Getpgid(pid)
 	if err == nil {
-		// Kill the entire process group to ensure all child processes are terminated
+		// Kill the entire process group to ensure all child processes (like node) are terminated
+		log.Printf("Sending SIGTERM to process group %d", pgid)
 		if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
-			log.Printf("Failed to terminate process group: %v\n", err)
-
-			// Try harder if needed
+			log.Printf("Failed to send SIGTERM to process group %d: %v. Trying SIGKILL.", pgid, err)
+			// Try harder if SIGTERM failed
 			if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
-				log.Printf("Failed to kill process group: %v\n", err)
+				log.Printf("Failed to send SIGKILL to process group %d: %v", pgid, err)
 			}
 		}
 	} else {
-		log.Printf("Failed to get process group ID: %v\n", err)
-		// Fallback to direct kill
+		log.Printf("Failed to get process group ID for PID %d: %v. Killing process directly.", pid, err)
+		// Fallback to direct kill if getting PGID fails
 		if err := s.cmd.Process.Kill(); err != nil {
-			log.Printf("Failed to kill server process: %v\n", err)
+			log.Printf("Failed to kill server process (PID: %d): %v", pid, err)
 		}
 	}
 
-	// Wait for the process to exit
-	if err := s.cmd.Wait(); err != nil {
-		log.Printf("Server process exited with error: %v\n", err)
+	// Wait for the process to exit (with a timeout)
+	done := make(chan error, 1)
+	go func() {
+		done <- s.cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil && err.Error() != "signal: killed" && err.Error() != "exit status 1" && err.Error() != "signal: terminated" {
+			log.Printf("Server process (PID: %d) exited with error: %v", pid, err)
+		} else {
+			log.Printf("Server process (PID: %d) exited.", pid)
+		}
+	case <-time.After(5 * time.Second):
+		log.Printf("Timeout waiting for server process (PID: %d) to exit.", pid)
 	}
 }
 
@@ -661,7 +708,7 @@ func updateSetting(key string, value interface{}) error {
 		}
 	} else {
 		// Insert new setting with minimal required fields
-		_, err = db.Exec(`INSERT INTO "Settings" (key, group, name, description, value) VALUES ($1, 'test', $1, $1, $2)`,
+		_, err = db.Exec(`INSERT INTO "Settings" (key, "group", name, description, value, frontend) VALUES ($1, 'test', $1, $1, $2, false)`,
 			key, valueJSON)
 		if err != nil {
 			return fmt.Errorf("failed to insert setting: %w", err)
@@ -675,34 +722,48 @@ func updateSetting(key string, value interface{}) error {
 func startGatewayServer(ctx context.Context, port int) (*Server, error) {
 	serverCtx, cancel := context.WithCancel(ctx)
 
-	//запустить GW
-	logger, err := zap.NewDevelopment()
+	logger, err := zap.NewDevelopment() // Use Development logger for tests
 	if err != nil {
-		log.Fatalf("Failed to create logger: %v", err)
+		cancel()
+		return nil, fmt.Errorf("failed to create gateway logger: %w", err)
 	}
 	cfgGw, err := config.NewDatabaseConfig(DATABASE_URL, logger)
 	if err != nil {
-		log.Fatalf("Failed to create config: %v", err)
+		cancel()
+		return nil, fmt.Errorf("failed to create gateway database config: %w", err)
 	}
-	_, err = gateway.Start(serverCtx, logger.With(zap.String("s", "gateway")), cfgGw, fmt.Sprintf(":%d", port))
+	// Ensure Close is called when context is done
+	go func() {
+		<-serverCtx.Done()
+		cfgGw.Close()
+	}()
+
+	node, err := gateway.Start(serverCtx, logger.With(zap.String("s", "gateway")), cfgGw, fmt.Sprintf(":%d", port))
 	if err != nil {
-		log.Fatalf("Failed to find available port: %v", err)
+		cancel()
+		return nil, fmt.Errorf("failed to start gateway node: %w", err)
 	}
 
-	// Create the server instance
+	// Goroutine to wait for shutdown (optional, helps ensure cleanup)
+	go func() {
+		node.WaitForShutdown(10 * time.Second) // Wait briefly on exit
+	}()
+
+	// Create the server instance (cmd is nil as it's run in-process)
 	server := &Server{
 		port: port,
-		url:  GATEWAY_URL,
-		ctx:  cancel,
+		url:  fmt.Sprintf("http://localhost:%d", port),
+		ctx:  cancel, // Use the cancel func to signal shutdown
 	}
 
 	// Wait for the server to be ready
-	if err := waitForServer(GATEWAY_URL + "/status"); err != nil {
-		server.Stop()
+	gatewayStatusURL := fmt.Sprintf("http://localhost:%d/status", port)
+	if err := waitForServer(gatewayStatusURL); err != nil {
+		server.Stop() // Call stop to trigger cancel
 		return nil, err
 	}
 
-	log.Printf("Gateway server started on %s\n", GATEWAY_URL)
+	log.Printf("Gateway server started on %s\n", server.url)
 	return server, nil
 }
 
@@ -710,21 +771,29 @@ func startGatewayServer(ctx context.Context, port int) (*Server, error) {
 func startExampleServer(ctx context.Context, port int) (*Server, error) {
 	serverCtx, cancel := context.WithCancel(ctx)
 
-	//запустить GW
-	logger, err := zap.NewDevelopment()
+	logger, err := zap.NewDevelopment() // Use Development logger
 	if err != nil {
-		log.Fatalf("Failed to create logger: %v", err)
+		cancel()
+		return nil, fmt.Errorf("failed to create example server logger: %w", err)
 	}
-	cfg, err := config.NewYamlConfig(TEST_CONFIG_WORKSPACE_FOLDER+"/server/cmd/mcp-example-server/config.yaml", logger)
+	cfg, err := config.NewYamlConfig(filepath.Join(TEST_CONFIG_WORKSPACE_FOLDER, "server/cmd/mcp-example-server/config.yaml"), logger)
 	if err != nil {
-		log.Fatalf("Failed to create config: %v", err)
+		cancel()
+		return nil, fmt.Errorf("failed to create example server config: %w", err)
 	}
-	err = server.StartExample(serverCtx, logger.With(zap.String("s", "gateway")), cfg, fmt.Sprintf(":%d", port))
+	// Ensure Close is called when context is done
+	go func() {
+		<-serverCtx.Done()
+		cfg.Close()
+	}()
+
+	err = server.StartExample(serverCtx, logger.With(zap.String("s", "example")), cfg, fmt.Sprintf(":%d", port))
 	if err != nil {
-		log.Fatalf("Failed to find available port: %v", err)
+		cancel()
+		return nil, fmt.Errorf("failed to start example server: %w", err)
 	}
 
-	// Create the server instance
+	// Create the server instance (cmd is nil)
 	server := &Server{
 		port: port,
 		url:  fmt.Sprintf("http://localhost:%d", port),
@@ -732,12 +801,13 @@ func startExampleServer(ctx context.Context, port int) (*Server, error) {
 	}
 
 	// Wait for the server to be ready
-	if err := waitForServer(fmt.Sprintf("http://localhost:%d/status", port)); err != nil {
+	exampleStatusURL := fmt.Sprintf("http://localhost:%d/status", port)
+	if err := waitForServer(exampleStatusURL); err != nil {
 		server.Stop()
 		return nil, err
 	}
 
-	log.Printf("Example server started on %s\n", EXAMPLE_SERVER_URL)
+	log.Printf("Example server started on %s\n", server.url)
 	return server, nil
 }
 
@@ -755,5 +825,23 @@ func isDebugMode() bool {
 		return false
 	}
 
-	return parentName == "dlv"
+	// Common debugger process names
+	debuggers := []string{"dlv", "debug"}
+	for _, dbg := range debuggers {
+		if parentName == dbg {
+			return true
+		}
+	}
+
+	// Check command line arguments for delve flags
+	parentCmdline, err := parentProc.CmdlineSlice()
+	if err == nil {
+		for _, arg := range parentCmdline {
+			if arg == "debug" || arg == "--" || strings.Contains(arg, "dlv") {
+				return true
+			}
+		}
+	}
+
+	return false
 }

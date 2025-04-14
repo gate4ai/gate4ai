@@ -30,9 +30,9 @@ func browseServerCatalog(am *ArtifactManager, user *User) error {
 		description string
 	}{
 		// Try label-based selector first (most reliable)
-		{`[aria-label="Search servers"], [placeholder="Search servers"]`, "label_based_search"},
+		{`input[label*="Search servers"]`, "label_based_search"},
 		// Try placeholder-based selector as second option
-		{"input[placeholder*='search'], input[placeholder*='Search']", "placeholder_search"},
+		{`input[placeholder*="Search servers"]`, "placeholder_search"},
 		// Try common input field classes as fallback
 		{".v-field__input", "class_based_search"},
 		// Final fallback for any input that might be a search
@@ -129,8 +129,8 @@ func TestServerCatalog(t *testing.T) {
 	}
 
 	am.T.Logf("Adding servers")
-	addServer(am, user)
-	addServer(am, user)
+	addServer(am, user, "test-server-catalog1")
+	addServer(am, user, "test-server-catalog2")
 
 	// Browse the server catalog
 	err = browseServerCatalog(am, user)
