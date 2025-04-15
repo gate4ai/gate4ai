@@ -39,7 +39,7 @@ func (c *GatewayCapability) GetResources(inputMsg *shared.Message, logger *zap.L
 
 	// Define the function to fetch resources from a single backend session
 	fetchResourcesFunc := func(ctx context.Context, session *client.Session) ([]*resourceWithServerInfo, error) {
-		fetchLogger := logger.With(zap.String("server", session.Backend.ID))
+		fetchLogger := logger.With(zap.String("server", session.Backend.Slug))
 		fetchLogger.Debug("Getting resources from backend")
 
 		// GetResources now returns a channel GetResourcesResult (using 2025 schema type)
@@ -58,7 +58,7 @@ func (c *GatewayCapability) GetResources(inputMsg *shared.Message, logger *zap.L
 				results = append(results, &resourceWithServerInfo{
 					Resource:    rCopy,
 					originalURI: rCopy.URI, // Store original URI
-					serverID:    session.Backend.ID,
+					serverID:    session.Backend.Slug,
 				})
 			}
 			fetchLogger.Debug("Received resources from backend", zap.Int("count", len(results)))

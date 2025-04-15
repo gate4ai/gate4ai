@@ -14,13 +14,13 @@ import (
 )
 
 type Backend struct {
-	ID     string
+	Slug   string
 	URL    *url.URL
 	Logger *zap.Logger
 }
 
 // New creates a new MCP SSE client
-func New(ID string, sseurl string, logger *zap.Logger) (*Backend, error) {
+func New(serverSlug string, sseurl string, logger *zap.Logger) (*Backend, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -30,11 +30,11 @@ func New(ID string, sseurl string, logger *zap.Logger) (*Backend, error) {
 		return nil, fmt.Errorf("invalid SSE URL %s: %w", sseurl, err) // Wrap error
 	}
 
-	logger = logger.With(zap.String("backendID", ID), zap.String("backendURL", u.String())) // Add context to logger
+	logger = logger.With(zap.String("backendSlug", serverSlug), zap.String("backendURL", u.String())) // Add context to logger
 	logger.Debug("Created new MCP SSE client backend")
 
 	return &Backend{
-		ID:     ID,
+		Slug:   serverSlug,
 		URL:    u,
 		Logger: logger,
 	}, nil

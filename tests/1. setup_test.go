@@ -73,7 +73,7 @@ func TestMain(m *testing.M) {
 	containerChan := make(chan initResult, 3) // Buffer for the 3 initial containers (PostgreSQL, MailHog, Playwright)
 	resultChan := make(chan initResult, 3)    // Buffer for other tasks (portal, gateway, example)
 
-	// Step 1: Start the PostgreSQL and MailHog containers in parallel
+	// Step 1: Start the PostgreSQL and MailHog containers and Playwright in parallel
 	go func() {
 		dbContainer, err := startDB(ctx)
 		if err != nil {
@@ -92,7 +92,6 @@ func TestMain(m *testing.M) {
 		containerChan <- initResult{"mailhog", mailhogContainer, nil}
 	}()
 
-	// Initialize Playwright in parallel
 	go func() {
 		playwright, err := playwright.Run()
 		if err != nil {

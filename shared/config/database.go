@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
+	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema" // Import A2A schema
 	_ "github.com/lib/pq"
 	"go.uber.org/zap"
 )
@@ -50,137 +52,130 @@ func (c *DatabaseConfig) Close() error {
 	return nil
 }
 
-// ServerConfig interface implementation
+// --- IConfig Implementation (Existing methods mostly unchanged, adding A2A) ---
 
-// ListenAddr returns the configured server listen address
 func (c *DatabaseConfig) ListenAddr() (string, error) {
-	return c.getSettingString("gateway_listen_address")
+	return c.getSettingString("gateway_listen_address", ":8080") // Provide default
 }
 
-// Authorization returns the authorization type based on configuration
 func (c *DatabaseConfig) AuthorizationType() (AuthorizationType, error) {
-	authTypeStr, err := c.getSettingString("gateway_authorization_type")
+	// Get raw value first
+	rawValue, err := c.getSettingJSON("gateway_authorization_type")
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return AuthorizedUsersOnly, nil // Default if not found
+		}
 		return AuthorizedUsersOnly, err
 	}
 
-	// Convert string to int
-	var authTypeInt int
-	if _, err := fmt.Sscanf(authTypeStr, "%d", &authTypeInt); err != nil {
-		return AuthorizedUsersOnly, fmt.Errorf("failed to parse authorization type: %w", err)
+	// Handle both number and string representations from DB
+	switch v := rawValue.(type) {
+	case float64: // JSON numbers are float64
+		return AuthorizationType(int(v)), nil
+	case string: // Handle potential string values if they exist
+		switch strings.ToLower(v) {
+		case "authorizedusersonly", "users_only":
+			return AuthorizedUsersOnly, nil
+		case "notauthorizedtomarkedmethods", "marked_methods":
+			return NotAuthorizedToMarkedMethods, nil
+		case "notauthorizedeverywhere", "none":
+			return NotAuthorizedEverywhere, nil
+		default:
+			// Attempt numeric conversion from string
+			var authTypeInt int
+			if _, scanErr := fmt.Sscanf(v, "%d", &authTypeInt); scanErr == nil {
+				if authTypeInt >= int(AuthorizedUsersOnly) && authTypeInt <= int(NotAuthorizedEverywhere) {
+					return AuthorizationType(authTypeInt), nil
+				}
+			}
+			return AuthorizedUsersOnly, fmt.Errorf("invalid authorization type string value: %s", v)
+		}
+	default:
+		return AuthorizedUsersOnly, fmt.Errorf("invalid authorization type format in database: %T", rawValue)
 	}
-
-	return AuthorizationType(authTypeInt), nil
 }
 
-// UsersConfig interface implementation
-
-// GetUserIDByKeyHash returns the user ID for the given key hash by querying the database
 func (c *DatabaseConfig) GetUserIDByKeyHash(keyHash string) (string, error) {
 	if keyHash == "" {
-		return "", fmt.Errorf("token hash not found")
-	}
+		return "", nil
+	} // Allow anonymous if key is empty and auth type allows
 
-	// Open a connection to the database
 	db, err := sql.Open("postgres", c.dbConnectionString)
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to database: %w", err)
+		return "", fmt.Errorf("db connect: %w", err)
 	}
 	defer db.Close()
 
-	// Query to get user ID from the API key hash
 	query := `SELECT "userId" FROM "ApiKey" WHERE "keyHash" = $1 LIMIT 1`
 	var userID string
 	err = db.QueryRow(query, keyHash).Scan(&userID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("token not found")
-		}
-		return "", fmt.Errorf("failed to get user ID: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		} // Use ErrNotFound
+		return "", fmt.Errorf("query user by key hash: %w", err)
 	}
-
 	return userID, nil
 }
 
-// GetUserParams returns the parameters for the given user ID
 func (c *DatabaseConfig) GetUserParams(userID string) (map[string]string, error) {
-	// Open a connection to the database
 	db, err := sql.Open("postgres", c.dbConnectionString)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("db connect: %w", err)
 	}
 	defer db.Close()
 
-	// Query to get user parameters from the database
 	query := `SELECT name, status, role, company FROM "User" WHERE id = $1 LIMIT 1`
-	var name sql.NullString
-	var status string
-	var role string
-	var company sql.NullString
-
+	var name, status, role, company sql.NullString
 	err = db.QueryRow(query, userID).Scan(&name, &status, &role, &company)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return make(map[string]string), nil
 		}
-		return nil, fmt.Errorf("failed to get user parameters: %w", err)
+		return nil, fmt.Errorf("query user params: %w", err)
 	}
-
-	// Create the parameters map
 	params := make(map[string]string)
-
 	if name.Valid {
 		params["name"] = name.String
 	}
-
-	params["status"] = status
-	params["role"] = role
-
+	if status.Valid {
+		params["status"] = status.String
+	}
+	if role.Valid {
+		params["role"] = role.String
+	}
 	if company.Valid {
 		params["company"] = company.String
 	}
-
 	return params, nil
 }
 
-// UserSubscribesConfig interface implementation
-
-// GetUserSubscribes returns the server IDs that the user is subscribed to
 func (c *DatabaseConfig) GetUserSubscribes(userID string) ([]string, error) {
-	// Open a connection to the database
 	db, err := sql.Open("postgres", c.dbConnectionString)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("db connect: %w", err)
 	}
 	defer db.Close()
 
-	// Get user role first
-	userParams, err := c.GetUserParams(userID)
+	userParams, err := c.GetUserParams(userID) // Reuse existing method
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user parameters: %w", err)
+		return nil, fmt.Errorf("get user params: %w", err)
 	}
-
-	role, exists := userParams["role"]
-	if !exists {
-		return nil, fmt.Errorf("user role not found")
-	}
+	role := userParams["role"] // Ignore existence check, default is handled below
 
 	var query string
 	var rows *sql.Rows
-
-	// Handle different user roles
-	switch role {
-	case "ADMIN", "SECURITY":
-		// Admins and security users get all servers
-		query = `SELECT id FROM "Server"`
+	if role == "ADMIN" || role == "SECURITY" {
+		query = `SELECT slug FROM "Server" WHERE status = 'ACTIVE'` // Admins see active servers
 		rows, err = db.Query(query)
-	default:
-		// Owners get servers they own + active subscriptions
+	} else {
+		// Non-admins see owned + active subscribed & active servers
 		query = `
-			SELECT "serverId" FROM "ServerOwner"
-			WHERE "userId" = $1
+			SELECT slug from "Server"
+            join "ServerOwner" ON "Server".id = "ServerOwner"."serverId" 
+			WHERE "ServerOwner"."userId" = $1
 			UNION
-			SELECT "serverId" FROM "Subscription" 
+			SELECT slug FROM "Subscription" 
 			JOIN "Server" ON "Subscription"."serverId" = "Server"."id"
 			WHERE "userId" = $1
 			AND "Subscription"."status" = 'ACTIVE'
@@ -188,297 +183,269 @@ func (c *DatabaseConfig) GetUserSubscribes(userID string) ([]string, error) {
 		`
 		rows, err = db.Query(query, userID)
 	}
-
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user subscriptions: %w", err)
+		return nil, fmt.Errorf("query subscriptions: %w", err)
 	}
 	defer rows.Close()
 
-	var serverIDs []string
+	var serverSlugs []string
 	for rows.Next() {
-		var serverID string
-		if err := rows.Scan(&serverID); err != nil {
-			return nil, fmt.Errorf("failed to scan subscription row: %w", err)
+		var serverSlug string
+		if scanErr := rows.Scan(&serverSlug); scanErr != nil {
+			return nil, fmt.Errorf("scan subscription: %w", scanErr)
 		}
-		serverIDs = append(serverIDs, serverID)
+		serverSlugs = append(serverSlugs, serverSlug)
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating through subscription rows: %w", err)
-	}
-
-	return serverIDs, nil
+	return serverSlugs, rows.Err()
 }
 
-// ServersConfig interface implementation
-
-// GetServer returns the URL for the given server ID
-func (c *DatabaseConfig) GetBackend(backendID string) (*Backend, error) {
-	// Open a connection to the database
+func (c *DatabaseConfig) GetBackendBySlug(backendSlug string) (*Backend, error) {
 	db, err := sql.Open("postgres", c.dbConnectionString)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("db connect: %w", err)
 	}
 	defer db.Close()
 
-	// Query to get server details from the database
-	query := `SELECT "serverUrl" FROM "Server" WHERE id = $1 LIMIT 1`
-	var serverURL string
-	err = db.QueryRow(query, backendID).Scan(&serverURL)
+	query := `SELECT "serverUrl" FROM "Server" WHERE slug = $1 LIMIT 1`
+	var serverURL sql.NullString
+	err = db.QueryRow(query, backendSlug).Scan(&serverURL)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to get server details: %w", err)
+		return nil, fmt.Errorf("query backend: %w", err)
+	}
+	if !serverURL.Valid {
+		return nil, fmt.Errorf("backend URL is NULL for ID %s", backendSlug)
 	}
 
-	// For now, we're not setting the Bearer token - this would require additional logic
-	// to determine the appropriate token for the given server
-	return &Backend{
-		URL:    serverURL,
-		Bearer: "", // This may need to be filled in from a different source
-	}, nil
+	return &Backend{URL: serverURL.String}, nil
 }
 
 func (c *DatabaseConfig) ServerName() (string, error) {
-	return c.getSettingString("gateway_server_name")
+	return c.getSettingString("gateway_server_name", "Gate4AI Gateway") // Default
 }
 
 func (c *DatabaseConfig) ServerVersion() (string, error) {
-	return c.getSettingString("gateway_server_version")
+	return c.getSettingString("gateway_server_version", "1.0.0") // Default
 }
 
-// LogLevel returns the configured log level for Zap
 func (c *DatabaseConfig) LogLevel() (string, error) {
-	return c.getSettingString("gateway_log_level")
+	return c.getSettingString("gateway_log_level", "info") // Default
 }
 
-// DiscoveringHandlerPath returns the information handler path from settings
 func (c *DatabaseConfig) DiscoveringHandlerPath() (string, error) {
-	// Open a connection to the database
-	db, err := sql.Open("postgres", c.dbConnectionString)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to database: %w", err)
-	}
-	defer db.Close()
-
-	// Query to get info handler setting
-	query := `SELECT value FROM "Settings" WHERE key = 'path_for_discovering_handler'`
-	var valueStr string
-	err = db.QueryRow(query).Scan(&valueStr)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", nil // Return empty string if setting doesn't exist
-		}
-		return "", fmt.Errorf("failed to get info handler setting: %w", err)
-	}
-
-	// Parse value JSON
-	var value interface{}
-	if err := json.Unmarshal([]byte(valueStr), &value); err != nil {
-		return "", fmt.Errorf("failed to unmarshal info handler value: %w", err)
-	}
-
-	// Convert to string
-	DiscoveringHandlerPath, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("info handler value is not a string")
-	}
-
-	return DiscoveringHandlerPath, nil
+	return c.getSettingString("path_for_discovering_handler", "") // Default empty
 }
 
-// FrontendAddressForProxy returns the address for the frontend proxy from settings
 func (c *DatabaseConfig) FrontendAddressForProxy() (string, error) {
-	return c.getSettingString("url_how_gateway_proxy_connect_to_the_portal")
+	return c.getSettingString("url_how_gateway_proxy_connect_to_the_portal", "http://portal:3000") // Default
 }
 
 func (c *DatabaseConfig) Status(ctx context.Context) error {
 	db, err := sql.Open("postgres", c.dbConnectionString)
 	if err != nil {
-		c.logger.Error("Failed to connect to database", zap.Error(err))
+		c.logger.Error("DB connect failed", zap.Error(err))
 		return err
-	} else {
-		err = db.PingContext(ctx)
-		if err != nil {
-			c.logger.Error("Failed to ping database", zap.Error(err))
-			return err
-		}
-		db.Close()
+	}
+	defer db.Close()
+	if err = db.PingContext(ctx); err != nil {
+		c.logger.Error("DB ping failed", zap.Error(err))
+		return err
 	}
 	return nil
 }
 
-// getSettingString retrieves a string value from the Settings table
-func (c *DatabaseConfig) getSettingString(key string) (string, error) {
-	// Open a connection to the database
-	db, err := sql.Open("postgres", c.dbConnectionString)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to database: %w", err)
-	}
-	defer db.Close()
-
-	// Query to get the setting
-	query := `SELECT value FROM "Settings" WHERE key = $1 LIMIT 1`
-	var valueStr string
-	err = db.QueryRow(query, key).Scan(&valueStr)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("setting not found: %s", key)
-		}
-		return "", fmt.Errorf("failed to get setting: %w", err)
-	}
-
-	// Parse value JSON
-	var value interface{}
-	if err := json.Unmarshal([]byte(valueStr), &value); err != nil {
-		return "", fmt.Errorf("failed to unmarshal setting value: %w", err)
-	}
-
-	// Convert to string
-	strValue, ok := value.(string)
-	if !ok {
-		floatValue, isFloat := value.(float64)
-		if isFloat {
-			// Convert numeric value to string (for items like gateway_authorization_type)
-			return fmt.Sprintf("%v", int(floatValue)), nil
-		}
-		return "", fmt.Errorf("setting value is not a string or number: %s", key)
-	}
-
-	return strValue, nil
-}
-
-// --- Implement New SSL Methods ---
-
+// --- SSL Methods ---
 func (c *DatabaseConfig) SSLEnabled() (bool, error) {
-	// Default to false if setting not found or error occurs
-	val, err := c.getSettingBool("gateway_ssl_enabled")
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		c.logger.Error("Error reading gateway_ssl_enabled", zap.Error(err))
-	}
-	return val, nil // Return default (false) on error or not found
+	return c.getSettingBool("gateway_ssl_enabled", false)
 }
-
 func (c *DatabaseConfig) SSLMode() (string, error) {
-	// Default to "manual" if not found
-	val, err := c.getSettingString("gateway_ssl_mode")
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		c.logger.Error("Error reading gateway_ssl_mode", zap.Error(err))
-	}
-	if errors.Is(err, ErrNotFound) || val == "" {
-		return "manual", nil
-	}
-	return val, nil
+	return c.getSettingString("gateway_ssl_mode", "manual")
 }
-
 func (c *DatabaseConfig) SSLCertFile() (string, error) {
-	val, err := c.getSettingString("gateway_ssl_cert_file")
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		c.logger.Error("Error reading gateway_ssl_cert_file", zap.Error(err))
-	}
-	return val, nil // Return "" on error or not found
+	return c.getSettingString("gateway_ssl_cert_file", "")
 }
-
 func (c *DatabaseConfig) SSLKeyFile() (string, error) {
-	val, err := c.getSettingString("gateway_ssl_key_file")
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		c.logger.Error("Error reading gateway_ssl_key_file", zap.Error(err))
-	}
-	return val, nil // Return "" on error or not found
+	return c.getSettingString("gateway_ssl_key_file", "")
 }
-
-func (c *DatabaseConfig) SSLAcmeDomains() ([]string, error) {
-	value, err := c.getSettingJSON("gateway_ssl_acme_domains")
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return []string{}, nil // Return empty slice if not found
-		}
-		c.logger.Error("Error reading gateway_ssl_acme_domains", zap.Error(err))
-		return []string{}, err
-	}
-
-	// Type assert to []interface{} first, then convert to []string
-	if domainsInterface, ok := value.([]interface{}); ok {
-		domains := make([]string, 0, len(domainsInterface))
-		for _, item := range domainsInterface {
-			if domainStr, ok := item.(string); ok {
-				domains = append(domains, domainStr)
-			} else {
-				err := fmt.Errorf("non-string value found in ACME domains list for key 'gateway_ssl_acme_domains'")
-				c.logger.Error(err.Error())
-				return []string{}, err
-			}
-		}
-		return domains, nil
-	}
-	// Handle case where it's already []string (less likely with json.Unmarshal)
-	if domainsStr, ok := value.([]string); ok {
-		return domainsStr, nil
-	}
-
-	err = fmt.Errorf("setting 'gateway_ssl_acme_domains' has invalid format, expected JSON array of strings")
-	c.logger.Error(err.Error())
-	return []string{}, err
-}
-
 func (c *DatabaseConfig) SSLAcmeEmail() (string, error) {
-	val, err := c.getSettingString("gateway_ssl_acme_email")
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		c.logger.Error("Error reading gateway_ssl_acme_email", zap.Error(err))
-	}
-	return val, nil // Return "" on error or not found
+	return c.getSettingString("gateway_ssl_acme_email", "")
 }
-
 func (c *DatabaseConfig) SSLAcmeCacheDir() (string, error) {
-	val, err := c.getSettingString("gateway_ssl_acme_cache_dir")
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		c.logger.Error("Error reading gateway_ssl_acme_cache_dir", zap.Error(err))
-	}
-	if errors.Is(err, ErrNotFound) || val == "" {
-		return "./.autocert-cache", nil // Default cache dir
-	}
-	return val, nil
+	return c.getSettingString("gateway_ssl_acme_cache_dir", "./.autocert-cache")
+}
+func (c *DatabaseConfig) SSLAcmeDomains() ([]string, error) {
+	return c.getSettingStringSlice("gateway_ssl_acme_domains", []string{})
 }
 
-// --- Helper functions to get typed settings ---
+// --- A2A Method ---
+func (c *DatabaseConfig) GetA2ACardBaseInfo(agentURL string) (A2ACardBaseInfo, error) {
+	info := A2ACardBaseInfo{AgentURL: agentURL}
+	var err error
 
-// getSettingJSON retrieves a raw JSON value from the Settings table
-func (c *DatabaseConfig) getSettingJSON(key string) (interface{}, error) {
+	info.Name, err = c.getSettingString("a2a_agent_name", "Gate4AI A2A Agent")
+	if err != nil {
+		return info, fmt.Errorf("a2a_agent_name: %w", err)
+	}
+
+	desc, err := c.getSettingString("a2a_agent_description", "")
+	if err != nil {
+		return info, fmt.Errorf("a2a_agent_description: %w", err)
+	}
+	if desc != "" {
+		info.Description = &desc
+	}
+
+	info.Version, err = c.getSettingString("a2a_agent_version", "1.0.0")
+	if err != nil {
+		return info, fmt.Errorf("a2a_agent_version: %w", err)
+	}
+
+	docURL, err := c.getSettingString("a2a_agent_documentation_url", "")
+	if err != nil {
+		return info, fmt.Errorf("a2a_agent_documentation_url: %w", err)
+	}
+	if docURL != "" {
+		info.DocumentationURL = &docURL
+	}
+
+	info.DefaultInputModes, err = c.getSettingStringSlice("a2a_default_input_modes", []string{"text"})
+	if err != nil {
+		return info, fmt.Errorf("a2a_default_input_modes: %w", err)
+	}
+
+	info.DefaultOutputModes, err = c.getSettingStringSlice("a2a_default_output_modes", []string{"text"})
+	if err != nil {
+		return info, fmt.Errorf("a2a_default_output_modes: %w", err)
+	}
+
+	// Provider Info
+	provOrg, errOrg := c.getSettingString("a2a_agent_provider_organization", "")
+	provURL, errURL := c.getSettingString("a2a_agent_provider_url", "")
+	// Only create provider if at least organization is set
+	if errOrg == nil && provOrg != "" {
+		provider := a2aSchema.AgentProvider{Organization: provOrg}
+		if errURL == nil && provURL != "" {
+			provider.URL = &provURL
+		}
+		info.Provider = &provider
+	} else if errOrg != nil && !errors.Is(errOrg, ErrNotFound) {
+		return info, fmt.Errorf("a2a_agent_provider_organization: %w", errOrg)
+	} else if errURL != nil && !errors.Is(errURL, ErrNotFound) {
+		return info, fmt.Errorf("a2a_agent_provider_url: %w", errURL)
+	}
+
+	// Authentication - Assuming simple structure for now, adjust if complex
+	authJSON, err := c.getSettingString("a2a_agent_authentication", "")
+	if err == nil && authJSON != "" && authJSON != "{}" && authJSON != "null" {
+		var auth a2aSchema.AgentAuthentication
+		if jsonErr := json.Unmarshal([]byte(authJSON), &auth); jsonErr != nil {
+			c.logger.Error("Failed to unmarshal a2a_agent_authentication", zap.Error(jsonErr), zap.String("value", authJSON))
+			return info, fmt.Errorf("invalid a2a_agent_authentication format: %w", jsonErr)
+		}
+		info.Authentication = &auth
+	} else if err != nil && !errors.Is(err, ErrNotFound) {
+		return info, fmt.Errorf("a2a_agent_authentication: %w", err)
+	}
+
+	return info, nil
+}
+
+// --- Database Helper Functions ---
+
+// getSetting retrieves a setting value as JSON bytes
+func (c *DatabaseConfig) getSettingRaw(key string) ([]byte, error) {
 	db, err := sql.Open("postgres", c.dbConnectionString)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("db connect: %w", err)
 	}
 	defer db.Close()
 
 	query := `SELECT value FROM "Settings" WHERE key = $1 LIMIT 1`
 	var valueStr string
-
-	ctx := context.Background() // Replace with c.ctx if watcher is active
-	err = db.QueryRowContext(ctx, query, key).Scan(&valueStr)
+	err = db.QueryRowContext(context.Background(), query, key).Scan(&valueStr)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, ErrNotFound // Use specific error for not found
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to get setting '%s': %w", key, err)
+		return nil, fmt.Errorf("query setting '%s': %w", key, err)
 	}
+	return []byte(valueStr), nil
+}
+
+// getSettingJSON unmarshals a setting into an interface{}
+func (c *DatabaseConfig) getSettingJSON(key string) (interface{}, error) {
+	raw, err := c.getSettingRaw(key)
+	if err != nil {
+		return nil, err
+	} // Propagate ErrNotFound
 
 	var value interface{}
-	if err := json.Unmarshal([]byte(valueStr), &value); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal setting value for '%s': %w", key, err)
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, fmt.Errorf("unmarshal setting '%s': %w", key, err)
 	}
 	return value, nil
 }
 
-// getSettingBool retrieves a boolean setting
-func (c *DatabaseConfig) getSettingBool(key string) (bool, error) {
+// getSettingString retrieves a string setting, handling potential number conversion
+func (c *DatabaseConfig) getSettingString(key string, defaultValue string) (string, error) {
 	value, err := c.getSettingJSON(key)
 	if err != nil {
-		return false, err // Propagate ErrNotFound or other errors
+		if errors.Is(err, ErrNotFound) {
+			return defaultValue, nil
+		} // Use default if not found
+		return defaultValue, err // Return default on other errors
+	}
+	switch v := value.(type) {
+	case string:
+		return v, nil
+	case float64: // Handle numeric values stored as JSON numbers
+		return fmt.Sprintf("%v", int(v)), nil // Convert int part
+	default:
+		return defaultValue, fmt.Errorf("setting '%s' has unexpected type %T", key, value)
+	}
+}
+
+// getSettingBool retrieves a boolean setting
+func (c *DatabaseConfig) getSettingBool(key string, defaultValue bool) (bool, error) {
+	value, err := c.getSettingJSON(key)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return defaultValue, nil
+		}
+		return defaultValue, err
 	}
 	boolValue, ok := value.(bool)
 	if !ok {
-		return false, fmt.Errorf("setting '%s' value is not a boolean", key)
+		return defaultValue, fmt.Errorf("setting '%s' is not a boolean (type: %T)", key, value)
 	}
 	return boolValue, nil
+}
+
+// getSettingStringSlice retrieves a setting expected to be a JSON array of strings
+func (c *DatabaseConfig) getSettingStringSlice(key string, defaultValue []string) ([]string, error) {
+	value, err := c.getSettingJSON(key)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return defaultValue, nil
+		}
+		return defaultValue, err
+	}
+	if sliceInterface, ok := value.([]interface{}); ok {
+		strSlice := make([]string, 0, len(sliceInterface))
+		for i, item := range sliceInterface {
+			if strVal, ok := item.(string); ok {
+				strSlice = append(strSlice, strVal)
+			} else {
+				return defaultValue, fmt.Errorf("non-string value at index %d in setting '%s'", i, key)
+			}
+		}
+		return strSlice, nil
+	}
+	// Handle case where it might already be []string (less common from DB json)
+	if strSlice, ok := value.([]string); ok {
+		return strSlice, nil
+	}
+	return defaultValue, fmt.Errorf("setting '%s' is not a JSON array of strings (type: %T)", key, value)
 }

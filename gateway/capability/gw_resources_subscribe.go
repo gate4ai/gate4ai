@@ -121,7 +121,7 @@ func (c *GatewayCapability) gw_resources_notification_updated(backendMsg *shared
 	// Get the originating backend session's parameters to find the server ID and the target gateway client session
 	backendSessionParams := backendMsg.Session.GetParams()
 
-	serverID, _, okServer := GetServerID(backendSessionParams)
+	serverID, _, okServer := GetServerSlug(backendSessionParams)
 	if !okServer || serverID == "" {
 		logger.Error("Could not determine server ID from backend session receiving the update")
 		// backendMsg.Session.Close() // Consider closing inconsistent backend session

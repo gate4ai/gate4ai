@@ -12,7 +12,7 @@ import (
 const (
 	backendSessionsKey = "gw_backend_sessions"
 	clientSessionsKey  = "gw_client_sessions"
-	serverIDKey        = "gw_server_id"
+	serverSlugKey      = "gw_server_id"
 )
 
 // SavedValue represents a cached value with its timestamp
@@ -75,16 +75,16 @@ func GetClientSession(sessionParams *sync.Map) (*mcp.Session, time.Time, bool) {
 	return session, saved.Timestamp, true
 }
 
-func SaveServerID(sessionParams *sync.Map, serverID string) {
-	sessionParams.Store(serverIDKey, &SavedValue{
-		Value:     serverID,
+func SaveServerSlug(sessionParams *sync.Map, serverSlug string) {
+	sessionParams.Store(serverSlugKey, &SavedValue{
+		Value:     serverSlug,
 		Timestamp: time.Now(),
 	})
 }
 
 // GetServerID returns server ID with timestamp and success indicator
-func GetServerID(sessionParams *sync.Map) (string, time.Time, bool) {
-	savedValue, ok1 := sessionParams.Load(serverIDKey)
+func GetServerSlug(sessionParams *sync.Map) (string, time.Time, bool) {
+	savedValue, ok1 := sessionParams.Load(serverSlugKey)
 	if !ok1 {
 		return "", time.Time{}, false
 	}
@@ -94,10 +94,10 @@ func GetServerID(sessionParams *sync.Map) (string, time.Time, bool) {
 		return "", time.Time{}, false
 	}
 
-	serverID, ok := saved.Value.(string)
+	serverSlug, ok := saved.Value.(string)
 	if !ok {
 		return "", time.Time{}, false
 	}
 
-	return serverID, saved.Timestamp, true
+	return serverSlug, saved.Timestamp, true
 }

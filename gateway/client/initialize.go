@@ -62,7 +62,7 @@ func (s *Session) sendInitialize() {
 	logger.Debug("Received initialize response from backend", zap.String("backendNegotiatedVersion", backendNegotiatedVersion))
 
 	if _, supported := clientSupportedVersions[backendNegotiatedVersion]; !supported {
-		err := fmt.Errorf("backend '%s' negotiated unsupported protocol version '%s'", s.Backend.ID, backendNegotiatedVersion)
+		err := fmt.Errorf("backend '%s' negotiated unsupported protocol version '%s'", s.Backend.Slug, backendNegotiatedVersion)
 		logger.Error(err.Error())
 		s.writeInitializationErrorAndClose(err)
 	}

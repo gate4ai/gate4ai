@@ -17,7 +17,7 @@ import (
 // tool wrapper to include serverID and originalName
 type tool struct {
 	schema.Tool  // Embed 2025 schema type
-	serverID     string
+	serverSlug   string
 	originalName string // Store original name before potential modification
 }
 
@@ -46,7 +46,7 @@ func (c *GatewayCapability) GetTools(inputMsg *shared.Message, logger *zap.Logge
 
 	// Define the function to fetch tools from a single backend session
 	fetchToolsFunc := func(ctx context.Context, session *client.Session) ([]*tool, error) {
-		fetchLogger := logger.With(zap.String("server", session.Backend.ID))
+		fetchLogger := logger.With(zap.String("server", session.Backend.Slug))
 		fetchLogger.Debug("Getting tools from backend")
 
 		// GetTools now returns a channel GetToolsResult (using 2025 schema type)
@@ -63,7 +63,7 @@ func (c *GatewayCapability) GetTools(inputMsg *shared.Message, logger *zap.Logge
 				tCopy := t // Create a copy of the tool struct
 				results = append(results, &tool{
 					Tool:         tCopy,
-					serverID:     session.Backend.ID,
+					serverSlug:   session.Backend.Slug,
 					originalName: tCopy.Name, // Store original name
 				})
 			}

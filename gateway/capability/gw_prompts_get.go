@@ -17,7 +17,7 @@ import (
 // prompt wrapper to include serverID
 type prompt struct {
 	schema.Prompt // Embed 2025 schema type
-	serverID      string
+	serverSlug    string
 	originalName  string // Store original name before potential modification
 }
 
@@ -34,7 +34,7 @@ func (c *GatewayCapability) GetPrompts(inputMsg *shared.Message, logger *zap.Log
 
 	// Define the function to fetch prompts from a single backend session
 	fetchPromptsFunc := func(ctx context.Context, session *client.Session) ([]*prompt, error) {
-		fetchLogger := logger.With(zap.String("server", session.Backend.ID))
+		fetchLogger := logger.With(zap.String("server", session.Backend.Slug))
 		fetchLogger.Debug("Getting prompts from backend")
 
 		// GetPrompts now returns a channel of results
@@ -53,7 +53,7 @@ func (c *GatewayCapability) GetPrompts(inputMsg *shared.Message, logger *zap.Log
 			pCopy := p // Create a copy to avoid modifying the cache
 			results = append(results, &prompt{
 				Prompt:       pCopy,
-				serverID:     session.Backend.ID,
+				serverSlug:   session.Backend.Slug,
 				originalName: pCopy.Name, // Store original name
 			})
 		}
@@ -140,19 +140,19 @@ func (c *GatewayCapability) gw_prompts_get(inputMsg *shared.Message) (interface{
 	}
 
 	logger.Debug("Found prompt, forwarding to backend",
-		zap.String("backendServerID", foundPrompt.serverID),
+		zap.String("backendServerID", foundPrompt.serverSlug),
 		zap.String("originalName", foundPrompt.originalName))
 
 	// Get the backend session for the server that owns this prompt
-	backendSession, err := c.getBackendSession(inputMsg.Session, foundPrompt.serverID)
+	backendSession, err := c.getBackendSession(inputMsg.Session, foundPrompt.serverSlug)
 	if err != nil {
 		// Error logged by getBackendSession
 		return nil, err // Return error from getting session
 	}
 	if backendSession == nil {
 		// Should not happen if getBackendSession returns nil error, but check defensively
-		logger.Error("Backend session is nil after successful retrieval", zap.String("serverID", foundPrompt.serverID))
-		return nil, fmt.Errorf("internal error: failed to get valid backend session for server %s", foundPrompt.serverID)
+		logger.Error("Backend session is nil after successful retrieval", zap.String("serverID", foundPrompt.serverSlug))
+		return nil, fmt.Errorf("internal error: failed to get valid backend session for server %s", foundPrompt.serverSlug)
 	}
 
 	// Use a timeout context for the backend call
@@ -166,7 +166,7 @@ func (c *GatewayCapability) gw_prompts_get(inputMsg *shared.Message) (interface{
 
 	if asyncResult.Error != nil {
 		logger.Error("Failed to get prompt from backend server",
-			zap.String("server", foundPrompt.serverID),
+			zap.String("server", foundPrompt.serverSlug),
 			zap.String("originalName", foundPrompt.originalName),
 			zap.Error(asyncResult.Error))
 		// Return the error received from the backend
