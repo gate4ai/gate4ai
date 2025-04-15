@@ -86,12 +86,6 @@ func (c *InternalConfig) ListenAddr() (string, error) {
 	return c.ServerAddress, nil
 }
 
-func (c *InternalConfig) SetListenAddr(addr string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.ServerAddress = addr
-}
-
 func (c *InternalConfig) AuthorizationType() (AuthorizationType, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

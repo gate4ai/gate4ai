@@ -242,7 +242,6 @@ func setupServerTest(t *testing.T) (*transport.Transport, *MockMCPManager, *conf
 	t.Helper()
 	logger, _ := zap.NewDevelopment() // Or NewNop() for less output
 	cfg := config.NewInternalConfig()
-	cfg.SetListenAddr(":0")            // Use ephemeral port
 	cfg.ServerNameValue = "TestServer" // Set a specific name for testing
 	cfg.ServerVersionValue = "1.2.3"
 

@@ -165,8 +165,6 @@ func main() {
 
 	// Use internal config for simplicity, A2A example doesn't need complex user/backend management
 	cfg := config.NewInternalConfig()
-	cfg.SetListenAddr(*listenAddr)
-	// No MCP specific auth needed for A2A usually, but set auth type if needed
 	cfg.AuthorizationTypeValue = config.NotAuthorizedEverywhere // Allow all requests for this example
 
 	// --- A2A Setup ---

@@ -34,8 +34,10 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to load configuration", zap.Error(err))
 	}
+
+	overwriteListenAddr := ""
 	if *port != 0 {
-		cfg.SetListenAddr(fmt.Sprintf(":%d", *port))
+		overwriteListenAddr = fmt.Sprintf(":%d", *port)
 	}
 
 	// Create a context that cancels on SIGINT or SIGTERM
@@ -58,7 +60,7 @@ func main() {
 		zap.String("address", add),
 		zap.String("config", *configPath))
 
-	toolsCapability, resourcesCapability, promptsCapability, completionCapability, err := server.StartServer(ctx, logger, cfg, "")
+	toolsCapability, resourcesCapability, promptsCapability, completionCapability, err := server.StartServer(ctx, logger, cfg, overwriteListenAddr)
 	if err != nil {
 		logger.Fatal("Failed to start server", zap.Error(err))
 	}
