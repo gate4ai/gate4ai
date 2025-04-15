@@ -73,7 +73,7 @@ func (n *Node) Start(ctx context.Context, mux *http.ServeMux, overwriteListenAdd
 	n.logger.Info("Starting gateway node...")
 
 	// --- Register Handlers ---
-	n.serverTransport.RegisterHandlers(mux)
+	n.serverTransport.RegisterMCPHandlers(mux)
 
 	discoveringHandlerPath, err := n.cfg.DiscoveringHandlerPath()
 	if err != nil {

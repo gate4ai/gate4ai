@@ -9,7 +9,7 @@ import (
 	"syscall"
 
 	"github.com/gate4ai/mcp/server"
-	"github.com/gate4ai/mcp/server/cmd/mcp-example-server/capability"
+	"github.com/gate4ai/mcp/server/cmd/mcp-example-server/exampleCapability"
 	"github.com/gate4ai/mcp/shared/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -53,20 +53,27 @@ func main() {
 		cancel()
 	}()
 
-	add, _ := cfg.ListenAddr()
+	serverOptions := exampleCapability.BuildOptions(logger)
+	if overwriteListenAddr != "" {
+		serverOptions = append(serverOptions, server.WithListenAddr(overwriteListenAddr))
+	}
 
-	// Start the server
-	logger.Info("Starting MCP example server",
-		zap.String("address", add),
-		zap.String("config", *configPath))
-
-	toolsCapability, resourcesCapability, promptsCapability, completionCapability, err := server.StartServer(ctx, logger, cfg, overwriteListenAddr)
+	errChan, err := server.Start(ctx, logger, cfg, serverOptions...)
 	if err != nil {
 		logger.Fatal("Failed to start server", zap.Error(err))
 	}
 
-	capability.Add(toolsCapability, resourcesCapability, promptsCapability, completionCapability)
+	// --- Wait for Termination ---
+	select {
+	case startErr := <-errChan:
+		if startErr != nil {
+			logger.Fatal("Server encountered an error", zap.Error(startErr))
+		} else {
+			logger.Info("Server shutdown initiated cleanly")
+		}
+	case <-ctx.Done(): // Handle external cancellation
+		logger.Info("Server context done")
+	}
 
-	<-ctx.Done()
 	logger.Info("Server stopped")
 }

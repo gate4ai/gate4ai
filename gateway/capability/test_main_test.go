@@ -10,7 +10,7 @@ import (
 
 	"github.com/gate4ai/mcp/gateway"
 	"github.com/gate4ai/mcp/server"
-	exampleCapability "github.com/gate4ai/mcp/server/cmd/mcp-example-server/capability"
+	"github.com/gate4ai/mcp/server/cmd/mcp-example-server/exampleCapability"
 	"github.com/gate4ai/mcp/shared/config"
 	"github.com/gate4ai/mcp/tests"
 	"go.uber.org/zap"
@@ -49,20 +49,22 @@ func TestMain(m *testing.M) {
 	// run Example Server1
 	cfg1 := config.NewInternalConfig()
 	cfg1.UserKeyHashes[config.HashAPIKey("gateway")] = "gw"
-	toolsCapability1, resourcesCapability1, promptsCapability1, completionCapability1, err := server.StartServer(ctx, LOGGER.With(zap.String("s", "server1")), cfg1, fmt.Sprintf(":%d", portForExampleServer1))
+	serverOptions1 := exampleCapability.BuildOptions(LOGGER.With(zap.String("s", "server1builder")))
+	serverOptions1 = append(serverOptions1, server.WithListenAddr(fmt.Sprintf(":%d", portForExampleServer1)))
+	_, err = server.Start(ctx, LOGGER.With(zap.String("s", "server1")), cfg1, serverOptions1...)
 	if err != nil {
-		log.Fatalf("Failed to start Example Server1 %v", err)
+		LOGGER.Fatal("Failed to start server", zap.Error(err))
 	}
-	exampleCapability.Add(toolsCapability1, resourcesCapability1, promptsCapability1, completionCapability1)
 
 	//run Example Server2
 	cfg2 := config.NewInternalConfig()
 	cfg2.UserKeyHashes[config.HashAPIKey("gateway")] = "gw"
-	toolsCapability2, resourcesCapability2, promptsCapability2, completionCapability2, err := server.StartServer(ctx, LOGGER.With(zap.String("s", "server2")), cfg2, fmt.Sprintf(":%d", portForExampleServer2))
+	serverOptions2 := exampleCapability.BuildOptions(LOGGER.With(zap.String("s", "server2builder")))
+	serverOptions2 = append(serverOptions2, server.WithListenAddr(fmt.Sprintf(":%d", portForExampleServer2)))
+	_, err = server.Start(ctx, LOGGER.With(zap.String("s", "server2")), cfg2, serverOptions2...)
 	if err != nil {
-		log.Fatalf("Failed to start Example Server2 %v", err)
+		LOGGER.Fatal("Failed to start server", zap.Error(err))
 	}
-	exampleCapability.Add(toolsCapability2, resourcesCapability2, promptsCapability2, completionCapability2)
 
 	//run Gateway
 	cfgGw := config.NewInternalConfig()

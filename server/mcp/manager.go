@@ -2,13 +2,13 @@ package mcp
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/gate4ai/mcp/shared"
 	"github.com/gate4ai/mcp/shared/config"
 
-	// Use V2025 schema for manager's state
 	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
@@ -34,6 +34,11 @@ type Manager struct {
 	logger         *zap.Logger
 	ServerInfo     schema.Implementation
 	inputProcessor *shared.Input
+}
+
+// Input returns the manager's input processor.
+func (m *Manager) Input() *shared.Input {
+	return m.inputProcessor
 }
 
 func (m *Manager) GetLogger() *zap.Logger {
@@ -76,8 +81,19 @@ func NewManager(logger *zap.Logger, cfg config.IConfig, capabilities ...[]shared
 	return m, nil
 }
 
-func (m *Manager) AddCapability(capabilities ...shared.IServerCapability) {
-	m.inputProcessor.AddServerCapability(capabilities...)
+// AddCapability registers one or more capabilities with the input processor.
+// Changed to accept generic ICapability. The input processor will route correctly.
+func (m *Manager) AddCapability(capabilities ...shared.ICapability) {
+	// The type check logic is now inside Input.AddServer/ClientCapability methods
+	for _, cap := range capabilities {
+		if serverCap, ok := cap.(shared.IServerCapability); ok {
+			m.inputProcessor.AddServerCapability(serverCap)
+		} else if clientCap, ok := cap.(shared.IClientCapability); ok {
+			m.inputProcessor.AddClientCapability(clientCap)
+		} else {
+			m.logger.Warn("Unknown capability type, cannot add", zap.String("type", fmt.Sprintf("%T", cap)))
+		}
+	}
 }
 
 // CreateSession creates a new session with a unique ID
@@ -106,6 +122,19 @@ func (m *Manager) GetSession(id string) (shared.ISession, error) {
 	}
 
 	return session, nil
+}
+
+// RemoveSession removes a session reference without calling Close.
+// Used by transport on disconnect detection.
+func (m *Manager) RemoveSession(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, exists := m.sessions[id]
+	if exists {
+		delete(m.sessions, id)
+		m.logger.Debug("Removed session reference", zap.String("sessionID", id))
+	}
 }
 
 // CloseSession removes a session and cleans up resources

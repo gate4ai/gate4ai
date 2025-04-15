@@ -18,7 +18,7 @@ import (
 
 	"github.com/gate4ai/mcp/gateway"
 	"github.com/gate4ai/mcp/server"
-	exampleCapability "github.com/gate4ai/mcp/server/cmd/mcp-example-server/capability"
+	"github.com/gate4ai/mcp/server/cmd/mcp-example-server/exampleCapability"
 	"github.com/gate4ai/mcp/server/transport"
 	"github.com/gate4ai/mcp/shared/config"
 	_ "github.com/lib/pq"
@@ -784,12 +784,13 @@ func startExampleServer(ctx context.Context, port int) (*Server, error) {
 		cfg.Close()
 	}()
 
-	toolsCapability, resourcesCapability, promptsCapability, completionCapability, err := server.StartServer(serverCtx, logger.With(zap.String("s", "example")), cfg, fmt.Sprintf(":%d", port))
+	serverOptions := exampleCapability.BuildOptions(logger)
+	serverOptions = append(serverOptions, server.WithListenAddr(fmt.Sprintf(":%d", port)))
+
+	_, err = server.Start(ctx, logger, cfg, serverOptions...)
 	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to start example server: %w", err)
+		logger.Fatal("Failed to start server", zap.Error(err))
 	}
-	exampleCapability.Add(toolsCapability, resourcesCapability, promptsCapability, completionCapability)
 
 	// Create the server instance (cmd is nil)
 	server := &Server{

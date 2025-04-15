@@ -10,6 +10,7 @@ import (
 
 	"github.com/gate4ai/mcp/server/mcp"
 	"github.com/gate4ai/mcp/shared"
+	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
 	"github.com/gate4ai/mcp/shared/config"
 	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
 	"go.uber.org/zap"
@@ -127,7 +128,7 @@ func New(mcpManager mcp.ISessionManager, logger *zap.Logger, cfg config.IConfig,
 	}
 
 	// Start background cleanup routine if timeout is set
-	if transport.sessionTimeout > 0 { // TODO Session manager function?
+	if transport.sessionTimeout > 0 { // TODO: Move cleanup to session manager?
 		go transport.startSessionCleanup()
 	}
 
@@ -144,13 +145,18 @@ func (t *Transport) SetAuthManager(authManager AuthenticationManager) {
 	t.authManager = authManager
 }
 
-// RegisterHandlers registers the unified MCP handler with the HTTP mux.
-func (t *Transport) RegisterHandlers(mux *http.ServeMux) {
+// RegisterMCPHandlers registers only the MCP protocol handlers.
+func (t *Transport) RegisterMCPHandlers(mux *http.ServeMux) {
 	mux.HandleFunc(MCP2024_PATH, t.Handle2024MCP())
 	mux.HandleFunc(MCP2025_PATH, t.HandleMCP())
+	t.logger.Info("Registered MCP protocol handlers", zap.String("path_v2025", MCP2025_PATH), zap.String("path_v2024", MCP2024_PATH))
+}
+
+// RegisterA2AHandlers registers only the A2A protocol handlers.
+func (t *Transport) RegisterA2AHandlers(mux *http.ServeMux, agentCard a2aSchema.AgentCard) {
 	mux.HandleFunc(A2A_PATH, t.HandleA2A())
-	//TODO: A2A - add well-known agent.json ?
-	t.logger.Info("Registered MCP handler", zap.String("path", MCP2025_PATH), zap.String("path2024", MCP2024_PATH))
+	t.registerAgentCardHandler(mux, agentCard)
+	t.logger.Info("Registered A2A protocol handlers", zap.String("path", A2A_PATH), zap.String("wellKnownPath", "/.well-known/agent.json"))
 }
 
 func (t *Transport) Handle2024MCP() http.HandlerFunc {
@@ -211,22 +217,24 @@ func (t *Transport) HandleMCP() http.HandlerFunc {
 // HandleA2A handles requests on the dedicated /a2a path.
 func (t *Transport) HandleA2A() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		logger := t.logger.With(zap.String("protocol", "a2a"))
+		// Add CORS headers for all A2A responses, including errors and OPTIONS
+		w.Header().Set("Access-Control-Allow-Origin", "*")                   // Adjust as needed
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET") // Allow GET for .well-known even if routed here initially
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept")
+
+		logger := t.logger.With(zap.String("protocol", "A2A"))
 		logger.Debug("Received A2A request",
 			zap.String("method", r.Method),
 			zap.String("path", r.URL.Path),
 			zap.String("remoteAddr", r.RemoteAddr),
 		)
 
-		// A2A primarily uses POST for task operations
 		switch r.Method {
 		case http.MethodPost:
-			t.handleA2APOST(w, r, logger) // New handler for A2A POST
+			t.handleA2APOST(w, r, logger)
+		case http.MethodGet:
+			http.NotFound(w, r)
 		case http.MethodOptions:
-			// Handle CORS preflight requests
-			w.Header().Set("Access-Control-Allow-Origin", "*") // Adjust as needed
-			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization") // Add other headers if needed
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			logger.Warn("Method not allowed for A2A", zap.String("method", r.Method))
@@ -247,6 +255,16 @@ func (t *Transport) startSessionCleanup() {
 		t.sessionManager.CleanupIdleSessions(t.sessionTimeout)
 	}
 	t.logger.Info("Session cleanup routine stopped")
+}
+
+// registerAgentCardHandler dynamically registers the /.well-known/agent.json handler.
+func (t *Transport) registerAgentCardHandler(mux *http.ServeMux, card a2aSchema.AgentCard) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*") // Allow discovery
+		json.NewEncoder(w).Encode(card)
+	}
+	mux.HandleFunc("/.well-known/agent.json", handler)
 }
 
 // --- Helper to send JSON responses ---
@@ -293,7 +311,6 @@ func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, logger *z
 		session, err := t.sessionManager.GetSession(sessionID)
 		if err == nil {
 			logger.Debug("Retrieved existing session", zap.String("sessionId", sessionID))
-			session.UpdateLastActivity() // Update activity on retrieval
 			return session, nil
 		}
 		// Log specific error if session was looked up but not found

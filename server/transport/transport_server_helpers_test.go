@@ -27,7 +27,8 @@ import (
 
 // --- Mock Implementations ---
 
-// MockMCPManager implements mcp.ISessionManager for testing purposes
+var _ mcp.ISessionManager = &MockMCPManager{}
+
 type MockMCPManager struct {
 	mu       sync.RWMutex
 	sessions map[string]mcp.IDownstreamSession
@@ -266,7 +267,7 @@ func setupServerTest(t *testing.T) (*transport.Transport, *MockMCPManager, *conf
 	mockManager.AddCapability(baseCap, testCap)
 
 	mux := http.NewServeMux()
-	tp.RegisterHandlers(mux)
+	tp.RegisterMCPHandlers(mux)
 	server := httptest.NewServer(mux)
 
 	// Update config with actual server URL (mainly for logging/debugging in tests)
