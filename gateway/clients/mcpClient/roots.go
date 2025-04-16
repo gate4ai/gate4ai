@@ -1,4 +1,4 @@
-package client
+package mcpClient
 
 // Root represents a root directory or file for server operations.
 type Root struct {

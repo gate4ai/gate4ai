@@ -1,4 +1,4 @@
-package client
+package mcpClient
 
 import (
 	"encoding/json"

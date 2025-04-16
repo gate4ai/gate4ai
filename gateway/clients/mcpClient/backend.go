@@ -1,4 +1,4 @@
-package client
+package mcpClient
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/gate4ai/mcp/gateway/client/capability"
+	"github.com/gate4ai/mcp/gateway/clients/mcpClient/capability"
 	"github.com/gate4ai/mcp/shared"
 	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
 	"github.com/r3labs/sse/v2"

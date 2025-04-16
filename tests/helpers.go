@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/client"
+	"github.com/gate4ai/mcp/gateway/clients/mcpClient"
 	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
@@ -45,11 +45,11 @@ func GetToolsList(serverURL string, key string, logger *zap.Logger) ([]schema.To
 	ctxTimeout, cancelTimeout := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelTimeout()
 
-	resultChan := make(chan client.GetToolsResult, 1)
+	resultChan := make(chan mcpClient.GetToolsResult, 1)
 	go func() {
-		c, err := client.New(serverURL, serverURL, logger)
+		c, err := mcpClient.New(serverURL, serverURL, logger)
 		if err != nil {
-			resultChan <- client.GetToolsResult{Err: fmt.Errorf("failed to create client: %w", err)}
+			resultChan <- mcpClient.GetToolsResult{Err: fmt.Errorf("failed to create client: %w", err)}
 			return
 		}
 		session := c.NewSession(ctxTimeout, http.DefaultClient, key)

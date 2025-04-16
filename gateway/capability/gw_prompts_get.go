@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/client"
+	client "github.com/gate4ai/mcp/gateway/clients/mcpClient"
 	"github.com/gate4ai/mcp/shared"
 
 	// Use 2025 schema

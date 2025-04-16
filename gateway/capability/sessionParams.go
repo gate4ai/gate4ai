@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/client"
+	"github.com/gate4ai/mcp/gateway/clients/mcpClient"
 	"github.com/gate4ai/mcp/server/mcp"
 )
 
@@ -21,7 +21,7 @@ type SavedValue struct {
 	Timestamp time.Time
 }
 
-func SaveBackendSessions(sessionParams *sync.Map, clientSessions []*client.Session) {
+func SaveBackendSessions(sessionParams *sync.Map, clientSessions []*mcpClient.Session) {
 	sessionParams.Store(backendSessionsKey, &SavedValue{
 		Value:     clientSessions,
 		Timestamp: time.Now(),
@@ -29,20 +29,20 @@ func SaveBackendSessions(sessionParams *sync.Map, clientSessions []*client.Sessi
 }
 
 // LoadBackendSessions returns backend sessions with timestamp and success indicator
-func LoadBackendSessions(sessionParams *sync.Map) ([]*client.Session, time.Time, bool) {
+func LoadBackendSessions(sessionParams *sync.Map) ([]*mcpClient.Session, time.Time, bool) {
 	savedValue, ok1 := sessionParams.Load(backendSessionsKey)
 	if !ok1 {
-		return []*client.Session{}, time.Time{}, false
+		return []*mcpClient.Session{}, time.Time{}, false
 	}
 
 	saved, ok2 := savedValue.(*SavedValue)
 	if !ok2 {
-		return []*client.Session{}, time.Time{}, false
+		return []*mcpClient.Session{}, time.Time{}, false
 	}
 
-	sessions, ok := saved.Value.([]*client.Session)
+	sessions, ok := saved.Value.([]*mcpClient.Session)
 	if !ok {
-		return []*client.Session{}, time.Time{}, false
+		return []*mcpClient.Session{}, time.Time{}, false
 	}
 
 	return sessions, saved.Timestamp, true

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/client"
+	client "github.com/gate4ai/mcp/gateway/clients/mcpClient"
 	"github.com/gate4ai/mcp/server/mcp"
 	"github.com/gate4ai/mcp/server/transport"
 	"github.com/gate4ai/mcp/shared"

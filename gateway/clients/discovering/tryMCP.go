@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/client"
+	"github.com/gate4ai/mcp/gateway/clients/mcpClient"
 	"github.com/gate4ai/mcp/shared"
 	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
 	"go.uber.org/zap"
@@ -17,7 +17,7 @@ func tryMCPDiscovery(ctx context.Context, targetURL string, authBearer string, l
 	logger.Debug("Attempting MCP discovery", zap.String("url", targetURL))
 
 	// Create a new MCP client for the target URL
-	mcpClient, err := client.New(shared.RandomID(), targetURL, logger.Named("mcp-discover-client"))
+	mcpClient, err := mcpClient.New(shared.RandomID(), targetURL, logger.Named("mcp-discover-client"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create MCP client for discovery: %w", err)
 	}

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/client"
+	"github.com/gate4ai/mcp/gateway/clients/mcpClient"
 	"github.com/gate4ai/mcp/shared"
 
 	// Use 2025 schema
@@ -45,7 +45,7 @@ func (c *GatewayCapability) GetTools(inputMsg *shared.Message, logger *zap.Logge
 	logger.Debug("Cache miss or expired, fetching fresh tools")
 
 	// Define the function to fetch tools from a single backend session
-	fetchToolsFunc := func(ctx context.Context, session *client.Session) ([]*tool, error) {
+	fetchToolsFunc := func(ctx context.Context, session *mcpClient.Session) ([]*tool, error) {
 		fetchLogger := logger.With(zap.String("server", session.Backend.Slug))
 		fetchLogger.Debug("Getting tools from backend")
 

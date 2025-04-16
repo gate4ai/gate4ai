@@ -9,7 +9,7 @@ import (
 	"time"
 
 	gwCapabilities "github.com/gate4ai/mcp/gateway/capability"
-	"github.com/gate4ai/mcp/gateway/discovering"
+	"github.com/gate4ai/mcp/gateway/clients/discovering"
 	"github.com/gate4ai/mcp/gateway/extra"
 	serverextra "github.com/gate4ai/mcp/server/extra"
 	"github.com/gate4ai/mcp/server/mcp"
