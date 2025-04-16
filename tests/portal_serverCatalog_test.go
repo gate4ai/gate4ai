@@ -129,8 +129,8 @@ func TestServerCatalog(t *testing.T) {
 	}
 
 	am.T.Logf("Adding servers")
-	addServer(am, user, "test-server-catalog1")
-	addServer(am, user, "test-server-catalog2")
+	addMCPServer(am, user, "test-server-catalog1")
+	addMCPServer(am, user, "test-server-catalog2")
 
 	// Browse the server catalog
 	err = browseServerCatalog(am, user)

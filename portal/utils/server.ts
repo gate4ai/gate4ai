@@ -1,4 +1,3 @@
-// gate4ai/portal/utils/server.ts
 /**
  * Shared server and tool interfaces
  */
@@ -73,7 +72,7 @@ export interface ServerInfo {
   email?: string | null;
   createdAt: string; // Keep as string for simplicity or use Date
   updatedAt: string; // Keep as string
-  tools: ToolInfo[]; // Use basic ToolInfo for lists
+  tools?: ToolInfo[]; // Use basic ToolInfo for lists
   _count?: {
     tools: number;
     subscriptions: number; // Active subscriptions count
@@ -89,9 +88,12 @@ export interface Server extends ServerInfo {
   status: ServerStatus; // Use imported enum type
   availability: ServerAvailability; // Use imported enum type
   serverUrl: string;
-  tools: ServerTool[]; // Use ServerTool with detailed parameters
   owners: ServerOwner[];
   subscriptionStatusCounts?: Record<SubscriptionStatus, number>;
+  // Add new fields for A2A and REST data
+  tools?: ServerTool[]; // Use ServerTool with detailed parameters
+  a2aSkills?: AgentSkill[];
+  restEndpoints?: RestEndpoint[];
 }
 
 // Server data for forms (matches ServerFormData in ServerForm.vue)
@@ -109,4 +111,41 @@ export interface ServerData {
   status: ServerStatus; // Use Prisma type
   availability: ServerAvailability; // Use Prisma type
   // Tools are usually handled separately, not directly in the main form data object
+}
+
+// Agent to Agent (A2A) skill definitions
+export interface AgentSkill {
+  id: string;
+  name: string;
+  description?: string | null;
+  tags?: string[];
+  examples?: string[];
+  inputModes?: string[];
+  outputModes?: string[];
+}
+
+// REST API endpoint definitions
+export interface RestEndpoint {
+  path: string;
+  method: string;
+  description?: string;
+  queryParams?: RestParameter[];
+  requestBody?: {
+    description?: string;
+    example?: string;
+  };
+  responses?: RestResponse[];
+}
+
+export interface RestParameter {
+  name: string;
+  type: string;
+  description?: string;
+  required: boolean;
+}
+
+export interface RestResponse {
+  statusCode: number;
+  description: string;
+  example?: string;
 }

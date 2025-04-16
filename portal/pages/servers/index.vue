@@ -10,9 +10,9 @@
       <!-- Show Add Server button only when viewing 'all' or 'owned' servers -->
       <v-btn
         v-if="canAddServer"
+        id="add-server-button"
         color="primary"
         prepend-icon="mdi-plus"
-        id="add-server-button"
         @click="showAddServerDialog = true"
       >
         Add Server

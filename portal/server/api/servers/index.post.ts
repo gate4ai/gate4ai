@@ -6,7 +6,56 @@ import type { User } from '@prisma/client';
 // Import enums for validation
 import { ServerProtocol } from '@prisma/client'; // Use ServerProtocol instead of ServerType
 
-// Updated schema to include slug and type (using ServerProtocol enum)
+// Parameter schema (shared between MCP tools and REST endpoints)
+const parameterSchema = z.object({
+  name: z.string().min(1, 'Parameter name is required'),
+  type: z.string().min(1, 'Parameter type is required'),
+  description: z.string().optional().nullable(),
+  required: z.boolean().optional().default(false)
+});
+
+// MCP Tool schema
+const toolSchema = z.object({
+  name: z.string().min(1, 'Tool name is required'),
+  description: z.string().optional().nullable(),
+  parameters: z.array(parameterSchema).optional().default([])
+});
+
+// A2A Skill schema
+const skillSchema = z.object({
+  id: z.string().min(1, 'Skill ID is required'),
+  name: z.string().min(1, 'Skill name is required'),
+  description: z.string().optional().nullable(),
+  tags: z.array(z.string()).optional().default([]),
+  examples: z.array(z.string()).optional().default([]),
+  inputModes: z.array(z.string()).optional().default(['text']),
+  outputModes: z.array(z.string()).optional().default(['text'])
+});
+
+// REST Response schema
+const responseSchema = z.object({
+  statusCode: z.number().int().min(100).max(599),
+  description: z.string().min(1, 'Response description is required'),
+  example: z.string().optional().nullable()
+});
+
+// REST Request Body schema
+const requestBodySchema = z.object({
+  description: z.string().optional().nullable(),
+  example: z.string().optional().nullable()
+});
+
+// REST Endpoint schema
+const endpointSchema = z.object({
+  path: z.string().min(1, 'Endpoint path is required'),
+  method: z.string().min(1, 'HTTP method is required'),
+  description: z.string().optional().nullable(),
+  queryParams: z.array(parameterSchema).optional().default([]),
+  requestBody: requestBodySchema.optional().nullable(),
+  responses: z.array(responseSchema).optional().default([])
+});
+
+// Updated schema to include protocol-specific data
 const createServerSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100, 'Name must be 100 characters or less'),
   slug: z.string().min(1, 'Slug is required').regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Invalid slug format'),
@@ -17,20 +66,10 @@ const createServerSchema = z.object({
   imageUrl: z.string().url('Invalid URL format').optional().nullable(),
   serverUrl: z.string().url('Server URL must be a valid URL'),
   protocolVersion: z.string().optional(),
-  tools: z.array(
-    z.object({
-      name: z.string().min(1, 'Tool name is required'),
-      description: z.string().optional().nullable(),
-      parameters: z.array(
-        z.object({
-          name: z.string().min(1, 'Parameter name is required'),
-          type: z.string().min(1, 'Parameter type is required'),
-          description: z.string().optional().nullable(),
-          required: z.boolean().optional().default(false)
-        })
-      ).optional().default([])
-    })
-  ).optional().default([])
+  // Protocol-specific data based on the server type
+  tools: z.array(toolSchema).optional().default([]), // MCP Tools
+  a2aSkills: z.array(skillSchema).optional().default([]), // A2A Skills
+  restEndpoints: z.array(endpointSchema).optional().default([]) // REST Endpoints
 }).strict();
 
 export default defineEventHandler(async (event) => {
@@ -55,6 +94,7 @@ export default defineEventHandler(async (event) => {
 
     // 3. Create server with tools and parameters in a transaction
     const newServer = await prisma.$transaction(async (tx) => {
+      // Create the base server
       const server = await tx.server.create({
         data: {
           name: validatedData.name,
@@ -67,8 +107,6 @@ export default defineEventHandler(async (event) => {
           serverUrl: validatedData.serverUrl,
           protocolVersion: validatedData.protocolVersion || "",
           // status and availability will use Prisma schema defaults
-          // status: validatedData.status,
-          // availability: validatedData.availability,
           owners: {
             create: [{ userId: authenticatedUser.id }],
           },
@@ -92,8 +130,8 @@ export default defineEventHandler(async (event) => {
         }
       });
 
-      // Create tools and parameters (unchanged)
-      if (validatedData.tools && validatedData.tools.length > 0) {
+      // Create MCP tools and parameters if protocol is MCP
+      if (validatedData.protocol === 'MCP' && validatedData.tools && validatedData.tools.length > 0) {
         for (const toolData of validatedData.tools) {
           const newTool = await tx.tool.create({
             data: {
@@ -117,6 +155,74 @@ export default defineEventHandler(async (event) => {
           }
         }
       }
+      
+      // Create A2A skills if protocol is A2A
+      if (validatedData.protocol === 'A2A' && validatedData.a2aSkills && validatedData.a2aSkills.length > 0) {
+        await tx.a2ASkill.createMany({
+          data: validatedData.a2aSkills.map(skill => ({
+            name: skill.name,
+            description: skill.description,
+            tags: skill.tags,
+            examples: skill.examples,
+            inputModes: skill.inputModes,
+            outputModes: skill.outputModes,
+            serverId: server.id
+          }))
+        });
+      }
+      
+      // Create REST endpoints if protocol is REST
+      if (validatedData.protocol === 'REST' && validatedData.restEndpoints && validatedData.restEndpoints.length > 0) {
+        for (const endpointData of validatedData.restEndpoints) {
+          // Create the endpoint first
+          const newEndpoint = await tx.rESTEndpoint.create({
+            data: {
+              path: endpointData.path,
+              method: endpointData.method,
+              description: endpointData.description,
+              serverId: server.id
+            },
+            select: { id: true }
+          });
+          
+          // Create parameters if any
+          if (endpointData.queryParams && endpointData.queryParams.length > 0) {
+            await tx.rESTParameter.createMany({
+              data: endpointData.queryParams.map(param => ({
+                name: param.name,
+                type: param.type,
+                description: param.description,
+                required: param.required,
+                endpointId: newEndpoint.id
+              }))
+            });
+          }
+          
+          // Create request body if any
+          if (endpointData.requestBody) {
+            await tx.rESTRequestBody.create({
+              data: {
+                description: endpointData.requestBody.description,
+                example: endpointData.requestBody.example,
+                endpointId: newEndpoint.id
+              }
+            });
+          }
+          
+          // Create responses if any
+          if (endpointData.responses && endpointData.responses.length > 0) {
+            await tx.rESTResponse.createMany({
+              data: endpointData.responses.map(response => ({
+                statusCode: response.statusCode,
+                description: response.description,
+                example: response.example,
+                endpointId: newEndpoint.id
+              }))
+            });
+          }
+        }
+      }
+      
       return server; // Return the created server data
     });
 
@@ -130,7 +236,7 @@ export default defineEventHandler(async (event) => {
        throw error;
      }
       // Handle potential Prisma errors (e.g., unique constraint on slug)
-     if (error instanceof Error && 'code' in error && error.code === 'P2002' && (error as any).meta?.target?.includes('slug')) {
+     if (error instanceof Error && 'code' in error && (error as any).code === 'P2002' && (error as any).meta?.target?.includes('slug')) {
          throw createError({ statusCode: 409, statusMessage: 'A server with this slug already exists.' });
      }
      throw createError({

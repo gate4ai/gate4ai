@@ -83,7 +83,7 @@ export default defineEventHandler(async (event) => {
         availability: true,
         createdAt: true,
         updatedAt: true,
-        tools: { include: { parameters: true } }, // Include related data if needed by frontend
+        tools: { include: { parameters: true } },
         owners: { select: { user: { select: { id: true, name: true, email: true } } } },
       }
     });

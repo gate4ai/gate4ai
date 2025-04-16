@@ -40,6 +40,7 @@ var (
 	EXAMPLE_MCP2024_SERVER_URL string
 	EXAMPLE_MCP2025_SERVER_URL string
 	MAILHOG_API_URL            string
+	A2A_SERVER_URL             string // A2A server URL for testing
 	EMAIL_SMTP_SERVER          SmtpServerType
 	pw                         *playwright.Playwright
 )
@@ -70,10 +71,10 @@ func TestMain(m *testing.M) {
 		result interface{}
 		err    error
 	}
-	containerChan := make(chan initResult, 3) // Buffer for the 3 initial containers (PostgreSQL, MailHog, Playwright)
+	containerChan := make(chan initResult, 4) // Buffer for the 4 initial containers (PostgreSQL, MailHog, A2A, Playwright)
 	resultChan := make(chan initResult, 3)    // Buffer for other tasks (portal, gateway, example)
 
-	// Step 1: Start the PostgreSQL and MailHog containers and Playwright in parallel
+	// Step 1: Start the PostgreSQL, MailHog, A2A containers and Playwright in parallel
 	go func() {
 		dbContainer, err := startDB(ctx)
 		if err != nil {
@@ -93,6 +94,15 @@ func TestMain(m *testing.M) {
 	}()
 
 	go func() {
+		a2aContainer, err := startA2AServer(ctx)
+		if err != nil {
+			containerChan <- initResult{"a2a", nil, fmt.Errorf("failed to start A2A container: %v", err)}
+			return
+		}
+		containerChan <- initResult{"a2a", a2aContainer, nil}
+	}()
+
+	go func() {
 		playwright, err := playwright.Run()
 		if err != nil {
 			containerChan <- initResult{"playwright", nil, fmt.Errorf("failed to start playwright: %v", err)}
@@ -101,12 +111,13 @@ func TestMain(m *testing.M) {
 		containerChan <- initResult{"playwright", playwright, nil}
 	}()
 
-	// Wait for both containers to start
+	// Wait for all containers to start
 	var dbContainer testcontainers.Container
 	var mailhogContainer testcontainers.Container
+	var a2aContainer testcontainers.Container
 	var errors []error
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		result := <-containerChan
 		if result.err != nil {
 			errors = append(errors, result.err)
@@ -118,6 +129,8 @@ func TestMain(m *testing.M) {
 			dbContainer = result.result.(testcontainers.Container)
 		case "mailhog":
 			mailhogContainer = result.result.(testcontainers.Container)
+		case "a2a":
+			a2aContainer = result.result.(testcontainers.Container)
 		case "playwright":
 			pw = result.result.(*playwright.Playwright)
 		}
@@ -128,6 +141,7 @@ func TestMain(m *testing.M) {
 		for _, err := range errors {
 			log.Printf("Container initialization error: %v\n", err)
 		}
+		cleanup(ctx, dbContainer, mailhogContainer, a2aContainer, nil, nil, nil)
 		return
 	}
 
@@ -135,7 +149,7 @@ func TestMain(m *testing.M) {
 	portalPort, gatewayPort, examplePort, err := FindAvailablePort3()
 	if err != nil {
 		log.Printf("Failed to find available ports: %v\n", err)
-		cleanup(ctx, dbContainer, mailhogContainer, nil, nil, nil)
+		cleanup(ctx, dbContainer, mailhogContainer, a2aContainer, nil, nil, nil)
 		return
 	}
 	PORTAL_INTERNAL_URL = fmt.Sprintf("http://localhost:%d", portalPort) // Internal URL for gateway proxy
@@ -156,14 +170,14 @@ func TestMain(m *testing.M) {
 	// Step 3: Run Prisma migrations
 	if err := runPrismaMigrations(); err != nil {
 		log.Printf("Failed to run prisma migrations: %v\n", err)
-		cleanup(ctx, dbContainer, mailhogContainer, nil, nil, nil)
+		cleanup(ctx, dbContainer, mailhogContainer, a2aContainer, nil, nil, nil)
 		return
 	}
 
 	// Step 4: Update database config with URLs
 	if err := updateDatabaseSettings(); err != nil {
 		log.Printf("Failed to update database settings: %v\n", err)
-		cleanup(ctx, dbContainer, mailhogContainer, nil, nil, nil)
+		cleanup(ctx, dbContainer, mailhogContainer, a2aContainer, nil, nil, nil)
 		return
 	}
 
@@ -176,17 +190,6 @@ func TestMain(m *testing.M) {
 		}
 		resultChan <- initResult{"portal", portalServer, nil}
 	}()
-
-	// Step 6.5: Wait for Portal to be ready *before* starting Gateway
-	log.Println("Waiting for Portal server to be ready...")
-	portalStatusURL := fmt.Sprintf("%s/api/status", PORTAL_INTERNAL_URL) // Check internal URL
-	if err := waitForServer(portalStatusURL); err != nil {
-		log.Printf("Portal server did not become ready: %v", err)
-		// Attempt cleanup even if portal fails
-		cleanup(ctx, dbContainer, mailhogContainer, nil, nil, nil)
-		return
-	}
-	log.Println("Portal server is ready.")
 
 	// Step 7: Start the gateway server in a goroutine
 	go func() {
@@ -236,19 +239,19 @@ func TestMain(m *testing.M) {
 		for _, err := range errors {
 			log.Printf("Initialization error: %v\n", err)
 		}
-		cleanup(ctx, dbContainer, mailhogContainer, portalServer, gatewayServer, exampleServer)
+		cleanup(ctx, dbContainer, mailhogContainer, a2aContainer, portalServer, gatewayServer, exampleServer)
 		return
 	}
 
 	// Clean up resources on exit
-	defer cleanup(ctx, dbContainer, mailhogContainer, portalServer, gatewayServer, exampleServer)
+	defer cleanup(ctx, dbContainer, mailhogContainer, a2aContainer, portalServer, gatewayServer, exampleServer)
 
 	// Run the tests and get the exit code
 	exitCode = m.Run()
 }
 
 // cleanup handles graceful termination of all resources
-func cleanup(ctx context.Context, dbContainer, mailhogContainer testcontainers.Container,
+func cleanup(ctx context.Context, dbContainer, mailhogContainer, a2aContainer testcontainers.Container,
 	portalServer, gatewayServer, exampleServer *Server) {
 	// Added check for nil before terminating
 	if portalServer != nil {
@@ -273,6 +276,12 @@ func cleanup(ctx context.Context, dbContainer, mailhogContainer testcontainers.C
 		log.Println("Stopping MailHog container...")
 		if err := mailhogContainer.Terminate(ctx); err != nil {
 			log.Printf("Failed to stop MailHog container: %v\n", err)
+		}
+	}
+	if a2aContainer != nil {
+		log.Println("Stopping A2A container...")
+		if err := a2aContainer.Terminate(ctx); err != nil {
+			log.Printf("Failed to stop A2A container: %v\n", err)
 		}
 	}
 	if pw != nil {
@@ -388,6 +397,52 @@ func startMailHog(ctx context.Context) (testcontainers.Container, error) {
 	log.Printf("MailHog container started, SMTP: %s:%s, Web UI: %s:%s\n",
 		host, smtpPort.Port(), host, uiPort.Port())
 
+	return container, nil
+}
+
+// startA2AServer starts an A2A server container based on the Dockerfile
+func startA2AServer(ctx context.Context) (testcontainers.Container, error) {
+	// Build the Docker image using the dockerfile - fix path to be in same directory
+	dockerfilePath := "a2a-testServer.Dockerfile"
+
+	// Prepare container request to build and start the container
+	req := testcontainers.ContainerRequest{
+		FromDockerfile: testcontainers.FromDockerfile{
+			Context:    ".",
+			Dockerfile: dockerfilePath,
+		},
+		ExposedPorts: []string{"41241/tcp"},
+		WaitingFor:   wait.ForListeningPort("41241/tcp").WithStartupTimeout(120 * time.Second), // Longer timeout for build and startup
+	}
+
+	// Start the container
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to start A2A container: %w", err)
+	}
+
+	// Get the container's mapped port
+	mappedPort, err := container.MappedPort(ctx, "41241")
+	if err != nil {
+		container.Terminate(ctx)
+		return nil, fmt.Errorf("failed to get mapped port for A2A container: %w", err)
+	}
+
+	// Get the container's host
+	host, err := container.Host(ctx)
+	if err != nil {
+		container.Terminate(ctx)
+		return nil, fmt.Errorf("failed to get host for A2A container: %w", err)
+	}
+
+	// Build the A2A server URL
+	A2A_SERVER_URL = fmt.Sprintf("http://%s:%s", host, mappedPort.Port())
+	os.Setenv("GATE4AI_A2A_SERVER_URL", A2A_SERVER_URL)
+
+	log.Printf("A2A server container started, URL: %s\n", A2A_SERVER_URL)
 	return container, nil
 }
 
@@ -579,11 +634,10 @@ func startPortalServer(ctx context.Context, port int) (*Server, error) {
 		ctx:  cancel,
 	}
 
-	// Wait for the server to be ready - Handled outside this function now
-	// if err := waitForServer(fmt.Sprintf("http://localhost:%d/api/status", port)); err != nil {
-	// 	server.Stop()
-	// 	return nil, err
-	// }
+	if err := waitForServer(fmt.Sprintf("http://localhost:%d/api/status", port)); err != nil {
+		server.Stop()
+		return nil, err
+	}
 
 	log.Printf("Portal server started (PID: %d) in production mode, listening internally on :%d\n", cmd.Process.Pid, port)
 	return server, nil
@@ -729,11 +783,6 @@ func startGatewayServer(ctx context.Context, port int) (*Server, error) {
 		cancel()
 		return nil, fmt.Errorf("failed to create gateway database config: %w", err)
 	}
-	// Ensure Close is called when context is done
-	go func() {
-		<-serverCtx.Done()
-		cfgGw.Close()
-	}()
 
 	node, err := gateway.Start(serverCtx, logger.With(zap.String("s", "gateway")), cfgGw, fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -741,9 +790,10 @@ func startGatewayServer(ctx context.Context, port int) (*Server, error) {
 		return nil, fmt.Errorf("failed to start gateway node: %w", err)
 	}
 
-	// Goroutine to wait for shutdown (optional, helps ensure cleanup)
 	go func() {
-		node.WaitForShutdown(10 * time.Second) // Wait briefly on exit
+		<-serverCtx.Done()
+		cfgGw.Close()
+		node.WaitForShutdown(10 * time.Second)
 	}()
 
 	// Create the server instance (cmd is nil as it's run in-process)

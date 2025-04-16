@@ -6,7 +6,6 @@
 
     <v-text-field
       :model-value="serverName"
-      @update:model-value="$emit('update:serverName', $event)"
       label="Server Name *"
       placeholder="Enter a name for this server"
       required
@@ -16,20 +15,20 @@
       class="mb-4"
       :disabled="isLoading"
       data-testid="step2-server-name-input"
+      @update:model-value="$emit('update:serverName', $event)"
     />
     <v-textarea
       :model-value="description"
-      @update:model-value="$emit('update:description', $event)"
       label="Description (Optional)"
       rows="2"
       variant="outlined"
       density="compact"
       class="mb-4"
       :disabled="isLoading"
+      @update:model-value="$emit('update:description', $event)"
     />
     <v-text-field
       :model-value="websiteUrl"
-      @update:model-value="$emit('update:websiteUrl', $event)"
       label="Website URL (Optional)"
       hint="e.g. https://example.com"
       :rules="[rules.simpleUrl]"
@@ -37,10 +36,10 @@
       density="compact"
       class="mb-4"
       :disabled="isLoading"
+      @update:model-value="$emit('update:websiteUrl', $event)"
     />
     <v-text-field
       :model-value="email"
-      @update:model-value="$emit('update:email', $event)"
       label="Contact Email (Optional)"
       hint="e.g. contact@example.com"
       :rules="[rules.email]"
@@ -48,6 +47,7 @@
       density="compact"
       class="mb-4"
       :disabled="isLoading"
+      @update:model-value="$emit('update:email', $event)"
     />
     <!-- Display discovered skills (read-only) -->
     <div v-if="a2aSkills && a2aSkills.length > 0">

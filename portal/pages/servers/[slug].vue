@@ -33,7 +33,7 @@
       <v-col cols="12" md="8">
         <div class="d-flex align-center mb-4">
            <h1 class="text-h3 mr-2">{{ server.name }}</h1>
-           <v-chip v-if="server.type" color="info" size="small">{{ server.type }}</v-chip>
+           <v-chip v-if="server.protocol" color="info" size="small">{{ server.protocol }}</v-chip>
           <v-spacer />
 
           <!-- Server management buttons for owners, admins and security -->
@@ -59,7 +59,10 @@
 
         <p class="text-body-1 mb-6">{{ server.description }}</p>
 
-        <ServerTools :tools="server.tools" :is-authenticated="isAuthenticated" />
+        <!-- Display components based on server protocol -->
+        <MCPServerTools v-if="server.protocol === 'MCP'" :tools="server.tools" :is-authenticated="isAuthenticated" />
+        <A2AServerSkills v-else-if="server.protocol === 'A2A'" :skills="server.a2aSkills" :is-authenticated="isAuthenticated" />
+        <RESTServerFuncs v-else-if="server.protocol === 'REST'" :endpoints="server.restEndpoints" :is-authenticated="isAuthenticated" />
       </v-col>
     </v-row>
 
@@ -79,18 +82,19 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { useRoute, useRouter } from 'vue-router'; // Import useRouter
+import { useRoute } from 'vue-router'; 
 import ServerInfo from '~/components/ServerInfo.vue';
 import ServerInfoForOwners from '~/components/ServerInfoForOwners.vue';
 import DeleteServerDialog from '~/components/DeleteServerDialog.vue';
-import ServerTools from '~/components/ServerTools.vue';
+import MCPServerTools from '~/components/MCPServerTools.vue';
+import A2AServerSkills from '~/components/A2AServerSkills.vue';
+import RESTServerFuncs from '~/components/RESTServerFuncs.vue';
 import type { Server } from '~/utils/server'; // Use the updated Server type
 import { useSnackbar } from '~/composables/useSnackbar'; // Import useSnackbar
 
 const { $auth, $api } = useNuxtApp();
 const route = useRoute();
-const router = useRouter(); // Use useRouter for navigation
-const { showError } = useSnackbar(); // Use snackbar for errors
+const { showError, showSuccess } = useSnackbar(); // Use snackbar for errors and success
 
 const serverSlug = route.params.slug as string; // Get slug from route
 const isLoading = ref(true);

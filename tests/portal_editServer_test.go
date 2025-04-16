@@ -160,7 +160,7 @@ func TestEditServer(t *testing.T) {
 	require.NoError(t, err, "Failed to create user")
 
 	// Add a new server
-	server, err := addServer(am, user, "test-edit-server")
+	server, err := addMCPServer(am, user, "test-edit-server")
 	require.NoError(t, err, "Failed to add server")
 	require.NotNil(t, server)
 

@@ -93,6 +93,8 @@ model Server {
   // Relations
   owners        ServerOwner[] // Hidden from non-owners
   tools         Tool[]
+  a2aSkills     A2ASkill[]
+  restEndpoints RESTEndpoint[]
   subscriptions Subscription[] // Hidden from non-owners
   toolCalls     ToolCall[] // Hidden from non-owners
 }
@@ -202,4 +204,78 @@ model Settings {
   frontend    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// A2A Skill model for Agent to Agent servers
+model A2ASkill {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  tags        String[] // Array of tags associated with the skill
+  examples    String[] // Example usage of the skill
+  inputModes  String[] // Input content types supported by the skill
+  outputModes String[] // Output content types produced by the skill
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  serverId String
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([name, serverId])
+}
+
+// REST Endpoint model for REST API servers
+model RESTEndpoint {
+  id          String   @id @default(uuid())
+  path        String   // API path like /api/users
+  method      String   // HTTP method (GET, POST, etc.)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  serverId String
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  parameters RESTParameter[]
+  requestBody RESTRequestBody?
+  responses RESTResponse[]
+
+  @@unique([path, method, serverId])
+}
+
+// REST Parameter model
+model RESTParameter {
+  id          String  @id @default(uuid())
+  name        String
+  type        String
+  description String?
+  required    Boolean @default(false)
+
+  // Relations
+  endpointId String
+  endpoint   RESTEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+}
+
+// REST Request Body model
+model RESTRequestBody {
+  id          String @id @default(uuid())
+  description String?
+  example     String? // Example JSON as string
+
+  // Relations
+  endpointId String       @unique
+  endpoint   RESTEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+}
+
+// REST Response model
+model RESTResponse {
+  id          String @id @default(uuid())
+  statusCode  Int
+  description String
+  example     String? // Example JSON as string
+
+  // Relations
+  endpointId String
+  endpoint   RESTEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
 }

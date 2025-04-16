@@ -1,6 +1,3 @@
-//////////////////////////
-// /home/alex/go-ai/gate4ai/www/components/ServerTools.vue
-//////////////////////////
 <template>
   <div>
     <h2 class="text-h4 mb-4">Available Tools</h2>

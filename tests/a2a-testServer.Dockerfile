@@ -14,6 +14,9 @@ WORKDIR /app/A2A/samples/js
 # Install dependencies
 RUN npm install
 
+# Set a dummy Gemini API key for testing purposes
+ENV GEMINI_API_KEY="DUMMY_KEY_FOR_TESTS"
+
 # Expose the default port for the coder agent
 EXPOSE 41241
 

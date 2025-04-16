@@ -70,7 +70,7 @@ func TestServerSubscriptions(t *testing.T) {
 	require.NoError(t, err, "Failed to create subscriber user")
 
 	// Owner adds the server
-	server, err := addServer(am, owner, "test-server-subscriptions")
+	server, err := addMCPServer(am, owner, "test-server-subscriptions")
 	require.NoError(t, err, "Failed to add server")
 	require.NotNil(t, server)
 

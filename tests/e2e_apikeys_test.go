@@ -26,7 +26,7 @@ func TestGatewayAPIKeyAuthorization(t *testing.T) {
 
 	// 1. Owner adds a demo server
 	t.Log("Owner adding server...")
-	server, err := addServer(am, owner, "test-gateway-apikey-authorization")
+	server, err := addMCPServer(am, owner, "test-gateway-apikey-authorization")
 	require.NoError(t, err, "Failed to add server")
 	require.NotNil(t, server)
 	t.Logf("Server added by owner. Slug: %s", server.Slug)

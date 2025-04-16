@@ -2,7 +2,6 @@
     <div>
       <v-text-field
         :model-value="serverUrl"
-        @update:model-value="$emit('update:serverUrl', $event); $emit('url-input')"
         label="Server URL *"
         placeholder="Enter the base URL of the server"
         hint="URL of the server (e.g., https://api.example.com/mcp or http://localhost:4001/sse?key=...)"
@@ -13,11 +12,11 @@
         variant="outlined"
         density="compact"
         data-testid="add-server-url-input"
+        @update:model-value="$emit('update:serverUrl', $event); $emit('url-input')"
       />
   
       <v-text-field
         :model-value="slug"
-        @update:model-value="$emit('update:slug', $event); $emit('slug-input')"
         label="Server Slug *"
         placeholder="my-unique-server-slug"
         hint="Unique identifier (letters, numbers, hyphens). Used in URLs."
@@ -28,20 +27,21 @@
         :disabled="isLoading || isDiscovering"
         class="mb-4"
         variant="outlined"
+        @update:model-value="$emit('update:slug', $event); $emit('slug-input')"
         density="compact"
         data-testid="add-server-slug-input"
       />
   
       <!-- Fetch / Discover Button -->
       <v-btn
+        id="discover-server-button"
         color="info"
         block
         :loading="isDiscovering"
         :disabled="isLoading || !isStep1Valid || isCheckingSlug || !!slugError"
-        @click="$emit('discover')"
         class="mb-4"
-        id="discover-server-button"
         data-testid="discover-server-button"
+        @click="$emit('discover')"
       >
         Discover Server Type & Info
       </v-btn>
