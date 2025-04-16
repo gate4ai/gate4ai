@@ -22,7 +22,7 @@
             :is-checking-slug="isCheckingSlug"
             :slug-error="slugError"
             :fetch-error="fetchError"
-            :is-step1-valid="isStep1Valid"
+            :is-step1-valid="isStep1Valid as boolean"
             :slug-unique-rule="slugUniqueRule"
             @url-input="autoGenerateSlug"
             @slug-input="handleSlugInput"
@@ -32,7 +32,7 @@
 
           <!-- Step 2: Confirm/Edit MCP Info -->
           <AddServerDialogStep2MCP
-            v-if="currentStep === 2 && discoveredType === 'MCP'"
+            v-if="currentStep === 2 && discoveredPtrotocol === 'MCP'"
             v-model:server-name="serverName"
             v-model:description="description"
             v-model:website-url="websiteUrl"
@@ -42,16 +42,40 @@
             :save-error="fetchError"
           />
 
+          <!-- Step 2: A2A Server Details -->
+          <AddServerDialogStep2A2A
+            v-if="currentStep === 2 && discoveredPtrotocol === 'A2A'"
+            v-model:server-name="serverName"
+            v-model:description="description"
+            v-model:website-url="websiteUrl"
+            v-model:email="email"
+            :is-loading="isLoading"
+            :a2a-skills="discoveredInfo?.a2aSkills || []"
+            :save-error="fetchError"
+          />
+
+          <!-- Step 2: REST Server Details -->
+          <AddServerDialogStep2REST
+            v-if="currentStep === 2 && discoveredPtrotocol === 'REST'"
+            v-model:server-name="serverName"
+            v-model:description="description"
+            v-model:website-url="websiteUrl"
+            v-model:email="email"
+            :is-loading="isLoading"
+            :protocol-version="discoveredInfo?.protocolVersion || 'Unknown'"
+            :save-error="fetchError"
+          />
+
           <!-- Step 2: Unsupported Type Message -->
-          <div v-if="currentStep === 2 && discoveredType !== 'MCP' && discoveredType !== 'ERROR' && discoveredType !== 'UNKNOWN'">
+          <div v-if="currentStep === 2 && discoveredPtrotocol !== 'MCP' && discoveredPtrotocol !== 'A2A' && discoveredPtrotocol !== 'REST' && discoveredPtrotocol !== 'ERROR' && discoveredPtrotocol !== 'UNKNOWN'">
             <v-alert type="warning" variant="tonal" class="mb-4">
-              Detected Server Type: <strong>{{ discoveredType }}</strong><br>
-              This server type is not currently supported by the Add Server feature. Automatic addition is only available for MCP servers.
+              Detected Server Protocol: <strong>{{ discoveredPtrotocol }}</strong><br>
+              This server type is not currently supported by the Add Server feature.
             </v-alert>
           </div>
 
           <!-- Step 2: Unknown Type / Error Message -->
-          <div v-if="currentStep === 2 && (discoveredType === 'UNKNOWN' || discoveredType === 'ERROR')">
+          <div v-if="currentStep === 2 && (discoveredPtrotocol === 'UNKNOWN' || discoveredPtrotocol === 'ERROR')">
             <v-alert type="error" variant="tonal" class="mb-4">
               Could not reliably determine the server type, or an error occurred during discovery. Please check the URL and server status.
               <span v-if="fetchError"><br>Details: {{ fetchError }}</span>
@@ -84,7 +108,7 @@
           </v-btn>
           <!-- Save button only visible in Step 2 and only for MCP type -->
           <v-btn
-            v-if="currentStep === 2 && discoveredType === 'MCP'"
+            v-if="currentStep === 2 && discoveredPtrotocol === 'MCP'"
             color="primary"
             variant="flat"
             :loading="isLoading"
@@ -94,6 +118,34 @@
             data-testid="add-mcp-server-button"
           >
             Add MCP Server
+          </v-btn>
+          
+          <!-- A2A Server button -->
+          <v-btn
+            v-if="currentStep === 2 && discoveredPtrotocol === 'A2A'"
+            color="primary"
+            variant="flat"
+            :loading="isLoading"
+            :disabled="isDiscovering || !isStep2Valid"
+            @click="saveServer"
+            id="add-a2a-server-button"
+            data-testid="add-a2a-server-button"
+          >
+            Add A2A Server
+          </v-btn>
+          
+          <!-- REST Server button -->
+          <v-btn
+            v-if="currentStep === 2 && discoveredPtrotocol === 'REST'"
+            color="primary"
+            variant="flat"
+            :loading="isLoading"
+            :disabled="isDiscovering || !isStep2Valid"
+            @click="saveServer"
+            id="add-rest-server-button"
+            data-testid="add-rest-server-button"
+          >
+            Add REST Server
           </v-btn>
         </v-card-actions>
       </v-form>
@@ -107,22 +159,37 @@ import { useDebounceFn } from '@vueuse/core';
 import { useRouter } from 'vue-router';
 import AddServerDialogStep1 from './AddServerDialogStep1.vue';
 import AddServerDialogStep2MCP from './AddServerDialogStep2MCP.vue';
-import type { ServerType, ServerTool as DiscoveredTool } from '~/utils/server';
+import AddServerDialogStep2A2A from './AddServerDialogStep2A2A.vue';
+import AddServerDialogStep2REST from './AddServerDialogStep2REST.vue';
 import { useSnackbar } from '~/composables/useSnackbar';
 import { rules } from '~/utils/validation';
+import type { ServerProtocol } from '@prisma/client';
 
 // --- Interface Definitions ---
-interface MCPInfoResponse {
-    serverInfo?: { name: string; version?: string };
-    tools?: DiscoveredTool[];
+interface DiscoveredTool {
+  name: string;
+  description?: string;
+  inputSchema?: {
+    type: string;
+    properties?: Record<string, {
+      type: string;
+      description?: string;
+    }>;
+    required?: string[];
+  };
 }
-interface A2AInfoResponse { agentJsonUrl?: string }
-interface RESTInfoResponse { openApiJsonUrl?: string; swaggerUrl?: string }
+
 interface DiscoveringResponse {
+  url: string;
+  name: string;
+  version: string;
+  description: string;
+  website: string | null;
+  protocol: 'MCP' | 'A2A' | 'REST';
+  protocolVersion: string;
+  mcpTools?: DiscoveredTool[];
+  a2aSkills?: any[];
   error?: string;
-  mcp?: MCPInfoResponse;
-  a2a?: A2AInfoResponse;
-  rest?: RESTInfoResponse;
 }
 
 // --- Props and Emits ---
@@ -147,7 +214,7 @@ const email = ref(''); // (for Step 2)
 // --- Discovery & Server State ---
 const discoveredInfo = ref<DiscoveringResponse | null>(null);
 const discoveredTools = ref<DiscoveredTool[]>([]);
-const discoveredType = ref<ServerType | 'UNKNOWN' | 'ERROR' | null>(null);
+const discoveredPtrotocol = ref<ServerProtocol | 'UNKNOWN' | 'ERROR' | null>(null);
 const fetchError = ref(''); // Covers discovery and save errors
 const wasSlugAutoGenerated = ref(false);
 
@@ -171,15 +238,20 @@ watch(dialog, (val) => emit('update:modelValue', val));
 
 // --- Computed Properties ---
 const isStep1Valid = computed(() => {
-  return serverUrl.value && slug.value && !slugError.value &&
-         rules.url(serverUrl.value) === true &&
-         rules.slugFormat(slug.value) === true &&
+  const urlValid = rules.url(serverUrl.value) === true;
+  const slugValid = rules.slugFormat(slug.value) === true;
+  
+  return serverUrl.value && 
+         slug.value && 
+         !slugError.value &&
+         urlValid &&
+         slugValid &&
          !isCheckingSlug.value; // Ensure check is complete
 });
 
 const isStep2Valid = computed(() => {
     // Validation specific to Step 2 (MCP)
-    return discoveredType.value === 'MCP' &&
+    return discoveredPtrotocol.value === 'MCP' &&
            serverName.value && // Name is required
            slug.value && // Slug must still be valid
            !slugError.value && // No slug errors
@@ -204,7 +276,7 @@ function resetForm() {
   email.value = '';
   discoveredInfo.value = null;
   discoveredTools.value = [];
-  discoveredType.value = null;
+  discoveredPtrotocol.value = null;
   fetchError.value = '';
   slugError.value = '';
   isCheckingSlug.value = false;
@@ -305,7 +377,7 @@ async function fetchServerInfo() {
     fetchError.value = '';
     discoveredInfo.value = null;
     discoveredTools.value = [];
-    discoveredType.value = null;
+    discoveredPtrotocol.value = null;
 
     try {
         const gatewayAddress = $settings.get('general_gateway_address') as string;
@@ -323,39 +395,43 @@ async function fetchServerInfo() {
         console.log('Discovery response:', data);
         discoveredInfo.value = data;
 
-        // Determine Type
-        if (data.mcp) discoveredType.value = 'MCP';
-        else if (data.a2a) discoveredType.value = 'A2A';
-        else if (data.rest) discoveredType.value = 'REST';
-        else discoveredType.value = 'UNKNOWN';
-
-        if (data.error && discoveredType.value === 'UNKNOWN') {
+        // Determine Type - it's now directly in the protocol field
+        discoveredPtrotocol.value = data.protocol as ServerProtocol;
+        
+        // Handle error
+        if (data.error) {
             throw new Error(`Discovery failed: ${data.error}`);
         }
 
         // Populate Step 2 fields based on discovery
-        if (discoveredType.value === 'MCP' && data.mcp) {
-            serverName.value = data.mcp.serverInfo?.name || slug.value || 'MCP Server';
-            discoveredTools.value = data.mcp.tools || [];
+        if (discoveredPtrotocol.value === 'MCP') {
+            serverName.value = data.name || slug.value || 'MCP Server';
+            description.value = data.description || '';
+            websiteUrl.value = data.website || '';
+            discoveredTools.value = data.mcpTools || [];
+        } else if (discoveredPtrotocol.value === 'A2A') {
+            serverName.value = data.name || slug.value || 'A2A Agent';
+            description.value = data.description || '';
+            websiteUrl.value = data.website || '';
+            // Handle A2A specific data if needed
+        } else if (discoveredPtrotocol.value === 'REST') {
+            serverName.value = data.name || slug.value || 'REST API';
+            description.value = data.description || '';
+            websiteUrl.value = data.website || '';
+            // Handle REST specific data if needed
         } else {
-             // Set default names for other types or if MCP discovery failed
-             serverName.value = slug.value || `${discoveredType.value || 'Unknown'} Server`;
-             if (discoveredType.value !== 'MCP') {
-                 // Set informative message for non-MCP types to be shown in Step 2
-                 // fetchError.value = `Server type ${discoveredType.value} is not currently supported for automatic addition.`;
-             } else if (discoveredType.value === 'UNKNOWN' || discoveredType.value === 'ERROR') {
-                 fetchError.value = 'Could not determine server type or type is unsupported.';
-             }
+            discoveredPtrotocol.value = 'UNKNOWN';
+            fetchError.value = 'Could not determine server type or type is unsupported.';
         }
 
-        currentStep.value = 2; // Move to next step
+        currentStep.value = 2; // Move to next step regardless of type
 
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Failed to discover server info.';
         fetchError.value = message; // Display error in step 1
         showError(message);
         console.error("Error discovering server:", err);
-        discoveredType.value = 'ERROR';
+        discoveredPtrotocol.value = 'ERROR';
         // Stay in Step 1 on discovery failure
     } finally {
         isDiscovering.value = false;
@@ -364,8 +440,8 @@ async function fetchServerInfo() {
 
 // Step 2 Action: Save the MCP server
 async function saveServer() {
-    if (discoveredType.value !== 'MCP' || !discoveredInfo.value?.mcp) {
-        showError("Cannot add server: Only MCP type is currently supported or discovery failed.");
+    if (!['MCP', 'A2A', 'REST'].includes(discoveredPtrotocol.value as string)) {
+        showError("Cannot add server: Only MCP, A2A, and REST types are currently supported or discovery failed.");
         return;
     }
 
@@ -381,7 +457,6 @@ async function saveServer() {
       return;
     }
 
-
     isLoading.value = true;
     fetchError.value = ''; // Clear previous errors before saving
 
@@ -394,22 +469,17 @@ async function saveServer() {
             let parameters: { name: string; type: string; description: string; required: boolean }[] = [];
 
             // Check if inputSchema and properties exist
-            if (tool.inputSchema && typeof tool.inputSchema === 'object' && tool.inputSchema.properties && typeof tool.inputSchema.properties === 'object') {
+            if (tool.inputSchema && typeof tool.inputSchema === 'object' && 
+                tool.inputSchema.properties && typeof tool.inputSchema.properties === 'object') {
                 // Get the set of required parameter names for efficient lookup
                 const requiredParams = new Set(tool.inputSchema.required || []);
 
                 // Map over the properties (parameters) defined in the schema
                 parameters = Object.entries(tool.inputSchema.properties).map(([paramName, paramSchema]) => {
-                    // Ensure paramSchema is an object before accessing properties
-                    const schemaObj = typeof paramSchema === 'object' && paramSchema !== null ? paramSchema : {};
-
-                    const description = typeof schemaObj.description === 'string' ? schemaObj.description : '';
-                    const type = typeof schemaObj.type === 'string' ? schemaObj.type : 'string'; // Default type if missing
-
                     return {
                         name: paramName,
-                        type: type,
-                        description: description,
+                        type: paramSchema.type || 'string', // Default type if missing
+                        description: paramSchema.description || '', // Use empty string if description is null/undefined
                         required: requiredParams.has(paramName) // Check if name is in the required set
                     };
                 });
@@ -425,7 +495,8 @@ async function saveServer() {
         const payload = {
             name: serverName.value,
             slug: slug.value,
-            type: discoveredType.value, // 'MCP'
+            protocol: discoveredPtrotocol.value, // Keep using 'type' as we've updated the backend schema to accept it
+            protocolVersion: discoveredInfo.value?.protocolVersion || "", // Add protocol version
             description: description.value || null,
             website: websiteUrl.value || null,
             email: email.value || user.email || null,
@@ -460,7 +531,7 @@ async function saveServer() {
 function handleSubmit() {
     if (currentStep.value === 1 && isStep1Valid.value && !isCheckingSlug.value) {
         fetchServerInfo();
-    } else if (currentStep.value === 2 && discoveredType.value === 'MCP' && isStep2Valid.value) {
+    } else if (currentStep.value === 2 && discoveredPtrotocol.value === 'MCP' && isStep2Valid.value) {
         saveServer();
     }
 }

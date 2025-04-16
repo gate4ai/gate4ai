@@ -5,10 +5,7 @@
 // Import necessary enums directly from Prisma types if possible,
 // otherwise redeclare them here based on the schema definition.
 // Assuming Prisma enums are available:
-import type { SubscriptionStatus, ServerStatus, ServerAvailability, ServerType as PrismaServerType } from '@prisma/client';
-
-// Export the ServerType enum for use in components
-export type ServerType = PrismaServerType;
+import type { SubscriptionStatus, ServerStatus, ServerAvailability, ServerProtocol } from '@prisma/client';
 
 // Basic tool information remains the same
 export interface ToolInfo {
@@ -42,7 +39,7 @@ export interface ServerParameter {
   id: string;
   name: string;
   type: string;
-  description?: string; // Make optional
+  description?: string;
   required?: boolean;
 }
 
@@ -50,7 +47,7 @@ export interface ServerParameter {
 export interface ServerTool {
   id: string;
   name: string;
-  description?: string; // Make optional
+  description?: string;
   parameters: ServerParameter[];
 }
 
@@ -67,7 +64,8 @@ export interface ServerOwner {
 export interface ServerInfo {
   id: string;
   slug: string;
-  type: ServerType; // Use Prisma enum
+  protocol: ServerProtocol;
+  protocolVersion: string;
   name: string;
   description: string | null;
   imageUrl: string | null;
@@ -100,7 +98,8 @@ export interface Server extends ServerInfo {
 export interface ServerData {
   id?: string; // Optional for create, required for edit
   slug: string;
-  type: ServerType; // Use Prisma enum
+  protocol: ServerProtocol; // Use Prisma enum
+  protocolVersion: string;
   name: string;
   description?: string | null;
   website?: string | null;

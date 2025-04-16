@@ -1,6 +1,6 @@
 import { defineEventHandler, getRouterParam, createError } from 'h3';
 import prisma from '../../utils/prisma';
-import type { User, SubscriptionStatus, Server as PrismaServer, ServerOwner } from '@prisma/client'; // Adjusted imports
+import type { User, SubscriptionStatus, Server, ServerOwner } from '@prisma/client'; // Adjusted imports
 import { getServerReadAccessLevel, getSubscriptionStatusCounts } from '../../utils/serverPermissions'; // Import helper functions
 
 export default defineEventHandler(async (event) => {
@@ -55,11 +55,8 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 404, statusMessage: 'Server not found' });
     }
 
-    // Type assertion to help TypeScript understand the included relations
-    const serverWithOwners = server as PrismaServer & { owners: { user: User }[] };
-
     // 3. Determine user's read access level using the helper
-    const { hasExtendedAccess, isOwner } = getServerReadAccessLevel(user, serverWithOwners);
+    const { hasExtendedAccess, isOwner } = getServerReadAccessLevel(user, server);
 
     // 4. Check current user's subscription status and ID (only if user is logged in)
     let currentUserSubscriptionId: string | undefined = undefined;
@@ -91,7 +88,8 @@ export default defineEventHandler(async (event) => {
       // --- Always Visible Fields ---
       id: server.id, // Still include ID
       slug: server.slug, // Include slug
-      type: server.type, // Include type
+      protocol: server.protocol, // Include protocol
+      protocolVersion: server.protocolVersion, // Include protocol version
       name: server.name,
       description: server.description,
       website: server.website,

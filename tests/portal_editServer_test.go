@@ -85,6 +85,28 @@ func editServer(am *ArtifactManager, user *User, server *CatalogServer, newName,
 	}
 	am.SaveScreenshot("edit_server_form_filled")
 
+	// --- Check Protocol and Version Fields ---
+	protocolSelector := "div.v-slide-group__content > span:first-child"
+	protocolLocator, err := am.WaitForLocatorWithDebug(protocolSelector, "wait_for_protocol_version")
+	if err != nil {
+		return fmt.Errorf("could not find protocol and version information: %w", err)
+	}
+	protocolVersionText, err := protocolLocator.TextContent()
+	if err != nil {
+		return fmt.Errorf("could not get protocol and version text: %w", err)
+	}
+	require.Contains(am.T, protocolVersionText, "MCP", "Protocol should be present")
+	require.Contains(am.T, protocolVersionText, "v2025-03-26", "Version should be 'v2025-03-26'")
+	am.T.Logf("Protocol and Version: %s", protocolVersionText)
+
+	// Verify that the fields are likely read-only (no input elements found within the chip)
+	protocolVersionInput := am.Page.Locator(protocolSelector + " input")
+	protocolVersionInputCount, err := protocolVersionInput.Count()
+	if err != nil {
+		return fmt.Errorf("could not count input elements in protocol/version field: %w", err)
+	}
+	require.Equal(am.T, 0, protocolVersionInputCount, "Protocol and Version field should not be editable")
+
 	// --- Submit Form ---
 	submitButtonSelector := "button[type='submit']:has-text('Update Server')"
 	if err := am.ClickWithDebug(submitButtonSelector, "update_button_click"); err != nil {

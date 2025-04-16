@@ -1,7 +1,7 @@
 <template>
     <div>
       <v-alert type="success" variant="tonal" class="mb-4" density="compact">
-        Detected Server Type: <strong>MCP</strong>
+        Detected Server Protocol: <strong>MCP</strong>
       </v-alert>
   
       <v-text-field
@@ -85,7 +85,18 @@
     websiteUrl: string;
     email: string;
     isLoading: boolean;
-    discoveredTools: DiscoveredTool[];
+    discoveredTools: Array<{
+      name: string;
+      description?: string;
+      inputSchema?: {
+        type: string;
+        properties?: Record<string, {
+          type: string;
+          description?: string;
+        }>;
+        required?: string[];
+      };
+    }>;
     saveError: string; // Error specific to the save operation
   }>();
   

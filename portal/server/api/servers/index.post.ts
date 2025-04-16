@@ -4,18 +4,19 @@ import { defineEventHandler, readBody, createError } from 'h3';
 import { checkServerCreationRights } from '../../utils/serverPermissions';
 import type { User } from '@prisma/client';
 // Import enums for validation
-import { ServerStatus, ServerAvailability, ServerType } from '@prisma/client'; // Ensure ServerType is imported
+import { ServerProtocol } from '@prisma/client'; // Use ServerProtocol instead of ServerType
 
-// Updated schema to include slug and type (using ServerType enum)
+// Updated schema to include slug and type (using ServerProtocol enum)
 const createServerSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100, 'Name must be 100 characters or less'),
   slug: z.string().min(1, 'Slug is required').regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Invalid slug format'),
-  type: z.nativeEnum(ServerType), // Use the imported Prisma enum for validation
+  protocol: z.nativeEnum(ServerProtocol), // Use ServerProtocol enum for validation
   description: z.string().max(500, "Description too long").optional().nullable(),
   website: z.string().url('Invalid URL format').optional().nullable(),
   email: z.string().email('Invalid email format').optional().nullable(),
   imageUrl: z.string().url('Invalid URL format').optional().nullable(),
   serverUrl: z.string().url('Server URL must be a valid URL'),
+  protocolVersion: z.string().optional(),
   tools: z.array(
     z.object({
       name: z.string().min(1, 'Tool name is required'),
@@ -58,12 +59,13 @@ export default defineEventHandler(async (event) => {
         data: {
           name: validatedData.name,
           slug: validatedData.slug,
-          type: validatedData.type, // Save validated type
+          protocol: validatedData.protocol as ServerProtocol,
           description: validatedData.description,
           website: validatedData.website,
           email: validatedData.email,
           imageUrl: validatedData.imageUrl,
           serverUrl: validatedData.serverUrl,
+          protocolVersion: validatedData.protocolVersion || "",
           // status and availability will use Prisma schema defaults
           // status: validatedData.status,
           // availability: validatedData.availability,
@@ -82,7 +84,8 @@ export default defineEventHandler(async (event) => {
           serverUrl: true,
           status: true,
           availability: true,
-          type: true, // Return type
+          protocol: true, // Return protocol field
+          protocolVersion: true, // Also return the protocol version
           createdAt: true,
           updatedAt: true,
           owners: { select: { user: { select: { id: true, name: true, email: true } } } } // Return owner info
@@ -103,7 +106,7 @@ export default defineEventHandler(async (event) => {
 
           if (toolData.parameters && toolData.parameters.length > 0) {
             await tx.toolParameter.createMany({
-              data: toolData.parameters.map(param => ({
+              data: toolData.parameters.map((param) => ({
                 name: param.name,
                 type: param.type,
                 description: param.description,

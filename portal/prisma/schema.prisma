@@ -82,7 +82,8 @@ model Server {
   website      String?
   email        String?
   imageUrl     String?
-  type         ServerType         @default(MCP) // Type of the server protocol
+  protocol     ServerProtocol     @default(MCP) // Type of the server protocol
+  protocolVersion String?
   serverUrl    String // Hidden from non-owners
   status       ServerStatus       @default(DRAFT)
   availability ServerAvailability @default(SUBSCRIPTION) // Hidden from non-owners
@@ -97,7 +98,7 @@ model Server {
 }
 
 // Enum for Server Type
-enum ServerType {
+enum ServerProtocol {
   MCP // Original protocol
   A2A // New protocol type
   REST // Generic REST API

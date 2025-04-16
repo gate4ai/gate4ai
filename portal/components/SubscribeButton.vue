@@ -15,12 +15,12 @@
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue';
 import { useRouter } from 'vue-router';
-import type { Server } from '~/utils/server'; 
+import type { ServerInfo } from '~/utils/server'; 
 import { useSubscriptionPermissions } from '../composables/useSubscriptionPermissions';
 import { useSnackbar } from '../composables/useSnackbar'; 
 
 const props = defineProps<{
-  server: Server; // Expect server object with id, isCurrentUserSubscribed, subscriptionId?, owners?
+  server: ServerInfo; // Expect server object with id, isCurrentUserSubscribed, subscriptionId?, owners?
   isAuthenticated: boolean;
 }>();
 

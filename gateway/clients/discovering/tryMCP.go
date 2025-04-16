@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gate4ai/mcp/gateway/clients"
 	"github.com/gate4ai/mcp/gateway/clients/mcpClient"
 	"github.com/gate4ai/mcp/shared"
 	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
@@ -13,7 +14,7 @@ import (
 )
 
 // tryMCPDiscovery attempts to discover if the target URL hosts an MCP server.
-func tryMCPDiscovery(ctx context.Context, targetURL string, authBearer string, logger *zap.Logger) (*MCPInfo, error) {
+func tryMCPDiscovery(ctx context.Context, targetURL string, authBearer string, logger *zap.Logger) (*DiscoveryResult, error) {
 	logger.Debug("Attempting MCP discovery", zap.String("url", targetURL))
 
 	// Create a new MCP client for the target URL
@@ -49,9 +50,16 @@ func tryMCPDiscovery(ctx context.Context, targetURL string, authBearer string, l
 
 		// Now, fetch tools (optional, but useful for the dialog)
 		toolsResultChan := mcpSession.GetTools(ctx)
-		mcpInfo := &MCPInfo{
-			ServerInfo: serverInfoResult.ServerInfo,
-			Tools:      []schema.Tool{}, // Initialize empty slice
+		result := &DiscoveryResult{
+			ServerInfo: clients.ServerInfo{
+				URL:             targetURL,
+				Name:            serverInfoResult.ServerInfo.Name,
+				Version:         serverInfoResult.ServerInfo.Version,
+				Description:     "",  // MCP doesn't provide a description
+				Website:         nil, // MCP doesn't provide a website
+				Protocol:        clients.ServerTypeMCP,
+				ProtocolVersion: schema.PROTOCOL_VERSION,
+			},
 		}
 
 		// Wait for tools result or timeout/cancellation
@@ -61,12 +69,12 @@ func tryMCPDiscovery(ctx context.Context, targetURL string, authBearer string, l
 				logger.Warn("MCP server detected, but failed to fetch tools", zap.Error(toolsResult.Err))
 				// Return success but without tools
 			} else {
-				mcpInfo.Tools = toolsResult.Tools
+				result.MCPTools = toolsResult.Tools
 			}
-			return mcpInfo, nil // Return success (with or without tools)
+			return result, nil // Return success (with or without tools)
 		case <-ctx.Done():
 			logger.Warn("MCP server detected, but timed out fetching tools", zap.Error(ctx.Err()))
-			return mcpInfo, nil // Return success but without tools due to timeout
+			return result, nil // Return success but without tools due to timeout
 		}
 
 	case <-ctx.Done():

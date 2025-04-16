@@ -73,7 +73,7 @@
     slugError: string;
     fetchError: string;
     isStep1Valid: boolean;
-    slugUniqueRule: () => boolean | string; // Pass the rule function from parent
+    slugUniqueRule: () => string | boolean; // Allow boolean or string return type
   }>();
   
   // Emits define events sent back to the parent

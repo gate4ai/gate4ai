@@ -2,17 +2,22 @@ package discovering
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 
 	"go.uber.org/zap"
+
+	"github.com/gate4ai/mcp/gateway/clients"
+	"github.com/gate4ai/mcp/shared"
+	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
 )
 
 // tryA2ADiscovery attempts to discover if the target URL hosts an A2A server
 // by checking for the /.well-known/agent.json endpoint.
-func tryA2ADiscovery(ctx context.Context, targetURL string, httpClient *http.Client, logger *zap.Logger) (*A2AInfo, error) {
+func tryA2ADiscovery(ctx context.Context, targetURL string, httpClient *http.Client, logger *zap.Logger) (*DiscoveryResult, error) {
 	logger.Debug("Attempting A2A discovery", zap.String("url", targetURL))
 
 	// Construct the well-known URL
@@ -41,19 +46,44 @@ func tryA2ADiscovery(ctx context.Context, targetURL string, httpClient *http.Cli
 
 	// Check if the endpoint exists and returns success (e.g., 200 OK)
 	if resp.StatusCode == http.StatusOK {
-		// Optionally, you could try to read and parse the agent.json here
-		// to extract more information if needed.
-		_, readErr := io.ReadAll(resp.Body) // Read body to check validity, but discard for now
+		// Try to read and parse the agent.json to extract information
+		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			logger.Warn("Found agent.json but failed to read body", zap.String("url", wellKnownURL), zap.Error(readErr))
-			// Proceed considering it A2A, but log the read error
+			return nil, fmt.Errorf("failed to read A2A agent card: %w", readErr)
 		}
+
+		// Try to parse the agent card
+		var agentCard a2aSchema.AgentCard
+		if jsonErr := json.Unmarshal(body, &agentCard); jsonErr != nil {
+			return nil, fmt.Errorf("failed to parse A2A agent card: %w", jsonErr)
+		}
+
+		// Successfully parsed agent card - create a result with full information
+		result := &DiscoveryResult{
+			ServerInfo: clients.ServerInfo{
+				URL:             agentCard.URL,                                   // Use URL from agent card as specified in ServerInfo comments
+				Name:            agentCard.Name,                                  // Map from AgentCard.Name
+				Version:         agentCard.Version,                               // Map from AgentCard.Version
+				Description:     shared.StringPtrToString(agentCard.Description), // Map from AgentCard.Description
+				Website:         getWebsiteFromProvider(agentCard.Provider),      // Map from AgentCard.Provider.URL
+				Protocol:        clients.ServerTypeA2A,
+				ProtocolVersion: "2025-draft",
+			},
+			A2ASkills: agentCard.Skills, // Include skills in the discovery result
+		}
+
 		logger.Info("A2A detected via /.well-known/agent.json", zap.String("url", wellKnownURL))
-		return &A2AInfo{
-			AgentJsonUrl: wellKnownURL,
-		}, nil
+		return result, nil
 	}
 
 	// Endpoint doesn't exist or returned an error status
 	return nil, fmt.Errorf("A2A discovery failed: status code %d for %s", resp.StatusCode, wellKnownURL)
+}
+
+// Helper function to extract website from provider
+func getWebsiteFromProvider(provider *a2aSchema.AgentProvider) *string {
+	if provider == nil {
+		return nil
+	}
+	return provider.URL
 }

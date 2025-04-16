@@ -8,12 +8,13 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gate4ai/mcp/gateway/clients"
 	"go.uber.org/zap"
 )
 
 // tryRESTDiscovery attempts to discover if the target URL hosts a REST/OpenAPI server
 // by checking for common OpenAPI definition file paths (/openapi.json, /docs, etc.).
-func tryRESTDiscovery(ctx context.Context, targetURL string, httpClient *http.Client, logger *zap.Logger) (*RESTInfo, error) {
+func tryRESTDiscovery(ctx context.Context, targetURL string, httpClient *http.Client, logger *zap.Logger) (*DiscoveryResult, error) {
 	logger.Debug("Attempting REST/OpenAPI discovery", zap.String("url", targetURL))
 
 	baseParsedURL, err := url.Parse(targetURL)
@@ -62,19 +63,49 @@ func tryRESTDiscovery(ctx context.Context, targetURL string, httpClient *http.Cl
 		// Check for success status (2xx or 3xx redirects which might lead to UI)
 		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 			logger.Info("REST/OpenAPI likely detected", zap.String("path", path), zap.Int("statusCode", resp.StatusCode))
-			restInfo := &RESTInfo{}
-			// Distinguish between JSON file and potential UI based on path/content-type (optional)
-			if strings.HasSuffix(path, ".json") {
-				restInfo.OpenApiJsonUrl = checkURL
-			} else {
-				// Assume it might be a Swagger/ReDoc UI path
-				restInfo.SwaggerUrl = checkURL
+
+			// Create a discovery result with REST information
+			result := &DiscoveryResult{
+				ServerInfo: clients.ServerInfo{
+					URL:             targetURL,
+					Name:            getServerNameFromPath(path),
+					Version:         "", // Version information is not typically available through discovery
+					Description:     "REST/OpenAPI Service",
+					Website:         nil,
+					Protocol:        clients.ServerTypeREST,
+					ProtocolVersion: getOpenAPIVersionFromPath(path),
+				},
 			}
-			return restInfo, nil
+
+			return result, nil
 		}
 		logger.Debug("REST check failed for path", zap.String("path", path), zap.Int("statusCode", resp.StatusCode))
 	}
 
 	// If none of the common paths returned success
 	return nil, fmt.Errorf("no common REST/OpenAPI paths found or accessible")
+}
+
+// Helper function to get a descriptive server name based on the discovered path
+func getServerNameFromPath(path string) string {
+	if strings.Contains(path, "swagger") {
+		return "Swagger API"
+	} else if strings.Contains(path, "openapi") {
+		return "OpenAPI Service"
+	} else if strings.Contains(path, "redoc") {
+		return "ReDoc API"
+	} else if strings.Contains(path, "api-docs") {
+		return "API Documentation Service"
+	}
+	return "REST API Service"
+}
+
+// Helper function to guess the OpenAPI version from the path
+func getOpenAPIVersionFromPath(path string) string {
+	if strings.Contains(path, "v3") {
+		return "OpenAPI 3.0"
+	} else if strings.Contains(path, "v2") {
+		return "OpenAPI/Swagger 2.0"
+	}
+	return "REST/OpenAPI"
 }

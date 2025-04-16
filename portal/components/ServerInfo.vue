@@ -33,6 +33,24 @@
             {{ server._count?.subscriptions || 0 }} subscribers
           </v-list-item-title>
         </v-list-item>
+        
+        <v-list-item v-if="server.protocol">
+          <template #prepend>
+            <v-icon color="primary">mdi-protocol</v-icon>
+          </template>
+          <v-list-item-title>
+            Protocol: {{ server.protocol }}
+          </v-list-item-title>
+        </v-list-item>
+        
+        <v-list-item v-if="server.protocolVersion">
+          <template #prepend>
+            <v-icon color="primary">mdi-version</v-icon>
+          </template>
+          <v-list-item-title>
+            Version: {{ server.protocolVersion }}
+          </v-list-item-title>
+        </v-list-item>
       </v-list>
     </v-card-text>
     

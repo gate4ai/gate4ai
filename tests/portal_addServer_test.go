@@ -67,7 +67,7 @@ func addServer(am *ArtifactManager, user *User, slug string) (*CatalogServer, er
 	}
 
 	if slug != "" {
-		time.Sleep(1000 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		slugField.Fill(slug)
 	} else {
 		val, inputErr := slugField.InputValue()

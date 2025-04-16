@@ -74,12 +74,9 @@ func TestServerSubscriptions(t *testing.T) {
 	require.NoError(t, err, "Failed to add server")
 	require.NotNil(t, server)
 
-	// --- IMPORTANT: Activate the server before subscribing ---
-	// Subscribing usually only makes sense for ACTIVE servers.
 	t.Logf("Activating server %s before subscription test", server.Slug)
 	err = doServerAcvite(am, owner, server)
 	require.NoError(t, err, "Failed to activate server")
-	// --- End Activation ---
 
 	// Subscriber subscribes to the (now active) server
 	err = subscribeToServer(am, subscriber, server)

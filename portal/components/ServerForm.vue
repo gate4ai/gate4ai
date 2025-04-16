@@ -24,15 +24,17 @@
       </v-col>
 
       <v-col cols="12" md="6">
-        <v-select
-          v-model="localServerData.type"
-          :items="serverTypeOptions"
-          label="Server Type"
-          required
-          :rules="[rules.required]"
-          variant="outlined"
-          :disabled="isSubmitting"
-        />
+        <v-chip-group>
+          <v-chip
+            color="primary"
+            label
+            class="text-body-1"
+            variant="elevated"
+          >
+            {{ localServerData.protocol }}
+            <span v-if="localServerData.protocolVersion" class="ml-1">v{{ localServerData.protocolVersion }}</span>
+          </v-chip>
+        </v-chip-group>
       </v-col>
 
       <v-col cols="12">
@@ -121,34 +123,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { rules } from '~/utils/validation';
-import type { ServerData, ServerType } from '~/utils/server'; // Import ServerType
-import type { ServerStatus, ServerAvailability } from '@prisma/client';
+import type { ServerData } from '~/utils/server'; // Remove ServerType import
+import type { ServerStatus, ServerAvailability, ServerProtocol } from '@prisma/client';
 
-// Extended ServerData interface with additional properties needed for the form
-interface ServerFormData extends ServerData {
-  id?: string;
-  slug: string; // Add slug
-  type: ServerType; // Add type
-  serverUrl: string;
-  status: ServerStatus; // Use Prisma type
-  availability: ServerAvailability; // Use Prisma type
-}
 
 const props = defineProps<{
-  serverData: ServerFormData;
+  serverData: ServerData;
   isSubmitting?: boolean;
   submitLabel?: string;
+  isEditMode?: boolean; // Add prop to determine if we're editing an existing server
 }>();
 
 const emit = defineEmits<{
-  submit: [updatedData: ServerFormData];
+  submit: [updatedData: ServerData];
   cancel: [];
 }>();
 
 const form = ref<HTMLFormElement | null>(null);
-const localServerData = ref<ServerFormData>({ ...props.serverData });
+const localServerData = ref<ServerData>({ ...props.serverData });
 
 // Watch for changes in the prop and update local data
 watch(() => props.serverData, (newVal) => {
@@ -184,10 +178,4 @@ const availabilityOptions = [
   { title: 'Subscription', value: 'SUBSCRIPTION' }
 ];
 
-// Server Type Options
-const serverTypeOptions: { title: string; value: ServerType }[] = [
-  { title: 'MCP', value: 'MCP' },
-  { title: 'A2A', value: 'A2A' },
-  { title: 'REST', value: 'REST' },
-];
 </script>

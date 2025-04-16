@@ -43,7 +43,7 @@ import ServerForm from '~/components/ServerForm.vue';
 // Use the specific type for the form
 import type { ServerData } from '~/utils/server';
 import { useSnackbar } from '~/composables/useSnackbar';
-import type { ServerStatus, ServerAvailability, ServerType } from '@prisma/client';
+import type { ServerStatus, ServerAvailability, ServerProtocol } from '@prisma/client';
 
 // Define the shape of data expected from the API GET call
 // This might be slightly different from ServerData if API returns more fields
@@ -51,7 +51,8 @@ interface ServerApiResponse {
   id: string;
   name: string;
   slug: string;
-  type: ServerType;
+  protocol: ServerProtocol;
+  protocolVersion?: string;
   description?: string | null;
   website?: string | null;
   email?: string | null;
@@ -61,18 +62,6 @@ interface ServerApiResponse {
   availability: ServerAvailability;
   // ... other fields if API returns more
 }
-
-// Define the shape of the data passed to the ServerForm component
-// This should match the `ServerFormData` interface in ServerForm.vue
-interface ServerFormData extends ServerData {
-  id: string; // ID is required for editing
-  slug: string;
-  type: ServerType;
-  serverUrl: string;
-  status: ServerStatus;
-  availability: ServerAvailability;
-}
-
 
 const { $auth, $api } = useNuxtApp();
 const route = useRoute();
@@ -84,7 +73,7 @@ const { showError, showSuccess } = useSnackbar();
 const loadError = ref<string | null>(null);
 
 // Use the specific ServerFormData type for the reactive ref
-const serverDataForForm = ref<ServerFormData | null>(null);
+const serverDataForForm = ref<ServerData | null>(null);
 
 // Check if user is authenticated
 const isAuthenticated = computed(() => $auth.check());
@@ -114,7 +103,8 @@ async function fetchServer() {
       id: data.id,
       name: data.name,
       slug: data.slug,
-      type: data.type,
+      protocol: data.protocol,
+      protocolVersion: data.protocolVersion || '',
       description: data.description || '',
       website: data.website || '',
       email: data.email || '',
@@ -141,39 +131,36 @@ async function fetchServer() {
 }
 
 // Update server using SLUG in the URL
-async function updateServer(updatedServerData: ServerFormData) {
-  if (!updatedServerData) return;
+function updateServer(updatedData: ServerData) {
+  if (!updatedData) return;
 
   isSubmitting.value = true;
 
-  try {
     // Prepare payload - only send fields allowed by the API endpoint's validation schema
     const payload = {
-      name: updatedServerData.name,
-      //slug: updatedServerData.slug, //  The 'slug' should not be updated via this endpoint.
-      type: updatedServerData.type, // Send type for update
-      description: updatedServerData.description || null,
-      website: updatedServerData.website || null,
-      email: updatedServerData.email || null,
-      imageUrl: updatedServerData.imageUrl || null,
-      serverUrl: updatedServerData.serverUrl,
-      status: updatedServerData.status,
-      availability: updatedServerData.availability
+      name: updatedData.name,
+      protocol: updatedData.protocol,
+      protocolVersion: updatedData.protocolVersion || "",
+      description: updatedData.description || null,
+      website: updatedData.website || null,
+      email: updatedData.email || null,
+      imageUrl: updatedData.imageUrl || null,
+      serverUrl: updatedData.serverUrl,
+      status: updatedData.status,
+      availability: updatedData.availability
     };
 
     // Call PUT endpoint using the slug
-    await $api.putJson(`/servers/${serverSlug}`, payload);
-
-    showSuccess('Server updated successfully');
-    navigateTo(`/servers/${serverSlug}`); // Navigate back to server details page using slug
-
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to update server.';
-    showError(message);
-    console.error("Error updating server:", err);
-  } finally {
-    isSubmitting.value = false;
-  }
+    $api.putJson(`/servers/${serverSlug}`, payload).then(() => {
+      showSuccess('Server updated successfully');
+      navigateTo(`/servers/${serverSlug}`); // Navigate back to server details page using slug
+    }).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Failed to update server.';
+      showError(message);
+      console.error("Error updating server:", err);
+    }).finally(() => {
+      isSubmitting.value = false;
+    });
 }
 
 // Navigate back using SLUG

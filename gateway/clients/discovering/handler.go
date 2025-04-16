@@ -4,39 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"sync"
 	"time"
 
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema" // Assuming MCP info is based on latest schema
+	"github.com/gate4ai/mcp/gateway/clients" // Assuming MCP info is based on latest schema
 	"go.uber.org/zap"
+
+	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
+	mcpSchema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
 )
-
-// A2AInfo holds information specific to A2A discovery results.
-type A2AInfo struct {
-	AgentJsonUrl string `json:"agentJsonUrl,omitempty"` // URL where agent.json was found
-	// TODO: Add more A2A specific info if needed after parsing agent.json
-}
-
-// RESTInfo holds information specific to REST (OpenAPI) discovery results.
-type RESTInfo struct {
-	OpenApiJsonUrl string `json:"openApiJsonUrl,omitempty"` // URL where openapi.json was found
-	SwaggerUrl     string `json:"swaggerUrl,omitempty"`     // URL where swagger UI might be found
-	// TODO: Add more REST specific info if needed
-}
-
-// MCPInfo holds information specific to MCP discovery results.
-type MCPInfo struct {
-	ServerInfo *schema.Implementation `json:"serverInfo,omitempty"`
-	Tools      []schema.Tool          `json:"tools,omitempty"`
-	// Add other relevant MCP info if needed
-}
 
 // DiscoveryResult holds the result of a discovery check.
 type DiscoveryResult struct {
-	MCP   *MCPInfo  `json:"mcp,omitempty"`
-	A2A   *A2AInfo  `json:"a2a,omitempty"`
-	REST  *RESTInfo `json:"rest,omitempty"`
-	Error string    `json:"error,omitempty"`
+	clients.ServerInfo
+	MCPTools  []mcpSchema.Tool       `json:"mcpTools,omitempty"`
+	A2ASkills []a2aSchema.AgentSkill `json:"a2aSkills,omitempty"`
+	Error     string                 `json:"error,omitempty"`
 }
 
 // Handler creates an HTTP handler for discovering server type and basic info.
@@ -50,9 +32,8 @@ func Handler(logger *zap.Logger) http.HandlerFunc {
 		targetURL := r.URL.Query().Get("url")
 		authBearer := r.URL.Query().Get("authorizationBearer") // Optional bearer token
 
-		var response DiscoveryResult
-
 		if targetURL == "" {
+			var response DiscoveryResult
 			handlerLogger.Warn("Missing 'url' query parameter")
 			response.Error = "'url' query parameter is required"
 			w.WriteHeader(http.StatusBadRequest)
@@ -66,21 +47,16 @@ func Handler(logger *zap.Logger) http.HandlerFunc {
 		defer cancel()
 
 		// Create a mutex for response and a channel to signal success
-		lock := sync.Mutex{}
-		successChan := make(chan struct{})
+		successChan := make(chan *DiscoveryResult)
 		errorChan := make(chan struct{})
 
 		checkCount := 1
 		// Launch MCP discovery in a goroutine
 		go func() {
-			mcpInfo, err := tryMCPDiscovery(ctx, targetURL, authBearer, handlerLogger)
-			if err == nil && mcpInfo != nil {
-				lock.Lock()
-				response.MCP = mcpInfo
-				lock.Unlock()
-				// Signal success to return early
+			response, err := tryMCPDiscovery(ctx, targetURL, authBearer, handlerLogger)
+			if err == nil && response != nil {
 				select {
-				case successChan <- struct{}{}:
+				case successChan <- response:
 				default:
 				}
 			} else {
@@ -94,14 +70,10 @@ func Handler(logger *zap.Logger) http.HandlerFunc {
 		checkCount++
 		// Launch A2A discovery in a goroutine
 		go func() {
-			a2aInfo, err := tryA2ADiscovery(ctx, targetURL, http.DefaultClient, handlerLogger)
-			if err == nil && a2aInfo != nil {
-				lock.Lock()
-				response.A2A = a2aInfo
-				lock.Unlock()
-				// Signal success to return early
+			response, err := tryA2ADiscovery(ctx, targetURL, http.DefaultClient, handlerLogger)
+			if err == nil && response != nil {
 				select {
-				case successChan <- struct{}{}:
+				case successChan <- response:
 				default:
 				}
 			} else {
@@ -115,14 +87,10 @@ func Handler(logger *zap.Logger) http.HandlerFunc {
 		checkCount++
 		// Launch REST discovery in a goroutine
 		go func() {
-			restInfo, err := tryRESTDiscovery(ctx, targetURL, http.DefaultClient, handlerLogger)
-			if err == nil && restInfo != nil {
-				lock.Lock()
-				response.REST = restInfo
-				lock.Unlock()
-				// Signal success to return early
+			response, err := tryRESTDiscovery(ctx, targetURL, http.DefaultClient, handlerLogger)
+			if err == nil && response != nil {
 				select {
-				case successChan <- struct{}{}:
+				case successChan <- response:
 				default:
 				}
 			} else {
@@ -134,10 +102,11 @@ func Handler(logger *zap.Logger) http.HandlerFunc {
 		}()
 
 		errorCounter := 0
+		var response *DiscoveryResult
 	discoveryLoop:
 		for {
 			select {
-			case <-successChan:
+			case response = <-successChan:
 				break discoveryLoop
 			case <-errorChan:
 				errorCounter++
@@ -149,8 +118,10 @@ func Handler(logger *zap.Logger) http.HandlerFunc {
 			}
 		}
 		w.WriteHeader(http.StatusOK)
-		if response.A2A == nil && response.REST == nil && response.MCP == nil {
-			response.Error = "no protocol found"
+		if response == nil {
+			response = &DiscoveryResult{
+				Error: "no protocol found",
+			}
 		}
 		json.NewEncoder(w).Encode(response)
 	}
