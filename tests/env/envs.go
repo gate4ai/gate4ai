@@ -259,10 +259,8 @@ func (e *Envs) Execute(ctx context.Context) error {
 	}
 
 	// Process completion signals and launch dependents until all are finished or an error occurs
-	processingDone := make(chan struct{})
-	go func() {
+	startGroup.Go(func() error {
 		logPrefixProc := "[Dependency Processor] "
-		defer close(processingDone)
 		processedCount := 0 // How many components we have processed the *completion* of
 		totalComponents := len(e.components)
 		log.Printf("%sStarting. Waiting for %d components to signal completion.", logPrefixProc, totalComponents)
@@ -295,21 +293,17 @@ func (e *Envs) Execute(ctx context.Context) error {
 
 			case <-startCtx.Done():
 				log.Printf("%sStopping dependency processing due to context cancellation: %v", logPrefixProc, startCtx.Err())
-				return // Exit processing loop if context is cancelled
+				return startCtx.Err()
 			}
 		}
 		log.Printf("%sFinished processing all %d component completions.", logPrefixProc, totalComponents)
-	}()
+		return nil
+	})
 
 	// Wait for all start goroutines to complete or for the first error
 	log.Println("Waiting for all component Start goroutines...")
 	err := startGroup.Wait() // This blocks until all launched goroutines finish or one errors
 	log.Println("All component Start goroutines finished or group errored.")
-
-	// Ensure the processing goroutine has also finished before proceeding
-	log.Println("Waiting for dependency processor goroutine...")
-	<-processingDone
-	log.Println("Dependency processor goroutine finished.")
 
 	if err != nil {
 		log.Printf("Environment setup failed during Start phase: %v", err)
