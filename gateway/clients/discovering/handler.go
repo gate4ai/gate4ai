@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/clients" // Assuming MCP info is based on latest schema
+	"github.com/gate4ai/gate4ai/gateway/clients" // Assuming MCP info is based on latest schema
 	"go.uber.org/zap"
 
-	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
-	mcpSchema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
+	mcpSchema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 )
 
 // DiscoveryResult holds the result of a discovery check.

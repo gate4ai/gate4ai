@@ -8,7 +8,7 @@ import (
 	"time"
 
 	// Import the new env package
-	"github.com/gate4ai/mcp/tests/env"
+	"github.com/gate4ai/gate4ai/tests/env"
 	// Import types needed for details retrieval
 	"github.com/playwright-community/playwright-go"
 	// Import details types defined in components
@@ -27,7 +27,6 @@ var (
 	EXAMPLE_MCP2024_SERVER_URL string                // Specific example endpoint URL
 	EXAMPLE_MCP2025_SERVER_URL string                // Specific example endpoint URL
 	MAILHOG_API_URL            string                // Mailhog Web UI URL
-	EXAMPLE_A2A_SERVER_URL     string                // A2A Server URL
 	EMAIL_SMTP_SERVER          env.SmtpServerDetails // Use the type defined in mailhog.go
 	pw                         *playwright.Playwright
 )
@@ -83,7 +82,6 @@ func TestMain(m *testing.M) {
 	PORTAL_INTERNAL_URL = env.GetURL(env.PortalComponentName)
 	PORTAL_URL = GATEWAY_URL                               // Tests access portal via gateway
 	MAILHOG_API_URL = env.GetURL(env.MailhogComponentName) // MailhogEnv.URL() returns API URL
-	EXAMPLE_A2A_SERVER_URL = env.GetURL(env.A2AServerComponentName)
 
 	// Populate details using GetDetails and type assertions
 	details := env.GetDetails(env.PlaywrightComponentName)
@@ -118,7 +116,7 @@ func TestMain(m *testing.M) {
 	componentNames := []string{
 		env.DBComponentName,
 		env.MailhogComponentName,
-		env.A2AServerComponentName,
+		//		env.A2AServerComponentName,
 		env.PlaywrightComponentName,
 		env.PrismaComponentName,
 		env.DBSettingsComponentName,

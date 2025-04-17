@@ -236,7 +236,9 @@ export default defineEventHandler(async (event) => {
        throw error;
      }
       // Handle potential Prisma errors (e.g., unique constraint on slug)
-     if (error instanceof Error && 'code' in error && (error as any).code === 'P2002' && (error as any).meta?.target?.includes('slug')) {
+     if (error instanceof Error && 'code' in error && 
+         (error as {code: string}).code === 'P2002' && 
+         (error as {meta?: {target?: string[]}}).meta?.target?.includes('slug')) {
          throw createError({ statusCode: 409, statusMessage: 'A server with this slug already exists.' });
      }
      throw createError({

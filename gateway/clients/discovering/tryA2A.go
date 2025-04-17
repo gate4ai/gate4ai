@@ -10,9 +10,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/gate4ai/mcp/gateway/clients"
-	"github.com/gate4ai/mcp/shared"
-	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
+	"github.com/gate4ai/gate4ai/gateway/clients"
+	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 )
 
 // tryA2ADiscovery attempts to discover if the target URL hosts an A2A server

@@ -7,13 +7,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gate4ai/mcp/server"
-	"github.com/gate4ai/mcp/server/mcp/capability"
+	"github.com/gate4ai/gate4ai/server"
+	"github.com/gate4ai/gate4ai/server/mcp/capability"
 	"go.uber.org/zap"
 
 	// Removed capability import here, options will ensure creation
-	"github.com/gate4ai/mcp/shared" // Keep for input schema if needed
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/shared" // Keep for input schema if needed
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 )
 
 // Define Tool handlers directly in this package

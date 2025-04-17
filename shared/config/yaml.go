@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema" // Import A2A schema
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema" // Import A2A schema
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )

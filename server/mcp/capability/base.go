@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/gate4ai/mcp/server/mcp"
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/server/mcp"
+	"github.com/gate4ai/gate4ai/shared"
 
 	// Import V2024 schema with an alias for checking supported versions
-	schemaV2024 "github.com/gate4ai/mcp/shared/mcp/2024/schema"
+	schemaV2024 "github.com/gate4ai/gate4ai/shared/mcp/2024/schema"
 	// Import V2025 schema as the default 'schema' for parsing, state, and response structure
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 
 	"go.uber.org/zap"
 )

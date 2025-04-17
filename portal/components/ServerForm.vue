@@ -123,10 +123,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch } from 'vue';
 import { rules } from '~/utils/validation';
-import type { ServerData } from '~/utils/server'; // Remove ServerType import
-import type { ServerStatus, ServerAvailability, ServerProtocol } from '@prisma/client';
+import type { ServerData } from '~/utils/server';
 
 
 const props = defineProps<{

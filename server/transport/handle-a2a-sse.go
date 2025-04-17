@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gate4ai/mcp/server/a2a"
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/server/a2a"
+	"github.com/gate4ai/gate4ai/shared"
 	"go.uber.org/zap"
 )
 

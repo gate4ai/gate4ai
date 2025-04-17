@@ -1,11 +1,11 @@
-module github.com/gate4ai/mcp/server
+module github.com/gate4ai/gate4ai/server
 
 go 1.24.1
 
-replace github.com/gate4ai/mcp/shared => ../shared
+replace github.com/gate4ai/gate4ai/shared => ../shared
 
 require (
-	github.com/gate4ai/mcp/shared v0.0.0-00010101000000-000000000000
+	github.com/gate4ai/gate4ai/shared v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.8.1
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.37.0

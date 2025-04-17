@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time" // Import time
 
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/shared"
 	// Use 2025 schema for parsing notifications
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 

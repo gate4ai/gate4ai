@@ -1,13 +1,7 @@
 import { PrismaClient, Role, Status } from '@prisma/client';
 import bcrypt from 'bcrypt';
-import crypto from 'crypto';
 
-// Helper function to hash API keys using SHA-256
-function hashApiKey(key: string): string {
-  const hash = crypto.createHash('sha256');
-  hash.update(key);
-  return hash.digest('hex');
-}
+
 
 const prisma = new PrismaClient();
 
@@ -16,8 +10,6 @@ async function main() {
   const user = await prisma.user.findUnique({
     where: { email: 'admin@gate4.ai' }
   });
-
-  let adminId: string;
 
   if (user) {
     // Update existing user
@@ -29,11 +21,10 @@ async function main() {
       }
     });
     console.log('Updated admin@gate4.ai to Admin role');
-    adminId = user.id;
   } else {
     // Create new admin user
     const hashedPassword = await bcrypt.hash('Admin123!', 10);
-    const newAdmin = await prisma.user.create({
+    await prisma.user.create({
       data: {
         email: 'admin@gate4.ai',
         password: hashedPassword,
@@ -43,7 +34,6 @@ async function main() {
       }
     });
     console.log('Created admin user admin@gate4.ai');
-    adminId = newAdmin.id;
   }
 
   // Add Settings

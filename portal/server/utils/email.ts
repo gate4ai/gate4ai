@@ -48,15 +48,17 @@ async function getEmailSettings(): Promise<{ smtpConfig: SmtpConfig | null, doNo
                  fetchedDoNotSend = setting.value;
             } else if (setting.key === 'email_smtp_server') {
                  // Basic type check for the SMTP config object
-                 const val = setting.value as any;
+                 const val = setting.value as Record<string, unknown>;
                  if (typeof val === 'object' && val !== null && typeof val.host === 'string' && typeof val.port === 'number') {
                      fetchedSmtpConfig = {
                          host: val.host,
                          port: val.port,
                          secure: typeof val.secure === 'boolean' ? val.secure : false, // Default secure to false
                          // Check for auth object existence and types
-                         auth: (typeof val.auth === 'object' && val.auth !== null && typeof val.auth.user === 'string' && typeof val.auth.pass === 'string')
-                               ? { user: val.auth.user, pass: val.auth.pass }
+                         auth: (typeof val.auth === 'object' && val.auth !== null && 
+                               val.auth && typeof (val.auth as Record<string, unknown>).user === 'string' && 
+                               typeof (val.auth as Record<string, unknown>).pass === 'string')
+                               ? { user: (val.auth as Record<string, string>).user, pass: (val.auth as Record<string, string>).pass }
                                : undefined, // Set auth to undefined if invalid or missing
                      };
                  } else {

@@ -76,7 +76,6 @@
   
   <script setup lang="ts">
   import { rules } from '~/utils/validation';
-  import type { ServerTool as DiscoveredTool } from '~/utils/server';
   
   // Props define the data passed from the parent and v-model bindings
   defineProps<{
@@ -102,10 +101,7 @@
   
   // Emits define events sent back to the parent for v-model updates
   defineEmits<{
-    (e: 'update:serverName', value: string): void;
-    (e: 'update:description', value: string): void;
-    (e: 'update:websiteUrl', value: string): void;
-    (e: 'update:email', value: string): void;
+    (e: 'update:serverName' | 'update:description' | 'update:websiteUrl' | 'update:email', value: string): void;
     // No 'save' emit needed here, parent dialog action handles it
   }>();
   </script>

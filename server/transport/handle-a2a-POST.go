@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gate4ai/mcp/shared"
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema" // For RequestID type
+	"github.com/gate4ai/gate4ai/shared"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema" // For RequestID type
 	"go.uber.org/zap"
 )
 

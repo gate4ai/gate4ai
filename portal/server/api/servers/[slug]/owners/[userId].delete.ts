@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
     }
 
     // 3. Remove the user as an owner (disconnect the relation)
-    const deletedLink = await prisma.serverOwner.delete({
+    await prisma.serverOwner.delete({
       where: {
         serverId_userId: {
           serverId: serverId,

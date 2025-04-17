@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/gate4ai/mcp/server/mcp/capability"
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/server/mcp/capability"
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 )
 
 // WithMCPPrompt is a server option to add an MCP prompt.

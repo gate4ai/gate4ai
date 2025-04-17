@@ -28,7 +28,7 @@ Other Go modules within the project (`gateway`, `server`, `tests`) import this `
 Example `go.mod` replace directive:
 
 ```go
-replace github.com/gate4ai/mcp/shared => ../shared
+replace github.com/gate4ai/gate4ai/shared => ../shared
 ```
 
 This ensures that the local version of the shared code is used during development and testing.

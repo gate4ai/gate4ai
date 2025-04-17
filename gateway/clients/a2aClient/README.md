@@ -30,8 +30,8 @@ import (
 	"log"
 	"time"
 
-	a2a "github.com/gate4ai/mcp/gateway/clients/a2aClient"
-	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
+	a2a "github.com/gate4ai/gate4ai/gateway/clients/a2aClient"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	"go.uber.org/zap"
 )
 
@@ -88,9 +88,9 @@ import (
 	"log"
 	"time"
 
-	a2a "github.com/gate4ai/mcp/gateway/clients/a2aClient"
-	"github.com/gate4ai/mcp/shared"
-	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
+	a2a "github.com/gate4ai/gate4ai/gateway/clients/a2aClient"
+	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	"go.uber.org/zap"
 )
 

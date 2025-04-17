@@ -13,12 +13,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gate4ai/mcp/server/a2a"
-	"github.com/gate4ai/mcp/server/mcp"
-	"github.com/gate4ai/mcp/server/transport"
-	"github.com/gate4ai/mcp/shared"
-	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
-	"github.com/gate4ai/mcp/shared/config"
+	"github.com/gate4ai/gate4ai/server/a2a"
+	"github.com/gate4ai/gate4ai/server/mcp"
+	"github.com/gate4ai/gate4ai/server/transport"
+	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
+	"github.com/gate4ai/gate4ai/shared/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

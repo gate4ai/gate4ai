@@ -115,7 +115,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import type { ServerInfo, ServerOwner } from '~/utils/server';
+import type { ServerOwner } from '~/utils/server';
 import { rules } from '~/utils/validation'; // Import validation rules
 import { useSnackbar } from '~/composables/useSnackbar';
 

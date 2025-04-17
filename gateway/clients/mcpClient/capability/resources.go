@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/gate4ai/mcp/shared"
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/shared"
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 

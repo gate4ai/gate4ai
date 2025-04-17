@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/gate4ai/mcp/gateway/clients"
+	"github.com/gate4ai/gate4ai/gateway/clients"
 	"go.uber.org/zap"
 )
 

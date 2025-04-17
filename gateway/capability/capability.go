@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
-	client "github.com/gate4ai/mcp/gateway/clients/mcpClient"
-	"github.com/gate4ai/mcp/server/mcp"
-	"github.com/gate4ai/mcp/server/transport"
-	"github.com/gate4ai/mcp/shared"
-	"github.com/gate4ai/mcp/shared/config"
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema" // Use 2025 schema
+	client "github.com/gate4ai/gate4ai/gateway/clients/mcpClient"
+	"github.com/gate4ai/gate4ai/server/mcp"
+	"github.com/gate4ai/gate4ai/server/transport"
+	"github.com/gate4ai/gate4ai/shared"
+	"github.com/gate4ai/gate4ai/shared/config"
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema" // Use 2025 schema
 	"go.uber.org/zap"
 )
 

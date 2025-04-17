@@ -1,7 +1,7 @@
 /**
  * Utilities for handling protocol-specific data conversion between UI models and database models
  */
-import type { AgentSkill, RestEndpoint, RestParameter, RestResponse } from '~/utils/server';
+import type { AgentSkill, RestEndpoint } from '~/utils/server';
 
 // Database model type definitions (for compatibility before Prisma generates them)
 interface DbA2ASkill {

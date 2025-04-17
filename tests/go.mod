@@ -1,17 +1,17 @@
-module github.com/gate4ai/mcp/tests
+module github.com/gate4ai/gate4ai/tests
 
 go 1.24.1
 
 replace (
-	github.com/gate4ai/mcp/gateway => ../gateway
-	github.com/gate4ai/mcp/server => ../server
-	github.com/gate4ai/mcp/shared => ../shared
+	github.com/gate4ai/gate4ai/gateway => ../gateway
+	github.com/gate4ai/gate4ai/server => ../server
+	github.com/gate4ai/gate4ai/shared => ../shared
 )
 
 require (
-	github.com/gate4ai/mcp/gateway v0.0.0-00010101000000-000000000000
-	github.com/gate4ai/mcp/server v0.0.0-00010101000000-000000000000
-	github.com/gate4ai/mcp/shared v0.0.0-00010101000000-000000000000
+	github.com/gate4ai/gate4ai/gateway v0.0.0-00010101000000-000000000000
+	github.com/gate4ai/gate4ai/server v0.0.0-00010101000000-000000000000
+	github.com/gate4ai/gate4ai/shared v0.0.0-00010101000000-000000000000
 	github.com/lib/pq v1.10.9
 	github.com/playwright-community/playwright-go v0.5001.0
 	github.com/shirou/gopsutil/v3 v3.24.5

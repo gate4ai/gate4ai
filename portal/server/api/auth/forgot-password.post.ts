@@ -83,9 +83,10 @@ export default defineEventHandler(async (event) => {
 
      return { message: "Password reset instructions have been sent to your email address." };
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Forgot password API error:', error);
-    if (error instanceof z.ZodError || (error.statusCode && error.statusCode !== 500)) { // Don't mask validation/auth errors
+    if (error instanceof z.ZodError || 
+       (error && typeof error === 'object' && 'statusCode' in error && error.statusCode !== 500)) {
         throw error;
     }
     // For other errors, return a generic message to avoid leaking info

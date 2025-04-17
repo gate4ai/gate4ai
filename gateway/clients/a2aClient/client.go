@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gate4ai/mcp/shared"
-	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema" // For RequestID type only
+	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema" // For RequestID type only
 	"go.uber.org/zap"
 )
 

@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/gate4ai/mcp/shared"
-	schema2024 "github.com/gate4ai/mcp/shared/mcp/2024/schema"
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/shared"
+	schema2024 "github.com/gate4ai/gate4ai/shared/mcp/2024/schema"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 

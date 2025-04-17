@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gate4ai/gate4ai/tests/env"
 	"github.com/playwright-community/playwright-go"
 	"github.com/stretchr/testify/require" // Import testify require
 )
@@ -341,6 +342,11 @@ func TestAddServer_NonRigthSlug(t *testing.T) {
 }
 
 func TestAddA2AServer(t *testing.T) {
+	a2a_server_url := env.GetURL(env.A2AServerComponentName)
+	if a2a_server_url == "" {
+		t.Skip("A2A server not running, skipping discovery test")
+	}
+
 	// Create artifact manager
 	am := NewArtifactManager(t)
 	defer am.Close()
@@ -350,7 +356,7 @@ func TestAddA2AServer(t *testing.T) {
 	require.NoError(t, err, "Failed to create user")
 
 	// Add a new server
-	server, err := addA2AServer(am, user, "test-add-a2a-server")
+	server, err := addA2AServer(am, user, "test-add-a2a-server", a2a_server_url)
 	require.NoError(t, err, "Failed to add server")
 	require.NotNil(t, server)
 	require.NotEmpty(t, server.Slug, "Server slug should not be empty after creation")
@@ -425,7 +431,7 @@ func TestAddA2AServer(t *testing.T) {
 }
 
 // addA2AServer adds a new A2A server to the catalog using Playwright browser automation
-func addA2AServer(am *ArtifactManager, user *User, slug string) (*CatalogServer, error) {
+func addA2AServer(am *ArtifactManager, user *User, slug string, a2a_server_url string) (*CatalogServer, error) {
 	// First, log in the user
 	if err := loginUser(am, user.Email, user.Password); err != nil {
 		return nil, fmt.Errorf("login failed before adding A2A server: %w", err)
@@ -464,7 +470,7 @@ func addA2AServer(am *ArtifactManager, user *User, slug string) (*CatalogServer,
 
 	// --- Step 1: Enter URL and Discover ---
 	// Fill the server URL using the located input field with increased timeout
-	if err := urlInput.Fill(EXAMPLE_A2A_SERVER_URL, playwright.LocatorFillOptions{
+	if err := urlInput.Fill(a2a_server_url, playwright.LocatorFillOptions{
 		Timeout: playwright.Float(10000), // 10 seconds timeout
 	}); err != nil {
 		am.SaveLocatorDebugInfo(urlFieldSelector, "fill_a2a_server_url_failed")
@@ -612,7 +618,7 @@ func addA2AServer(am *ArtifactManager, user *User, slug string) (*CatalogServer,
 		Slug:        extractServerSlugFromURL(am.Page.URL()),
 		Name:        "E2E A2A Example Server " + am.Timestamp,
 		Description: "",
-		ServerURL:   EXAMPLE_A2A_SERVER_URL,
+		ServerURL:   a2a_server_url,
 	}
 
 	// Verify slug extraction worked

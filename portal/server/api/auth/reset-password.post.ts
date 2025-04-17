@@ -50,9 +50,10 @@ export default defineEventHandler(async (event) => {
     console.log(`Password reset successfully for user: ${user.email}`);
     return { message: 'Password has been reset successfully.' };
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Reset password API error:', error);
-     if (error instanceof z.ZodError || (error.statusCode)) { // Re-throw validation and known H3 errors
+     if (error instanceof z.ZodError || 
+        (error && typeof error === 'object' && 'statusCode' in error)) {
         throw error;
     }
     throw createError({ statusCode: 500, statusMessage: 'An error occurred while resetting the password.' });

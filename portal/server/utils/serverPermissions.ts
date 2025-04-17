@@ -1,7 +1,7 @@
 import type { H3Event } from 'h3';
 import { createError } from 'h3';
 import prisma from './prisma';
-import type { User, Server as PrismaServer, SubscriptionStatus, ServerOwner } from '@prisma/client'; // Ensure correct types
+import type { User, Server, SubscriptionStatus } from '@prisma/client'; // Ensure correct types
 import { checkAuth } from './userUtils';
 
 /**
@@ -32,7 +32,7 @@ export async function checkServerModificationRights(event: H3Event, serverSlug: 
   }
 
   // Type assertion needed as Prisma include type inference isn't perfect
-  const serverWithProperOwners = server as PrismaServer & { owners: { userId: string }[] };
+  const serverWithProperOwners = server as Server & { owners: { userId: string }[] };
 
   const isOwner = serverWithProperOwners.owners.some(owner => owner.userId === user.id);
   const isAdminOrSecurity = user.role === 'ADMIN' || user.role === 'SECURITY';
@@ -117,7 +117,7 @@ export async function checkServerCreationRights(event: H3Event) {
  */
 export function getServerReadAccessLevel(
     user: User | undefined,
-    server: PrismaServer & { owners: { user?: { id: string } }[] } // Use PrismaServer and ServerOwner or similar structure
+    server: Server & { owners: { user?: { id: string } }[] } // Use PrismaServer and ServerOwner or similar structure
 ): { hasExtendedAccess: boolean; isOwner: boolean; isAdminOrSecurity: boolean } {
     if (!user) {
         return { hasExtendedAccess: false, isOwner: false, isAdminOrSecurity: false };

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gate4ai/mcp/server/transport"
-	"github.com/gate4ai/mcp/shared"
-	schema2025 "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/server/transport"
+	"github.com/gate4ai/gate4ai/shared"
+	schema2025 "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

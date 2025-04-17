@@ -8,7 +8,7 @@ export default defineEventHandler(async () => {
     
     // If query succeeds, return 200 with success message
     return { database: "ok" };
-  } catch (error) {
+  } catch {
     // If query fails, return 500 with error message
     throw createError({
       statusCode: 500,

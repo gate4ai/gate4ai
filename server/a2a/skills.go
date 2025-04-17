@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/mcp/server/mcp" // Needed for transport constants
-	"github.com/gate4ai/mcp/shared"
-	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
-	mcpSchema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/server/mcp" // Needed for transport constants
+	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
+	mcpSchema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 
 	"go.uber.org/zap"
 )

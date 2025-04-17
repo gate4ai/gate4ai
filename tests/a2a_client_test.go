@@ -8,20 +8,21 @@ import (
 	"testing"
 	"time"
 
-	a2aClient "github.com/gate4ai/mcp/gateway/clients/a2aClient"
-	"github.com/gate4ai/mcp/shared"
-	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
+	a2aClient "github.com/gate4ai/gate4ai/gateway/clients/a2aClient"
+	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
+	"github.com/gate4ai/gate4ai/tests/env"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 )
 
 // Helper function to create a new A2A client for tests
-func newTestA2AClient(t *testing.T) *a2aClient.Client {
+func newTestA2AClient(t *testing.T, a2a_server_url string) *a2aClient.Client {
 	t.Helper()
 	logger := zaptest.NewLogger(t)
 	client, err := a2aClient.New(
-		EXAMPLE_A2A_SERVER_URL,
+		a2a_server_url,
 		a2aClient.WithLogger(logger),
 		a2aClient.DoNotTrustAgentInfoURL())
 	require.NoError(t, err, "Failed to create A2A client")
@@ -30,7 +31,11 @@ func newTestA2AClient(t *testing.T) *a2aClient.Client {
 
 // Test A2A Discovery (Fetching Agent Card)
 func TestA2ADiscovery(t *testing.T) {
-	client := newTestA2AClient(t)
+	a2a_server_url := env.GetURL(env.A2AServerComponentName)
+	if a2a_server_url == "" {
+		t.Skip("A2A server not running, skipping discovery test")
+	}
+	client := newTestA2AClient(t, a2a_server_url)
 	ctx, cancel := context.WithTimeout(context.Background(), 100000*time.Second)
 	defer cancel()
 
@@ -55,7 +60,11 @@ func TestA2ADiscovery(t *testing.T) {
 
 // Test tasks/send
 func TestA2ATaskSend(t *testing.T) {
-	client := newTestA2AClient(t)
+	a2a_server_url := env.GetURL(env.A2AServerComponentName)
+	if a2a_server_url == "" {
+		t.Skip("A2A server not running, skipping discovery test")
+	}
+	client := newTestA2AClient(t, a2a_server_url)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second) // Longer timeout for task execution
 	defer cancel()
 
@@ -99,7 +108,11 @@ func TestA2ATaskSend(t *testing.T) {
 
 // Test tasks/get
 func TestA2ATaskGet(t *testing.T) {
-	client := newTestA2AClient(t)
+	a2a_server_url := env.GetURL(env.A2AServerComponentName)
+	if a2a_server_url == "" {
+		t.Skip("A2A server not running, skipping discovery test")
+	}
+	client := newTestA2AClient(t, a2a_server_url)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -152,7 +165,11 @@ func TestA2ATaskGet(t *testing.T) {
 
 // Test tasks/cancel
 func TestA2ATaskCancel(t *testing.T) {
-	client := newTestA2AClient(t)
+	a2a_server_url := env.GetURL(env.A2AServerComponentName)
+	if a2a_server_url == "" {
+		t.Skip("A2A server not running, skipping discovery test")
+	}
+	client := newTestA2AClient(t, a2a_server_url)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -225,7 +242,11 @@ func TestA2ATaskCancel(t *testing.T) {
 
 // Test tasks/sendSubscribe
 func TestA2ATaskSendSubscribe(t *testing.T) {
-	client := newTestA2AClient(t)
+	a2a_server_url := env.GetURL(env.A2AServerComponentName)
+	if a2a_server_url == "" {
+		t.Skip("A2A server not running, skipping discovery test")
+	}
+	client := newTestA2AClient(t, a2a_server_url)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second) // Timeout for the whole test
 	defer cancel()
 

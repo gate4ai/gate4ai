@@ -9,8 +9,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/clients/mcpClient"
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/gateway/clients/mcpClient"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/tests/env"
 	"go.uber.org/zap"
 )
 
@@ -71,8 +72,12 @@ func GetToolsList(serverURL string, key string, logger *zap.Logger) ([]schema.To
 
 // updateSetting updates a setting in the database
 func updateSetting(key string, value interface{}) error {
+	db_url := env.GetURL(env.DBComponentName)
+	if db_url == "" {
+		return fmt.Errorf("database URL not found")
+	}
 	// Connect to the database
-	db, err := sql.Open("postgres", DATABASE_URL)
+	db, err := sql.Open("postgres", db_url)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}

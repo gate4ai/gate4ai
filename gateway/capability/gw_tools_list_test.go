@@ -3,7 +3,7 @@ package capability_test
 import (
 	"testing"
 
-	"github.com/gate4ai/mcp/tests"
+	"github.com/gate4ai/gate4ai/tests"
 	"go.uber.org/zap"
 )
 

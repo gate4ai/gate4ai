@@ -3,7 +3,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/gate4ai/mcp/server/transport"
+	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/stretchr/testify/require"
 )
 

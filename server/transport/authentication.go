@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/gate4ai/mcp/shared/config"
+	"github.com/gate4ai/gate4ai/shared/config"
 	"go.uber.org/zap"
 )
 

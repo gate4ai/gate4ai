@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/mcp/server/mcp"
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/server/mcp"
+	"github.com/gate4ai/gate4ai/shared"
 
 	// Use 2025 schema
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 

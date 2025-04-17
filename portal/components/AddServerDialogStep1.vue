@@ -27,9 +27,9 @@
         :disabled="isLoading || isDiscovering"
         class="mb-4"
         variant="outlined"
-        @update:model-value="$emit('update:slug', $event); $emit('slug-input')"
         density="compact"
         data-testid="add-server-slug-input"
+        @update:model-value="$emit('update:slug', $event); $emit('slug-input')"
       />
   
       <!-- Fetch / Discover Button -->
@@ -78,12 +78,8 @@
   
   // Emits define events sent back to the parent
   defineEmits<{
-    (e: 'update:serverUrl', value: string): void;
-    (e: 'update:slug', value: string): void;
-    (e: 'url-input'): void; // Notify parent about URL input for auto-slug generation
-    (e: 'slug-input'): void; // Notify parent about manual slug input
-    (e: 'discover'): void;
-    (e: 'clear-fetch-error'): void;
+    (e: 'update:serverUrl' | 'update:slug', value: string): void;
+    (e: 'url-input' | 'slug-input' | 'discover' | 'clear-fetch-error'): void;
   }>();
   </script>
   

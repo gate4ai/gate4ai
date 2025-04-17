@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/gate4ai/mcp/shared/config"
+	"github.com/gate4ai/gate4ai/shared/config"
 	"github.com/playwright-community/playwright-go"
 )
 

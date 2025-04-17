@@ -1,7 +1,7 @@
 package schema
 
 import (
-	schema2024 "github.com/gate4ai/mcp/shared/mcp/2024/schema"
+	schema2024 "github.com/gate4ai/gate4ai/shared/mcp/2024/schema"
 )
 
 // JSONSchemaProperty represents a property within a JSON Schema definition.

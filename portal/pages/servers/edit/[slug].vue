@@ -38,7 +38,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router'; // Import useRouter
+import { useRoute } from 'vue-router';
 import ServerForm from '~/components/ServerForm.vue';
 // Use the specific type for the form
 import type { ServerData } from '~/utils/server';
@@ -65,7 +65,6 @@ interface ServerApiResponse {
 
 const { $auth, $api } = useNuxtApp();
 const route = useRoute();
-const router = useRouter(); // Use useRouter for navigation
 const serverSlug = route.params.slug as string; // Get slug
 const isLoading = ref(true);
 const isSubmitting = ref(false);
@@ -121,7 +120,7 @@ async function fetchServer() {
      showError(message); // Show snackbar
 
     // Redirect only if it's specifically a permission error (e.g., 403 from backend check)
-    if (err instanceof Error && 'statusCode' in err && (err as any).statusCode === 403) {
+    if (err instanceof Error && 'statusCode' in err && (err as {statusCode: number}).statusCode === 403) {
          navigateTo(`/servers/${serverSlug}`); // Redirect back to view page
     }
     // Keep the user on the edit page for other errors (like 404, 500) so they see the error message

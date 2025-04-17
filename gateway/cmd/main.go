@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway"
-	"github.com/gate4ai/mcp/shared/config"
+	"github.com/gate4ai/gate4ai/gateway"
+	"github.com/gate4ai/gate4ai/shared/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

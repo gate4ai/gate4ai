@@ -47,7 +47,7 @@ export default defineEventHandler(async (event) => {
     const validatedData = validationResult.data;
 
     // 3. Prepare the update data with proper Prisma types
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
     
     // Add fields conditionally
     if (validatedData.name !== undefined) updateData.name = validatedData.name;
@@ -99,13 +99,13 @@ export default defineEventHandler(async (event) => {
     }
 
      // Handle potential Prisma errors (e.g., unique constraint violation if slug is updated and conflicts)
-     if (error instanceof Error && 'code' in error && (error as any).code === 'P2002') { // Check specific target if needed
+     if (error instanceof Error && 'code' in error && (error as {code: string}).code === 'P2002') {
          throw createError({ statusCode: 409, statusMessage: 'Update failed due to conflicting data (e.g., slug already exists).' });
      }
 
     // Handle case where server wasn't found by checkServerModificationRights (should throw 404)
     // but catch Prisma's P2025 just in case something slips through
-     if (error instanceof Error && 'code' in error && (error as any).code === 'P2025') {
+     if (error instanceof Error && 'code' in error && (error as {code: string}).code === 'P2025') {
         throw createError({ statusCode: 404, statusMessage: `Server with slug '${serverSlug}' not found for update.` });
      }
 

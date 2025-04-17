@@ -10,15 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gate4ai/mcp/server/mcp"
-	"github.com/gate4ai/mcp/server/transport"
-	"github.com/gate4ai/mcp/shared"
-	a2aSchema "github.com/gate4ai/mcp/shared/a2a/2025-draft/schema"
-	"github.com/gate4ai/mcp/shared/config"
+	"github.com/gate4ai/gate4ai/server/mcp"
+	"github.com/gate4ai/gate4ai/server/transport"
+	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
+	"github.com/gate4ai/gate4ai/shared/config"
 	"go.uber.org/zap"
 
-	"github.com/gate4ai/mcp/server/extra"
-	"github.com/gate4ai/mcp/server/mcp/validators"
+	"github.com/gate4ai/gate4ai/server/extra"
+	"github.com/gate4ai/gate4ai/server/mcp/validators"
 )
 
 // Start starts the MCP SSE server with the provided options

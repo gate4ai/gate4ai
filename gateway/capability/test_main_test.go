@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/gate4ai/mcp/gateway"
-	"github.com/gate4ai/mcp/server"
-	"github.com/gate4ai/mcp/server/cmd/mcp-example-server/exampleCapability"
-	"github.com/gate4ai/mcp/shared/config"
-	"github.com/gate4ai/mcp/tests"
+	"github.com/gate4ai/gate4ai/gateway"
+	"github.com/gate4ai/gate4ai/server"
+	"github.com/gate4ai/gate4ai/server/cmd/mcp-example-server/exampleCapability"
+	"github.com/gate4ai/gate4ai/shared/config"
+	"github.com/gate4ai/gate4ai/tests"
 	"go.uber.org/zap"
 )
 
