@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/playwright-community/playwright-go"
+	"github.com/shirou/gopsutil/v3/process"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
@@ -44,6 +45,41 @@ type ArtifactManager struct {
 	Browser     playwright.Browser
 	Context     playwright.BrowserContext
 	Page        playwright.Page
+}
+
+func isDebugMode() bool {
+	pid := int32(os.Getppid())
+	parentProc, err := process.NewProcess(pid)
+	if err != nil {
+		log.Printf("Error getting parent process: %v", err)
+		return false
+	}
+
+	parentName, err := parentProc.Name()
+	if err != nil {
+		log.Printf("Error getting parent process name: %v", err)
+		return false
+	}
+
+	// Common debugger process names
+	debuggers := []string{"dlv", "debug"}
+	for _, dbg := range debuggers {
+		if parentName == dbg {
+			return true
+		}
+	}
+
+	// Check command line arguments for delve flags
+	parentCmdline, err := parentProc.CmdlineSlice()
+	if err == nil {
+		for _, arg := range parentCmdline {
+			if arg == "debug" || arg == "--" || strings.Contains(arg, "dlv") {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func NewArtifactManager(t *testing.T) *ArtifactManager {

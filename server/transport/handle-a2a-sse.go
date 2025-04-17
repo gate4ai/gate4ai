@@ -84,49 +84,25 @@ func (t *Transport) streamA2AResponse(w http.ResponseWriter, r *http.Request, se
 				continue
 			}
 
-			// Check if it's an A2A stream event message
-			if msg.A2AEvent != nil {
-				var eventDataJSON []byte
-				var err error
-				var eventName string
-
-				if msg.A2AEvent.Type == "status" && msg.A2AEvent.Status != nil {
-					eventName = "TaskStatusUpdate"
-					eventDataJSON, err = json.Marshal(msg.A2AEvent.Status)
-				} else if msg.A2AEvent.Type == "artifact" && msg.A2AEvent.Artifact != nil {
-					eventName = "TaskArtifactUpdate"
-					eventDataJSON, err = json.Marshal(msg.A2AEvent.Artifact)
-				} else {
-					logger.Error("Invalid A2A stream event data in message", zap.Any("event", msg.A2AEvent))
-					continue
-				}
-
-				if err != nil {
-					logger.Error("Failed to marshal A2A SSE event data", zap.Error(err), zap.String("eventName", eventName))
-					continue
-				}
-
-				// Send event
-				fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", eventID, eventName, eventDataJSON)
-				eventID++
-				flusher.Flush()
-				logger.Debug("Sent A2A SSE event", zap.String("eventName", eventName))
-
-				// If this was the final event, close the stream
-				if msg.A2AEvent.Final {
-					logger.Info("Final A2A event sent, closing SSE stream", zap.String("sessionId", session.GetID()))
-					return // Exit loop, which closes the stream
-				}
-
-			} else {
-				// Log unexpected non-A2A messages arriving on the stream's output channel
-				logger.Warn("Received unexpected non-A2A message on SSE output channel",
-					zap.String("sessionId", session.GetID()),
-					zap.Any("msgId", msg.ID),
-					zap.Stringp("method", msg.Method),
-				)
+			eventDataJSON, err := json.Marshal(msg)
+			if err != nil {
+				logger.Error("Failed to marshal A2A SSE event data", zap.Error(err))
+				continue
 			}
 
+			// Send event
+			fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", eventID, "event", eventDataJSON)
+			eventID++
+			flusher.Flush()
+			logger.Debug("Sent A2A SSE event", zap.Any("eventName", msg))
+
+			var a2aEvent shared.A2AStreamEvent
+			err = json.Unmarshal(*msg.Result, &a2aEvent)
+			// If this was the final event, close the stream
+			if err == nil && a2aEvent.Final {
+				logger.Info("Final A2A event sent, closing SSE stream", zap.String("sessionId", session.GetID()))
+				return // Exit loop, which closes the stream
+			}
 		case <-ticker.C:
 			// Send keepalive ping event
 			select {

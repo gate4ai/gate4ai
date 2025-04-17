@@ -464,7 +464,7 @@ func addA2AServer(am *ArtifactManager, user *User, slug string) (*CatalogServer,
 
 	// --- Step 1: Enter URL and Discover ---
 	// Fill the server URL using the located input field with increased timeout
-	if err := urlInput.Fill(A2A_SERVER_URL, playwright.LocatorFillOptions{
+	if err := urlInput.Fill(EXAMPLE_A2A_SERVER_URL, playwright.LocatorFillOptions{
 		Timeout: playwright.Float(10000), // 10 seconds timeout
 	}); err != nil {
 		am.SaveLocatorDebugInfo(urlFieldSelector, "fill_a2a_server_url_failed")
@@ -612,7 +612,7 @@ func addA2AServer(am *ArtifactManager, user *User, slug string) (*CatalogServer,
 		Slug:        extractServerSlugFromURL(am.Page.URL()),
 		Name:        "E2E A2A Example Server " + am.Timestamp,
 		Description: "",
-		ServerURL:   A2A_SERVER_URL,
+		ServerURL:   EXAMPLE_A2A_SERVER_URL,
 	}
 
 	// Verify slug extraction worked

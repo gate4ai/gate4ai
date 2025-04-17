@@ -35,7 +35,7 @@ type JSONRPCError struct {
 }
 
 // Test successful tool call with valid authorization
-func TestSuccessfulToolCall(t *testing.T) {
+func TestMCP2024SuccessfulToolCall(t *testing.T) {
 	// Create a JSON-RPC request for the 'echo' tool
 	request := JSONRPCRequest{
 		JSONRPC: "2.0",
@@ -73,7 +73,7 @@ func TestSuccessfulToolCall(t *testing.T) {
 }
 
 // Test failed tool call without authorization
-func TestUnauthorizedToolCall(t *testing.T) {
+func TestMCP2024UnauthorizedToolCall(t *testing.T) {
 	// Create a JSON-RPC request for the 'echo' tool
 	request := JSONRPCRequest{
 		JSONRPC: "2.0",

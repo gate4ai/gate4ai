@@ -394,8 +394,20 @@ func (s *BaseSession) SendA2AStreamEvent(event *A2AStreamEvent) error {
 	msg := &Message{
 		Session:   s,
 		Timestamp: time.Now(),
-		A2AEvent:  event, // Store the event data here
-		// ID, Method, Params, Result, Error are nil for SSE events
+	}
+
+	if event.Error != nil {
+		msg.Error = &JSONRPCError{
+			Code:    JSONRPCErrorInternal,
+			Message: event.Error.Error(),
+		}
+	} else {
+		jsonData, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+		raw := json.RawMessage(jsonData)
+		msg.Result = &raw
 	}
 
 	s.Mu.RLock()

@@ -172,7 +172,10 @@ func (ac *A2ACapability) handleTaskSend(msg *shared.Message) (interface{}, error
 			// Continue processing other updates? Or fail task? Let's fail task.
 			task.Status.State = a2aSchema.TaskStateFailed
 			errMsg := fmt.Sprintf("Internal error applying update: %v", applyErr)
-			task.Status.Message = &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{a2aSchema.Part(`{"type":"text", "text":"` + errMsg + `"}`)}}
+			task.Status.Message = &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{{
+				Type: shared.PointerTo("text"),
+				Text: shared.PointerTo(errMsg),
+			}}}
 			task.Status.Timestamp = time.Now()
 			break
 		}
@@ -187,13 +190,17 @@ func (ac *A2ACapability) handleTaskSend(msg *shared.Message) (interface{}, error
 			task = lastTaskState
 		}
 		task.Status.State = a2aSchema.TaskStateFailed
-		task.Status.Message = &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{a2aSchema.Part(`{"type":"text", "text":"` + handlerErr.Error() + `"}`)}}
+		task.Status.Message = &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{{
+			Type: shared.PointerTo("text"),
+			Text: shared.PointerTo(handlerErr.Error())}}}
 		task.Status.Timestamp = time.Now()
 	} else if lastTaskState == nil {
 		// Should not happen if handler ran correctly, but handle defensively
 		logger.Error("Handler finished but no final task state recorded")
 		task.Status.State = a2aSchema.TaskStateFailed
-		task.Status.Message = &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{a2aSchema.Part(`{"type":"text", "text":"Internal error: Handler finished unexpectedly"}`)}}
+		task.Status.Message = &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{{
+			Type: shared.PointerTo("text"),
+			Text: shared.PointerTo("Internal error: Handler finished unexpectedly")}}}
 		task.Status.Timestamp = time.Now()
 	} else {
 		// Handler finished successfully, use the last known state
@@ -261,7 +268,7 @@ func (ac *A2ACapability) handleTaskSendSubscribe(msg *shared.Message) (interface
 			// Send a final "failed" status update via the session
 			failStatus := a2aSchema.TaskStatus{
 				State:     a2aSchema.TaskStateFailed,
-				Message:   &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{a2aSchema.Part(`{"type":"text", "text":"` + handlerErr.Error() + `"}`)}},
+				Message:   &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{{Type: shared.PointerTo("text"), Text: shared.PointerTo(handlerErr.Error())}}},
 				Timestamp: time.Now(),
 			}
 			finalEvent := &shared.A2AStreamEvent{
@@ -460,7 +467,10 @@ func (ac *A2ACapability) handleTaskCancel(msg *shared.Message) (interface{}, err
 	// Update task state to canceled
 	task.Status.State = a2aSchema.TaskStateCanceled
 	task.Status.Timestamp = time.Now()
-	task.Status.Message = &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{a2aSchema.Part(`{"type":"text", "text":"Task canceled by request."}`)}}
+	task.Status.Message = &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{{
+		Type: shared.PointerTo("text"),
+		Text: shared.PointerTo("Task canceled by request."),
+	}}}
 
 	// Save updated state
 	if err := ac.taskStore.Save(context.Background(), task); err != nil {

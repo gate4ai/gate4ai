@@ -10,3 +10,11 @@ func StringPtrToString(ptr *string) string {
 	}
 	return *ptr
 }
+
+// NilIfNil returns "nil" if the string pointer is nil, otherwise returns the pointed-to string.
+func NilIfNil(s *string) string {
+	if s == nil {
+		return "nil"
+	}
+	return *s
+}
