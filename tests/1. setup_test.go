@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 	env.Register(
 		env.NewDBEnv(),
 		env.NewMailHogEnv(),
-		env.NewA2AServerEnv(),
+		//env.NewA2AServerEnv(),
 		env.NewPlaywrightEnv(),
 		env.NewPrismaEnv(),
 		env.NewDBSettingsEnv(),
