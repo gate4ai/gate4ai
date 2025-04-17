@@ -41,26 +41,34 @@ func (e *PrismaEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 	resultChan := make(chan error, 1)
 
 	go func() {
+		logPrefix := fmt.Sprintf("[%s] ", e.Name())
 		defer close(resultChan)
-		log.Printf("Starting component: %s", e.Name())
+		log.Printf("%sStarting component...", logPrefix)
 
 		// Get Database URL from the dependency component.
-		// At this stage, the DB component has finished Configure, so its URL (DSN) should be available.
-		// The DB container might still be starting up, but Prisma CLI needs the DSN now.
+		log.Printf("%sFetching database URL from component '%s'", logPrefix, DBComponentName)
 		databaseURL := envs.GetURL(DBComponentName)
 		if databaseURL == "" {
-			resultChan <- fmt.Errorf("%s dependency '%s' URL is not available", e.Name(), DBComponentName)
+			err := fmt.Errorf("%sdependency '%s' URL is not available", logPrefix, DBComponentName)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sDatabase URL obtained: %s", logPrefix, databaseURL)
 
-		// Wait briefly for the database to likely accept connections
+		// Wait for the database to likely accept connections
+		log.Printf("%sWaiting for database readiness...", logPrefix)
 		if err := e.waitForDB(ctx, databaseURL); err != nil {
-			resultChan <- fmt.Errorf("database not ready for migrations: %w", err)
+			err = fmt.Errorf("database not ready for migrations: %w", err)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sDatabase is ready.", logPrefix)
 
 		prismaDir := filepath.Join(TestConfigWorkspaceFolder, "portal")
 		envVars := append(os.Environ(), "GATE4AI_DATABASE_URL="+databaseURL)
+		log.Printf("%sUsing Prisma directory: %s", logPrefix, prismaDir)
 
 		// --- Run Prisma Commands ---
 		commands := []struct {
@@ -75,7 +83,7 @@ func (e *PrismaEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		}
 
 		for _, cmdInfo := range commands {
-			log.Printf("Running prisma %s...", cmdInfo.name)
+			log.Printf("%sRunning prisma %s...", logPrefix, cmdInfo.name)
 			cmd := exec.CommandContext(ctx, cmdInfo.args[0], cmdInfo.args[1:]...)
 			cmd.Dir = prismaDir
 			cmd.Env = envVars
@@ -83,28 +91,32 @@ func (e *PrismaEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 
+			cmdStartTime := time.Now()
 			err := cmd.Run()
+			cmdDuration := time.Since(cmdStartTime)
 
 			// Check context cancellation first
 			if ctx.Err() != nil {
-				log.Printf("Context cancelled during prisma %s", cmdInfo.name)
+				log.Printf("%sContext cancelled during prisma %s", logPrefix, cmdInfo.name)
 				resultChan <- ctx.Err()
 				return
 			}
 
 			if err != nil {
-				errMsg := fmt.Errorf("failed to run prisma %s: %w", cmdInfo.name, err)
+				errMsg := fmt.Errorf("failed to run prisma %s (duration: %s): %w", cmdInfo.name, cmdDuration, err)
 				if cmdInfo.warn {
-					log.Printf("Warning: %v", errMsg) // Log as warning, continue
+					log.Printf("%sWarning: %v", logPrefix, errMsg) // Log as warning, continue
 				} else {
-					log.Printf("Error: %v", errMsg)
+					log.Printf("%sError: %v", logPrefix, errMsg)
 					resultChan <- errMsg // Fail component
 					return
 				}
+			} else {
+				log.Printf("%sPrisma %s completed successfully in %s.", logPrefix, cmdInfo.name, cmdDuration)
 			}
 		}
 
-		log.Printf("Component %s finished successfully.", e.Name())
+		log.Printf("%sComponent finished successfully.", logPrefix)
 		resultChan <- nil // Signal success
 	}()
 
@@ -113,7 +125,8 @@ func (e *PrismaEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 
 // waitForDB pings the database until it's available or context is cancelled.
 func (e *PrismaEnv) waitForDB(ctx context.Context, databaseURL string) error {
-	log.Printf("Waiting for database (%s) to become available for migrations...", DBComponentName)
+	logPrefix := fmt.Sprintf("[%s] ", e.Name())
+	log.Printf("%sWaiting for database (%s) to become available for migrations...", logPrefix, DBComponentName)
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -129,7 +142,7 @@ func (e *PrismaEnv) waitForDB(ctx context.Context, databaseURL string) error {
 			db, err := sql.Open("postgres", databaseURL)
 			if err != nil {
 				// Should not happen with valid DSN unless driver is missing
-				log.Printf("Error opening database connection (will retry): %v", err)
+				log.Printf("%sError opening database connection (will retry): %v", logPrefix, err)
 				continue
 			}
 			pingCtx, pingCancel := context.WithTimeout(timeoutCtx, 1*time.Second)
@@ -138,22 +151,13 @@ func (e *PrismaEnv) waitForDB(ctx context.Context, databaseURL string) error {
 			db.Close() // Close connection immediately after ping
 
 			if err == nil {
-				log.Printf("Database is available.")
+				log.Printf("%sDatabase is available.", logPrefix)
 				// Add a small grace period?
 				time.Sleep(500 * time.Millisecond)
 				return nil // Success
 			}
 			// Log ping error but continue waiting
-			// log.Printf("Database ping failed (will retry): %v", err)
+			log.Printf("%sDatabase ping failed (will retry): %v", logPrefix, err)
 		}
 	}
 }
-
-// Stop for PrismaEnv is a no-op as it's a one-time task.
-// func (e *PrismaEnv) Stop() error { return nil } // Uses BaseEnv default
-
-// URL is not applicable for Prisma migrations.
-// func (e *PrismaEnv) URL() string { return "" } // Uses BaseEnv default
-
-// GetDetails is not applicable for Prisma migrations.
-// func (e *PrismaEnv) GetDetails() interface{} { return nil } // Uses BaseEnv default

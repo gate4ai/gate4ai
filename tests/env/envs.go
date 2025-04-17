@@ -56,6 +56,8 @@ func (e *Envs) GetFreePort() (int, error) {
 		listener, err := net.Listen("tcp", ":0") // :0 requests a free port from the OS
 		if err != nil {
 			// If Listen fails, OS might be temporarily out of ports or having issues
+			log.Printf("Warning: net.Listen(\":0\") failed (attempt %d): %v", i+1, err)
+			time.Sleep(50 * time.Millisecond) // Small delay before retrying
 			continue
 		}
 		port := listener.Addr().(*net.TCPAddr).Port
@@ -68,6 +70,7 @@ func (e *Envs) GetFreePort() (int, error) {
 			return port, nil
 		}
 		// If port was already used by us, loop again to get a different one
+		log.Printf("Port %d already allocated, trying again...", port)
 	}
 
 	return 0, fmt.Errorf("failed to find an available free port after multiple attempts")
@@ -91,21 +94,23 @@ func (e *Envs) Execute(ctx context.Context) error {
 	for _, env := range e.components {
 		// Capture loop variables for the goroutine
 		currentEnv := env
+		currentName := currentEnv.Name() // Capture name for logging inside goroutine
 		configureGroup.Go(func() error {
 			select {
 			case <-configureCtx.Done(): // Check if another configure task failed
+				log.Printf("[%s] Configure cancelled due to prior error: %v", currentName, configureCtx.Err())
 				return configureCtx.Err()
 			default:
-				log.Printf("Configuring component: %s", currentEnv.Name())
+				log.Printf("[%s] Configuring component...", currentName)
 				deps, err := currentEnv.Configure(e) // Pass Envs for potential port allocation
 				if err != nil {
-					log.Printf("ERROR: Failed to configure component %s: %v", currentEnv.Name(), err)
-					return fmt.Errorf("configure %s failed: %w", currentEnv.Name(), err)
+					log.Printf("[%s] ERROR: Failed to configure component: %v", currentName, err)
+					return fmt.Errorf("configure %s failed: %w", currentName, err)
 				}
-				// Safely store dependencies (though this part runs concurrently, map access needs care if Execute ran concurrently itself, which it doesn't)
-				// For simplicity, we collect results after the group wait. A mutex could be used if needed.
-				dependenciesMap[currentEnv.Name()] = deps // Store dependencies returned by Configure
-				log.Printf("Component %s configured, dependencies: %v", currentEnv.Name(), deps)
+				// Safely store dependencies
+				// This access is safe because each goroutine writes to a unique key derived from its component
+				dependenciesMap[currentName] = deps // Store dependencies returned by Configure
+				log.Printf("[%s] Component configured successfully, dependencies: %v", currentName, deps)
 				return nil
 			}
 		})
@@ -116,9 +121,10 @@ func (e *Envs) Execute(ctx context.Context) error {
 		// No components started yet, no cleanup needed.
 		return err // Return the first configuration error
 	}
-	log.Println("Configure phase completed.")
+	log.Println("Configure phase completed successfully.")
 
 	// --- Build Graph & Check Dependencies ---
+	log.Println("Building dependency graph...")
 	depGraph := make(map[string][]string) // dependency name -> list of components that depend on it
 	depCount := make(map[string]int)      // component name -> number of unmet dependencies
 	initialStarters := []string{}         // Names of components with no dependencies
@@ -140,38 +146,45 @@ func (e *Envs) Execute(ctx context.Context) error {
 			}
 		}
 	}
+	log.Printf("Initial starters (no dependencies): %v", initialStarters)
 
+	log.Println("Checking for dependency cycles...")
 	// Detect cycles in the dependency graph using depth-first search
+	overallVisited := make(map[string]bool)
 	for name := range e.components {
-		visited := make(map[string]bool)  // Track visited nodes in current traversal
-		recStack := make(map[string]bool) // Track nodes in current recursion stack
-		cycle := detectCycle(name, dependenciesMap, visited, recStack)
-		if cycle != "" {
-			err := fmt.Errorf("dependency cycle detected: %s", cycle)
-			log.Printf("ERROR: %v", err)
-			return err
+		if !overallVisited[name] { // Only start DFS from unvisited nodes
+			recStack := make(map[string]bool) // Reset recursion stack for each DFS run
+			cycle := detectCycle(name, dependenciesMap, overallVisited, recStack)
+			if cycle != "" {
+				err := fmt.Errorf("dependency cycle detected: %s", cycle)
+				log.Printf("ERROR: %v", err)
+				return err
+			}
 		}
 	}
+	log.Println("No dependency cycles detected.")
 
 	// --- Phase 2: Start Components Asynchronously ---
 	log.Println("Executing Start phase...")
-	var startMu sync.Mutex               // Protects shared state: depCount, started, finishedCount
-	started := make(map[string]struct{}) // Set of successfully started component names
-	finishedCount := 0
+	var startMu sync.Mutex                   // Protects shared state: depCount, started, finishedCount
+	started := make(map[string]struct{})     // Set of successfully started component names
+	finishedCount := 0                       // Number of components whose Start goroutine has finished (success or fail)
+	componentError := make(map[string]error) // Store error per component if start fails
 
 	startGroup, startCtx := errgroup.WithContext(ctx) // Use context for cancellation
 
 	// Channel to coordinate starting dependents
-	// Using a buffered channel to avoid blocking goroutines if the main loop is busy
 	readyToProcess := make(chan string, len(e.components))
 
 	// Function to launch the start process for a component
 	launchStart := func(nameToStart string) {
+		log.Printf("[%s] Launching start process...", nameToStart)
 		envToStart := e.components[nameToStart]
 
 		startGroup.Go(func() error {
+			logPrefix := fmt.Sprintf("[%s] ", nameToStart)
 			startTaskTime := time.Now()
-			log.Printf("Starting component: %s", nameToStart)
+			log.Printf("%sStarting component...", logPrefix)
 
 			// Start the component's async process
 			startResultChan := envToStart.Start(startCtx, e) // Pass Envs
@@ -180,53 +193,67 @@ func (e *Envs) Execute(ctx context.Context) error {
 			select {
 			case err, ok := <-startResultChan:
 				if !ok {
-					// Channel closed without sending a value - treat as success unless context cancelled
 					if startCtx.Err() != nil {
-						startErr = fmt.Errorf("context cancelled during start of %s: %w", nameToStart, startCtx.Err())
+						startErr = fmt.Errorf("context cancelled during start: %w", startCtx.Err())
 					} else {
+						log.Printf("%sStart channel closed without error (success).", logPrefix)
 						startErr = nil // Success
 					}
+				} else if err != nil {
+					startErr = fmt.Errorf("start function returned error: %w", err)
 				} else {
-					startErr = err // Value received (nil for success, error otherwise)
+					log.Printf("%sStart function returned success (nil error).", logPrefix)
+					startErr = nil // Explicit success
 				}
 			case <-startCtx.Done():
-				startErr = fmt.Errorf("context cancelled waiting for start of %s: %w", nameToStart, startCtx.Err())
+				startErr = fmt.Errorf("context cancelled waiting for start: %w", startCtx.Err())
 			}
 
 			duration := time.Since(startTaskTime)
 
 			startMu.Lock()
-			defer startMu.Unlock()
-
 			finishedCount++ // Increment finished count regardless of success/failure
+			currentFinishedCount := finishedCount
+			startMu.Unlock() // Unlock before logging potentially large amounts
 
 			if startErr != nil {
-				log.Printf("ERROR: Component '%s' failed to start in %s: %v", nameToStart, duration, startErr)
+				log.Printf("%sERROR: Component failed to start in %s: %v", logPrefix, duration, startErr)
+				startMu.Lock()
+				componentError[nameToStart] = startErr // Record the error
+				startMu.Unlock()
 				// Don't trigger dependents, return the error to the errgroup
 				return fmt.Errorf("start %s failed: %w", nameToStart, startErr)
 			}
 
 			// --- Success ---
-			log.Printf("Component '%s' started successfully in %s.", nameToStart, duration)
+			log.Printf("%sComponent started successfully in %s.", logPrefix, duration)
+			startMu.Lock()
 			started[nameToStart] = struct{}{}
+			startMu.Unlock()
 
 			// Set duration using BaseEnv's unexported method (requires embedding)
 			envToStart.SetStartDuration(duration)
 
 			// Notify that this component is done, so dependents can be checked
-			// Use non-blocking send in case the channel buffer is full (shouldn't happen with correct sizing)
+			log.Printf("%sSignaling readiness to process dependents...", logPrefix)
 			select {
 			case readyToProcess <- nameToStart:
+				log.Printf("%sSignaled readiness successfully.", logPrefix)
+			case <-startCtx.Done():
+				log.Printf("%sContext cancelled before signaling readiness.", logPrefix)
 			default:
 				// Should not happen if channel is sized correctly
-				log.Printf("Warning: readyToProcess channel full when signaling completion of %s", nameToStart)
+				log.Printf("%sWarning: readyToProcess channel full when signaling completion.", logPrefix)
 			}
-
+			log.Printf("%sComponent start goroutine finished. Total finished: %d/%d", logPrefix, currentFinishedCount, len(e.components))
 			return nil // Success for this goroutine
 		})
 	}
 
 	// Kick off initial starters
+	if len(initialStarters) == 0 && len(e.components) > 0 {
+		return fmt.Errorf("no initial components found (all have dependencies?) - check for cycles or configuration errors")
+	}
 	for _, name := range initialStarters {
 		launchStart(name)
 	}
@@ -234,42 +261,55 @@ func (e *Envs) Execute(ctx context.Context) error {
 	// Process completion signals and launch dependents until all are finished or an error occurs
 	processingDone := make(chan struct{})
 	go func() {
+		logPrefixProc := "[Dependency Processor] "
 		defer close(processingDone)
 		processedCount := 0 // How many components we have processed the *completion* of
-		for processedCount < len(e.components) {
+		totalComponents := len(e.components)
+		log.Printf("%sStarting. Waiting for %d components to signal completion.", logPrefixProc, totalComponents)
+
+		for processedCount < totalComponents {
 			select {
 			case justStartedName := <-readyToProcess:
 				processedCount++
+				log.Printf("%sComponent '%s' signaled completion (%d/%d processed). Checking dependents...", logPrefixProc, justStartedName, processedCount, totalComponents)
+
 				// A component finished successfully, check its dependents
 				startMu.Lock()
 				dependents := depGraph[justStartedName]
-				log.Printf("Component '%s' finished, checking %d dependents: %v", justStartedName, len(dependents), dependents)
+				log.Printf("%s'%s' has %d dependents: %v", logPrefixProc, justStartedName, len(dependents), dependents)
 				for _, depName := range dependents {
 					depCount[depName]--
-					log.Printf("Decremented dependency count for '%s', remaining: %d", depName, depCount[depName])
+					log.Printf("%sDecremented dependency count for '%s', remaining: %d", logPrefixProc, depName, depCount[depName])
 					if depCount[depName] == 0 {
 						// Check if context is already cancelled before launching more
 						if startCtx.Err() != nil {
-							log.Printf("Context cancelled, not launching dependent '%s'", depName)
+							log.Printf("%sContext cancelled, not launching dependent '%s'", logPrefixProc, depName)
 							continue
 						}
-						log.Printf("Component '%s' dependencies met, launching start.", depName)
-						launchStart(depName)
+						log.Printf("%sDependencies met for '%s', launching start.", logPrefixProc, depName)
+						launchStart(depName) // This starts a new goroutine in the startGroup
 					}
 				}
 				startMu.Unlock()
+				log.Printf("%sFinished processing dependents for '%s'.", logPrefixProc, justStartedName)
+
 			case <-startCtx.Done():
-				log.Printf("Stopping dependency processing due to context cancellation.")
+				log.Printf("%sStopping dependency processing due to context cancellation: %v", logPrefixProc, startCtx.Err())
 				return // Exit processing loop if context is cancelled
 			}
 		}
+		log.Printf("%sFinished processing all %d component completions.", logPrefixProc, totalComponents)
 	}()
 
 	// Wait for all start goroutines to complete or for the first error
-	err := startGroup.Wait()
+	log.Println("Waiting for all component Start goroutines...")
+	err := startGroup.Wait() // This blocks until all launched goroutines finish or one errors
+	log.Println("All component Start goroutines finished or group errored.")
 
-	// Ensure the processing goroutine has finished before proceeding
+	// Ensure the processing goroutine has also finished before proceeding
+	log.Println("Waiting for dependency processor goroutine...")
 	<-processingDone
+	log.Println("Dependency processor goroutine finished.")
 
 	if err != nil {
 		log.Printf("Environment setup failed during Start phase: %v", err)
@@ -280,20 +320,23 @@ func (e *Envs) Execute(ctx context.Context) error {
 
 	// Final check: Ensure all components were processed
 	startMu.Lock()
-	allFinished := finishedCount == len(e.components)
-	allStartedSuccessfully := len(started) == len(e.components)
+	finalFinishedCount := finishedCount
+	finalStartedCount := len(started)
+	finalErrors := componentError
 	startMu.Unlock()
 
-	if !allFinished || !allStartedSuccessfully {
+	log.Printf("Final Check: Registered=%d, Finished Goroutines=%d, Started Successfully=%d", len(e.components), finalFinishedCount, finalStartedCount)
+
+	if finalFinishedCount != len(e.components) || finalStartedCount != len(e.components) {
 		// This might indicate a dependency cycle, a logic error, or premature context cancellation
-		err := fmt.Errorf("environment setup finished inconsistently: %d components registered, %d finished, %d started successfully", len(e.components), finishedCount, len(started))
-		log.Printf("ERROR: %v", err)
+		errMsg := fmt.Errorf("environment setup finished inconsistently: %d components registered, %d finished, %d started successfully. Errors: %v", len(e.components), finalFinishedCount, finalStartedCount, finalErrors)
+		log.Printf("ERROR: %v", errMsg)
 		log.Println("Performing cleanup...")
 		e.cleanupStarted(started)
-		return err
+		return errMsg
 	}
 
-	log.Printf("Environment setup complete in %s. Started %d components.", time.Since(startTime), len(started))
+	log.Printf("Environment setup complete in %s. Started %d components.", time.Since(startTime), finalStartedCount)
 	return nil
 }
 
@@ -301,16 +344,18 @@ func (e *Envs) Execute(ctx context.Context) error {
 func (e *Envs) StopAll() {
 	log.Println("Stopping all environment components...")
 	var wg sync.WaitGroup
-	// Stop in reverse order? Not strictly necessary, parallel stop is usually fine.
+	// Stop in parallel for faster cleanup
 	for name, env := range e.components {
 		wg.Add(1)
 		go func(n string, en Environment) {
+			logPrefix := fmt.Sprintf("[%s] ", n)
 			defer wg.Done()
-			log.Printf("Stopping component: %s", n)
+			log.Printf("%sStopping component...", logPrefix)
+			stopStartTime := time.Now()
 			if err := en.Stop(); err != nil {
-				log.Printf("Error stopping component %s: %v", n, err)
+				log.Printf("%sERROR stopping component: %v", logPrefix, err)
 			} else {
-				log.Printf("Component %s stopped.", n)
+				log.Printf("%sComponent stopped successfully in %s.", logPrefix, time.Since(stopStartTime))
 			}
 		}(name, env)
 	}
@@ -320,20 +365,24 @@ func (e *Envs) StopAll() {
 
 // cleanupStarted stops only the components that successfully started.
 func (e *Envs) cleanupStarted(started map[string]struct{}) {
+	log.Println("Cleaning up successfully started components...")
 	var wg sync.WaitGroup
 	for name := range started {
 		env, ok := e.components[name]
 		if !ok {
-			continue // Should not happen
+			log.Printf("Warning: Component '%s' marked as started but not found in registry during cleanup.", name)
+			continue
 		}
 		wg.Add(1)
 		go func(n string, en Environment) {
+			logPrefix := fmt.Sprintf("[%s] ", n)
 			defer wg.Done()
-			log.Printf("Stopping successfully started component: %s", n)
+			log.Printf("%sStopping component during cleanup...", logPrefix)
+			stopStartTime := time.Now()
 			if err := en.Stop(); err != nil {
-				log.Printf("Error stopping component %s during cleanup: %v", n, err)
+				log.Printf("%sERROR stopping component during cleanup: %v", logPrefix, err)
 			} else {
-				log.Printf("Component %s stopped during cleanup.", n)
+				log.Printf("%sComponent stopped successfully during cleanup in %s.", logPrefix, time.Since(stopStartTime))
 			}
 		}(name, env)
 	}
@@ -344,30 +393,38 @@ func (e *Envs) cleanupStarted(started map[string]struct{}) {
 // detectCycle performs a depth-first search to find cycles in the dependency graph.
 // Returns a string representation of the detected cycle, or empty string if no cycle found.
 func detectCycle(node string, depMap map[string][]string, visited map[string]bool, recStack map[string]bool) string {
-	if !visited[node] {
-		visited[node] = true
-		recStack[node] = true
+	// If node is already in recursion stack, cycle detected
+	if recStack[node] {
+		return node // Return the node where the cycle is detected
+	}
 
-		// Visit all dependencies of this node
-		for _, dep := range depMap[node] {
-			// If dependency is in the recursion stack, we found a cycle
-			if recStack[dep] {
-				return fmt.Sprintf("%s -> %s", node, dep)
-			}
+	// If node has already been fully visited in this DFS run, no need to revisit
+	if visited[node] {
+		return ""
+	}
 
-			// If not visited, do DFS and check for cycle
-			if !visited[dep] {
-				if cycle := detectCycle(dep, depMap, visited, recStack); cycle != "" {
-					// Prepend current node to the cycle path
-					return fmt.Sprintf("%s -> %s", node, cycle)
-				}
+	// Mark node as visited for this DFS run and add to recursion stack
+	visited[node] = true
+	recStack[node] = true
+
+	// Visit all dependencies of this node
+	for _, dep := range depMap[node] {
+		if cycleStartNode := detectCycle(dep, depMap, visited, recStack); cycleStartNode != "" {
+			// If a cycle is found downstream, prepend current node if it's part of the cycle path
+			// The cycle path starts building up from the node that detected the back edge.
+			if cycleStartNode == node {
+				// We completed the cycle back to the start of this recursive call chain
+				return node // Just return the start node name
+			} else {
+				// Part of an ongoing cycle string, prepend current node
+				return fmt.Sprintf("%s -> %s", node, cycleStartNode)
 			}
 		}
 	}
 
-	// Remove node from recursion stack after traversal
+	// Remove node from recursion stack after visiting all its dependencies
 	recStack[node] = false
-	return ""
+	return "" // No cycle found starting from this node in this path
 }
 
 // GetComponent returns the registered component by name.

@@ -31,12 +31,6 @@ func NewDBSettingsEnv() *DBSettingsEnv {
 // It depends on the database being ready, MailHog having SMTP details,
 // and Portal/Gateway having their intended URLs allocated.
 func (e *DBSettingsEnv) Configure(envs *Envs) (dependencies []string, err error) {
-	// Dependencies needed *before* Start can run:
-	// - database: Need DSN to connect.
-	// - mailhog: Need SMTP details.
-
-	// - portal: Only URL is needed.
-	// - gateway: Only URL is needed.
 	return []string{DBComponentName, MailhogComponentName, PrismaComponentName}, nil
 }
 
@@ -45,40 +39,57 @@ func (e *DBSettingsEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 	resultChan := make(chan error, 1)
 
 	go func() {
+		logPrefix := fmt.Sprintf("[%s] ", e.Name())
 		defer close(resultChan)
-		log.Printf("Starting component: %s", e.Name())
+		log.Printf("%sStarting component...", logPrefix)
 
 		// --- Get Dependency Info ---
+		log.Printf("%sFetching dependency information...", logPrefix)
 		dbURL := envs.GetURL(DBComponentName)
 		if dbURL == "" {
-			resultChan <- fmt.Errorf("%s: database URL not available", e.Name())
+			err := fmt.Errorf("%sdatabase URL not available", logPrefix)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sDatabase URL: %s", logPrefix, dbURL)
 
 		smtpDetailsRaw := envs.GetDetails(MailhogComponentName)
 		smtpDetails, ok := smtpDetailsRaw.(SmtpServerDetails)
 		if !ok {
-			resultChan <- fmt.Errorf("%s: mailhog SMTP details not available or wrong type (%T)", e.Name(), smtpDetailsRaw)
+			err := fmt.Errorf("%smailhog SMTP details not available or wrong type (%T)", logPrefix, smtpDetailsRaw)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sMailhog SMTP Details: %+v", logPrefix, smtpDetails)
 
-		// Get *intended* URLs from portal/gateway (available after their Configure phase)
 		portalInternalURL := envs.GetURL(PortalComponentName)
 		if portalInternalURL == "" {
-			resultChan <- fmt.Errorf("%s: portal internal URL not available", e.Name())
+			err := fmt.Errorf("%sportal internal URL not available", logPrefix)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sPortal Internal URL: %s", logPrefix, portalInternalURL)
 
 		gatewayURL := envs.GetURL(GatewayComponentName)
 		if gatewayURL == "" {
-			resultChan <- fmt.Errorf("%s: gateway URL not available", e.Name())
+			err := fmt.Errorf("%sgateway URL not available", logPrefix)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sGateway Public URL: %s", logPrefix, gatewayURL)
+		log.Printf("%sDependency information fetched successfully.", logPrefix)
 
 		// --- Connect to Database ---
+		log.Printf("%sConnecting to database...", logPrefix)
 		db, err := sql.Open("postgres", dbURL)
 		if err != nil {
-			resultChan <- fmt.Errorf("%s: failed to open database connection: %w", e.Name(), err)
+			err = fmt.Errorf("%sfailed to open database connection: %w", logPrefix, err)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
 		defer db.Close()
@@ -88,50 +99,54 @@ func (e *DBSettingsEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		err = db.PingContext(pingCtx)
 		cancel()
 		if err != nil {
-			resultChan <- fmt.Errorf("%s: failed to ping database: %w", e.Name(), err)
+			err = fmt.Errorf("%sfailed to ping database: %w", logPrefix, err)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sDatabase connection successful.", logPrefix)
 
 		// --- Update Settings ---
-		log.Printf("%s: Updating database settings...", e.Name())
+		log.Printf("%sUpdating database settings...", logPrefix)
 
-		// Update email SMTP server settings
-		if err := updateSettingInDB(ctx, db, "email_smtp_server", smtpDetails); err != nil {
-			resultChan <- fmt.Errorf("%s: failed to update email_smtp_server: %w", e.Name(), err)
-			return
+		settingsToUpdate := []struct {
+			key   string
+			value interface{}
+		}{
+			{"email_smtp_server", smtpDetails},
+			{"url_how_gateway_proxy_connect_to_the_portal", portalInternalURL},
+			{"url_how_users_connect_to_the_portal", gatewayURL},
+			{"general_gateway_address", gatewayURL},
+			// Disable email sending by default for tests unless explicitly enabled elsewhere
+			{"email_do_not_send_email", true},
 		}
 
 		// Update gateway_listen_address (extract port from public gateway URL)
 		_, portStr, err := net.SplitHostPort(gatewayURL[len("http://"):]) // Remove "http://"
 		if err != nil {
-			resultChan <- fmt.Errorf("%s: failed to parse gateway URL '%s': %w", e.Name(), gatewayURL, err)
+			err = fmt.Errorf("%sfailed to parse gateway URL '%s': %w", logPrefix, gatewayURL, err)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
 		gatewayListenAddress := fmt.Sprintf(":%s", portStr)
-		if err := updateSettingInDB(ctx, db, "gateway_listen_address", gatewayListenAddress); err != nil {
-			resultChan <- fmt.Errorf("%s: failed to update gateway_listen_address: %w", e.Name(), err)
-			return
+		settingsToUpdate = append(settingsToUpdate, struct {
+			key   string
+			value interface{}
+		}{"gateway_listen_address", gatewayListenAddress})
+
+		for _, setting := range settingsToUpdate {
+			log.Printf("%sUpdating setting '%s'...", logPrefix, setting.key)
+			if err := updateSettingInDB(ctx, db, setting.key, setting.value); err != nil {
+				err = fmt.Errorf("%sfailed to update setting '%s': %w", logPrefix, setting.key, err)
+				log.Printf("%sERROR: %v", logPrefix, err)
+				resultChan <- err
+				return
+			}
+			log.Printf("%sSetting '%s' updated.", logPrefix, setting.key)
 		}
 
-		// Update frontend proxy address (use the INTERNAL portal URL)
-		if err := updateSettingInDB(ctx, db, "url_how_gateway_proxy_connect_to_the_portal", portalInternalURL); err != nil {
-			resultChan <- fmt.Errorf("%s: failed to update url_how_gateway_proxy_connect_to_the_portal: %w", e.Name(), err)
-			return
-		}
-
-		// Update the base URL users connect to (the PUBLIC gateway URL)
-		if err := updateSettingInDB(ctx, db, "url_how_users_connect_to_the_portal", gatewayURL); err != nil {
-			resultChan <- fmt.Errorf("%s: failed to update url_how_users_connect_to_the_portal: %w", e.Name(), err)
-			return
-		}
-
-		// Update general gateway address (the PUBLIC gateway URL)
-		if err := updateSettingInDB(ctx, db, "general_gateway_address", gatewayURL); err != nil {
-			resultChan <- fmt.Errorf("%s: failed to update general_gateway_address: %w", e.Name(), err)
-			return
-		}
-
-		log.Printf("%s: Database settings updated successfully.", e.Name())
+		log.Printf("%sDatabase settings updated successfully.", logPrefix)
 		resultChan <- nil // Signal success
 	}()
 
@@ -140,6 +155,7 @@ func (e *DBSettingsEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 
 // Helper function to update a setting in the Settings table.
 func updateSettingInDB(ctx context.Context, db *sql.DB, key string, value interface{}) error {
+	logPrefix := "[db-settings-updater] "
 	// Marshal the value to JSON
 	var valueJSON []byte
 	var err error
@@ -147,13 +163,16 @@ func updateSettingInDB(ctx context.Context, db *sql.DB, key string, value interf
 	case string:
 		// Ensure strings are quoted in JSON
 		valueJSON = []byte(fmt.Sprintf("%q", v))
+		log.Printf("%sMarshalled string for key '%s': %s", logPrefix, key, string(valueJSON))
 	case json.RawMessage:
 		valueJSON = v
+		log.Printf("%sUsing raw JSON for key '%s': %s", logPrefix, key, string(valueJSON))
 	default:
 		valueJSON, err = json.Marshal(value)
 		if err != nil {
 			return fmt.Errorf("failed to marshal value for key '%s' to JSON: %w", key, err)
 		}
+		log.Printf("%sMarshalled default type for key '%s': %s", logPrefix, key, string(valueJSON))
 	}
 
 	// Use context for the transaction/query
@@ -169,62 +188,11 @@ func updateSettingInDB(ctx context.Context, db *sql.DB, key string, value interf
     `
 	// Note: Using default values for group, name, description, frontend. Adjust if needed.
 
+	log.Printf("%sExecuting UPSERT for key '%s'", logPrefix, key)
 	_, err = db.ExecContext(txCtx, query, key, valueJSON)
 	if err != nil {
 		return fmt.Errorf("failed to upsert setting '%s': %w", key, err)
 	}
-	// log.Printf("Updated/Inserted setting: %s", key)
+	log.Printf("%sUPSERT successful for key '%s'", logPrefix, key)
 	return nil
 }
-
-/*
-
-// updateSetting updates a setting in the database
-func updateSetting(key string, value interface{}) error {
-	// Connect to the database
-	db, err := sql.Open("postgres", DATABASE_URL)
-	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
-	}
-	defer db.Close()
-
-	// Marshal the value to JSON
-	var valueJSON []byte
-	switch v := value.(type) {
-	case string:
-		valueJSON = []byte(fmt.Sprintf("%q", v))
-	case json.RawMessage:
-		valueJSON = v
-	default:
-		valueJSON, err = json.Marshal(value)
-		if err != nil {
-			return fmt.Errorf("failed to marshal value to JSON: %w", err)
-		}
-	}
-
-	// Check if the setting exists
-	var count int
-	err = db.QueryRow(`SELECT COUNT(*) FROM "Settings" WHERE key = $1`, key).Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to check if setting exists: %w", err)
-	}
-
-	if count > 0 {
-		// Update existing setting
-		_, err = db.Exec(`UPDATE "Settings" SET value = $1 WHERE key = $2`, valueJSON, key)
-		if err != nil {
-			return fmt.Errorf("failed to update setting: %w", err)
-		}
-	} else {
-		// Insert new setting with minimal required fields
-		_, err = db.Exec(`INSERT INTO "Settings" (key, "group", name, description, value, frontend) VALUES ($1, 'test', $1, $1, $2, false)`,
-			key, valueJSON)
-		if err != nil {
-			return fmt.Errorf("failed to insert setting: %w", err)
-		}
-	}
-
-	return nil
-}
-
-*/

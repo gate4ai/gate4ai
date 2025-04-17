@@ -38,6 +38,7 @@ type ExampleServerEnv struct {
 	logger     *zap.Logger
 	mux        sync.RWMutex
 	shutdownWg sync.WaitGroup
+	errChan    <-chan error // Store error channel from server.Start
 }
 
 // NewExampleServerEnv creates a new example server component.
@@ -71,12 +72,11 @@ func (e *ExampleServerEnv) Configure(envs *Envs) (dependencies []string, err err
 	}
 	e.mux.Unlock()
 
-	log.Printf("%s: Intends to run on base URL: %s", e.Name(), baseURL)
+	log.Printf("[%s] Configuring component. Intends to run on base URL: %s", e.Name(), baseURL)
 	os.Setenv("GATE4AI_EXAMPLE_SERVER_URL", e.details.MCP2024URL) // Set one for compatibility
 
-	// Example server might depend on DB setup if it uses config, adjust as needed.
-	// Assuming it primarily uses its yaml config.
-	return []string{DBComponentName}, nil // Depends on DB for potential config reads
+	log.Printf("[%s] Declaring dependencies: %v", e.Name(), []string{DBComponentName}) // Assume it might read config from DB eventually
+	return []string{DBComponentName}, nil                                              // Depends on DB for potential config reads
 }
 
 // Start launches the Go example server.
@@ -84,8 +84,9 @@ func (e *ExampleServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 	resultChan := make(chan error, 1)
 
 	go func() {
+		logPrefix := fmt.Sprintf("[%s] ", e.Name())
 		defer close(resultChan)
-		log.Printf("Starting component: %s", e.Name())
+		log.Printf("%sStarting component...", logPrefix)
 
 		e.mux.RLock()
 		port := e.port
@@ -93,68 +94,88 @@ func (e *ExampleServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		e.mux.RUnlock()
 
 		if port == 0 {
-			resultChan <- fmt.Errorf("%s: port not allocated in Configure phase", e.Name())
+			err := fmt.Errorf("%sport not allocated in Configure phase", logPrefix)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sUsing port: %d", logPrefix, port)
 
 		// Server context for managing the server lifecycle
 		serverCtx, cancel := context.WithCancel(context.Background())
 
 		// --- Setup Example Server ---
+		log.Printf("%sLoading YAML config...", logPrefix)
 		var err error
 		configPath := filepath.Join(TestConfigWorkspaceFolder, "server/cmd/mcp-example-server/config.yaml")
 		e.yamlConfig, err = config.NewYamlConfig(configPath, e.logger)
 		if err != nil {
 			cancel()
-			resultChan <- fmt.Errorf("%s: failed to create example server yaml config: %w", e.Name(), err)
+			err = fmt.Errorf("%sfailed to create example server yaml config: %w", logPrefix, err)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sYAML config loaded from %s.", logPrefix, configPath)
 
 		listenAddr := fmt.Sprintf(":%d", port)
 		serverOptions := exampleCapability.BuildOptions(e.logger)
 		serverOptions = append(serverOptions, server.WithListenAddr(listenAddr))
-
-		// --- Start Server in Goroutine ---
-		e.shutdownWg.Add(1)
-		go func() {
-			defer e.shutdownWg.Done()
-			e.logger.Info("Starting example server", zap.String("listenAddr", listenAddr))
-
-			// server.Start blocks until shutdown or errors
-			_, startErr := server.Start(serverCtx, e.logger, e.yamlConfig, serverOptions...)
-
-			if startErr != nil {
-				// Don't log Fatal here, report error back
-				e.logger.Error("Failed to start example server", zap.Error(startErr))
-				select {
-				case resultChan <- fmt.Errorf("%s: server.Start failed: %w", e.Name(), startErr):
-				default:
-					log.Printf("%s: Failed to send immediate start error to channel", e.Name())
-				}
-				cancel() // Ensure context is cancelled
-				return
-			}
-
-			// Wait for context cancellation signal
-			<-serverCtx.Done()
-			e.logger.Info("Shutdown signal received, stopping example server...")
-			// server.Start handles its own cleanup on context cancellation.
-			// We still need to close the config.
-			if e.yamlConfig != nil {
-				e.yamlConfig.Close()
-				e.logger.Info("Closed example server config.")
-			}
-			e.logger.Info("Example server shut down.")
-		}()
+		log.Printf("%sServer options prepared.", logPrefix)
 
 		// Store the cancel function
 		e.mux.Lock()
 		e.stopFunc = cancel
 		e.mux.Unlock()
 
+		// --- Start Server in Goroutine ---
+		e.shutdownWg.Add(1)
+		go func() {
+			defer e.shutdownWg.Done()
+			e.logger.Info("Starting example server process", zap.String("listenAddr", listenAddr))
+			startStartTime := time.Now()
+
+			// server.Start blocks until shutdown or errors
+			errChan, startErr := server.Start(serverCtx, e.logger, e.yamlConfig, serverOptions...)
+			startDuration := time.Since(startStartTime)
+
+			if startErr != nil {
+				e.logger.Error("Failed to start example server immediately", zap.Error(startErr), zap.Duration("duration", startDuration))
+				select {
+				case resultChan <- fmt.Errorf("%s: server.Start failed immediately: %w", e.Name(), startErr):
+				default:
+					log.Printf("%s: Failed to send immediate start error to channel", e.Name())
+				}
+				cancel() // Ensure context is cancelled
+				return
+			}
+			e.logger.Info("Example server process launched.", zap.Duration("duration", startDuration))
+			e.mux.Lock()
+			e.errChan = errChan // Store the error channel from server.Start
+			e.mux.Unlock()
+
+			// Wait for context cancellation signal or error from server.Start's listener
+			select {
+			case err := <-errChan:
+				if err != nil {
+					e.logger.Error("Example server listener failed", zap.Error(err))
+					// Don't send to resultChan here, the main Start routine handles readiness check failure
+				} else {
+					e.logger.Info("Example server listener stopped gracefully.")
+				}
+			case <-serverCtx.Done():
+				e.logger.Info("Shutdown signal received, stopping example server...")
+			}
+
+			// Config closing handled in Stop()
+			e.logger.Info("Example server goroutine finished.")
+		}()
+
 		// --- Wait for Readiness ---
 		readinessURL := fmt.Sprintf("%s/status", intendedURL) // Assuming /status endpoint
-		waitCtx, waitCancel := context.WithTimeout(ctx, 60*time.Second)
+		log.Printf("%sChecking readiness at %s...", logPrefix, readinessURL)
+		// Use parent context for readiness check timeout
+		waitCtx, waitCancel := context.WithTimeout(ctx, 60*time.Second) // Readiness timeout
 		defer waitCancel()
 
 		readinessCheckDone := make(chan error, 1)
@@ -165,24 +186,23 @@ func (e *ExampleServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		select {
 		case err = <-readinessCheckDone:
 			if err != nil {
-				log.Printf("%s: Readiness check failed: %v", e.Name(), err)
-				e.Stop() // Attempt to stop
+				log.Printf("%sERROR: Readiness check failed: %v", logPrefix, err)
+				e.Stop() // Attempt to stop the misbehaving process
 				select {
 				case <-resultChan: // Error already sent or channel closed
 				default:
-					resultChan <- fmt.Errorf("%s: server readiness check failed: %w", e.Name(), err)
+					resultChan <- fmt.Errorf("%sserver readiness check failed: %w", logPrefix, err)
 				}
-
 				return
 			}
 		case <-ctx.Done(): // Parent context cancelled
-			log.Printf("%s: Readiness check cancelled by parent context.", e.Name())
+			log.Printf("%sReadiness check cancelled by parent context.", logPrefix)
 			e.Stop()
 			resultChan <- ctx.Err()
 			return
 		}
 
-		log.Printf("%s: Server is ready on %s.", e.Name(), intendedURL)
+		log.Printf("%sServer is ready.", logPrefix)
 		resultChan <- nil // Signal success
 	}()
 
@@ -191,27 +211,30 @@ func (e *ExampleServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 
 // Stop triggers the graceful shutdown of the example server.
 func (e *ExampleServerEnv) Stop() error {
+	logPrefix := fmt.Sprintf("[%s] ", e.Name())
 	e.mux.Lock()
 	cancel := e.stopFunc
-	e.stopFunc = nil // Prevent double stopping
 	cfg := e.yamlConfig
+	e.stopFunc = nil // Prevent double stopping
 	e.mux.Unlock()
 
 	if cancel != nil {
-		log.Printf("%s: Triggering shutdown...", e.Name())
+		log.Printf("%sTriggering shutdown...", logPrefix)
 		cancel() // Signal the server's context to cancel
 
 		// Wait for the shutdown goroutine to complete
-		log.Printf("%s: Waiting for shutdown completion...", e.Name())
+		log.Printf("%sWaiting for shutdown completion...", logPrefix)
 		e.shutdownWg.Wait() // Wait for the server.Start goroutine to finish
-		log.Printf("%s: Shutdown complete.", e.Name())
+		log.Printf("%sShutdown complete.", logPrefix)
 	} else {
-		log.Printf("%s: Server already stopped or not started.", e.Name())
+		log.Printf("%sServer already stopped or not started.", logPrefix)
 	}
 
-	// Close config just in case (might be redundant if shutdown succeeded)
+	// Close config AFTER shutdown is complete
 	if cfg != nil {
+		log.Printf("%sClosing YAML config...", logPrefix)
 		cfg.Close()
+		log.Printf("%sYAML config closed.", logPrefix)
 	}
 
 	return nil

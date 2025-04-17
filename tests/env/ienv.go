@@ -2,6 +2,9 @@ package env
 
 import (
 	"context"
+	"fmt"
+	"log"
+	"net/http"
 	"time"
 )
 
@@ -100,4 +103,52 @@ func (b *BaseEnv) GetStartDuration() time.Duration {
 // This is intentionally unexported but accessible within the same package.
 func (b *BaseEnv) SetStartDuration(d time.Duration) {
 	b.startDuration = d
+}
+
+func waitForServer(ctx context.Context, url string, timeout time.Duration) error {
+	log.Printf("Waiting for server to become available at %s (timeout %s)...", url, timeout)
+	startTime := time.Now()
+
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(500 * time.Millisecond) // Check every 500ms
+	defer ticker.Stop()
+
+	httpClient := &http.Client{
+		Timeout: 2 * time.Second, // Short timeout for individual requests
+		Transport: &http.Transport{
+			DisableKeepAlives: true, // Avoid reusing connections during startup checks
+		},
+	}
+
+	for {
+		select {
+		case <-checkCtx.Done():
+			return fmt.Errorf("timed out waiting for server at %s after %s: %w", url, time.Since(startTime), checkCtx.Err())
+		case <-ticker.C:
+			req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, url, nil)
+			if err != nil {
+				// Should not happen with valid URL
+				log.Printf("Error creating request for %s (will retry): %v", url, err)
+				continue
+			}
+
+			resp, err := httpClient.Do(req)
+			if err == nil {
+				resp.Body.Close() // Close body immediately
+				if resp.StatusCode == http.StatusOK {
+					log.Printf("Server at %s is ready (status %d).", url, resp.StatusCode)
+					// Optional: Add a small grace period after readiness?
+					// time.Sleep(200 * time.Millisecond)
+					return nil // Success!
+				}
+				// Log non-200 status but continue waiting
+				log.Printf("Server at %s returned status %d, waiting...", url, resp.StatusCode)
+			} else {
+				// Log connection errors but continue waiting
+				log.Printf("Failed to connect to server at %s (will retry): %v", url, err)
+			}
+		}
+	}
 }

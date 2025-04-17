@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,10 +43,11 @@ func (e *PortalServerEnv) Configure(envs *Envs) (dependencies []string, err erro
 	e.url = fmt.Sprintf("http://localhost:%d", port) // This is the internal URL
 	e.mux.Unlock()
 
-	log.Printf("%s: Intends to run on internal URL: %s", e.Name(), e.url)
+	log.Printf("[%s] Configuring component. Intends to run on internal URL: %s", e.Name(), e.url)
 
 	// Depends on migrations being done before starting the server process
-	// Also needs the database URL available.
+	// Also needs the database URL available. DB settings should also be applied.
+	log.Printf("[%s] Declaring dependencies: %v", e.Name(), []string{PrismaComponentName, DBSettingsComponentName, DBComponentName})
 	return []string{PrismaComponentName, DBSettingsComponentName, DBComponentName}, nil
 }
 
@@ -56,8 +56,9 @@ func (e *PortalServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 	resultChan := make(chan error, 1)
 
 	go func() {
+		logPrefix := fmt.Sprintf("[%s] ", e.Name())
 		defer close(resultChan)
-		log.Printf("Starting component: %s", e.Name())
+		log.Printf("%sStarting component...", logPrefix)
 
 		e.mux.RLock()
 		port := e.port
@@ -65,23 +66,30 @@ func (e *PortalServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		e.mux.RUnlock()
 
 		if port == 0 {
-			resultChan <- fmt.Errorf("%s: port not allocated in Configure phase", e.Name())
+			err := fmt.Errorf("%sport not allocated in Configure phase", logPrefix)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sUsing port: %d", logPrefix, port)
 
+		log.Printf("%sFetching database URL...", logPrefix)
 		databaseURL := envs.GetURL(DBComponentName)
 		if databaseURL == "" {
-			resultChan <- fmt.Errorf("%s: database URL not available", e.Name())
+			err := fmt.Errorf("%sdatabase URL not available", logPrefix)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sDatabase URL obtained.", logPrefix)
 
 		// Server context for managing the process lifecycle
 		serverCtx, cancel := context.WithCancel(context.Background()) // Use background, manage via Stop()
 
 		// Set up environment variables for the server
-		// Ensure JWT secret is strong enough for production build mode
 		jwtSecret := "a-secure-test-secret-key-for-go-tests-needs-to-be-at-least-32-chars-long"
 		nodeEnv := "production" // Build and run in production mode for tests
+		log.Printf("%sSetting environment variables (PORT=%d, HOST=localhost, NODE_ENV=%s)...", logPrefix, port, nodeEnv)
 
 		serverEnv := append(os.Environ(),
 			fmt.Sprintf("PORT=%d", port),
@@ -94,29 +102,32 @@ func (e *PortalServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		)
 
 		portalDir := filepath.Join(TestConfigWorkspaceFolder, "portal")
+		log.Printf("%sUsing portal directory: %s", logPrefix, portalDir)
 
 		// --- Build Step ---
-		log.Printf("%s: Building Nuxt app in %s mode...", e.Name(), nodeEnv)
+		log.Printf("%sBuilding Nuxt app in %s mode...", logPrefix, nodeEnv)
 		buildCmd := exec.CommandContext(ctx, "npm", "run", "build") // Use parent ctx for build timeout
 		buildCmd.Dir = portalDir
 		buildCmd.Env = serverEnv
+		buildStartTime := time.Now()
 		buildOutput, err := buildCmd.CombinedOutput()
+		buildDuration := time.Since(buildStartTime)
 		if err != nil {
-			log.Printf("%s: Build failed. Output:\n%s", e.Name(), string(buildOutput))
+			log.Printf("%sERROR: Build failed after %s. Output:\n%s", logPrefix, buildDuration, string(buildOutput))
 			cancel() // Cancel server context
-			resultChan <- fmt.Errorf("%s: failed to build portal: %w", e.Name(), err)
+			resultChan <- fmt.Errorf("%sfailed to build portal: %w", logPrefix, err)
 			return
 		}
 		if ctx.Err() != nil { // Check if parent context was cancelled during build
-			log.Printf("%s: Build cancelled.", e.Name())
+			log.Printf("%sBuild cancelled.", logPrefix)
 			cancel()
 			resultChan <- ctx.Err()
 			return
 		}
-		log.Printf("%s: Build successful.", e.Name())
+		log.Printf("%sBuild successful in %s.", logPrefix, buildDuration)
 
 		// --- Start Step ---
-		log.Printf("%s: Starting Nuxt server process (npm run preview) on port %d...", e.Name(), port)
+		log.Printf("%sStarting Nuxt server process (npm run preview) on port %d...", logPrefix, port)
 		cmd := exec.CommandContext(serverCtx, "npm", "run", "preview", "--", "--port", fmt.Sprintf("%d", port), "--host", "localhost")
 		cmd.Dir = portalDir
 		cmd.Env = serverEnv
@@ -125,12 +136,15 @@ func (e *PortalServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		cmd.Stderr = os.Stderr
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Create process group for proper termination
 
+		startStartTime := time.Now()
 		err = cmd.Start()
 		if err != nil {
+			log.Printf("%sERROR: Failed to start portal server process: %v", logPrefix, err)
 			cancel()
-			resultChan <- fmt.Errorf("%s: failed to start portal server process: %w", e.Name(), err)
+			resultChan <- fmt.Errorf("%sfailed to start portal server process: %w", logPrefix, err)
 			return
 		}
+		log.Printf("%sServer process started (PID: %d). Waiting for readiness...", logPrefix, cmd.Process.Pid)
 
 		// Store command and cancel func for Stop()
 		e.mux.Lock()
@@ -138,23 +152,22 @@ func (e *PortalServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		e.cancelFunc = cancel
 		e.mux.Unlock()
 
-		log.Printf("%s: Server process started (PID: %d). Waiting for readiness...", e.Name(), cmd.Process.Pid)
-
 		// --- Wait for Readiness ---
-		// Use the internal URL and a known health/status endpoint
-		readinessURL := fmt.Sprintf("%s/api/status", intendedURL)
+		readinessURL := fmt.Sprintf("%s/api/status", intendedURL) // Assuming /api/status endpoint
+		log.Printf("%sChecking readiness at %s...", logPrefix, readinessURL)
 		// Use parent context for readiness check timeout
 		waitCtx, waitCancel := context.WithTimeout(ctx, 120*time.Second) // Readiness timeout
 		defer waitCancel()
 
 		if err := waitForServer(waitCtx, readinessURL, 120*time.Second); err != nil {
-			log.Printf("%s: Readiness check failed: %v", e.Name(), err)
+			readinessDuration := time.Since(startStartTime)
+			log.Printf("%sERROR: Readiness check failed after %s: %v", logPrefix, readinessDuration, err)
 			e.Stop() // Attempt to stop the misbehaving process
-			resultChan <- fmt.Errorf("%s: server readiness check failed: %w", e.Name(), err)
+			resultChan <- fmt.Errorf("%sserver readiness check failed: %w", logPrefix, err)
 			return
 		}
-
-		log.Printf("%s: Server is ready.", e.Name())
+		readinessDuration := time.Since(startStartTime)
+		log.Printf("%sServer is ready. Readiness check passed in %s.", logPrefix, readinessDuration)
 		resultChan <- nil // Signal success
 	}()
 
@@ -163,6 +176,7 @@ func (e *PortalServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 
 // Stop terminates the portal server process group.
 func (e *PortalServerEnv) Stop() error {
+	logPrefix := fmt.Sprintf("[%s] ", e.Name())
 	e.mux.Lock()
 	cmd := e.cmd
 	cancel := e.cancelFunc
@@ -171,36 +185,40 @@ func (e *PortalServerEnv) Stop() error {
 	e.mux.Unlock()
 
 	if cmd == nil || cmd.Process == nil {
-		log.Printf("%s: Server process already stopped or not started.", e.Name())
+		log.Printf("%sServer process already stopped or not started.", logPrefix)
 		return nil
 	}
 	if cancel != nil {
+		log.Printf("%sCancelling server context...", logPrefix)
 		cancel() // Cancel the context first
 	}
 
 	pid := cmd.Process.Pid
-	log.Printf("%s: Stopping server process group (PID: %d)...", e.Name(), pid)
+	log.Printf("%sStopping server process group (PID: %d)...", logPrefix, pid)
 
 	// Kill the entire process group using the negative PID
 	pgid, err := syscall.Getpgid(pid)
 	if err == nil {
+		log.Printf("%sSending SIGTERM to process group %d...", logPrefix, pgid)
 		// Send SIGTERM to the process group first
 		if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
-			log.Printf("%s: Failed to send SIGTERM to process group %d: %v. Trying SIGKILL.", e.Name(), pgid, err)
+			log.Printf("%sFailed to send SIGTERM to process group %d: %v. Trying SIGKILL.", logPrefix, pgid, err)
 			// If SIGTERM fails, try SIGKILL
 			_ = syscall.Kill(-pgid, syscall.SIGKILL) // Ignore SIGKILL error
 		} else {
+			log.Printf("%sSIGTERM sent to process group %d.", logPrefix, pgid)
 			// Wait a short moment after SIGTERM before checking or forcefully killing
 			time.Sleep(500 * time.Millisecond)
 		}
 
 	} else {
-		log.Printf("%s: Failed to get process group ID for PID %d: %v. Sending SIGTERM to process directly.", e.Name(), pid, err)
+		log.Printf("%sFailed to get process group ID for PID %d: %v. Sending SIGTERM to process directly.", logPrefix, pid, err)
 		// Fallback: Send SIGTERM directly to the process
 		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-			log.Printf("%s: Failed to send SIGTERM to process %d: %v. Trying SIGKILL.", e.Name(), pid, err)
+			log.Printf("%sFailed to send SIGTERM to process %d: %v. Trying SIGKILL.", logPrefix, pid, err)
 			_ = cmd.Process.Kill() // Ignore error
 		} else {
+			log.Printf("%sSIGTERM sent to process %d.", logPrefix, pid)
 			time.Sleep(500 * time.Millisecond)
 		}
 
@@ -209,6 +227,7 @@ func (e *PortalServerEnv) Stop() error {
 	// Wait for the process to exit with a timeout
 	waitDone := make(chan error, 1)
 	go func() {
+		log.Printf("%sWaiting for process %d to exit...", logPrefix, pid)
 		waitDone <- cmd.Wait()
 	}()
 
@@ -216,22 +235,28 @@ func (e *PortalServerEnv) Stop() error {
 	case waitErr := <-waitDone:
 		if waitErr != nil {
 			// Ignore common exit errors after termination signals
-			state, _ := cmd.ProcessState.Sys().(syscall.WaitStatus)
+			state, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+			if !ok {
+				// Handle case where Sys() is not syscall.WaitStatus (e.g., Windows)
+				log.Printf("%sServer process %d exited with error, but could not get detailed status: %v", logPrefix, pid, waitErr)
+				return fmt.Errorf("server process %d exit error: %w", pid, waitErr)
+			}
+
 			signaled := state.Signaled()
 			exitStatus := state.ExitStatus()
 			if signaled && (state.Signal() == syscall.SIGTERM || state.Signal() == syscall.SIGKILL) {
-				log.Printf("%s: Process %d terminated as expected by signal %s.", e.Name(), pid, state.Signal())
+				log.Printf("%sProcess %d terminated as expected by signal %s.", logPrefix, pid, state.Signal())
 			} else if !signaled && (exitStatus == 0 || exitStatus == -1 /* typically from signal */ || exitStatus == 1 /* common node exit code */) {
-				log.Printf("%s: Process %d exited with status %d.", e.Name(), pid, exitStatus)
+				log.Printf("%sProcess %d exited with status %d.", logPrefix, pid, exitStatus)
 			} else {
-				log.Printf("%s: Server process %d exited with unexpected error: %v (State: %+v)", e.Name(), pid, waitErr, state)
+				log.Printf("%sServer process %d exited with unexpected error: %v (State: %+v)", logPrefix, pid, waitErr, state)
 				return fmt.Errorf("server process %d exit error: %w", pid, waitErr)
 			}
 		} else {
-			log.Printf("%s: Server process %d exited gracefully.", e.Name(), pid)
+			log.Printf("%sServer process %d exited gracefully.", logPrefix, pid)
 		}
 	case <-time.After(5 * time.Second):
-		log.Printf("%s: Timeout waiting for server process %d to exit. Attempting forceful kill.", e.Name(), pid)
+		log.Printf("%sTimeout waiting for server process %d to exit. Attempting forceful kill.", logPrefix, pid)
 		// Force kill if still running after timeout
 		if pgid > 0 {
 			_ = syscall.Kill(-pgid, syscall.SIGKILL)
@@ -248,56 +273,4 @@ func (e *PortalServerEnv) URL() string {
 	e.mux.RLock()
 	defer e.mux.RUnlock()
 	return e.url
-}
-
-// GetDetails returns nil for the portal server.
-// func (e *PortalServerEnv) GetDetails() interface{} { return nil } // Uses BaseEnv default
-
-// Helper function if needed specifically for portal server
-func waitForServer(ctx context.Context, url string, timeout time.Duration) error {
-	log.Printf("Waiting for server to become available at %s (timeout %s)...", url, timeout)
-	startTime := time.Now()
-
-	checkCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	ticker := time.NewTicker(500 * time.Millisecond) // Check every 500ms
-	defer ticker.Stop()
-
-	httpClient := &http.Client{
-		Timeout: 2 * time.Second, // Short timeout for individual requests
-		Transport: &http.Transport{
-			DisableKeepAlives: true, // Avoid reusing connections during startup checks
-		},
-	}
-
-	for {
-		select {
-		case <-checkCtx.Done():
-			return fmt.Errorf("timed out waiting for server at %s after %s: %w", url, time.Since(startTime), checkCtx.Err())
-		case <-ticker.C:
-			req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, url, nil)
-			if err != nil {
-				// Should not happen with valid URL
-				log.Printf("Error creating request for %s (will retry): %v", url, err)
-				continue
-			}
-
-			resp, err := httpClient.Do(req)
-			if err == nil {
-				resp.Body.Close() // Close body immediately
-				if resp.StatusCode == http.StatusOK {
-					log.Printf("Server at %s is ready (status %d).", url, resp.StatusCode)
-					// Optional: Add a small grace period after readiness?
-					// time.Sleep(200 * time.Millisecond)
-					return nil // Success!
-				}
-				// Log non-200 status but continue waiting
-				log.Printf("Server at %s returned status %d, waiting...", url, resp.StatusCode)
-			} else {
-				// Log connection errors but continue waiting
-				log.Printf("Failed to connect to server at %s (will retry): %v", url, err)
-			}
-		}
-	}
 }

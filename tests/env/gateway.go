@@ -25,6 +25,7 @@ type GatewayServerEnv struct {
 	logger     *zap.Logger
 	mux        sync.RWMutex
 	shutdownWg sync.WaitGroup // WaitGroup for graceful shutdown
+	node       *gateway.Node  // Store the started node for graceful shutdown
 }
 
 // NewGatewayServerEnv creates a new gateway server component.
@@ -50,12 +51,13 @@ func (e *GatewayServerEnv) Configure(envs *Envs) (dependencies []string, err err
 	e.url = fmt.Sprintf("http://localhost:%d", port) // Public URL
 	e.mux.Unlock()
 
-	log.Printf("%s: Intends to run on public URL: %s", e.Name(), e.url)
+	log.Printf("[%s] Configuring component. Intends to run on public URL: %s", e.Name(), e.url)
 	os.Setenv("GATE4AI_GATEWAY_URL", e.url) // Set env var for other components if needed early
 
 	// Depends on DB settings being applied and the portal being configured (to get its internal URL later).
 	// Database must also be configured.
-	return []string{DBSettingsComponentName}, nil
+	log.Printf("[%s] Declaring dependencies: %v", e.Name(), []string{DBSettingsComponentName, PortalComponentName}) // Portal needed for proxy URL in DB settings
+	return []string{DBSettingsComponentName, PortalComponentName}, nil
 }
 
 // Start launches the Go gateway server.
@@ -63,8 +65,9 @@ func (e *GatewayServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 	resultChan := make(chan error, 1)
 
 	go func() {
+		logPrefix := fmt.Sprintf("[%s] ", e.Name())
 		defer close(resultChan)
-		log.Printf("Starting component: %s", e.Name())
+		log.Printf("%sStarting component...", logPrefix)
 
 		e.mux.RLock()
 		port := e.port
@@ -72,37 +75,38 @@ func (e *GatewayServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		e.mux.RUnlock()
 
 		if port == 0 {
-			resultChan <- fmt.Errorf("%s: port not allocated in Configure phase", e.Name())
+			err := fmt.Errorf("%sport not allocated in Configure phase", logPrefix)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sUsing port: %d", logPrefix, port)
 
+		log.Printf("%sFetching database URL...", logPrefix)
 		dbURL := envs.GetURL(DBComponentName)
 		if dbURL == "" {
-			resultChan <- fmt.Errorf("%s: database URL not available", e.Name())
+			err := fmt.Errorf("%sdatabase URL not available", logPrefix)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
-
-		// Portal internal URL is needed by gateway config/runtime
-		// portalInternalURL := envs.GetURL(PortalComponentName)
-		// if portalInternalURL == "" {
-		// 	resultChan <- fmt.Errorf("%s: portal internal URL not available", e.Name())
-		// 	return
-		// }
-		// NOTE: Gateway fetches portal URL from DB settings now, so direct dependency might not be needed here,
-		// but the dependency in Configure ensures DB settings are applied first.
+		log.Printf("%sDatabase URL obtained.", logPrefix)
 
 		// Server context for managing the gateway lifecycle
-		// Use background context because termination is handled by Stop() calling cancelFunc
-		serverCtx, cancel := context.WithCancel(context.Background())
+		serverCtx, cancel := context.WithCancel(context.Background()) // Use background, manage via Stop()
 
 		// --- Setup Gateway ---
+		log.Printf("%sCreating database config...", logPrefix)
 		var err error
 		e.dbConfig, err = config.NewDatabaseConfig(dbURL, e.logger) // Use component's logger
 		if err != nil {
 			cancel()
-			resultChan <- fmt.Errorf("%s: failed to create gateway database config: %w", e.Name(), err)
+			err = fmt.Errorf("%sfailed to create gateway database config: %w", logPrefix, err)
+			log.Printf("%sERROR: %v", logPrefix, err)
+			resultChan <- err
 			return
 		}
+		log.Printf("%sDatabase config created.", logPrefix)
 
 		listenAddr := fmt.Sprintf(":%d", port)
 
@@ -112,37 +116,34 @@ func (e *GatewayServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 			defer e.shutdownWg.Done() // Decrement WaitGroup when goroutine exits
 
 			e.logger.Info("Starting gateway node", zap.String("listenAddr", listenAddr))
-			// gateway.Start might block until shutdown or return an error immediately
+			startStartTime := time.Now()
 			node, startErr := gateway.Start(serverCtx, e.logger, e.dbConfig, listenAddr)
+			startDuration := time.Since(startStartTime)
 
 			if startErr != nil {
-				e.logger.Error("Failed to start gateway node", zap.Error(startErr))
-				// If Start fails immediately, signal the outer goroutine
-				// We need a way to signal this failure back to the resultChan
-				// Using a separate channel for async start errors
+				e.logger.Error("Failed to start gateway node", zap.Error(startErr), zap.Duration("duration", startDuration))
 				select {
 				case resultChan <- fmt.Errorf("%s: gateway.Start failed: %w", e.Name(), startErr):
-				default: // Avoid blocking if resultChan already used
+				default:
 					log.Printf("%s: Failed to send immediate start error to channel", e.Name())
 				}
 				cancel() // Ensure context is cancelled if start fails
 				return
 			}
-			e.logger.Info("Gateway node started.")
+			e.logger.Info("Gateway node started.", zap.Duration("duration", startDuration))
+			e.mux.Lock()
+			e.node = node // Store the node instance
+			e.mux.Unlock()
 
 			// Wait for context cancellation to trigger shutdown
 			<-serverCtx.Done()
 			e.logger.Info("Shutdown signal received, stopping gateway node...")
-			if !node.WaitForShutdown(5 * time.Second) {
+			if !node.WaitForShutdown(5 * time.Second) { // Use node's method
 				e.logger.Error("Gateway graceful shutdown failed")
 			} else {
 				e.logger.Info("Gateway node shut down gracefully.")
 			}
-			// Close config AFTER shutdown
-			if e.dbConfig != nil {
-				e.dbConfig.Close()
-				e.logger.Info("Closed gateway database config.")
-			}
+			// Config closing handled in Stop() or here if preferred after WaitForShutdown
 		}()
 
 		// Store the cancel function for Stop()
@@ -152,11 +153,11 @@ func (e *GatewayServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 
 		// --- Wait for Readiness ---
 		readinessURL := fmt.Sprintf("%s/status", intendedURL) // Assuming gateway has /status endpoint
+		log.Printf("%sChecking readiness at %s...", logPrefix, readinessURL)
 		// Use parent context for readiness check timeout
 		waitCtx, waitCancel := context.WithTimeout(ctx, 60*time.Second) // Readiness timeout
 		defer waitCancel()
 
-		// Need to handle the case where gateway.Start failed immediately
 		readinessCheckDone := make(chan error, 1)
 		go func() {
 			readinessCheckDone <- waitForServer(waitCtx, readinessURL, 60*time.Second)
@@ -165,25 +166,24 @@ func (e *GatewayServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		select {
 		case err = <-readinessCheckDone:
 			if err != nil {
-				log.Printf("%s: Readiness check failed: %v", e.Name(), err)
+				log.Printf("%sERROR: Readiness check failed: %v", logPrefix, err)
 				e.Stop() // Attempt to stop the misbehaving process
 				// Check if the error wasn't already sent by the start goroutine
 				select {
 				case <-resultChan: // Error already sent or channel closed
 				default:
-					resultChan <- fmt.Errorf("%s: server readiness check failed: %w", e.Name(), err)
+					resultChan <- fmt.Errorf("%sserver readiness check failed: %w", logPrefix, err)
 				}
 				return
 			}
 		case <-ctx.Done(): // Parent context cancelled
-			log.Printf("%s: Readiness check cancelled by parent context.", e.Name())
+			log.Printf("%sReadiness check cancelled by parent context.", logPrefix)
 			e.Stop()
 			resultChan <- ctx.Err()
 			return
-			// No need to check resultChan here, parent context cancellation takes priority
 		}
 
-		log.Printf("%s: Server is ready on %s.", e.Name(), intendedURL)
+		log.Printf("%sServer is ready.", logPrefix)
 		resultChan <- nil // Signal success (only if readiness check passed)
 	}()
 
@@ -192,30 +192,33 @@ func (e *GatewayServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 
 // Stop triggers the graceful shutdown of the gateway server.
 func (e *GatewayServerEnv) Stop() error {
+	logPrefix := fmt.Sprintf("[%s] ", e.Name())
 	e.mux.Lock()
 	cancel := e.stopFunc
 	e.stopFunc = nil // Prevent double stopping
 	e.mux.Unlock()
 
 	if cancel != nil {
-		log.Printf("%s: Triggering shutdown...", e.Name())
+		log.Printf("%sTriggering shutdown...", logPrefix)
 		cancel() // Signal the gateway's context to cancel
 
 		// Wait for the shutdown goroutine to complete
-		log.Printf("%s: Waiting for shutdown completion...", e.Name())
+		log.Printf("%sWaiting for shutdown completion...", logPrefix)
 		e.shutdownWg.Wait() // Wait for the goroutine started in Start to finish
-		log.Printf("%s: Shutdown complete.", e.Name())
+		log.Printf("%sShutdown complete.", logPrefix)
 
 	} else {
-		log.Printf("%s: Server already stopped or not started.", e.Name())
+		log.Printf("%sServer already stopped or not started.", logPrefix)
 	}
 
-	// Close config just in case shutdown logic didn't run (e.g., start failed before goroutine setup)
+	// Close config AFTER shutdown is complete
 	e.mux.RLock()
 	cfg := e.dbConfig
 	e.mux.RUnlock()
 	if cfg != nil {
+		log.Printf("%sClosing database config...", logPrefix)
 		cfg.Close()
+		log.Printf("%sDatabase config closed.", logPrefix)
 	}
 
 	return nil
