@@ -386,49 +386,102 @@ func (s *BaseSession) GetLogger() *zap.Logger {
 }
 
 // SendA2AStreamEvent sends an A2A SSE event to the output channel
+// Note: This is added to BaseSession to fulfill the ISession interface.
+// It marshals the *entire* A2AStreamEvent structure as the *result* of a JSON-RPC message.
 func (s *BaseSession) SendA2AStreamEvent(event *A2AStreamEvent) error {
 	if event == nil {
 		return fmt.Errorf("cannot send nil A2A event")
 	}
 
-	msg := &Message{
-		Session:   s,
-		Timestamp: time.Now(),
-	}
-
-	if event.Error != nil {
-		msg.Error = &JSONRPCError{
-			Code:    JSONRPCErrorInternal,
-			Message: event.Error.Error(),
+	// The structure to be sent over SSE should match the spec's event definitions,
+	// typically wrapped in a basic JSON-RPC structure if needed by the transport layer.
+	// For SSE, we often send just the data payload of the event.
+	// Let's marshal the specific event type (Status or Artifact) as the result.
+	var payloadToMarshal interface{}
+	if event.Status != nil {
+		payloadToMarshal = event.Status
+	} else if event.Artifact != nil {
+		payloadToMarshal = event.Artifact
+	} else if event.Error != nil {
+		// Create a JSON-RPC error structure to send
+		msg := &Message{
+			Session: s,
+			Error:   &JSONRPCError{Code: JSONRPCErrorInternal, Message: event.Error.Error()},
+			// ID should be nil for stream errors? Check spec/practice.
 		}
+		// Send the error message directly
+		return s.sendMessageToOutput(msg)
 	} else {
-		jsonData, err := json.Marshal(event)
-		if err != nil {
-			return err
-		}
-		raw := json.RawMessage(jsonData)
-		msg.Result = &raw
+		return fmt.Errorf("A2AStreamEvent has no content (Status, Artifact, or Error)")
 	}
 
+	jsonData, err := json.Marshal(payloadToMarshal)
+	if err != nil {
+		return fmt.Errorf("failed to marshal A2A event payload: %w", err)
+	}
+	rawResult := json.RawMessage(jsonData)
+	return s.sendResultToOutput(nil, &rawResult) // ID is nil for stream events
+}
+
+// Helper to reduce duplication in sending messages
+func (s *BaseSession) sendMessageToOutput(msg *Message) error {
 	s.Mu.RLock()
 	outputChan := s.output
 	currentStatus := s.status
 	s.Mu.RUnlock()
 
 	if outputChan == nil {
-		s.Logger.Warn("Cannot send A2A event, session closed")
+		s.Logger.Warn("Cannot send message, session closed", zap.Any("msgId", msg.ID))
 		return fmt.Errorf("session closed")
 	}
-	if currentStatus != StatusConnected {
-		s.Logger.Warn("Attempting to send A2A event on non-connected session", zap.Int("status", int(currentStatus)))
-		return fmt.Errorf("session not connected")
+
+	// Allow sending on connecting state *only* for initialize response or stream events without ID
+	isInitializeResponse := false
+	if msg.Result != nil && msg.ID != nil { // Basic check for initialize response structure
+		// A more robust check might involve checking the request method stored somewhere
 	}
+	canSend := currentStatus == StatusConnected ||
+		(currentStatus == StatusConnecting && (isInitializeResponse || msg.ID == nil))
+
+	if !canSend {
+		s.Logger.Warn("Attempting to send message on non-connected/non-connecting session",
+			zap.Any("msgId", msg.ID),
+			zap.Int("status", int(currentStatus)),
+			zap.Error(msg.Error),
+		)
+		return fmt.Errorf("session not in sendable state (status %d)", currentStatus)
+	}
+
 	select {
 	case outputChan <- msg:
 		s.UpdateLastActivity()
 		return nil
 	default:
-		s.Logger.Error("Failed to send A2A event, output channel full")
+		s.Logger.Error("Failed to send message, output channel full", zap.Any("msgId", msg.ID))
 		return fmt.Errorf("output channel full")
 	}
+}
+
+// Helper to send successful results
+func (s *BaseSession) sendResultToOutput(msgId *schema.RequestID, result *json.RawMessage) error {
+	msg := &Message{
+		Session:   s,
+		Timestamp: time.Now(),
+		ID:        msgId,
+		Result:    result,
+		Error:     nil,
+	}
+	return s.sendMessageToOutput(msg)
+}
+
+// Helper to send error results
+func (s *BaseSession) sendErrorToOutput(msgId *schema.RequestID, err *JSONRPCError) error {
+	msg := &Message{
+		Session:   s,
+		Timestamp: time.Now(),
+		ID:        msgId,
+		Result:    nil,
+		Error:     err,
+	}
+	return s.sendMessageToOutput(msg)
 }

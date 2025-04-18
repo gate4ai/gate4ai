@@ -16,35 +16,42 @@ import (
 // handleA2APOST processes POST requests on the A2A endpoint.
 func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger *zap.Logger) {
 	// 1. Get or Create Session Context (Authentication happens here)
-	// For A2A, creating a session per request might be okay if auth is per-request.
+	// For A2A, creating a *new* session per request might be okay if auth is per-request.
 	// Or, we might need to correlate based on headers if a persistent connection concept applies.
 	// Let's use getSession(allowCreate=true) for now, assuming auth handles A2A schemes.
 	session, err := t.getSession(w, r, logger, true)
 	if err != nil {
-		logger.Error("Failed to get/create session for A2A POST", zap.Error(err))
-		// getSession already wrote error response
+		logger.Error("Failed to get/create session for A2A request", zap.Error(err))
+		http.Error(w, "Session creation failed", http.StatusInternalServerError)
 		return
 	}
-	// Note: 'session' here might represent the authenticated context rather than a persistent MCP session.
 
 	// 2. Read Request Body
-	bodyBytes, bodyErr := io.ReadAll(r.Body)
-	if bodyErr != nil {
-		logger.Error("Failed to read A2A request body", zap.Error(bodyErr))
-		sendA2AErrorResponse(w, nil, shared.JSONRPCErrorParseError, "Failed to read request body", nil, logger)
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		logger.Error("Failed to read A2A request body", zap.Error(err))
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
 
-	// 3. Parse JSON-RPC Request(s)
+	// 3. Parse JSON-RPC Request
+	// A2A JSON-RPC body SHOULD contain a single Request object.
 	// A2A spec generally assumes single request per POST, but let's handle potential batch just in case.
 	msgs, err := shared.ParseMessages(session, bodyBytes)
 	if err != nil || len(msgs) == 0 {
-		logger.Error("Failed to parse A2A JSON-RPC message(s)", zap.Error(err), zap.ByteString("body", bodyBytes))
-		sendA2AErrorResponse(w, nil, shared.JSONRPCErrorParseError, "Invalid JSON", err.Error(), logger)
+		logger.Error("Failed to parse A2A JSON-RPC request", zap.Error(err))
+		sendA2AErrorResponse(w, nil, shared.JSONRPCErrorParseError, "Invalid JSON-RPC request", nil, logger)
 		return
 	}
 
+	if len(msgs) > 1 {
+		logger.Warn("Received A2A request with batch, processing only the first message.")
+		// JSON-RPC spec says for batch errors, return batch response.
+		// A2A implies single requests, so maybe return Invalid Request for batch? Let's error.
+		sendA2AErrorResponse(w, nil, shared.JSONRPCErrorInvalidRequest, "A2A endpoint does not support batch requests", nil, logger)
+		return
+	}
 	// For A2A, we process only the first message in the batch if multiple are sent.
 	msg := msgs[0]
 	msg.Session = session // Associate session context

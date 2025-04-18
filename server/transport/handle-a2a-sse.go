@@ -8,110 +8,94 @@ import (
 
 	"github.com/gate4ai/gate4ai/server/a2a"
 	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	"go.uber.org/zap"
 )
 
-// streamA2AResponse handles the SSE stream specifically for A2A `tasks/sendSubscribe` requests.
+// streamA2AResponse handles the SSE stream specifically for A2A `tasks/sendSubscribe` and `tasks/resubscribe`.
+// It assumes the initial HTTP headers have already been sent by the caller.
+// It reads events from the session's output channel and forwards them as SSE events.
 func (t *Transport) streamA2AResponse(w http.ResponseWriter, r *http.Request, session shared.ISession, logger *zap.Logger) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		logger.Error("Streaming unsupported for A2A SSE", zap.String("sessionId", session.GetID()))
+		logger.Error("Streaming unsupported (http.Flusher missing) for A2A SSE", zap.String("sessionID", session.GetID()))
 		t.sessionManager.CloseSession(session.GetID()) // Clean up session
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		// Cannot send HTTP error here as headers might be sent already.
 		return
 	}
-
-	// --- Get A2ACapability ---
-	// This assumes A2ACapability is registered with the session's input processor.
-	// We need a way to access it or its state (like running handlers) more directly.
-	// For now, let's assume the initial `tasks/sendSubscribe` handler in A2ACapability
-	// already started the agentHandler and we just need to forward events from the session output.
-
-	a2aCapability := findA2ACapability(session.Input())
-	if a2aCapability == nil {
-		logger.Error("A2ACapability not found for session, cannot stream", zap.String("sessionID", session.GetID()))
-		http.Error(w, "Internal server error: A2A capability unavailable", http.StatusInternalServerError)
-		t.sessionManager.CloseSession(session.GetID())
-		return
-	}
-
-	// --- Prepare SSE Headers ---
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*") // Consider restricting this
-	// Optionally set Mcp-Session-Id header if applicable/useful for A2A?
-	// w.Header().Set(MCP_SESSION_HEADER, session.GetID())
-	w.WriteHeader(http.StatusOK)
-	flusher.Flush() // Send headers immediately
 
 	logger.Info("A2A SSE stream initiated", zap.String("sessionId", session.GetID()))
 
-	// --- Event Loop ---
+	// --- Process Stream Events ---
 	ticker := time.NewTicker(15 * time.Second) // Keepalive ticker
 	defer ticker.Stop()
 	defer logger.Debug("Exiting A2A SSE stream goroutine", zap.String("sessionId", session.GetID()))
-
-	ctx := r.Context() // Use request context for cancellation
+	defer t.sessionManager.CloseSession(session.GetID()) // Clean up session on disconnect
+	ctx := r.Context()                                   // Use request context for cancellation
 
 	output, ok := session.AcquireOutput()
 	if !ok {
-		logger.Error("Failed to acquire output channel for A2A SSE", zap.String("sessionId", session.GetID()))
-		// Don't write HTTP error here, stream is already started
+		logger.Error("Failed to acquire session output channel", zap.String("sessionId", session.GetID()))
 		return
 	}
-	defer session.ReleaseOutput()
+	defer session.ReleaseOutput() // Ensure output is released
 
-	eventID := time.Now().UnixNano() // Initial event ID
+	// Start event ID counter
+	eventID := 1
 
+	// Process events until client disconnect or task completion
 	for {
 		select {
-		case <-ctx.Done(): // Client disconnected
-			logger.Info("A2A SSE client disconnected (context done)", zap.String("sessionId", session.GetID()))
-			// Attempt to cancel the underlying task handler if it's still running
-			// Need the task ID associated with this stream! How to get it?
-			// Maybe store task ID in session Params? Or associate stream context with taskID?
-			// For now, we can't reliably cancel the specific handler here.
+		case <-ctx.Done():
+			// Client disconnected
+			logger.Info("Client disconnected from A2A SSE stream", zap.String("sessionId", session.GetID()))
 			return
-
+		case <-ticker.C:
+			// Send comment as keepalive
+			fmt.Fprintf(w, ": keepalive %s\n\n", time.Now().Format(time.RFC3339))
+			flusher.Flush()
+			logger.Debug("Sent A2A SSE keepalive")
 		case msg, ok := <-output:
 			if !ok {
-				logger.Info("Session output channel closed, closing A2A SSE stream", zap.String("sessionId", session.GetID()))
-				return // Exit loop
+				// Channel closed - session ended
+				logger.Info("A2A SSE output channel closed, ending stream", zap.String("sessionId", session.GetID()))
+				return
 			}
-			if msg == nil {
-				logger.Error("Received nil message from session output channel (A2A)", zap.String("sessionId", session.GetID()))
+
+			// Skip messages without ID or Result (not sure if this can happen in A2A)
+			// Actually, A2A SSE events have nil ID by design.
+			if msg.Error != nil && msg.Result == nil {
+				logger.Warn("Received error message on A2A SSE stream", zap.Any("error", msg.Error))
 				continue
 			}
 
-			eventDataJSON, err := json.Marshal(msg)
-			if err != nil {
-				logger.Error("Failed to marshal A2A SSE event data", zap.Error(err))
+			// The message in the output channel *should* already contain the A2AStreamEvent
+			// marshalled into its Result field by session.SendA2AStreamEvent.
+			if msg.Result == nil {
+				logger.Warn("Received message on A2A SSE stream with nil result", zap.Any("msgID", msg.ID), zap.String("method", *msg.Method))
 				continue
 			}
 
 			// Send event
-			fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", eventID, "event", eventDataJSON)
+			// Use standard SSE format: id, event (optional, A2A doesn't specify), data
+			// The data payload is the JSON representation of the event (TaskStatusUpdateEvent or TaskArtifactUpdateEvent).
+			fmt.Fprintf(w, "id: %d\ndata: %s\n\n", eventID, string(*msg.Result))
 			eventID++
 			flusher.Flush()
-			logger.Debug("Sent A2A SSE event", zap.Any("eventName", msg))
+			logger.Debug("Sent A2A SSE event", zap.String("eventData", string(*msg.Result)))
 
-			var a2aEvent shared.A2AStreamEvent
-			err = json.Unmarshal(*msg.Result, &a2aEvent)
-			// If this was the final event, close the stream
-			if err == nil && a2aEvent.Final {
+			// Check if the event payload indicates it's the final one.
+			// Unmarshal the Result into TaskStatusUpdateEvent to check its Final flag.
+			var statusEvent a2aSchema.TaskStatusUpdateEvent
+			// We only care about the 'final' flag on status updates.
+			isFinal := false
+			if err := json.Unmarshal(*msg.Result, &statusEvent); err == nil {
+				isFinal = statusEvent.Final
+			}
+
+			if isFinal {
 				logger.Info("Final A2A event sent, closing SSE stream", zap.String("sessionId", session.GetID()))
 				return // Exit loop, which closes the stream
-			}
-		case <-ticker.C:
-			// Send keepalive ping event
-			select {
-			case <-ctx.Done():
-				return // Exit if client disconnected during tick
-			default:
-				// A2A doesn't specify ping events, but it's good practice for SSE
-				fmt.Fprintf(w, ": keepalive\n\n")
-				flusher.Flush()
 			}
 		}
 	}

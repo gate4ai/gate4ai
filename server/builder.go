@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
+	"github.com/gate4ai/gate4ai/server/a2a"
 	"github.com/gate4ai/gate4ai/server/mcp"
 	"github.com/gate4ai/gate4ai/server/mcp/capability"
 	"github.com/gate4ai/gate4ai/server/transport"
@@ -29,7 +31,7 @@ type ServerBuilder struct {
 	resourcesCap  *capability.ResourcesCapability
 	promptsCap    *capability.PromptsCapability
 	completionCap *capability.CompletionCapability
-	//a2aCap        *a2a.A2ACapability
+	a2aCap        *a2a.A2ACapability
 
 	// Flags to control route registration
 	registerMCPRoutes bool
@@ -99,6 +101,22 @@ func (b *ServerBuilder) EnsureCompletionCapability() (*capability.CompletionCapa
 		b.capabilities = append(b.capabilities, b.completionCap)
 	}
 	return b.completionCap, nil
+}
+
+// EnsureA2ACapability creates the A2ACapability if it doesn't exist.
+// Requires a TaskStore and A2AHandler to be provided via options (e.g., WithA2ACapability).
+func (b *ServerBuilder) EnsureA2ACapability(store a2a.TaskStore, handler a2a.A2AHandler) (*a2a.A2ACapability, error) {
+	if b.manager == nil { // manager is needed by A2ACapability
+		return nil, fmt.Errorf("cannot initialize A2ACapability without MCP manager")
+	}
+	if b.a2aCap == nil {
+		b.logger.Debug("Initializing A2ACapability")
+		// Manager is now passed during construction
+		b.a2aCap = a2a.NewA2ACapability(b.logger, b.manager, store, handler)
+		b.capabilities = append(b.capabilities, b.a2aCap)
+		b.registerA2ARoutes = true // A2A capability implies A2A routes are needed
+	}
+	return b.a2aCap, nil
 }
 
 // ServerOption defines a function type for configuring the ServerBuilder.

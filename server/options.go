@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/gate4ai/gate4ai/server/a2a"
 	"github.com/gate4ai/gate4ai/server/mcp/capability"
 	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 )
@@ -90,5 +91,15 @@ func WithMCPTool(name string, description string, inputSchema *schema.JSONSchema
 
 		// Add the tool using the capability's method
 		return toolsCap.AddTool(name, description, inputSchema, annotations, handler)
+	}
+}
+
+// WithA2ACapability is a server option to add and configure the A2A capability.
+func WithA2ACapability(store a2a.TaskStore, handler a2a.A2AHandler) ServerOption {
+	return func(b *ServerBuilder) error {
+		// BaseCapability is NOT required for A2A-only servers
+		// Initialize A2ACapability directly
+		_, err := b.EnsureA2ACapability(store, handler)
+		return err
 	}
 }

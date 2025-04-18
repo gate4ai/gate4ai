@@ -155,7 +155,10 @@ func (t *Transport) RegisterMCPHandlers(mux *http.ServeMux) {
 // RegisterA2AHandlers registers only the A2A protocol handlers.
 func (t *Transport) RegisterA2AHandlers(mux *http.ServeMux, agentCard a2aSchema.AgentCard) {
 	mux.HandleFunc(A2A_PATH, t.HandleA2A())
-	t.registerAgentCardHandler(mux, agentCard)
+	// Register /.well-known only if A2A path is different
+	if A2A_PATH != "/.well-known/agent.json" {
+		t.registerAgentCardHandler(mux, agentCard)
+	}
 	t.logger.Info("Registered A2A protocol handlers", zap.String("path", A2A_PATH), zap.String("wellKnownPath", "/.well-known/agent.json"))
 }
 
