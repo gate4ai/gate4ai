@@ -12,20 +12,26 @@ type FileContent struct {
 	URI *string `json:"uri,omitempty"`
 }
 
-// FilePart represents a file part of a message or artifact.
+// Part represents a piece of content within a Message or Artifact.
+// Uses pointers for value fields to distinguish between empty/zero and omitted.
 type Part struct {
+	// The type of the part ("text", "file", or "data"). Strongly recommended.
+	Type *string `json:"type,omitempty"`
+	// Text content, only if Type is "text".
+	Text *string `json:"text,omitempty"`
+	// File content, only if Type is "file".
+	File *FileContent `json:"file,omitempty"`
+	// Structured data content, only if Type is "data".
+	Data *map[string]interface{} `json:"data,omitempty"`
+	// Optional metadata specific to this part.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
-	Type     *string                 `json:"type"` // enum: "text", "file", "data" . but sometimes they don't send it
-	Text     *string                 `json:"text,omitempty"`
-	File     *FileContent            `json:"file,omitempty"`
-	Data     *map[string]interface{} `json:"data,omitempty"`
 }
 
 // Message represents a unit of communication between a user/client and an agent.
 type Message struct {
-	// Role of the sender ("user" or "agent").
+	// Role of the sender ("user" or "agent"). (Required)
 	Role string `json:"role"` // enum: "user", "agent"
-	// The content parts of the message. Each part should be unmarshalled based on its 'type' field.
+	// The content parts of the message. (Required, must have at least one part)
 	Parts []Part `json:"parts"`
 	// Optional metadata associated with the entire message.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`

@@ -12,7 +12,7 @@ import (
 // handlePOST processes POST requests on the unified MCP endpoint.
 // It handles V2024 message posting (via session_id query) and V2 message posting (via header).
 func (t *Transport) handle2024POST(w http.ResponseWriter, r *http.Request, logger *zap.Logger) {
-	session, err := t.getSession(w, r, logger, false)
+	session, err := t.getSession(w, r, r.URL.Query().Get(SESSION_ID_KEY2024), logger, false)
 	if err != nil {
 		logger.Warn("Session not found for V2024 POST", zap.Error(err))
 		// http.Error was already called by getSession if session not found

@@ -20,6 +20,7 @@ const (
 	StatusNew SessionStatus = iota
 	StatusConnecting
 	StatusConnected
+	StatusDisconnected
 )
 
 type ISession interface {
@@ -403,14 +404,7 @@ func (s *BaseSession) SendA2AStreamEvent(event *A2AStreamEvent) error {
 	} else if event.Artifact != nil {
 		payloadToMarshal = event.Artifact
 	} else if event.Error != nil {
-		// Create a JSON-RPC error structure to send
-		msg := &Message{
-			Session: s,
-			Error:   &JSONRPCError{Code: JSONRPCErrorInternal, Message: event.Error.Error()},
-			// ID should be nil for stream errors? Check spec/practice.
-		}
-		// Send the error message directly
-		return s.sendMessageToOutput(msg)
+		return s.sendErrorToOutput(nil, &JSONRPCError{Code: JSONRPCErrorInternal, Message: event.Error.Error()})
 	} else {
 		return fmt.Errorf("A2AStreamEvent has no content (Status, Artifact, or Error)")
 	}

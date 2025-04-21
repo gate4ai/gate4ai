@@ -9,24 +9,14 @@ import (
 	"time"
 
 	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema" // For RequestID type
 	"go.uber.org/zap"
 )
 
 // handleA2APOST processes POST requests on the A2A endpoint.
 func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger *zap.Logger) {
-	// 1. Get or Create Session Context (Authentication happens here)
-	// For A2A, creating a *new* session per request might be okay if auth is per-request.
-	// Or, we might need to correlate based on headers if a persistent connection concept applies.
-	// Let's use getSession(allowCreate=true) for now, assuming auth handles A2A schemes.
-	session, err := t.getSession(w, r, logger, true)
-	if err != nil {
-		logger.Error("Failed to get/create session for A2A request", zap.Error(err))
-		http.Error(w, "Session creation failed", http.StatusInternalServerError)
-		return
-	}
-
-	// 2. Read Request Body
+	// 1. Read Request Body
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		logger.Error("Failed to read A2A request body", zap.Error(err))
@@ -35,10 +25,10 @@ func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger
 	}
 	defer r.Body.Close()
 
-	// 3. Parse JSON-RPC Request
+	// 2. Parse JSON-RPC Request
 	// A2A JSON-RPC body SHOULD contain a single Request object.
 	// A2A spec generally assumes single request per POST, but let's handle potential batch just in case.
-	msgs, err := shared.ParseMessages(session, bodyBytes)
+	msgs, err := shared.ParseMessages(nil, bodyBytes)
 	if err != nil || len(msgs) == 0 {
 		logger.Error("Failed to parse A2A JSON-RPC request", zap.Error(err))
 		sendA2AErrorResponse(w, nil, shared.JSONRPCErrorParseError, "Invalid JSON-RPC request", nil, logger)
@@ -46,16 +36,15 @@ func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger
 	}
 
 	if len(msgs) > 1 {
-		logger.Warn("Received A2A request with batch, processing only the first message.")
+		logger.Warn("Received A2A request with batch")
 		// JSON-RPC spec says for batch errors, return batch response.
 		// A2A implies single requests, so maybe return Invalid Request for batch? Let's error.
 		sendA2AErrorResponse(w, nil, shared.JSONRPCErrorInvalidRequest, "A2A endpoint does not support batch requests", nil, logger)
 		return
 	}
-	// For A2A, we process only the first message in the batch if multiple are sent.
+
+	// For A2A, we process only one message
 	msg := msgs[0]
-	msg.Session = session // Associate session context
-	msg.Timestamp = time.Now()
 
 	if msg.Method == nil {
 		sendA2AErrorResponse(w, msg.ID, shared.JSONRPCErrorInvalidRequest, "Method is required", nil, logger)
@@ -68,6 +57,31 @@ func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger
 		sendA2AErrorResponse(w, msg.ID, shared.JSONRPCErrorMethodNotFound, fmt.Sprintf("Method '%s' not supported on A2A endpoint", method), nil, logger)
 		return
 	}
+
+	var sessionID string
+	if method == "tasks/send" || method == "tasks/sendSubscribe" {
+		var params a2aSchema.TaskSendParams
+		if err := json.Unmarshal(*msg.Params, &params); err != nil {
+			logger.Error("Failed to unmarshal tasks/send params", zap.Error(err))
+			http.Error(w, "Failed to unmarshal tasks/send params", http.StatusInternalServerError)
+			return
+		}
+		if params.SessionID != nil {
+			sessionID = *params.SessionID
+		}
+	}
+
+	session, err := t.getSession(w, r, sessionID, logger, true)
+	if err != nil {
+		logger.Error("Failed to get/create session for A2A request", zap.Error(err))
+		http.Error(w, "Session creation failed", http.StatusInternalServerError)
+		return
+	}
+	session.SetStatus(shared.StatusConnected)
+	defer session.SetStatus(shared.StatusDisconnected)
+
+	msg.Session = session // Associate session context
+	msg.Timestamp = time.Now()
 
 	// 4. Handle A2A Streaming Request (`tasks/sendSubscribe`)
 	isStreamingRequest := method == "tasks/sendSubscribe"
@@ -90,64 +104,75 @@ func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger
 		return
 	}
 
+	responseChan, ok := session.AcquireOutput()
+	if !ok {
+		logger.Error("Failed to acquire output channel for A2A request", zap.String("method", method), zap.Any("reqID", msg.ID))
+		sendA2AErrorResponse(w, msg.ID, shared.JSONRPCErrorInternal, "Failed to acquire output channel", nil, logger)
+		return
+	}
+	defer session.ReleaseOutput()
+
 	// 6. Handle Response / SSE Stream
 	if isStreamingRequest {
 		// A2A SSE Stream Handling
 		// The initial handler for tasks/sendSubscribe in A2ACapability will return the initial task state.
-		// We need to wait for *that specific* response from the output channel.
-		// Then, we start the SSE stream using streamA2AResponse.
-
-		// Wait for the initial task response from the handler
-		initialResponseChan := make(chan *shared.Message, 1)
-		callback := func(respMsg *shared.Message) {
-			select {
-			case initialResponseChan <- respMsg:
-			default:
-				logger.Warn("Initial response channel full or closed for tasks/sendSubscribe", zap.String("taskID", msg.ID.String()))
-			}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			logger.Error("Streaming unsupported (http.Flusher missing) for A2A SSE", zap.String("sessionID", session.GetID()))
+			t.sessionManager.CloseSession(session.GetID()) // Clean up session
+			// Cannot send HTTP error here as headers might be sent already.
+			return
 		}
-		session.GetRequestManager().RegisterRequest(msg.ID, callback)
 
+		eventID := 0
 		// Wait for the response or timeout
-		select {
-		case initialResponse := <-initialResponseChan:
-			if initialResponse.Error != nil {
-				logger.Error("tasks/sendSubscribe handler returned an error immediately", zap.Error(initialResponse.Error), zap.Any("reqID", msg.ID))
-				sendA2AErrorResponse(w, msg.ID, initialResponse.Error.Code, initialResponse.Error.Message, initialResponse.Error.Data, logger)
+		for {
+			select {
+			case response, ok := <-responseChan:
+				if !ok {
+					logger.Info("A2A SSE output channel closed, ending stream", zap.String("sessionId", session.GetID()))
+					return
+				}
+				if response.Error != nil {
+					logger.Error("tasks/sendSubscribe handler returned an error immediately", zap.Error(response.Error), zap.Any("reqID", msg.ID))
+					sendA2AErrorResponse(w, msg.ID, response.Error.Code, response.Error.Message, response.Error.Data, logger)
+					return
+				}
+
+				eventID++
+				data, err := json.Marshal(response)
+				if err != nil {
+					logger.Error("Failed to marshal A2A SSE event", zap.Error(err), zap.Any("reqID", msg.ID))
+					sendA2AErrorResponse(w, msg.ID, shared.JSONRPCErrorInternal, "Failed to marshal A2A SSE event", nil, logger)
+					return
+				}
+				fmt.Fprintf(w, "id: %d\ndata: %s\n\n", eventID, data)
+				flusher.Flush()
+				logger.Debug("Sent A2A SSE event", zap.String("eventData", string(*response.Result)))
+
+				// Is final?
+				var statusEvent a2aSchema.TaskStatusUpdateEvent
+				err = json.Unmarshal(*response.Result, &statusEvent)
+				if err == nil && statusEvent.Final {
+					logger.Info("Final A2A event sent, closing SSE stream", zap.String("sessionId", session.GetID()))
+					return // Exit loop, which closes the stream
+				}
+			case <-time.After(responseTimeout): // Use constant defined elsewhere
+				logger.Error("Timeout waiting for initial response from tasks/sendSubscribe handler", zap.Any("reqID", msg.ID))
+				sendA2AErrorResponse(w, msg.ID, shared.JSONRPCErrorInternal, "Timeout waiting for initial task response", nil, logger)
+				// Cleanup the registered callback
+				session.GetRequestManager().ProcessResponse(&shared.Message{ID: msg.ID, Error: shared.NewJSONRPCError(fmt.Errorf("timeout"))})
+				return
+			case <-r.Context().Done():
+				logger.Debug("Client disconnected while waiting for initial tasks/sendSubscribe response", zap.Any("reqID", msg.ID))
+				// Cleanup the registered callback
+				session.GetRequestManager().ProcessResponse(&shared.Message{ID: msg.ID, Error: shared.NewJSONRPCError(fmt.Errorf("client disconnected"))})
 				return
 			}
-			// Got initial response (likely Task object), now start streaming
-			logger.Info("Starting A2A SSE stream", zap.String("sessionID", session.GetID()), zap.Any("reqID", msg.ID))
-			t.streamA2AResponse(w, r, session, logger) // This function takes over the response writer
-			logger.Info("A2A SSE stream handler finished", zap.String("sessionID", session.GetID()))
-
-		case <-time.After(responseTimeout): // Use constant defined elsewhere
-			logger.Error("Timeout waiting for initial response from tasks/sendSubscribe handler", zap.Any("reqID", msg.ID))
-			sendA2AErrorResponse(w, msg.ID, shared.JSONRPCErrorInternal, "Timeout waiting for initial task response", nil, logger)
-			// Cleanup the registered callback
-			session.GetRequestManager().ProcessResponse(&shared.Message{ID: msg.ID, Error: shared.NewJSONRPCError(fmt.Errorf("timeout"))})
-
-		case <-r.Context().Done():
-			logger.Warn("Client disconnected while waiting for initial tasks/sendSubscribe response", zap.Any("reqID", msg.ID))
-			// Cleanup the registered callback
-			session.GetRequestManager().ProcessResponse(&shared.Message{ID: msg.ID, Error: shared.NewJSONRPCError(fmt.Errorf("client disconnected"))})
 		}
-
 	} else {
 		// Regular A2A Request (tasks/send, tasks/get, tasks/cancel)
-		// Wait for a single response from the output channel
-
-		responseChan := make(chan *shared.Message, 1)
-		callback := func(respMsg *shared.Message) {
-			select {
-			case responseChan <- respMsg:
-			default:
-				logger.Warn("Response channel full or closed for A2A request", zap.String("method", method), zap.Any("reqID", msg.ID))
-			}
-		}
-		session.GetRequestManager().RegisterRequest(msg.ID, callback)
-
-		// Wait for the response or timeout
+		// Wait for a single response from the output channel or timeout
 		select {
 		case response := <-responseChan:
 			if response.Error != nil {
@@ -172,14 +197,14 @@ func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger
 	}
 }
 
-// --- A2A Specific Response Helpers ---
+// --- Response Helpers ---
 
 func sendA2ASuccessResponse(w http.ResponseWriter, id *schema.RequestID, result *json.RawMessage, logger *zap.Logger) {
 	// A2A uses standard JSON-RPC success response format
 	resp := shared.JSONRPCResponse{
 		JSONRPC: shared.JSONRPCVersion,
 		ID:      id,
-		Result:  result, // Already marshalled json.RawMessage
+		Result:  result,
 	}
 	logger.Debug("Sending A2A Success", zap.Any("reqID", id))
 	sendJSONResponse(w, http.StatusOK, resp, logger) // Reuse existing helper

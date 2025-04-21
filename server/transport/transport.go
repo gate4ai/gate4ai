@@ -156,9 +156,13 @@ func (t *Transport) RegisterMCPHandlers(mux *http.ServeMux) {
 func (t *Transport) RegisterA2AHandlers(mux *http.ServeMux, agentCard a2aSchema.AgentCard) {
 	mux.HandleFunc(A2A_PATH, t.HandleA2A())
 	// Register /.well-known only if A2A path is different
-	if A2A_PATH != "/.well-known/agent.json" {
-		t.registerAgentCardHandler(mux, agentCard)
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(agentCard)
 	}
+	mux.HandleFunc("/.well-known/agent.json", handler)
+
 	t.logger.Info("Registered A2A protocol handlers", zap.String("path", A2A_PATH), zap.String("wellKnownPath", "/.well-known/agent.json"))
 }
 
@@ -260,16 +264,6 @@ func (t *Transport) startSessionCleanup() {
 	t.logger.Info("Session cleanup routine stopped")
 }
 
-// registerAgentCardHandler dynamically registers the /.well-known/agent.json handler.
-func (t *Transport) registerAgentCardHandler(mux *http.ServeMux, card a2aSchema.AgentCard) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*") // Allow discovery
-		json.NewEncoder(w).Encode(card)
-	}
-	mux.HandleFunc("/.well-known/agent.json", handler)
-}
-
 // --- Helper to send JSON responses ---
 func sendJSONResponse(w http.ResponseWriter, statusCode int, data interface{}, logger *zap.Logger) {
 	w.Header().Set("Content-Type", contentTypeJSON)
@@ -304,12 +298,7 @@ func sendJSONRPCErrorResponse(w http.ResponseWriter, id *schema.RequestID, code 
 	sendJSONResponse(w, http.StatusOK, errResp, logger)
 }
 
-func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, logger *zap.Logger, allowCreate bool) (shared.ISession, error) {
-	sessionID := r.Header.Get(MCP_SESSION_HEADER) // V2025+
-	if sessionID == "" {
-		sessionID = r.URL.Query().Get(SESSION_ID_KEY2024) // V2024 fallback
-	}
-
+func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, sessionID string, logger *zap.Logger, allowCreate bool) (shared.ISession, error) {
 	if sessionID != "" {
 		session, err := t.sessionManager.GetSession(sessionID)
 		if err == nil {

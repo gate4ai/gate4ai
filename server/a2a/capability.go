@@ -8,43 +8,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/gate4ai/server/mcp" // Needed for manager interface
+	"github.com/gate4ai/gate4ai/server/mcp" // Needed for manager interface dependency
 	"github.com/gate4ai/gate4ai/shared"
 	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	mcpSchema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 
-	// Only for SetCapabilities type
-	// Only for SetCapabilities type
 	"go.uber.org/zap"
 )
 
 // Ensure A2ACapability implements IServerCapability
 var _ shared.IServerCapability = (*A2ACapability)(nil)
 
-// --- A2A Task Handling Interface ---
-
-// A2AYieldUpdate represents the possible types of updates an A2AHandler can yield.
-type A2AYieldUpdate struct {
-	Status   *a2aSchema.TaskStatus // Use a pointer to differentiate
-	Artifact *a2aSchema.Artifact   // Use a pointer to differentiate
-}
-
-// A2AHandler defines the signature for the core logic of an A2A agent.
-// It receives the task context and a channel to send updates back to the capability.
-// The handler should run asynchronously and send updates via the channel.
-// It should return an error if the handler initialization fails critically.
-// The final task state (completed, failed) should be sent via the updates channel.
-// A logger is passed for handler-specific logging.
-type A2AHandler func(ctx context.Context, task *a2aSchema.Task, updates chan<- A2AYieldUpdate, logger *zap.Logger) error
-
 // --- A2A Capability ---
 
-// A2ACapability handles A2A protocol methods (tasks/*).
+// A2ACapability handles A2A protocol methods (tasks/*). It acts as the bridge
+// between the transport layer and the specific agent logic (A2AHandler).
 type A2ACapability struct {
 	logger       *zap.Logger
-	manager      mcp.ISessionManager // To interact with sessions for SSE
-	taskStore    TaskStore
-	agentHandler A2AHandler
+	manager      mcp.ISessionManager // To interact with sessions for SSE/Resubscribe
+	taskStore    TaskStore           // Interface for task persistence
+	agentHandler A2AHandler          // The actual agent logic implementation
 	handlers     map[string]func(*shared.Message) (interface{}, error)
 	// Track running handlers for cancellation
 	runningHandlersMu sync.Mutex
@@ -54,12 +37,14 @@ type A2ACapability struct {
 // NewA2ACapability creates a new A2A capability.
 func NewA2ACapability(
 	logger *zap.Logger,
-	manager mcp.ISessionManager, // Manager is required now
+	manager mcp.ISessionManager, // Manager is needed for SSE/Resubscribe
 	store TaskStore,
 	handler A2AHandler,
 ) *A2ACapability {
+	// While A2A *could* potentially operate without MCP/SSE, the current architecture
+	// relies on the manager for session handling, especially for sendSubscribe/resubscribe.
 	if manager == nil {
-		panic("A2ACapability requires a non-nil ISessionManager")
+		panic("A2ACapability requires a non-nil ISessionManager for current implementation")
 	}
 	if store == nil {
 		panic("A2ACapability requires a non-nil TaskStore")
@@ -74,249 +59,328 @@ func NewA2ACapability(
 		agentHandler:    handler,
 		runningHandlers: make(map[string]context.CancelFunc),
 	}
+	// Map JSON-RPC method names to handler functions within this capability
 	ac.handlers = map[string]func(*shared.Message) (interface{}, error){
 		"tasks/send":                 ac.handleTaskSend,
 		"tasks/sendSubscribe":        ac.handleTaskSendSubscribe,
 		"tasks/get":                  ac.handleTaskGet,
 		"tasks/cancel":               ac.handleTaskCancel,
-		"tasks/pushNotification/set": ac.handleTaskPushNotificationSet,
-		"tasks/pushNotification/get": ac.handleTaskPushNotificationGet,
-		"tasks/resubscribe":          ac.handleTaskResubscribe, // Added Resubscribe
+		"tasks/pushNotification/set": ac.handleTaskPushNotificationSet, // Returns unsupported
+		"tasks/pushNotification/get": ac.handleTaskPushNotificationGet, // Returns unsupported
+		"tasks/resubscribe":          ac.handleTaskResubscribe,         // Basic implementation
 	}
 	return ac
 }
 
-// GetHandlers returns the map of JSON-RPC method handlers.
+// GetHandlers returns the map of JSON-RPC method handlers this capability provides.
 func (ac *A2ACapability) GetHandlers() map[string]func(*shared.Message) (interface{}, error) {
 	return ac.handlers
 }
 
 // --- A2A Method Handlers ---
 
-// handleTaskSend handles synchronous task requests.
+// handleTaskSend handles synchronous task requests (`tasks/send`).
 func (ac *A2ACapability) handleTaskSend(msg *shared.Message) (interface{}, error) {
 	logger := ac.logger.With(zap.String("sessionID", msg.Session.GetID()), zap.String("method", "tasks/send"))
 
 	var params a2aSchema.TaskSendParams
 	if err := json.Unmarshal(*msg.Params, &params); err != nil {
 		logger.Error("Failed to unmarshal tasks/send params", zap.Error(err))
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: err.Error()})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: err.Error()}
 	}
+	// Add taskID to logger *after* parsing params
 	logger = logger.With(zap.String("taskID", params.ID))
 	logger.Debug("Handling tasks/send request")
 
-	// --- Load or Create Task ---
-	task, err := ac.loadOrCreateTask(context.Background(), params.ID, params.SessionID, params.Metadata)
+	// --- Load or Create Task State ---
+	task, err := ac.loadOrCreateTask(context.Background(), params.ID, msg.Session.GetID(), params.Metadata)
 	if err != nil {
 		logger.Error("Failed to load/create task", zap.Error(err))
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to initialize task"})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to initialize task"}
 	}
 
-	// --- Check if Task is Active ---
+	// --- Prevent Concurrent Execution ---
 	if ac.isHandlerRunning(task.ID) {
 		logger.Warn("Received tasks/send for already active task")
-		// Decide behavior: return current state? return error? For sync, let's return error.
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidRequest, Message: "Task is already processing"})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidRequest, Message: "Task is already processing"}
 	}
-	if isTerminalState(task.Status.State) && params.Message.Role == "user" {
-		// If task is finished and user sends a new message, treat it as continuation/new phase
-		logger.Info("Continuing completed task", zap.String("previousState", string(task.Status.State)))
-		task.Status.State = a2aSchema.TaskStateSubmitted // Reset state? Or let handler decide? Let handler decide based on history.
+
+	// --- Handle Task Continuation/Restart ---
+	if task.Status.State == a2aSchema.TaskStateInputRequired && params.Message.Role == "user" {
+		logger.Info("Continuing task from input-required state")
+		task.Status.State = a2aSchema.TaskStateSubmitted // Reset state to allow agent processing
+	} else if isTerminalState(task.Status.State) && params.Message.Role == "user" {
+		logger.Info("Restarting completed/failed/canceled task", zap.String("previousState", string(task.Status.State)))
+		task.Status = a2aSchema.TaskStatus{State: a2aSchema.TaskStateSubmitted, Timestamp: time.Now()}
+		task.Artifacts = []a2aSchema.Artifact{} // Clear previous artifacts on restart
+		// Keep history for context
 	}
 
 	// --- Add User Message to History ---
-	if params.Message.Role == "user" { // Only add user messages here
+	if params.Message.Role == "user" {
+		if task.History == nil {
+			task.History = []a2aSchema.Message{}
+		}
 		task.History = append(task.History, params.Message)
-		// Persist the history addition immediately? Or wait for handler completion? Let's wait.
+	}
+
+	// --- Save Task State Before Starting Handler ---
+	if err := ac.taskStore.Save(context.Background(), task); err != nil {
+		logger.Error("Failed to save task state before handler start", zap.Error(err))
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to save task state"}
 	}
 
 	// --- Prepare and Run Handler Synchronously ---
 	handlerCtx, cancel := context.WithCancel(context.Background())
-	ac.storeCancelFunc(task.ID, cancel) // Store cancel func
-	defer ac.removeCancelFunc(task.ID)  // Ensure cleanup on exit
+	ac.storeCancelFunc(task.ID, cancel) // Store cancel func for potential task cancellation
+	defer ac.removeCancelFunc(task.ID)  // Ensure cleanup when this function returns
 
-	updates := make(chan A2AYieldUpdate, 20) // Buffered channel
-	handlerErrChan := make(chan error, 1)
-	handlerLogger := logger // Pass logger to handler
+	updates := make(chan A2AYieldUpdate, 20) // Buffered channel for agent updates
+	handlerErrChan := make(chan error, 1)    // Channel for handler's final return error
+	handlerLogger := logger                  // Pass logger with task context
 
-	go func() {
-		defer close(handlerErrChan)
-		defer close(updates)
-		// Pass the task *with the new user message included in history*
-		if err := ac.agentHandler(handlerCtx, task, updates, handlerLogger); err != nil {
-			handlerErrChan <- err
-		}
-	}()
+	// Run the agent handler in a separate goroutine
+	go func(currentTaskState *a2aSchema.Task) {
+		defer close(handlerErrChan) // Signal completion by closing the channel
+		defer close(updates)        // Close updates channel when handler goroutine finishes
+		// Pass the task *as saved just before the call*
+		handlerErr := ac.agentHandler(handlerCtx, currentTaskState, updates, handlerLogger)
+		handlerErrChan <- handlerErr // Send final error (or nil) back
+	}(task) // Pass the current task state
 
-	// --- Process Updates Synchronously ---
-	var lastTaskState *a2aSchema.Task = task // Start with the task state before handler call
-	for update := range updates {
-		var applyErr error
-		lastTaskState, applyErr = ac.applyUpdateToTask(lastTaskState, update)
-		if applyErr != nil {
-			logger.Error("Failed to apply update to task", zap.Error(applyErr), zap.Any("update", update))
-			lastTaskState.Status = createErrorStatus(applyErr) // Update status to reflect internal error
-			// Since this is sync, we should save this error state and return it.
-			if saveErr := ac.taskStore.Save(context.Background(), lastTaskState); saveErr != nil {
-				logger.Error("Failed to save internal error task state", zap.Error(saveErr))
+	// --- Process Updates from Handler Synchronously ---
+	var lastTaskState *a2aSchema.Task = task // Track the latest known state
+	var handlerError error                   // Store error returned by the handler goroutine
+	var finalJsonRpcError *shared.JSONRPCError
+
+	keepProcessing := true
+	for keepProcessing {
+		select {
+		case update, ok := <-updates:
+			if !ok {
+				// Updates channel closed, handler finished or panicked
+				keepProcessing = false
+				break // Exit select
 			}
-			// We still need to wait for the handler goroutine to potentially finish/error out.
-			// Drain the rest of the updates channel? Or just break and use this error state? Let's break.
-			cancel() // Cancel handler context as we encountered an internal error
-			break
-		}
-		// Optionally save intermediate states? For sync, usually only final state matters.
-	}
 
-	// --- Handle Handler Completion/Error ---
-	handlerErr := <-handlerErrChan // Wait for handler goroutine to finish
-	if handlerErr != nil && !errors.Is(handlerErr, context.Canceled) {
-		logger.Error("Agent handler returned an error", zap.Error(handlerErr))
-		// Ensure final task state reflects failure
-		if lastTaskState == nil { // Should not happen if task was loaded
-			lastTaskState = task
+			// Apply the update yielded by the handler
+			var applyErr error
+			lastTaskState, applyErr = ac.applyUpdateToTask(lastTaskState, update)
+			if applyErr != nil {
+				logger.Error("Internal error applying update from handler", zap.Error(applyErr), zap.Any("update", update))
+				lastTaskState.Status = createErrorStatus(applyErr, nil) // Mark task failed due to internal error
+				handlerError = applyErr                                 // Record internal error
+				cancel()                                                // Cancel handler context
+				keepProcessing = false                                  // Stop processing further updates
+				break                                                   // Exit select
+			}
+
+			// Check if the update itself contained a specific JSONRPCError
+			if update.Error != nil {
+				logger.Warn("Handler yielded a JSONRPCError", zap.Any("error", update.Error))
+				lastTaskState.Status = createErrorStatus(update.Error, update.Error) // Mark task failed
+				handlerError = update.Error                                          // Store the specific JSONRPCError
+				finalJsonRpcError = shared.NewJSONRPCError(update.Error)             // Prepare error for client
+				cancel()
+				keepProcessing = false
+				break
+			}
+
+			// Save intermediate state only if it's significant (input-required or terminal)
+			currentState := lastTaskState.Status.State
+			if currentState == a2aSchema.TaskStateInputRequired || isTerminalState(currentState) {
+				if err := ac.taskStore.Save(context.Background(), lastTaskState); err != nil {
+					logger.Error("Failed to save intermediate task state", zap.Error(err), zap.String("state", string(currentState)))
+					// If save fails, consider it an internal error
+					handlerError = fmt.Errorf("failed to save state (%s): %w", currentState, err)
+					lastTaskState.Status = createErrorStatus(handlerError, nil)
+					cancel()
+					keepProcessing = false
+				} else {
+					// Successfully saved significant state, stop processing for this sync call
+					logger.Debug("Saved significant intermediate state, stopping sync processing", zap.String("state", string(currentState)))
+					keepProcessing = false
+				}
+			}
+
+		case errFromHandler := <-handlerErrChan:
+			// Handler goroutine finished, capture its return error
+			handlerError = errFromHandler
+			// Drain any remaining updates that might have been sent just before finishing
+			for range updates {
+			}
+			keepProcessing = false // Stop processing loop
 		}
-		lastTaskState.Status = createErrorStatus(handlerErr)
-	} else if lastTaskState == nil {
-		logger.Error("Handler finished but no final task state recorded")
-		task.Status = createErrorStatus(errors.New("internal error: Handler finished unexpectedly"))
-		lastTaskState = task
-	} else if !isTerminalState(lastTaskState.Status.State) {
-		// Handler finished without error, but didn't set a terminal state. Assume completed.
-		logger.Warn("Handler finished successfully but task not in terminal state. Setting to 'completed'.", zap.String("finalState", string(lastTaskState.Status.State)))
+	} // End processing loop
+
+	// --- Final State Handling and Response Preparation ---
+	// Ensure task is in a final state if the handler finished without error or yielding input-required/terminal
+	if handlerError == nil && lastTaskState.Status.State != a2aSchema.TaskStateInputRequired && !isTerminalState(lastTaskState.Status.State) {
+		logger.Warn("Handler finished successfully but task not in terminal/input state. Setting to 'completed'.", zap.String("finalState", string(lastTaskState.Status.State)))
 		lastTaskState.Status.State = a2aSchema.TaskStateCompleted
 		lastTaskState.Status.Timestamp = time.Now()
+	} else if handlerError != nil && !errors.Is(handlerError, context.Canceled) {
+		// If handler returned an error (and it wasn't cancellation)
+		logger.Error("Agent handler finished with an error", zap.Error(handlerError))
+		// If it wasn't already set by yielding an error update, set status to failed
+		if lastTaskState.Status.State != a2aSchema.TaskStateFailed {
+			if jsonErr, ok := handlerError.(*a2aSchema.JSONRPCError); ok {
+				lastTaskState.Status = createErrorStatus(jsonErr, jsonErr)
+				finalJsonRpcError = shared.NewJSONRPCError(jsonErr) // Prepare error for client
+			} else {
+				lastTaskState.Status = createErrorStatus(handlerError, nil) // Generic internal error status
+				// Prepare generic internal error for client
+				finalJsonRpcError = &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Internal agent error occurred"}
+			}
+		}
 	}
 
-	// --- Save Final State and Return ---
+	// --- Save the final determined state ---
 	if err := ac.taskStore.Save(context.Background(), lastTaskState); err != nil {
 		logger.Error("Failed to save final task state", zap.Error(err))
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to save task state"})
+		// If final save fails, return internal error to client
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to save final task state"}
 	}
 
-	// --- Handle History Length in Response ---
-	finalResponseTask := *lastTaskState // Copy final state
+	// --- Return Result or Error to Client ---
+	if finalJsonRpcError != nil {
+		// Return the specific error determined during processing
+		logger.Info("Returning error to client", zap.Int("code", finalJsonRpcError.Code), zap.String("message", finalJsonRpcError.Message))
+		return nil, finalJsonRpcError
+	}
+
+	// --- Prepare Successful Response ---
+	finalResponseTask := *lastTaskState // Copy final state for response
+	// Handle history length trimming
 	if params.HistoryLength != nil && *params.HistoryLength >= 0 {
 		historyLen := *params.HistoryLength
 		if len(finalResponseTask.History) > historyLen {
 			finalResponseTask.History = finalResponseTask.History[len(finalResponseTask.History)-historyLen:]
 		}
 	} else {
-		finalResponseTask.History = nil // Return no history if length is not specified or negative
+		finalResponseTask.History = nil // Omit history if not requested or negative length
 	}
 
-	logger.Debug("tasks/send completed", zap.String("finalState", string(finalResponseTask.Status.State)))
-	return &finalResponseTask, nil // Return the potentially history-trimmed final task object
+	logger.Debug("tasks/send completed successfully", zap.String("finalState", string(finalResponseTask.Status.State)))
+	return &finalResponseTask, nil // Return the final task object
 }
 
-// handleTaskSendSubscribe handles requests to start a task and stream updates via SSE.
+// handleTaskSendSubscribe handles asynchronous task requests with SSE streaming (`tasks/sendSubscribe`).
 func (ac *A2ACapability) handleTaskSendSubscribe(msg *shared.Message) (interface{}, error) {
 	logger := ac.logger.With(zap.String("sessionID", msg.Session.GetID()), zap.String("method", "tasks/sendSubscribe"))
 
 	var params a2aSchema.TaskSendParams
 	if err := json.Unmarshal(*msg.Params, &params); err != nil {
 		logger.Error("Failed to unmarshal tasks/sendSubscribe params", zap.Error(err))
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: err.Error()})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: err.Error()}
 	}
 	logger = logger.With(zap.String("taskID", params.ID))
 	logger.Debug("Handling tasks/sendSubscribe request")
 
 	// --- Load or Create Task ---
-	task, err := ac.loadOrCreateTask(context.Background(), params.ID, params.SessionID, params.Metadata)
+	task, err := ac.loadOrCreateTask(context.Background(), params.ID, msg.Session.GetID(), params.Metadata)
 	if err != nil {
 		logger.Error("Failed to load/create task", zap.Error(err))
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to initialize task"})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to initialize task"}
 	}
 
-	// --- Check if Task is Active ---
+	// --- Prevent Concurrent Execution ---
 	if ac.isHandlerRunning(task.ID) {
 		logger.Warn("Received tasks/sendSubscribe for already active task")
-		// For SSE, allow re-subscribing? Or return error? Let's return error for now.
-		// Re-subscribe should likely use tasks/resubscribe.
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidRequest, Message: "Task is already processing, use tasks/resubscribe"})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidRequest, Message: "Task is already processing, use tasks/resubscribe"}
 	}
-	if isTerminalState(task.Status.State) && params.Message.Role == "user" {
-		logger.Info("Continuing completed task via sendSubscribe", zap.String("previousState", string(task.Status.State)))
-		task.Status.State = a2aSchema.TaskStateSubmitted // Reset state? Or let handler decide?
+
+	// --- Handle Task Continuation/Restart ---
+	if task.Status.State == a2aSchema.TaskStateInputRequired && params.Message.Role == "user" {
+		logger.Info("Continuing task from input-required state via sendSubscribe")
+		task.Status.State = a2aSchema.TaskStateSubmitted
+	} else if isTerminalState(task.Status.State) && params.Message.Role == "user" {
+		logger.Info("Restarting completed/failed/canceled task via sendSubscribe", zap.String("previousState", string(task.Status.State)))
+		task.Status = a2aSchema.TaskStatus{State: a2aSchema.TaskStateSubmitted, Timestamp: time.Now()}
+		task.Artifacts = []a2aSchema.Artifact{}
 	}
 
 	// --- Add User Message to History ---
 	if params.Message.Role == "user" {
-		task.History = append(task.History, params.Message)
-		// Save immediately so handler sees it? Yes.
-		if err := ac.taskStore.Save(context.Background(), task); err != nil {
-			logger.Error("Failed to save task history before starting handler", zap.Error(err))
-			return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to save task state"})
+		if task.History == nil {
+			task.History = []a2aSchema.Message{}
 		}
+		task.History = append(task.History, params.Message)
+	}
+
+	// --- Save Task State Before Starting Handler ---
+	if err := ac.taskStore.Save(context.Background(), task); err != nil {
+		logger.Error("Failed to save task state before handler start (sendSubscribe)", zap.Error(err))
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to save task state"}
 	}
 
 	// --- Prepare and Start Handler Asynchronously ---
-	// Use the session's context or background if session context isn't available/suitable
-	handlerCtx, cancel := context.WithCancel(context.Background()) // TODO: Link to request context if possible?
-	ac.storeCancelFunc(task.ID, cancel)                            // Store cancel func
+	handlerCtx, cancel := context.WithCancel(context.Background())
+	ac.storeCancelFunc(task.ID, cancel)      // Store cancel func
+	updates := make(chan A2AYieldUpdate, 20) // Buffered channel for agent updates
+	handlerLogger := logger                  // Pass logger with task context
 
-	updates := make(chan A2AYieldUpdate, 20) // Buffered channel
-	handlerLogger := logger                  // Pass logger to handler
+	var wait4TaskUpdates sync.WaitGroup
+	wait4TaskUpdates.Add(1)
 
 	// Goroutine to run the agent's logic
-	go func() {
-		// Ensure cleanup when handler goroutine exits
-		defer ac.removeCancelFunc(task.ID)
-		defer cancel()
-		defer close(updates)
+	go func(initialTaskState *a2aSchema.Task) {
+		defer ac.removeCancelFunc(task.ID) // Remove cancel func ref when handler exits
+		defer close(updates)               // Close updates chan when handler exits
 
-		// Run the actual agent logic
-		handlerErr := ac.agentHandler(handlerCtx, task, updates, handlerLogger)
+		handlerErr := ac.agentHandler(handlerCtx, initialTaskState, updates, handlerLogger)
+		wait4TaskUpdates.Wait()
 
-		// Handle Handler Completion/Error (after update loop finishes processing)
+		// --- Handle Handler Completion/Error (after update processing finishes) ---
 		if handlerErr != nil && !errors.Is(handlerErr, context.Canceled) {
 			logger.Error("Agent handler returned an error during streaming", zap.Error(handlerErr))
-			// Send final "failed" status update via the session's SSE stream
-			failStatus := createErrorStatus(handlerErr)
-			finalEvent := &shared.A2AStreamEvent{
-				Type: "status",
-				Status: &a2aSchema.TaskStatusUpdateEvent{
-					ID:     task.ID,
-					Status: failStatus,
+			// Determine final error status and event
+			var finalStatus a2aSchema.TaskStatus
+			var finalEvent *shared.A2AStreamEvent
+			if jsonRPCErr, ok := handlerErr.(*a2aSchema.JSONRPCError); ok {
+				finalStatus = createErrorStatus(jsonRPCErr, jsonRPCErr)
+				finalEvent = &shared.A2AStreamEvent{Type: "error", Error: jsonRPCErr, Final: true}
+			} else {
+				finalStatus = createErrorStatus(handlerErr, nil) // Generic internal error
+				finalEvent = &shared.A2AStreamEvent{
+					Type:   "status",
+					Status: &a2aSchema.TaskStatusUpdateEvent{ID: task.ID, Status: finalStatus, Final: true},
 					Final:  true,
-				},
-				Final: true, // Mark the stream event itself as final
+				}
 			}
-			// Send error event via session
+			// Send final event via session
 			if sendErr := msg.Session.SendA2AStreamEvent(finalEvent); sendErr != nil {
-				logger.Error("Failed to send final failed status event", zap.Error(sendErr))
+				logger.Error("Failed to send final failed status/error event", zap.Error(sendErr))
 			}
-			// Save the final failed state
-			task.Status = failStatus // Update local task copy before saving
-			if saveErr := ac.taskStore.Save(context.Background(), task); saveErr != nil {
+			// Save final failed state
+			finalTaskState, loadErr := ac.taskStore.Load(context.Background(), task.ID)
+			if loadErr != nil {
+				finalTaskState = task // Fallback
+			}
+			finalTaskState.Status = finalStatus
+			if saveErr := ac.taskStore.Save(context.Background(), finalTaskState); saveErr != nil {
 				logger.Error("Failed to save final failed task state", zap.Error(saveErr))
 			}
 		} else if errors.Is(handlerErr, context.Canceled) {
 			logger.Info("Handler execution cancelled", zap.Error(handlerErr))
-			// Final status (canceled) should have been set and saved by handleTaskCancel
+			// Cancellation status should be set by handleTaskCancel or transport disconnect cleanup
 		} else {
 			logger.Debug("Agent handler finished processing stream normally")
-			// Ensure the task is marked as completed if it wasn't explicitly failed/canceled
-			// Reload task state to ensure we have the latest saved version
+			// Ensure task completion if not already terminal/input-required
 			finalTaskState, loadErr := ac.taskStore.Load(context.Background(), task.ID)
 			if loadErr != nil {
 				logger.Error("Failed to load task state after handler completion", zap.Error(loadErr))
-				// Send internal error?
-			} else if !isTerminalState(finalTaskState.Status.State) {
-				logger.Warn("Handler finished but task not in terminal state. Sending 'completed'.")
+			} else if !isTerminalState(finalTaskState.Status.State) && finalTaskState.Status.State != a2aSchema.TaskStateInputRequired {
+				logger.Warn("Handler finished but task not in terminal/input state. Sending 'completed'.")
 				finalStatus := a2aSchema.TaskStatus{
 					State:     a2aSchema.TaskStateCompleted,
 					Timestamp: time.Now(),
-					Message:   finalTaskState.Status.Message, // Keep last message?
+					Message:   finalTaskState.Status.Message,
 				}
 				finalEvent := &shared.A2AStreamEvent{
-					Type: "status",
-					Status: &a2aSchema.TaskStatusUpdateEvent{
-						ID:     task.ID,
-						Status: finalStatus,
-						Final:  true,
-					},
-					Final: true,
+					Type:   "status",
+					Status: &a2aSchema.TaskStatusUpdateEvent{ID: task.ID, Status: finalStatus, Final: true},
+					Final:  true,
 				}
 				if sendErr := msg.Session.SendA2AStreamEvent(finalEvent); sendErr != nil {
 					logger.Error("Failed to send final completed status event", zap.Error(sendErr))
@@ -327,43 +391,63 @@ func (ac *A2ACapability) handleTaskSendSubscribe(msg *shared.Message) (interface
 				}
 			}
 		}
-	}()
+	}(task) // Pass the task state
 
-	// Goroutine to process updates and send SSE events via the session
-	go func() {
-		var lastTaskState *a2aSchema.Task = task // Track state locally for saving
-		isFinalSent := false
+	// Goroutine to process updates from the handler and send SSE events via the session
+	go func(currentTaskState *a2aSchema.Task) {
+		defer wait4TaskUpdates.Done()
 
-		for update := range updates {
+		lastTaskState := currentTaskState // Track state locally for saving
+		isFinalEventSent := false
+
+		for update := range updates { // Read from updates channel until closed
 			// Apply update to local task state copy
 			var applyErr error
 			lastTaskState, applyErr = ac.applyUpdateToTask(lastTaskState, update)
 			if applyErr != nil {
 				logger.Error("Failed to apply update to task during streaming", zap.Error(applyErr), zap.Any("update", update))
-				// Optionally send an error event? Or rely on the handler goroutine to send final fail?
-				// Let's rely on the handler goroutine's final error handling.
-				continue // Skip saving/sending this specific broken update
+				errorEvent := &shared.A2AStreamEvent{Type: "error", Error: &a2aSchema.JSONRPCError{Code: a2aSchema.ErrorInternalError, Message: fmt.Sprintf("Internal error applying update: %v", applyErr)}, Final: false}
+				_ = msg.Session.SendA2AStreamEvent(errorEvent) // Try to send error event
+				continue                                       // Skip saving/sending this broken update
 			}
 
-			// Save the updated task state (use handlerCtx for potential cancellation)
-			if err := ac.taskStore.Save(handlerCtx, lastTaskState); err != nil {
+			// Handle yielded JSONRPCError
+			if update.Error != nil {
+				logger.Error("Handler yielded JSONRPCError during stream", zap.Any("error", update.Error))
+				errorEvent := &shared.A2AStreamEvent{Type: "error", Error: update.Error, Final: true}
+				_ = msg.Session.SendA2AStreamEvent(errorEvent)
+				lastTaskState.Status = createErrorStatus(update.Error, update.Error)           // Update local state copy
+				if err := ac.taskStore.Save(context.Background(), lastTaskState); err != nil { // Save failed state
+					logger.Error("Failed to save task state after yielded error", zap.Error(err))
+				}
+				ac.cancelHandler(task.ID) // Cancel original context
+				return                    // Stop processing updates
+			}
+
+			// Save the updated task state
+			if err := ac.taskStore.Save(context.Background(), lastTaskState); err != nil {
 				logger.Error("Failed to save task state during streaming", zap.Error(err))
-				// If save fails, maybe stop processing? For now, log and continue sending events.
+				// Consider if failure to save should stop the stream? Potentially yes.
+				// Let's send an error event and stop.
+				errorEvent := &shared.A2AStreamEvent{Type: "error", Error: &a2aSchema.JSONRPCError{Code: a2aSchema.ErrorInternalError, Message: fmt.Sprintf("Internal error saving state: %v", err)}, Final: true}
+				_ = msg.Session.SendA2AStreamEvent(errorEvent)
+				ac.cancelHandler(task.ID)
+				return
 			}
 
 			// Prepare A2AStreamEvent to send to client
 			var eventToSend *shared.A2AStreamEvent
-			isFinal := isTerminalState(lastTaskState.Status.State)
+			isFinal := isTerminalState(lastTaskState.Status.State) || lastTaskState.Status.State == a2aSchema.TaskStateInputRequired
 
 			if update.Status != nil {
 				eventToSend = &shared.A2AStreamEvent{
 					Type: "status",
 					Status: &a2aSchema.TaskStatusUpdateEvent{
 						ID:     task.ID,
-						Status: *update.Status, // Use status directly from update
+						Status: *update.Status,
 						Final:  isFinal,
 					},
-					Final: isFinal, // Mark stream event itself as final if state is terminal
+					Final: isFinal,
 				}
 			} else if update.Artifact != nil {
 				eventToSend = &shared.A2AStreamEvent{
@@ -372,35 +456,33 @@ func (ac *A2ACapability) handleTaskSendSubscribe(msg *shared.Message) (interface
 						ID:       task.ID,
 						Artifact: *update.Artifact,
 					},
-					Final: false, // Artifact updates don't terminate the stream
+					Final: false,
 				}
 			}
 
-			// Send event via session's output channel (handles SSE formatting)
+			// Send event via session's output channel
 			if eventToSend != nil {
 				if err := msg.Session.SendA2AStreamEvent(eventToSend); err != nil {
-					logger.Error("Failed to send A2A stream event", zap.Error(err))
-					// If sending fails (e.g., client disconnected), cancel the handler context.
-					ac.cancelHandler(task.ID) // Use the helper method
-					return                    // Stop processing updates for this task
+					logger.Error("Failed to send A2A stream event, cancelling handler", zap.Error(err))
+					ac.cancelHandler(task.ID) // Cancel the agent handler
+					return                    // Stop processing updates
 				}
 				if isFinal {
-					isFinalSent = true
-					logger.Debug("Sent final status event via SSE", zap.String("state", string(lastTaskState.Status.State)))
-					// Don't return yet, the handler goroutine manages final cleanup.
+					isFinalEventSent = true
+					logger.Debug("Sent final event via SSE", zap.String("state", string(lastTaskState.Status.State)))
+					// Don't return yet, handler goroutine manages final cleanup.
 				}
 			}
 		} // End update processing loop
 
 		logger.Debug("Update processing loop finished for task", zap.String("taskID", task.ID))
-		// If handler finishes normally but didn't send a terminal status, the handler goroutine will handle it.
-		if !isFinalSent {
-			logger.Debug("No final event was sent explicitly during update processing")
+		if !isFinalEventSent {
+			logger.Debug("No final event was sent explicitly during update processing (handler might send one)")
 		}
-	}() // End update processing goroutine
+	}(task) // End update processing goroutine
 
-	// For tasks/sendSubscribe, the initial JSON-RPC response acknowledges the request.
-	// We return the initial task state (potentially trimmed history).
+	// For tasks/sendSubscribe, the initial JSON-RPC response acknowledges the request initiation.
+	// Return the initial task state (without artifacts, potentially trimmed history).
 	initialResponseTask := *task // Copy initial task state
 	if params.HistoryLength != nil && *params.HistoryLength >= 0 {
 		historyLen := *params.HistoryLength
@@ -410,19 +492,20 @@ func (ac *A2ACapability) handleTaskSendSubscribe(msg *shared.Message) (interface
 	} else {
 		initialResponseTask.History = nil // No history requested
 	}
+	initialResponseTask.Artifacts = nil // Artifacts are sent via SSE events
 
 	logger.Debug("tasks/sendSubscribe initiated, returning initial task state", zap.String("initialState", string(initialResponseTask.Status.State)))
 	return &initialResponseTask, nil
 }
 
-// handleTaskGet handles requests to retrieve task status and artifacts.
+// handleTaskGet handles `tasks/get` requests.
 func (ac *A2ACapability) handleTaskGet(msg *shared.Message) (interface{}, error) {
 	logger := ac.logger.With(zap.String("sessionID", msg.Session.GetID()), zap.String("method", "tasks/get"))
 
 	var params a2aSchema.TaskQueryParams
 	if err := json.Unmarshal(*msg.Params, &params); err != nil {
 		logger.Error("Failed to unmarshal tasks/get params", zap.Error(err))
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: err.Error()})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: err.Error()}
 	}
 	logger = logger.With(zap.String("taskID", params.ID))
 	logger.Debug("Handling tasks/get request")
@@ -430,39 +513,36 @@ func (ac *A2ACapability) handleTaskGet(msg *shared.Message) (interface{}, error)
 	task, err := ac.taskStore.Load(context.Background(), params.ID)
 	if err != nil {
 		logger.Warn("Failed to load task for get", zap.Error(err))
-		var taskNotFoundErr *a2aSchema.JSONRPCError // Check for specific error type
-		if errors.As(err, &taskNotFoundErr) && taskNotFoundErr.Code == a2aSchema.ErrorCodeTaskNotFound {
-			return nil, err // Return the specific TaskNotFound error
+		var jsonRPCErr *a2aSchema.JSONRPCError
+		if errors.As(err, &jsonRPCErr) {
+			return nil, shared.NewJSONRPCError(jsonRPCErr) // Propagate specific errors like TaskNotFound
 		}
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to load task state"})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to load task state"}
 	}
 
-	// Handle historyLength
-	responseTask := *task // Copy task
+	// --- Handle History Length ---
+	responseTask := *task // Copy task before modification
 	if params.HistoryLength != nil && *params.HistoryLength >= 0 {
 		historyLen := *params.HistoryLength
 		if len(responseTask.History) > historyLen {
-			// Return only the last 'historyLen' messages
 			responseTask.History = responseTask.History[len(responseTask.History)-historyLen:]
-		}
-		// If historyLen is 0, keep empty slice. If history is nil, keep nil.
+		} // Keep history as is if length is sufficient or 0 requested
 	} else {
-		// If historyLength is omitted or negative, return no history
-		responseTask.History = nil
+		responseTask.History = nil // Omit history if not requested or negative length
 	}
 
 	logger.Debug("Returning task state", zap.String("state", string(responseTask.Status.State)))
 	return &responseTask, nil
 }
 
-// handleTaskCancel handles requests to cancel a task.
+// handleTaskCancel handles `tasks/cancel` requests.
 func (ac *A2ACapability) handleTaskCancel(msg *shared.Message) (interface{}, error) {
 	logger := ac.logger.With(zap.String("sessionID", msg.Session.GetID()), zap.String("method", "tasks/cancel"))
 
 	var params a2aSchema.TaskIdParams
 	if err := json.Unmarshal(*msg.Params, &params); err != nil {
 		logger.Error("Failed to unmarshal tasks/cancel params", zap.Error(err))
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: err.Error()})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: err.Error()}
 	}
 	logger = logger.With(zap.String("taskID", params.ID))
 	logger.Debug("Handling tasks/cancel request")
@@ -470,117 +550,168 @@ func (ac *A2ACapability) handleTaskCancel(msg *shared.Message) (interface{}, err
 	task, err := ac.taskStore.Load(context.Background(), params.ID)
 	if err != nil {
 		logger.Warn("Failed to load task for cancellation", zap.Error(err))
-		var taskNotFoundErr *a2aSchema.JSONRPCError
-		if errors.As(err, &taskNotFoundErr) && taskNotFoundErr.Code == a2aSchema.ErrorCodeTaskNotFound {
-			return nil, err // Return specific error
+		var jsonRPCErr *a2aSchema.JSONRPCError
+		if errors.As(err, &jsonRPCErr) {
+			return nil, shared.NewJSONRPCError(jsonRPCErr)
 		}
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to load task state"})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to load task state"}
 	}
 
-	// Check if task is already in a terminal state
+	// --- Check if Cancellable ---
 	if isTerminalState(task.Status.State) {
 		logger.Warn("Task already in terminal state, cannot cancel", zap.String("state", string(task.Status.State)))
-		return nil, a2aSchema.NewTaskNotCancelableError(params.ID)
+		return nil, shared.NewJSONRPCError(a2aSchema.NewTaskNotCancelableError(params.ID))
 	}
 
-	// Cancel the handler's context if it's running
-	cancelled := ac.cancelHandler(params.ID) // This also removes from map
-	if !cancelled {
-		logger.Warn("Cancel requested, but no running handler found (might have finished?)")
-		// If handler finished between Load and cancelHandler call, the state might be terminal now. Reload?
-		// Let's proceed to set state to canceled, assuming the user intent is cancellation.
+	// --- Cancel Running Handler ---
+	wasRunning := ac.cancelHandler(params.ID) // This calls cancel() and removes from map
+	if !wasRunning {
+		logger.Warn("Cancel requested, but no running handler found (might have finished between load and cancel)")
 	}
 
-	// Update task state to canceled
+	// --- Update Task State ---
 	task.Status.State = a2aSchema.TaskStateCanceled
 	task.Status.Timestamp = time.Now()
-	cancelMsg := "Task canceled by request."
-	task.Status.Message = &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{{Type: shared.PointerTo("text"), Text: &cancelMsg}}}
+	cancelMsgText := "Task canceled by client request."
+	task.Status.Message = &a2aSchema.Message{Role: "agent", Parts: []a2aSchema.Part{{Type: shared.PointerTo("text"), Text: &cancelMsgText}}}
 
-	// Save updated state
+	// --- Save Final Canceled State ---
 	if err := ac.taskStore.Save(context.Background(), task); err != nil {
 		logger.Error("Failed to save canceled task state", zap.Error(err))
-		// What to return? Internal error seems appropriate.
-		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to save canceled task state"})
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to save canceled task state"}
 	}
 
-	// If the task was associated with an active SSE stream, send final canceled event.
-	// We need the original session that started the stream. This info isn't easily available here.
-	// The SSE sending loop should detect the context cancellation originating from cancelHandler.
-	// Alternatively, the capability could store sessionID with the cancel func.
+	// The transport layer's SSE handler (`streamA2AResponse`) associated with the *original*
+	// `sendSubscribe` request should detect the context cancellation triggered by `cancelHandler`
+	// and terminate the SSE stream gracefully. No explicit SSE event needed here.
 
 	logger.Debug("Task canceled successfully")
 	// Return the updated task state (without history)
-	task.History = nil
-	return task, nil
+	responseTask := *task
+	responseTask.History = nil
+	responseTask.Artifacts = nil // Don't return artifacts for cancel response
+	return &responseTask, nil
 }
 
-// handleTaskPushNotificationSet handles setting push notification config (Not Implemented).
+// handleTaskPushNotificationSet returns "Unsupported Operation".
 func (ac *A2ACapability) handleTaskPushNotificationSet(msg *shared.Message) (interface{}, error) {
-	return nil, a2aSchema.NewUnsupportedOperationError("tasks/pushNotification/set")
+	return nil, shared.NewJSONRPCError(a2aSchema.NewUnsupportedOperationError("tasks/pushNotification/set"))
 }
 
-// handleTaskPushNotificationGet handles getting push notification config (Not Implemented).
+// handleTaskPushNotificationGet returns "Unsupported Operation".
 func (ac *A2ACapability) handleTaskPushNotificationGet(msg *shared.Message) (interface{}, error) {
-	return nil, a2aSchema.NewUnsupportedOperationError("tasks/pushNotification/get")
+	return nil, shared.NewJSONRPCError(a2aSchema.NewUnsupportedOperationError("tasks/pushNotification/get"))
 }
 
-// handleTaskResubscribe handles requests to resume streaming (Not Implemented Robustly).
+// handleTaskResubscribe handles `tasks/resubscribe` requests.
+// Note: Full resumption of live updates from an *existing* handler run is complex.
+// This implementation provides a snapshot and starts a *new* stream that won't get
+// updates from the original handler instance.
 func (ac *A2ACapability) handleTaskResubscribe(msg *shared.Message) (interface{}, error) {
-	// Basic implementation: Treat like sendSubscribe for now.
-	// A real implementation would need to:
-	// 1. Load the task.
-	// 2. Check if it's still active (not terminal).
-	// 3. If active, potentially find the *existing* running handler/update channel.
-	// 4. Re-attach the *new* session's SSE stream to forward updates from that channel.
-	// 5. If not active but terminal, send final state event and close stream.
-	// 6. This is complex and requires careful state management.
-	ac.logger.Warn("tasks/resubscribe called, treating as tasks/sendSubscribe (resumption not fully implemented)")
-	// Re-use sendSubscribe logic, which will error out if handler is already running for the task ID.
-	// A better approach might be to load the task and immediately send its current state + final=true if terminal.
-	// If not terminal and handler running, error? Or try to hook into existing stream? Difficult.
-	return ac.handleTaskSendSubscribe(msg)
+	logger := ac.logger.With(zap.String("sessionID", msg.Session.GetID()), zap.String("method", "tasks/resubscribe"))
+
+	var params a2aSchema.TaskQueryParams // Resubscribe uses TaskQueryParams according to spec example
+	if err := json.Unmarshal(*msg.Params, &params); err != nil {
+		logger.Error("Failed to unmarshal tasks/resubscribe params", zap.Error(err))
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: err.Error()}
+	}
+	logger = logger.With(zap.String("taskID", params.ID))
+	logger.Debug("Handling tasks/resubscribe request")
+
+	// --- Load Task State ---
+	task, err := ac.taskStore.Load(context.Background(), params.ID)
+	if err != nil {
+		logger.Warn("Failed to load task for resubscribe", zap.Error(err))
+		var jsonRPCErr *a2aSchema.JSONRPCError
+		if errors.As(err, &jsonRPCErr) {
+			return nil, shared.NewJSONRPCError(jsonRPCErr)
+		}
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Failed to load task state"}
+	}
+
+	// --- Handle History Length for Initial Response ---
+	responseTask := *task // Copy before modification
+	if params.HistoryLength != nil && *params.HistoryLength >= 0 {
+		historyLen := *params.HistoryLength
+		if len(responseTask.History) > historyLen {
+			responseTask.History = responseTask.History[len(responseTask.History)-historyLen:]
+		}
+	} else {
+		responseTask.History = nil
+	}
+	// Don't include artifacts in the initial resubscribe response.
+	// The client should use tasks/get if they need the full current artifact state.
+	responseTask.Artifacts = nil
+
+	// --- Check Task Status for Response/Stream Behavior ---
+	if isTerminalState(task.Status.State) {
+		logger.Info("Task already terminated, returning final state for resubscribe", zap.String("state", string(task.Status.State)))
+		// The transport layer should see the terminal state and send *only* the final status event.
+		// We return the task object containing the terminal status.
+		return &responseTask, nil
+	}
+
+	if !ac.isHandlerRunning(task.ID) {
+		// Task is not terminal, but handler isn't running (inconsistent state).
+		logger.Error("Resubscribe requested for non-terminal task with no running handler", zap.String("state", string(task.Status.State)))
+		// Mark task as failed and return error
+		task.Status = createErrorStatus(errors.New("inconsistent state: task not terminal but handler not running"), nil)
+		_ = ac.taskStore.Save(context.Background(), task) // Attempt to save error state
+		return nil, &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Task in inconsistent state, cannot resubscribe"}
+	}
+
+	// --- Task is Running - Provide Current State ---
+	// The transport layer will start an SSE stream upon seeing the Accept header.
+	// This response provides the initial state snapshot for the resubscribing client.
+	// WARNING: Updates from the original agent handler run will NOT be sent to this new stream.
+	logger.Warn("Resuming stream not fully implemented. Returning current state. New updates from the original handler run won't be sent to this new stream.")
+	return &responseTask, nil
+
+	// Proper resumption would require complex state management (sharing update channels, fan-out).
+	// return nil, shared.NewJSONRPCError(a2aSchema.NewUnsupportedOperationError("tasks/resubscribe (full streaming resumption not implemented)"))
 }
 
 // --- Helper Methods ---
 
-func (ac *A2ACapability) loadOrCreateTask(ctx context.Context, taskID string, sessionID *string, metadata *map[string]interface{}) (*a2aSchema.Task, error) {
+// loadOrCreateTask retrieves a task or creates a new one if not found.
+func (ac *A2ACapability) loadOrCreateTask(ctx context.Context, taskID string, sessionID string, metadata *map[string]interface{}) (*a2aSchema.Task, error) {
 	task, err := ac.taskStore.Load(ctx, taskID)
-	if err == nil {
+	if err == nil { // Task found
 		ac.logger.Debug("Loaded existing task", zap.String("taskID", taskID), zap.String("state", string(task.Status.State)))
-		// Task exists, potentially update metadata or session ID if provided?
-		// For now, just return the loaded task.
-		// If the task is terminal, the calling handler might reset state or reject.
+		// Update metadata if provided in the current request? Let's merge/overwrite.
+		if metadata != nil {
+			task.Metadata = metadata // Replace metadata
+		}
+		// Should we update SessionID if provided? Let's keep the original SessionID.
 		return task, nil
 	}
 
-	// Check if error is *not* TaskNotFoundError
-	var taskNotFoundErr *a2aSchema.JSONRPCError
-	if !errors.As(err, &taskNotFoundErr) || taskNotFoundErr.Code != a2aSchema.ErrorCodeTaskNotFound {
-		// Unexpected error loading task
-		ac.logger.Error("Unexpected error loading task", zap.String("taskID", taskID), zap.Error(err))
-		return nil, err
+	// Check if error is specifically TaskNotFoundError
+	var jsonRPCErr *a2aSchema.JSONRPCError
+	if errors.As(err, &jsonRPCErr) && jsonRPCErr.Code == a2aSchema.ErrorCodeTaskNotFound {
+		// Task not found, proceed to create a new one
+		ac.logger.Info("Task not found, creating new task", zap.String("taskID", taskID))
+		newTask := &a2aSchema.Task{
+			ID:        taskID,
+			SessionID: sessionID,
+			Status: a2aSchema.TaskStatus{
+				State:     a2aSchema.TaskStateSubmitted,
+				Timestamp: time.Now(),
+			},
+			Artifacts: []a2aSchema.Artifact{}, // Initialize slices
+			History:   []a2aSchema.Message{},
+			Metadata:  metadata, // Set initial metadata
+		}
+		if err := ac.taskStore.Save(ctx, newTask); err != nil {
+			ac.logger.Error("Failed to save newly created task", zap.String("taskID", taskID), zap.Error(err))
+			return nil, fmt.Errorf("failed to save newly created task: %w", err)
+		}
+		return newTask, nil
 	}
 
-	// Task not found, create a new one
-	newTask := &a2aSchema.Task{
-		ID:        taskID,
-		SessionID: sessionID, // Use pointer directly
-		Status: a2aSchema.TaskStatus{
-			State:     a2aSchema.TaskStateSubmitted,
-			Timestamp: time.Now(), // Use ISO string
-		},
-		Artifacts: []a2aSchema.Artifact{}, // Initialize slice
-		History:   []a2aSchema.Message{},  // Initialize slice
-		Metadata:  metadata,               // Use pointer directly
-	}
-
-	if err := ac.taskStore.Save(ctx, newTask); err != nil {
-		ac.logger.Error("Failed to save newly created task", zap.String("taskID", taskID), zap.Error(err))
-		return nil, fmt.Errorf("failed to save newly created task: %w", err)
-	}
-	ac.logger.Info("Created new A2A task", zap.String("taskID", taskID))
-	return newTask, nil
+	// Unexpected error loading task
+	ac.logger.Error("Unexpected error loading task", zap.String("taskID", taskID), zap.Error(err))
+	return nil, fmt.Errorf("internal error loading task: %w", err) // Return internal error
 }
 
 // applyUpdateToTask modifies the task based on the yielded update from the handler.
@@ -590,90 +721,108 @@ func (ac *A2ACapability) applyUpdateToTask(task *a2aSchema.Task, update A2AYield
 		return nil, errors.New("cannot apply update to nil task")
 	}
 
-	// Work on a copy to avoid race conditions
+	// --- Create a Deep Copy ---
+	// This prevents modifying the state shared with the handler or other potential readers.
 	taskCopy := *task
+	// Deep copy slices and maps within the task
+	if task.Artifacts != nil {
+		taskCopy.Artifacts = make([]a2aSchema.Artifact, len(task.Artifacts))
+		copy(taskCopy.Artifacts, task.Artifacts)
+		// Further deep copy Parts within artifacts if necessary (structs are usually copied by value)
+	} else {
+		taskCopy.Artifacts = []a2aSchema.Artifact{} // Ensure initialized
+	}
+	if task.History != nil {
+		taskCopy.History = make([]a2aSchema.Message, len(task.History))
+		copy(taskCopy.History, task.History)
+		// Further deep copy Parts within messages if necessary
+	} else {
+		taskCopy.History = []a2aSchema.Message{} // Ensure initialized
+	}
+	if task.Metadata != nil {
+		newMeta := make(map[string]interface{}, len(*task.Metadata))
+		for k, v := range *task.Metadata {
+			newMeta[k] = v // Shallow copy of map values is usually sufficient
+		}
+		taskCopy.Metadata = &newMeta
+	}
+	// Status is a struct, copied by value. Message inside status is a pointer, handle defensively.
+	if task.Status.Message != nil {
+		msgCopy := *task.Status.Message
+		// Deep copy parts in status message
+		if task.Status.Message.Parts != nil {
+			msgCopy.Parts = make([]a2aSchema.Part, len(task.Status.Message.Parts))
+			copy(msgCopy.Parts, task.Status.Message.Parts)
+		}
+		taskCopy.Status.Message = &msgCopy
+	}
 
+	// --- Apply Update to the Copy ---
 	if update.Status != nil {
-		// Replace status, ensuring timestamp is set
 		taskCopy.Status = *update.Status
 		if taskCopy.Status.Timestamp.IsZero() {
 			taskCopy.Status.Timestamp = time.Now()
 		}
-		// Add agent message from status to history
 		if taskCopy.Status.Message != nil && taskCopy.Status.Message.Role == "agent" {
-			if taskCopy.History == nil {
-				taskCopy.History = []a2aSchema.Message{}
-			}
-			// Avoid adding duplicate status messages if state hasn't changed? Maybe not necessary.
+			// Add agent message from status to history (avoiding duplicates is complex, let's just append)
 			taskCopy.History = append(taskCopy.History, *taskCopy.Status.Message)
 		}
 	} else if update.Artifact != nil {
-		artifact := *update.Artifact
-		if taskCopy.Artifacts == nil {
-			taskCopy.Artifacts = make([]a2aSchema.Artifact, 0, 1)
-		}
-
+		artifactUpdate := *update.Artifact
 		found := false
 		for i := range taskCopy.Artifacts {
-			if taskCopy.Artifacts[i].Index == artifact.Index {
-				if artifact.Append != nil && *artifact.Append {
-					// Append parts
-					taskCopy.Artifacts[i].Parts = append(taskCopy.Artifacts[i].Parts, artifact.Parts...)
-					// Update other fields if provided
-					if artifact.LastChunk != nil {
-						taskCopy.Artifacts[i].LastChunk = artifact.LastChunk
-					}
-					if artifact.Description != nil {
-						taskCopy.Artifacts[i].Description = artifact.Description
-					}
-					if artifact.Metadata != nil {
-						taskCopy.Artifacts[i].Metadata = artifact.Metadata
-					}
-					if artifact.Name != nil { // Allow updating name on append?
-						taskCopy.Artifacts[i].Name = artifact.Name
-					}
+			if taskCopy.Artifacts[i].Index == artifactUpdate.Index {
+				existingArtifact := &taskCopy.Artifacts[i]
+				if artifactUpdate.Append != nil && *artifactUpdate.Append {
+					existingArtifact.Parts = append(existingArtifact.Parts, artifactUpdate.Parts...)
+					if artifactUpdate.LastChunk != nil {
+						existingArtifact.LastChunk = artifactUpdate.LastChunk
+					} // Update other fields as needed
 				} else {
-					// Overwrite artifact at this index
-					taskCopy.Artifacts[i] = artifact
+					taskCopy.Artifacts[i] = artifactUpdate // Overwrite
 				}
 				found = true
 				break
 			}
 		}
 		if !found {
-			// Append new artifact if index not found
-			taskCopy.Artifacts = append(taskCopy.Artifacts, artifact)
+			taskCopy.Artifacts = append(taskCopy.Artifacts, artifactUpdate) // Append new
 		}
-		// Update task status timestamp when an artifact is added/updated
-		taskCopy.Status.Timestamp = time.Now()
-
+		taskCopy.Status.Timestamp = time.Now() // Update timestamp on artifact change
+	} else if update.Error != nil {
+		// Handler yielded an error, mark task as failed
+		taskCopy.Status = createErrorStatus(update.Error, update.Error)
 	} else {
-		return nil, errors.New("invalid A2AYieldUpdate: missing status or artifact")
+		ac.logger.Warn("Received empty A2AYieldUpdate (no status, artifact, or error)")
 	}
 
 	return &taskCopy, nil
 }
 
+// storeCancelFunc stores the cancel function associated with a running task handler.
 func (ac *A2ACapability) storeCancelFunc(taskID string, cancel context.CancelFunc) {
 	ac.runningHandlersMu.Lock()
 	defer ac.runningHandlersMu.Unlock()
 	if existingCancel, ok := ac.runningHandlers[taskID]; ok {
-		ac.logger.Warn("Replacing/cancelling existing running handler for task ID", zap.String("taskID", taskID))
-		existingCancel() // Cancel the previous one
+		ac.logger.Warn("Handler already running for task, cancelling previous one", zap.String("taskID", taskID))
+		existingCancel() // Cancel the old one before storing the new one
 	}
 	ac.runningHandlers[taskID] = cancel
 	ac.logger.Debug("Stored cancel function for task", zap.String("taskID", taskID))
 }
 
+// removeCancelFunc removes the reference to the cancel function for a task.
+// This is called when the handler goroutine finishes or is explicitly cancelled.
 func (ac *A2ACapability) removeCancelFunc(taskID string) {
 	ac.runningHandlersMu.Lock()
 	defer ac.runningHandlersMu.Unlock()
 	if _, ok := ac.runningHandlers[taskID]; ok {
 		delete(ac.runningHandlers, taskID)
-		ac.logger.Debug("Removed cancel function for task", zap.String("taskID", taskID))
+		ac.logger.Debug("Removed cancel function reference for task", zap.String("taskID", taskID))
 	}
 }
 
+// isHandlerRunning checks if a handler is currently tracked as running for the taskID.
 func (ac *A2ACapability) isHandlerRunning(taskID string) bool {
 	ac.runningHandlersMu.Lock()
 	defer ac.runningHandlersMu.Unlock()
@@ -681,32 +830,34 @@ func (ac *A2ACapability) isHandlerRunning(taskID string) bool {
 	return ok
 }
 
+// cancelHandler explicitly cancels the running handler's context for a taskID.
+// It retrieves the cancel func, removes it from the map, and then calls it.
+// Returns true if a handler was found and its context cancellation was invoked.
 func (ac *A2ACapability) cancelHandler(taskID string) bool {
 	ac.runningHandlersMu.Lock()
-	defer ac.runningHandlersMu.Unlock()
-	if cancel, ok := ac.runningHandlers[taskID]; ok {
+	cancel, ok := ac.runningHandlers[taskID]
+	if ok {
+		// Remove immediately while holding lock to prevent race conditions
+		delete(ac.runningHandlers, taskID)
+	}
+	ac.runningHandlersMu.Unlock() // Unlock *before* calling cancel
+
+	if ok {
 		ac.logger.Info("Cancelling running handler context for task", zap.String("taskID", taskID))
-		cancel()
-		delete(ac.runningHandlers, taskID) // Remove after cancelling
+		cancel() // Call the actual context cancellation function
 		return true
 	}
 	ac.logger.Debug("No running handler found to cancel for task", zap.String("taskID", taskID))
 	return false
 }
 
-// SetCapabilities adds A2A marker to server capabilities if needed (currently none defined in MCP schema).
+// SetCapabilities is part of the IServerCapability interface.
+// For A2A, capabilities are primarily defined in the Agent Card, not MCP capabilities.
 func (ac *A2ACapability) SetCapabilities(s *mcpSchema.ServerCapabilities) {
-	// MCP schema doesn't have a dedicated A2A section.
-	// We could use the Experimental field if needed.
-	if s.Experimental == nil {
-		s.Experimental = make(map[string]json.RawMessage)
-	}
-	a2aMarker, _ := json.Marshal(true)
-	s.Experimental["a2a"] = a2aMarker // Simple marker
-	ac.logger.Debug("Marked A2A capability in ServerCapabilities (experimental)")
+	ac.logger.Debug("SetCapabilities called on A2ACapability (no MCP fields modified)")
 }
 
-// isTerminalState checks if a task state is final.
+// isTerminalState checks if a task state indicates final completion (success, failure, or cancellation).
 func isTerminalState(state a2aSchema.TaskState) bool {
 	switch state {
 	case a2aSchema.TaskStateCompleted, a2aSchema.TaskStateFailed, a2aSchema.TaskStateCanceled:
@@ -716,7 +867,36 @@ func isTerminalState(state a2aSchema.TaskState) bool {
 	}
 }
 
-// Need to add SetManager to A2ACapability
+// SetManager allows setting the session manager (needed for interface compatibility if used in MCP context).
 func (ac *A2ACapability) SetManager(manager mcp.ISessionManager) {
 	ac.manager = manager
+}
+
+// createErrorStatus generates a TaskStatus for a failed state.
+// If jsonErr is provided and represents a client-facing error, its details are used.
+// Otherwise, a generic message based on the Go error is used.
+func createErrorStatus(err error, jsonErr *a2aSchema.JSONRPCError) a2aSchema.TaskStatus {
+	errMsg := "An internal agent error occurred."
+	if jsonErr != nil {
+		// Use the message from the specific JSONRPCError
+		errMsg = jsonErr.Message
+	} else if err != nil {
+		// Use the Go error message for internal logging, but maybe not client response?
+		// For now, let's use it for the status message.
+		errMsg = fmt.Sprintf("Internal error: %v", err)
+	}
+
+	// Create the agent message containing the error part
+	agentMessage := &a2aSchema.Message{
+		Role: "agent",
+		Parts: []a2aSchema.Part{
+			{Type: shared.PointerTo("text"), Text: &errMsg},
+		},
+	}
+
+	return a2aSchema.TaskStatus{
+		State:     a2aSchema.TaskStateFailed,
+		Timestamp: time.Now(),
+		Message:   agentMessage, // Embed the error message details
+	}
 }
