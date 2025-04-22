@@ -44,7 +44,7 @@ func New(serverSlug string, sseurl string, logger *zap.Logger) (*Backend, error)
 func (backend *Backend) NewSession(ctx context.Context, httpClient *http.Client, authorizationBearer string) *Session {
 	input := shared.NewInput(backend.Logger)
 
-	baseSession := shared.NewBaseSession(backend.Logger, input, nil)
+	baseSession := shared.NewBaseSession(backend.Logger, "", input, nil)
 	baseSession.Logger.Debug("Creating new client session")
 
 	sseClient := sse.NewClient(backend.URL.String())

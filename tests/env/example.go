@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	// Adjust these imports based on actual project structure
 	"github.com/gate4ai/gate4ai/server"
+	"github.com/gate4ai/gate4ai/server/a2a"
+	"github.com/gate4ai/gate4ai/server/cmd/a2a-example-server/agent"
+
 	"github.com/gate4ai/gate4ai/server/cmd/mcp-example-server/exampleCapability"
 	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/gate4ai/gate4ai/shared/config"
@@ -22,6 +24,7 @@ const ExampleServerComponentName = "mcp-example"
 // ExampleServerDetails holds the specific URLs for the example server endpoints.
 type ExampleServerDetails struct {
 	BaseURL    string
+	A2AURL     string
 	MCP2024URL string
 	MCP2025URL string
 	TestAPIKey string
@@ -66,14 +69,12 @@ func (e *ExampleServerEnv) Configure(envs *Envs) (dependencies []string, err err
 	// Pre-calculate details based on intended URL
 	e.details = ExampleServerDetails{
 		BaseURL:    baseURL,
+		A2AURL:     fmt.Sprintf("%s%s", baseURL, transport.A2A_PATH),
 		MCP2024URL: fmt.Sprintf("%s%s?key=%s", baseURL, transport.MCP2024_PATH, testAPIKey),
-		MCP2025URL: fmt.Sprintf("%s%s?key=%s", baseURL, transport.MCP2025_PATH, testAPIKey),
+		MCP2025URL: fmt.Sprintf("%s%s", baseURL, transport.MCP2025_PATH),
 		TestAPIKey: testAPIKey,
 	}
 	e.mux.Unlock()
-
-	log.Printf("[%s] Configuring component. Intends to run on base URL: %s", e.Name(), baseURL)
-	os.Setenv("GATE4AI_EXAMPLE_SERVER_URL", e.details.MCP2024URL) // Set one for compatibility
 
 	log.Printf("[%s] Declaring dependencies: %v", e.Name(), []string{DBComponentName}) // Assume it might read config from DB eventually
 	return []string{DBComponentName}, nil                                              // Depends on DB for potential config reads
@@ -107,7 +108,7 @@ func (e *ExampleServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		// --- Setup Example Server ---
 		log.Printf("%sLoading YAML config...", logPrefix)
 		var err error
-		configPath := filepath.Join(TestConfigWorkspaceFolder, "server/cmd/mcp-example-server/config.yaml")
+		configPath := filepath.Join(TestConfigWorkspaceFolder, "tests/env/example_config.yaml")
 		e.yamlConfig, err = config.NewYamlConfig(configPath, e.logger)
 		if err != nil {
 			cancel()
@@ -118,8 +119,14 @@ func (e *ExampleServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 		}
 		log.Printf("%sYAML config loaded from %s.", logPrefix, configPath)
 
-		listenAddr := fmt.Sprintf(":%d", port)
+		// Add MCP capability
 		serverOptions := exampleCapability.BuildOptions(e.logger)
+		// Add A2A capability
+		a2aTaskStore := a2a.NewInMemoryTaskStore()
+		a2aHandler := agent.DemoAgentHandler
+		serverOptions = append(serverOptions, server.WithA2ACapability(a2aTaskStore, a2aHandler))
+		// Set listener address
+		listenAddr := fmt.Sprintf(":%d", port)
 		serverOptions = append(serverOptions, server.WithListenAddr(listenAddr))
 		log.Printf("%sServer options prepared.", logPrefix)
 

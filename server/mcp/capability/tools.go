@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/gate4ai/server/mcp"
+	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/gate4ai/gate4ai/shared"
 
 	// Use 2025 schema
@@ -22,7 +22,7 @@ var _ shared.IServerCapability = (*ToolsCapability)(nil)
 
 // ToolsCapability handles tool registration and invocation.
 type ToolsCapability struct {
-	manager  *mcp.Manager
+	manager  *transport.Manager
 	logger   *zap.Logger
 	mu       sync.RWMutex
 	tools    map[string]*Tool                                      // Map tool name -> Tool
@@ -36,7 +36,7 @@ type Tool struct {
 }
 
 // NewToolsCapability creates a new ToolsCapability.
-func NewToolsCapability(manager *mcp.Manager, logger *zap.Logger) *ToolsCapability {
+func NewToolsCapability(manager *transport.Manager, logger *zap.Logger) *ToolsCapability {
 	tc := &ToolsCapability{
 		manager: manager,
 		logger:  logger.Named("tools-capability"),

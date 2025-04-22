@@ -114,6 +114,11 @@ func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger
 
 	// 6. Handle Response / SSE Stream
 	if isStreamingRequest {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
 		// A2A SSE Stream Handling
 		// The initial handler for tasks/sendSubscribe in A2ACapability will return the initial task state.
 		flusher, ok := w.(http.Flusher)
@@ -171,6 +176,11 @@ func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger
 			}
 		}
 	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
 		// Regular A2A Request (tasks/send, tasks/get, tasks/cancel)
 		// Wait for a single response from the output channel or timeout
 		select {

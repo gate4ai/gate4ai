@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/gate4ai/gate4ai/server/mcp"
+	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/gate4ai/gate4ai/shared"
 
 	// Import V2024 schema with an alias for checking supported versions
@@ -29,12 +29,12 @@ var _ shared.IServerCapability = (*BaseCapability)(nil)
 // BaseCapability provides handlers for fundamental MCP methods like initialize and ping.
 type BaseCapability struct {
 	logger   *zap.Logger
-	manager  mcp.ISessionManager
+	manager  transport.ISessionManager
 	handlers map[string]func(*shared.Message) (interface{}, error) // Map method -> handler function
 }
 
 // NewBase creates a new BaseCapability.
-func NewBase(logger *zap.Logger, manager mcp.ISessionManager) *BaseCapability {
+func NewBase(logger *zap.Logger, manager transport.ISessionManager) *BaseCapability {
 	bc := &BaseCapability{
 		logger:  logger,
 		manager: manager,
@@ -117,7 +117,7 @@ func (bc *BaseCapability) handleInitialize(msg *shared.Message) (interface{}, er
 
 	// --- Store negotiated info in session ---
 	// Type assertion to access specific Session methods
-	session, ok := msg.Session.(mcp.IDownstreamSession) // Assert to the interface
+	session, ok := msg.Session.(transport.IDownstreamSession) // Assert to the interface
 	if !ok {
 		logger.Error("Session type assertion failed in handleInitialize")
 		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Internal server error: invalid session type"})
@@ -174,7 +174,7 @@ func (bc *BaseCapability) handleNotificationInitialized(msg *shared.Message) (in
 	}
 
 	// Ensure negotiated version was set - indicates initialize handshake occurred.
-	mcpSession, ok := session.(*mcp.Session)
+	mcpSession, ok := session.(*transport.Session)
 	if !ok {
 		logger.Error("Session type assertion failed in handleNotificationInitialized")
 		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Internal server error: invalid session type"})

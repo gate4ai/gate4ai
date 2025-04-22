@@ -6,11 +6,9 @@ import (
 	"net/http"
 
 	"github.com/gate4ai/gate4ai/server/a2a"
-	"github.com/gate4ai/gate4ai/server/mcp"
 	"github.com/gate4ai/gate4ai/server/mcp/capability"
 	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/gate4ai/gate4ai/shared"
-	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	"github.com/gate4ai/gate4ai/shared/config"
 	"go.uber.org/zap"
 )
@@ -20,7 +18,7 @@ type ServerBuilder struct {
 	logger       *zap.Logger
 	cfg          config.IConfig
 	listenAddr   string
-	manager      *mcp.Manager
+	manager      *transport.Manager
 	transport    *transport.Transport
 	mux          *http.ServeMux
 	capabilities []shared.ICapability // Store generic capabilities
@@ -36,7 +34,6 @@ type ServerBuilder struct {
 	// Flags to control route registration
 	registerMCPRoutes bool
 	registerA2ARoutes bool
-	a2aSkills         []a2aSchema.AgentSkill // Store skills added via options
 	// a2aAgentHandler  a2a.A2AHandler        // Store the A2A agent logic handler
 }
 
@@ -115,6 +112,8 @@ func (b *ServerBuilder) EnsureA2ACapability(store a2a.TaskStore, handler a2a.A2A
 		b.a2aCap = a2a.NewA2ACapability(b.logger, b.manager, store, handler)
 		b.capabilities = append(b.capabilities, b.a2aCap)
 		b.registerA2ARoutes = true // A2A capability implies A2A routes are needed
+	} else {
+		b.logger.Error("A2ACapability already initialized")
 	}
 	return b.a2aCap, nil
 }

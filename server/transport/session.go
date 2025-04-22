@@ -1,4 +1,4 @@
-package mcp
+package transport
 
 import (
 	"sync"
@@ -28,10 +28,10 @@ type Session struct {
 }
 
 // NewSession creates a new session with the given parameters
-func NewSession(manager ISessionManager, userID string, inputProcessor *shared.Input, params *sync.Map) *Session {
+func NewSession(manager ISessionManager, id string, userID string, inputProcessor *shared.Input, params *sync.Map) *Session {
 	// Note: ClientCapabilities and ClientInfo will be set during initialization
 	return &Session{
-		BaseSession: shared.NewBaseSession(manager.GetLogger(), inputProcessor, params),
+		BaseSession: shared.NewBaseSession(manager.GetLogger(), id, inputProcessor, params),
 		manager:     manager,
 		UserID:      userID,
 	}

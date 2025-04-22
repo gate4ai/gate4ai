@@ -9,7 +9,6 @@ import (
 	"time"
 
 	client "github.com/gate4ai/gate4ai/gateway/clients/mcpClient"
-	"github.com/gate4ai/gate4ai/server/mcp"
 	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/gate4ai/gate4ai/shared"
 	"github.com/gate4ai/gate4ai/shared/config"
@@ -35,7 +34,7 @@ type GatewayCapability struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	refreshRate  time.Duration
-	userSessions map[string]*mcp.Session // UserID -> mcp session
+	userSessions map[string]*transport.Session // UserID -> mcp session
 	config       config.IConfig
 }
 
@@ -48,7 +47,7 @@ func NewGatewayCapability(logger *zap.Logger, cfg config.IConfig) *GatewayCapabi
 		ctx:          ctx,
 		cancel:       cancel,
 		refreshRate:  5 * time.Minute, // Default refresh rate
-		userSessions: make(map[string]*mcp.Session),
+		userSessions: make(map[string]*transport.Session),
 		config:       cfg,
 	}
 	return cap
@@ -86,8 +85,8 @@ func (c *GatewayCapability) newBackendSession(serverSlug string, clientSession s
 	}
 
 	newBackendSession := backendServer.NewSession(c.ctx, http.DefaultClient, backend.Bearer)
-	SaveServerSlug(newBackendSession.GetParams(), serverSlug)                      // Use GetParams()
-	SaveClientSession(newBackendSession.GetParams(), clientSession.(*mcp.Session)) // Use GetParams()
+	SaveServerSlug(newBackendSession.GetParams(), serverSlug)                            // Use GetParams()
+	SaveClientSession(newBackendSession.GetParams(), clientSession.(*transport.Session)) // Use GetParams()
 	newBackendSession.SubscribeOnResourceUpdated(c.gw_resources_notification_updated)
 
 	return newBackendSession

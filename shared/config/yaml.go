@@ -40,16 +40,7 @@ type YamlConfig struct {
 	sslAcmeEmail    string
 	sslAcmeCacheDir string
 
-	// A2A Fields (read from config)
-	a2aAgentNameValue          string
-	a2aAgentDescriptionValue   *string
-	a2aProviderOrgValue        *string
-	a2aProviderURLValue        *string
-	a2aAgentVersionValue       string
-	a2aDocumentationURLValue   *string
-	a2aDefaultInputModesValue  []string
-	a2aDefaultOutputModesValue []string
-	a2aAuthenticationValue     *a2aSchema.AgentAuthentication // Raw YAML value
+	a2a *a2aSchema.AgentCard
 }
 
 // YAML configuration structure matching the required format
@@ -71,17 +62,7 @@ type yamlConfig struct {
 			AcmeEmail    string   `yaml:"acme_email"`
 			AcmeCacheDir string   `yaml:"acme_cache_dir"`
 		} `yaml:"ssl"`
-		A2A *struct { // Optional A2A section
-			Name               string                         `yaml:"agent_name"`
-			Description        *string                        `yaml:"agent_description"`
-			Version            string                         `yaml:"agent_version"`
-			DocumentationURL   *string                        `yaml:"agent_documentation_url"`
-			ProviderOrg        *string                        `yaml:"agent_provider_organization"`
-			ProviderURL        *string                        `yaml:"agent_provider_url"`
-			DefaultInputModes  []string                       `yaml:"default_input_modes"`
-			DefaultOutputModes []string                       `yaml:"default_output_modes"`
-			Authentication     *a2aSchema.AgentAuthentication `yaml:"agent_authentication"` // Directly unmarshal A2A auth struct
-		} `yaml:"a2a"` // Use pointer to make the section optional
+		A2A *a2aSchema.AgentCard `yaml:"a2a"` // Use pointer to make the section optional
 	} `yaml:"server"`
 
 	Users map[string]struct {
@@ -176,30 +157,7 @@ func (c *YamlConfig) Update() error {
 		c.sslAcmeCacheDir = "./.autocert-cache"
 	}
 
-	// --- Process A2A Section (if present) ---
-	if yamlCfg.Server.A2A != nil {
-		a2aCfg := yamlCfg.Server.A2A
-		c.a2aAgentNameValue = a2aCfg.Name
-		c.a2aAgentDescriptionValue = a2aCfg.Description
-		c.a2aAgentVersionValue = a2aCfg.Version
-		c.a2aDocumentationURLValue = a2aCfg.DocumentationURL
-		c.a2aProviderOrgValue = a2aCfg.ProviderOrg
-		c.a2aProviderURLValue = a2aCfg.ProviderURL
-		c.a2aDefaultInputModesValue = a2aCfg.DefaultInputModes
-		c.a2aDefaultOutputModesValue = a2aCfg.DefaultOutputModes
-		c.a2aAuthenticationValue = a2aCfg.Authentication
-	} else {
-		// Reset A2A fields if section is removed from config
-		c.a2aAgentNameValue = ""
-		c.a2aAgentDescriptionValue = nil
-		c.a2aAgentVersionValue = ""
-		c.a2aDocumentationURLValue = nil
-		c.a2aProviderOrgValue = nil
-		c.a2aProviderURLValue = nil
-		c.a2aDefaultInputModesValue = nil
-		c.a2aDefaultOutputModesValue = nil
-		c.a2aAuthenticationValue = nil
-	}
+	c.a2a = yamlCfg.Server.A2A
 
 	// --- Process Users Section ---
 	newUserKeyHashes := make(map[string]string)
@@ -362,43 +320,9 @@ func (c *YamlConfig) SSLAcmeCacheDir() (string, error) {
 }
 
 // --- A2A Method ---
-func (c *YamlConfig) GetA2ACardBaseInfo(agentURL string) (A2ACardBaseInfo, error) {
+func (c *YamlConfig) GetA2AAgentCard(agentURL string) (*a2aSchema.AgentCard, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	info := A2ACardBaseInfo{
-		Name:               c.a2aAgentNameValue,
-		Description:        c.a2aAgentDescriptionValue, // Already pointer
-		AgentURL:           agentURL,
-		Version:            c.a2aAgentVersionValue,
-		DocumentationURL:   c.a2aDocumentationURLValue, // Already pointer
-		DefaultInputModes:  make([]string, len(c.a2aDefaultInputModesValue)),
-		DefaultOutputModes: make([]string, len(c.a2aDefaultOutputModesValue)),
-		Authentication:     c.a2aAuthenticationValue, // Already pointer
-	}
-	copy(info.DefaultInputModes, c.a2aDefaultInputModesValue)
-	copy(info.DefaultOutputModes, c.a2aDefaultOutputModesValue)
-
-	if c.a2aProviderOrgValue != nil || c.a2aProviderURLValue != nil {
-		info.Provider = &a2aSchema.AgentProvider{
-			Organization: derefString(c.a2aProviderOrgValue),
-			URL:          c.a2aProviderURLValue, // Already pointer
-		}
-	}
-
-	// Set defaults if values were empty/missing in config
-	if info.Name == "" {
-		info.Name = "Gate4AI A2A Agent"
-	}
-	if info.Version == "" {
-		info.Version = "1.0.0"
-	}
-	if len(info.DefaultInputModes) == 0 {
-		info.DefaultInputModes = []string{"text"}
-	}
-	if len(info.DefaultOutputModes) == 0 {
-		info.DefaultOutputModes = []string{"text"}
-	}
-
-	return info, nil
+	return c.a2a, nil
 }

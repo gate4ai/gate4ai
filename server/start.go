@@ -10,10 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gate4ai/gate4ai/server/mcp"
 	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/gate4ai/gate4ai/shared"
-	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	"github.com/gate4ai/gate4ai/shared/config"
 	"go.uber.org/zap"
 
@@ -40,7 +38,7 @@ func Start(ctx context.Context, logger *zap.Logger, cfg config.IConfig, options 
 		return nil, fmt.Errorf("failed to get listen address: %w", err)
 	}
 
-	sessionManager, err := mcp.NewManager(logger, cfg)
+	sessionManager, err := transport.NewManager(logger, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session manager: %w", err)
 	}
@@ -106,25 +104,11 @@ func Start(ctx context.Context, logger *zap.Logger, cfg config.IConfig, options 
 		}
 		agentURL := fmt.Sprintf("%s://%s%s", scheme, hostPort, transport.A2A_PATH)
 
-		a2aBaseInfo, err := cfg.GetA2ACardBaseInfo(agentURL) // Use constructed URL
+		a2aInfo, err := cfg.GetA2AAgentCard(agentURL) // Use constructed URL
 		if err != nil {
 			return nil, fmt.Errorf("failed to load A2A agent card base info from config: %w", err)
 		}
-		// Construct full agent card
-		agentCard := a2aSchema.AgentCard{
-			Name:             a2aBaseInfo.Name,
-			Description:      a2aBaseInfo.Description,
-			URL:              a2aBaseInfo.AgentURL,
-			Provider:         a2aBaseInfo.Provider,
-			Version:          a2aBaseInfo.Version,
-			DocumentationURL: a2aBaseInfo.DocumentationURL,
-			//Capabilities:       a2aCap.GetCapabilitiesStruct(), // Assume GetCapabilitiesStruct exists
-			Authentication:     a2aBaseInfo.Authentication,
-			DefaultInputModes:  a2aBaseInfo.DefaultInputModes,
-			DefaultOutputModes: a2aBaseInfo.DefaultOutputModes,
-			Skills:             builder.a2aSkills, // Use skills collected by options
-		}
-		builder.transport.RegisterA2AHandlers(builder.mux, agentCard)
+		builder.transport.RegisterA2AHandlers(builder.mux, a2aInfo)
 	}
 
 	// Register status handler

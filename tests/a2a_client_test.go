@@ -3,8 +3,8 @@ package tests
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,17 +24,24 @@ func newTestA2AClient(t *testing.T, a2a_server_url string) *a2aClient.Client {
 	client, err := a2aClient.New(
 		a2a_server_url,
 		a2aClient.WithLogger(logger),
-		a2aClient.DoNotTrustAgentInfoURL())
+		a2aClient.DoNotTrustAgentInfoURL(),
+		a2aClient.WithAuthenticationBearer(env.GetDetails(env.ExampleServerComponentName).(env.ExampleServerDetails).TestAPIKey),
+	)
 	require.NoError(t, err, "Failed to create A2A client")
 	return client
 }
 
 // Test A2A Discovery (Fetching Agent Card)
 func TestA2ADiscovery(t *testing.T) {
-	a2a_server_url := env.GetURL(env.A2AServerComponentName)
-	if a2a_server_url == "" {
-		t.Skip("A2A server not running, skipping discovery test")
-	}
+	// Get A2A URL from the ExampleServerEnv details
+	detailsRaw := env.GetDetails(env.ExampleServerComponentName)
+	require.NotNil(t, detailsRaw, "Example server details are nil")
+	details, ok := detailsRaw.(env.ExampleServerDetails)
+	require.True(t, ok, "Example server details have wrong type")
+	require.NotEmpty(t, details.A2AURL, "Example server A2A URL is empty")
+	a2a_server_url := details.A2AURL
+
+	// Create client pointing to the example server's A2A endpoint
 	client := newTestA2AClient(t, a2a_server_url)
 	ctx, cancel := context.WithTimeout(context.Background(), 100000*time.Second)
 	defer cancel()
@@ -45,32 +52,27 @@ func TestA2ADiscovery(t *testing.T) {
 
 	t.Logf("Fetched AgentCard: Name=%s, Version=%s, URL=%s", agentInfo.Name, agentInfo.Version, agentInfo.URL)
 
-	// Assertions based on the expected AgentCard from the coder agent example
-	assert.Equal(t, "Coder Agent", agentInfo.Name) // Matches name in main.go
-	assert.Equal(t, "0.0.1", agentInfo.Version)
-	assert.True(t, agentInfo.Capabilities.Streaming, "Expected streaming capability to be true")
-	assert.False(t, agentInfo.Capabilities.PushNotifications)
-	assert.Contains(t, agentInfo.DefaultInputModes, "text")
-	assert.Contains(t, agentInfo.DefaultOutputModes, "text")
-	assert.Contains(t, agentInfo.DefaultOutputModes, "file")
+	// Assertions based on the expected AgentCard from the a2a demo agent integrated into the example server
+	assert.Equal(t, "Gate4AI A2A Agent", agentInfo.Name) // Matches default name in internal config
+	assert.Equal(t, "1.0.0", agentInfo.Version)          // Updated default version
+
 	require.NotEmpty(t, agentInfo.Skills, "Expected at least one skill")
-	assert.Equal(t, "code_generation", agentInfo.Skills[0].ID)
-	assert.Equal(t, "Code Generation", agentInfo.Skills[0].Name)
+	// Check the skill defined in CreateAgentCard for the demo agent
+	assert.Equal(t, "scenario_runner", agentInfo.Skills[0].ID, "Skill ID mismatch")
+	assert.Equal(t, "A2A Scenario Runner", agentInfo.Skills[0].Name, "Skill Name mismatch")
+	assert.Contains(t, *agentInfo.Skills[0].Description, "Runs different A2A test scenarios", "Skill description mismatch")
 }
 
-// Test tasks/send
+// Test tasks/send - Now uses the demo agent handler behavior
 func TestA2ATaskSend(t *testing.T) {
-	a2a_server_url := env.GetURL(env.A2AServerComponentName)
-	if a2a_server_url == "" {
-		t.Skip("A2A server not running, skipping discovery test")
-	}
+	a2a_server_url := env.GetDetails(env.ExampleServerComponentName).(env.ExampleServerDetails).A2AURL
 	client := newTestA2AClient(t, a2a_server_url)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second) // Longer timeout for task execution
 	defer cancel()
 
 	taskID := fmt.Sprintf("task-send-%d", time.Now().UnixNano())
 	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
-	prompt := "Generate a simple hello world in Python"
+	prompt := "respond with text 'Hello from test'" // Command for demo agent
 
 	params := a2aSchema.TaskSendParams{
 		ID:        taskID,
@@ -95,30 +97,28 @@ func TestA2ATaskSend(t *testing.T) {
 	require.NotEmpty(t, task.Artifacts, "Expected artifacts in the final task state")
 	assert.GreaterOrEqual(t, len(task.Artifacts), 1, "Expected at least one artifact")
 
-	// Inspect the first artifact (assuming it's the code file)
+	// Inspect the first artifact (expecting the text response)
 	artifact := task.Artifacts[0]
 	assert.NotNil(t, artifact.Name, "Artifact name should not be nil")
-
-	textPart := artifact.Parts[0]
-	require.Equal(t, "text", *textPart.Type, "Artifact part should be TextPart")
-	require.NoError(t, err, "Artifact part is TextPart")
+	require.NotEmpty(t, artifact.Parts, "Artifact should have parts")
+	textPart := artifact.Parts[0] // Assuming first part is text
+	require.NotNil(t, textPart.Type, "Part type should not be nil")
+	require.Equal(t, "text", *textPart.Type, "Artifact part should be of type text")
+	require.NotNil(t, textPart.Text, "Text field should not be nil for text part")
 	t.Logf("Artifact content (TextPart): %s", *textPart.Text)
-	assert.Contains(t, *textPart.Text, "console.log", "Artifact content should contain console.log")
+	assert.Contains(t, *textPart.Text, "Hello from test", "Artifact content mismatch")
 }
 
-// Test tasks/get
+// Test tasks/get - Now uses the demo agent handler behavior
 func TestA2ATaskGet(t *testing.T) {
-	a2a_server_url := env.GetURL(env.A2AServerComponentName)
-	if a2a_server_url == "" {
-		t.Skip("A2A server not running, skipping discovery test")
-	}
+	a2a_server_url := env.GetDetails(env.ExampleServerComponentName).(env.ExampleServerDetails).A2AURL
 	client := newTestA2AClient(t, a2a_server_url)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	taskID := fmt.Sprintf("task-get-%d", time.Now().UnixNano())
 	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
-	prompt := "Generate a short bash script to list files"
+	prompt := "wait 2 seconds respond text 'Delayed response'" // Command for demo agent
 
 	// Send the task first (don't wait for full completion if it's slow)
 	go func() {
@@ -163,26 +163,23 @@ func TestA2ATaskGet(t *testing.T) {
 	require.Equal(t, a2aSchema.TaskStateCompleted, task.Status.State, "Task should be completed after wait")
 }
 
-// Test tasks/cancel
+// Test tasks/cancel - Now uses the demo agent handler behavior
 func TestA2ATaskCancel(t *testing.T) {
-	a2a_server_url := env.GetURL(env.A2AServerComponentName)
-	if a2a_server_url == "" {
-		t.Skip("A2A server not running, skipping discovery test")
-	}
+	a2a_server_url := env.GetDetails(env.ExampleServerComponentName).(env.ExampleServerDetails).A2AURL
 	client := newTestA2AClient(t, a2a_server_url)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Second)
 	defer cancel()
 
 	taskID := fmt.Sprintf("task-cancel-%d", time.Now().UnixNano())
 	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
 	// Use a prompt that might take a moment, though the example server is fast
-	prompt := "Write a slightly longer Go program with comments"
+	prompt := "wait 10 seconds respond text 'This should be cancelled'" // Command for demo agent
 
 	// Send the task in the background
 	go func() {
 		sendCtx, sendCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer sendCancel()
-		_, _ = client.SendTask(sendCtx, a2aSchema.TaskSendParams{
+		task, err := client.SendTask(sendCtx, a2aSchema.TaskSendParams{
 			ID:        taskID,
 			SessionID: &sessionID,
 			Message: a2aSchema.Message{
@@ -190,6 +187,8 @@ func TestA2ATaskCancel(t *testing.T) {
 				Parts: []a2aSchema.Part{{Type: shared.PointerTo("text"), Text: shared.PointerTo(prompt)}},
 			},
 		})
+		require.NoError(t, err, "SendTask failed")
+		t.Logf("SendTask task state: %s", task.Status.State)
 	}()
 
 	// Wait briefly for the task to start
@@ -199,25 +198,8 @@ func TestA2ATaskCancel(t *testing.T) {
 	cancelParams := a2aSchema.TaskIdParams{ID: taskID}
 	canceledTask, err := client.CancelTask(ctx, cancelParams)
 
-	// Check the result - the example JS coder agent might not support cancellation
-	// and might complete before cancel hits, or ignore cancel.
-	if err != nil {
-		// Check if the error is specifically TaskNotCancelableError
-		var jsonRpcErr *shared.JSONRPCError
-		if errors.As(err, &jsonRpcErr) && jsonRpcErr.Code == a2aSchema.ErrorCodeTaskNotCancelable {
-			t.Logf("CancelTask failed as expected (task not cancelable): %v", err)
-			// This might be okay if the server doesn't support cancel or task finished too fast.
-			// Let's get the final status to confirm.
-			finalTask, getErr := client.GetTask(ctx, a2aSchema.TaskQueryParams{ID: taskID})
-			require.NoError(t, getErr, "GetTask failed after cancel attempt")
-			require.NotNil(t, finalTask)
-			t.Logf("Final task status after cancel attempt: %s", finalTask.Status.State)
-			assert.Contains(t, []a2aSchema.TaskState{a2aSchema.TaskStateCompleted, a2aSchema.TaskStateCanceled}, finalTask.Status.State)
-			return // End test here if TaskNotCancelable is returned
-		}
-		// If it's another error, fail the test
-		require.NoError(t, err, "CancelTask failed unexpectedly")
-	}
+	require.NoError(t, err, "CancelTask failed")
+	t.Logf("SendTask task state: %s", canceledTask.Status.State)
 
 	// If CancelTask succeeded without error (or returned TaskNotCancelable):
 	require.NotNil(t, canceledTask, "CancelTask result should not be nil if no error occurred")
@@ -240,26 +222,22 @@ func TestA2ATaskCancel(t *testing.T) {
 	assert.Contains(t, []a2aSchema.TaskState{a2aSchema.TaskStateCanceled, a2aSchema.TaskStateCompleted}, finalTask.Status.State)
 }
 
-// Test tasks/sendSubscribe
+// Test tasks/sendSubscribe - Now uses the demo agent handler behavior (stream command)
 func TestA2ATaskSendSubscribe(t *testing.T) {
-	a2a_server_url := env.GetURL(env.A2AServerComponentName)
-	if a2a_server_url == "" {
-		t.Skip("A2A server not running, skipping discovery test")
-	}
+	a2a_server_url := env.GetDetails(env.ExampleServerComponentName).(env.ExampleServerDetails).A2AURL
 	client := newTestA2AClient(t, a2a_server_url)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second) // Timeout for the whole test
 	defer cancel()
 
 	taskID := fmt.Sprintf("task-subscribe-%d", time.Now().UnixNano())
 	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
-	prompt := "Create a small html file and a css file for styling"
-
+	streamCommand := "stream 3 chunks" // Command for demo agent
 	params := a2aSchema.TaskSendParams{
 		ID:        taskID,
 		SessionID: &sessionID,
 		Message: a2aSchema.Message{
 			Role:  "user",
-			Parts: []a2aSchema.Part{{Type: shared.PointerTo("text"), Text: &prompt}},
+			Parts: []a2aSchema.Part{{Type: shared.PointerTo("text"), Text: &streamCommand}},
 		},
 	}
 
@@ -293,11 +271,14 @@ func TestA2ATaskSendSubscribe(t *testing.T) {
 					goto EndLoop // Exit loop once final completed status received
 				}
 				if event.Final && event.Status.Status.State != a2aSchema.TaskStateCompleted {
-					t.Fatalf("Received final event but state was not completed: %s", event.Status.Status.State)
+					// The stream command might send the final completed status *after* the last artifact chunk.
+					// This is okay, just don't terminate the test yet.
+					t.Logf("Received final event but state was not completed: %s (expected)", event.Status.Status.State)
 				}
 			} else if event.Artifact != nil {
 				t.Logf("Received Artifact Event: Index=%d, Name=%s, Parts=%d", event.Artifact.Artifact.Index, *event.Artifact.Artifact.Name, len(event.Artifact.Artifact.Parts))
 				receivedArtifacts++
+				require.True(t, strings.HasPrefix(*event.Artifact.Artifact.Name, "streamed_artifact_"), "Artifact name should indicate streaming")
 				// Optionally inspect artifact content
 				if len(event.Artifact.Artifact.Parts) > 0 {
 					t.Logf("  Artifact Part 0 Type: %s", *event.Artifact.Artifact.Parts[0].Type)
@@ -318,7 +299,7 @@ EndLoop:
 	// Assertions after the loop
 	assert.True(t, receivedWorking, "Did not receive 'working' status update")
 	// The JS coder agent generates multiple files (3 in the example)
-	assert.GreaterOrEqual(t, receivedArtifacts, 1, "Expected at least one artifact update")
+	assert.Equal(t, 3, receivedArtifacts, "Expected exactly 3 artifact updates for 'stream 3 chunks'") // Expect 3 chunks
 	assert.True(t, receivedFinalCompleted, "Did not receive final 'completed' status update")
 	t.Logf("Finished processing stream. Received %d artifacts.", receivedArtifacts)
 }

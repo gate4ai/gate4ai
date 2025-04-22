@@ -22,6 +22,7 @@ import (
 type Client struct {
 	baseURL           string // Base URL from Agent Card (or provided at creation)
 	httpClient        *http.Client
+	Headers           map[string]string
 	logger            *zap.Logger
 	requestManager    *shared.RequestManager
 	agentInfo         *AgentInfo
@@ -38,6 +39,7 @@ func New(baseURL string, options ...ClientOption) (*Client, error) {
 	client := &Client{
 		baseURL:           baseURL,
 		httpClient:        http.DefaultClient,
+		Headers:           make(map[string]string),
 		logger:            zap.NewNop(),
 		trustAgentInfoURL: true, // Trust by default for backward compatibility
 	}
@@ -141,6 +143,9 @@ func (c *Client) _sendRequest(ctx context.Context, method string, params interfa
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json") // Expect JSON response for sync calls
+	for key, value := range c.Headers {
+		httpReq.Header.Set(key, value)
+	}
 
 	logger.Debug("Sending synchronous request", zap.Any("reqID", reqID))
 	httpResp, err := c.httpClient.Do(httpReq)
@@ -254,6 +259,9 @@ func (c *Client) _handleStreamingRequest(ctx context.Context, method string, par
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream") // Crucial for SSE
+	for key, value := range c.Headers {
+		httpReq.Header.Set(key, value)
+	}
 
 	logger.Debug("Sending streaming request", zap.Any("reqID", reqID))
 	httpResp, err := c.httpClient.Do(httpReq)

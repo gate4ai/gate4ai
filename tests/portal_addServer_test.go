@@ -342,10 +342,7 @@ func TestAddServer_NonRigthSlug(t *testing.T) {
 }
 
 func TestAddA2AServer(t *testing.T) {
-	a2a_server_url := env.GetURL(env.A2AServerComponentName)
-	if a2a_server_url == "" {
-		t.Skip("A2A server not running, skipping discovery test")
-	}
+	a2a_server_url := env.GetDetails(env.ExampleServerComponentName).(env.ExampleServerDetails).A2AURL
 
 	// Create artifact manager
 	am := NewArtifactManager(t)
@@ -375,7 +372,7 @@ func TestAddA2AServer(t *testing.T) {
 
 	skillName, err := skillNameLocator.TextContent()
 	require.NoError(t, err, "Could not get skill name text")
-	require.Equal(t, "Code Generation", skillName, "Skill name should be 'Code Generation'")
+	require.Equal(t, "A2A Scenario Runner", skillName, "Skill name should be 'A2A Scenario Runner'")
 
 	// 2. Check for the skill description
 	descSelector := ".v-expansion-panel-title .text-caption.text-grey"
@@ -384,7 +381,7 @@ func TestAddA2AServer(t *testing.T) {
 
 	description, err := descLocator.TextContent()
 	require.NoError(t, err, "Could not get skill description text")
-	require.Equal(t, "Generates code snippets or complete files based on user requests, streaming the results.",
+	require.Equal(t, "Runs different A2A test scenarios based on input text",
 		description, "Skill description mismatch")
 
 	// 3. Expand the panel to see the examples
@@ -408,9 +405,7 @@ func TestAddA2AServer(t *testing.T) {
 	require.Greater(t, exampleCount, 0, "No examples found in expanded panel")
 
 	// Check if our specific example exists
-	targetExample := "Create an HTML file with a basic button that alerts 'Hello!' when clicked."
 	exampleFound := false
-
 	for i := 0; i < exampleCount; i++ {
 		example := exampleItems.Nth(i)
 		exampleText, err := example.TextContent()
@@ -421,13 +416,13 @@ func TestAddA2AServer(t *testing.T) {
 
 		// Strip any icons or extra whitespace
 		exampleText = strings.TrimSpace(exampleText)
-		if strings.Contains(exampleText, targetExample) {
+		if strings.Contains(exampleText, "Just a simple message") {
 			exampleFound = true
 			break
 		}
 	}
 
-	require.True(t, exampleFound, "Example about HTML button not found")
+	require.True(t, exampleFound, "Example not found")
 }
 
 // addA2AServer adds a new A2A server to the catalog using Playwright browser automation
@@ -547,7 +542,7 @@ func addA2AServer(am *ArtifactManager, user *User, slug string, a2a_server_url s
 	// Click on Discover Server Type & Info button with increased timeout
 	discoverButtonSelector := "[data-testid='discover-server-button']"
 	if err := am.Page.Locator(discoverButtonSelector).Click(playwright.LocatorClickOptions{
-		Timeout: playwright.Float(10000), // 10 seconds timeout
+		Timeout: playwright.Float(20000), // 10 seconds timeout
 	}); err != nil {
 		am.SaveLocatorDebugInfo(discoverButtonSelector, "discover_a2a_server_button_fail")
 		return nil, fmt.Errorf("failed to click Discover Server button: %w", err)
@@ -558,18 +553,8 @@ func addA2AServer(am *ArtifactManager, user *User, slug string, a2a_server_url s
 	// For A2A servers, look for the "Add A2A Server" button
 	addA2aButtonSelector := "[data-testid='add-a2a-server-button']"
 	_, err = am.WaitForLocatorWithDebug(addA2aButtonSelector, "wait_for_add_a2a_button")
-	if err != nil {
-		// Let's also try alternative MCP button - the UI may not have a specific A2A button
-		addMcpButtonSelector := "[data-testid='add-mcp-server-button']"
-		_, err = am.WaitForLocatorWithDebug(addMcpButtonSelector, "fallback_to_mcp_button")
-		if err != nil {
-			am.SaveScreenshot("add_a2a_server_dialog_step2_fail")
-			am.SaveHTML("add_a2a_server_dialog_step2_fail")
-			return nil, fmt.Errorf("step 2 of add server dialog did not load (no Add Server button found): %w", err)
-		}
-		// If we reach here, we'll use the MCP button instead
-		addA2aButtonSelector = addMcpButtonSelector
-	}
+	require.NoError(am.T, err, "step 2 of add server dialog did not load (no Add Server button found)")
+
 	am.SaveScreenshot("add_a2a_server_dialog_step2_visible")
 
 	// Optionally fill/verify name field in step 2

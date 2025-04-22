@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
-	"github.com/gate4ai/gate4ai/server/mcp" // Needed for manager interface dependency
+	// Needed for manager interface dependency
+	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/gate4ai/gate4ai/shared"
 	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	mcpSchema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
@@ -25,9 +27,10 @@ var _ shared.IServerCapability = (*A2ACapability)(nil)
 // between the transport layer and the specific agent logic (A2AHandler).
 type A2ACapability struct {
 	logger       *zap.Logger
-	manager      mcp.ISessionManager // To interact with sessions for SSE/Resubscribe
-	taskStore    TaskStore           // Interface for task persistence
-	agentHandler A2AHandler          // The actual agent logic implementation
+	manager      transport.ISessionManager // To interact with sessions for SSE/Resubscribe
+	agentCard    a2aSchema.AgentCard
+	taskStore    TaskStore  // Interface for task persistence
+	agentHandler A2AHandler // The actual agent logic implementation
 	handlers     map[string]func(*shared.Message) (interface{}, error)
 	// Track running handlers for cancellation
 	runningHandlersMu sync.Mutex
@@ -37,20 +40,20 @@ type A2ACapability struct {
 // NewA2ACapability creates a new A2A capability.
 func NewA2ACapability(
 	logger *zap.Logger,
-	manager mcp.ISessionManager, // Manager is needed for SSE/Resubscribe
+	manager transport.ISessionManager, // Manager is needed for SSE/Resubscribe
 	store TaskStore,
 	handler A2AHandler,
 ) *A2ACapability {
 	// While A2A *could* potentially operate without MCP/SSE, the current architecture
 	// relies on the manager for session handling, especially for sendSubscribe/resubscribe.
 	if manager == nil {
-		panic("A2ACapability requires a non-nil ISessionManager for current implementation")
+		log.Fatal("A2ACapability requires a non-nil ISessionManager for current implementation")
 	}
 	if store == nil {
-		panic("A2ACapability requires a non-nil TaskStore")
+		log.Fatal("A2ACapability requires a non-nil TaskStore")
 	}
 	if handler == nil {
-		panic("A2ACapability requires a non-nil A2AHandler")
+		log.Fatal("A2ACapability requires a non-nil A2AHandler")
 	}
 	ac := &A2ACapability{
 		logger:          logger.Named("a2a-capability"),
@@ -233,6 +236,9 @@ func (ac *A2ACapability) handleTaskSend(msg *shared.Message) (interface{}, error
 				finalJsonRpcError = &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Internal agent error occurred"}
 			}
 		}
+	} else if errors.Is(handlerError, context.Canceled) {
+		logger.Info("Handler execution cancelled", zap.Error(handlerError))
+		lastTaskState.Status.State = a2aSchema.TaskStateCanceled
 	}
 
 	// --- Save the final determined state ---
@@ -868,7 +874,7 @@ func isTerminalState(state a2aSchema.TaskState) bool {
 }
 
 // SetManager allows setting the session manager (needed for interface compatibility if used in MCP context).
-func (ac *A2ACapability) SetManager(manager mcp.ISessionManager) {
+func (ac *A2ACapability) SetManager(manager transport.ISessionManager) {
 	ac.manager = manager
 }
 

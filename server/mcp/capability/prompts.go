@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/gate4ai/server/mcp"
+	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/gate4ai/gate4ai/shared"
 
 	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
@@ -22,7 +22,7 @@ var _ shared.IServerCapability = (*PromptsCapability)(nil) // Ensure interface i
 // PromptsCapability handles prompt management and related requests.
 type PromptsCapability struct {
 	logger    *zap.Logger
-	manager   mcp.ISessionManager // Keep manager reference if needed for notifications
+	manager   transport.ISessionManager // Keep manager reference if needed for notifications
 	mu        sync.RWMutex
 	prompts   map[string]*Prompt                                    // Regular prompts map: name -> Prompt
 	templates map[string]*Template                                  // Templates map: name -> Template
@@ -44,7 +44,7 @@ type Template struct {
 }
 
 // NewPromptsCapability creates a new PromptsCapability.
-func NewPromptsCapability(logger *zap.Logger, manager mcp.ISessionManager) *PromptsCapability {
+func NewPromptsCapability(logger *zap.Logger, manager transport.ISessionManager) *PromptsCapability {
 	pc := &PromptsCapability{
 		logger:    logger.Named("prompts-capability"),
 		manager:   manager, // Store the manager

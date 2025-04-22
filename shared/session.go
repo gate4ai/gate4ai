@@ -73,11 +73,14 @@ type BaseSession struct {
 }
 
 // NewBaseSession creates a new base session with default values
-func NewBaseSession(logger *zap.Logger, inputProcessor *Input, params *sync.Map) *BaseSession {
+func NewBaseSession(logger *zap.Logger, id string, inputProcessor *Input, params *sync.Map) *BaseSession {
 	if params == nil {
 		params = &sync.Map{}
 	}
-	sessionID := RandomID()
+	sessionID := id
+	if id == "" {
+		sessionID = RandomID()
+	}
 	sessionLogger := logger.With(zap.String("session_id", sessionID))
 	sessionLogger.Debug("Creating new session")
 	s := &BaseSession{

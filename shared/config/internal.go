@@ -45,6 +45,8 @@ type InternalConfig struct {
 	A2ADocumentationURLValue   *string
 	A2ADefaultInputModesValue  []string
 	A2ADefaultOutputModesValue []string
+
+	A2ASkills []a2aSchema.AgentSkill
 }
 
 // NewInternalConfig creates a new in-memory configuration
@@ -69,12 +71,6 @@ func NewInternalConfig() *InternalConfig {
 		SSLAcmeDomainsValue:  []string{},
 		SSLAcmeEmailValue:    "",
 		SSLAcmeCacheDirValue: "./.autocert-cache", // Default cache dir
-
-		// Default A2A Settings (can be overridden)
-		A2AAgentNameValue:          "Unnamed A2A Agent",
-		A2AAgentVersionValue:       "0.1.0",
-		A2ADefaultInputModesValue:  []string{"text"},
-		A2ADefaultOutputModesValue: []string{"text"},
 	}
 }
 
@@ -249,18 +245,19 @@ func (c *InternalConfig) SSLAcmeCacheDir() (string, error) {
 }
 
 // --- A2A Method ---
-func (c *InternalConfig) GetA2ACardBaseInfo(agentURL string) (A2ACardBaseInfo, error) {
+func (c *InternalConfig) GetA2AAgentCard(agentURL string) (*a2aSchema.AgentCard, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	info := A2ACardBaseInfo{
+	info := &a2aSchema.AgentCard{
 		Name:               c.A2AAgentNameValue,
 		Description:        c.A2AAgentDescriptionValue,
-		AgentURL:           agentURL, // Use the dynamically provided agent URL
+		URL:                agentURL, // Use the dynamically provided agent URL
 		Version:            c.A2AAgentVersionValue,
 		DocumentationURL:   c.A2ADocumentationURLValue,
 		DefaultInputModes:  make([]string, len(c.A2ADefaultInputModesValue)),
 		DefaultOutputModes: make([]string, len(c.A2ADefaultOutputModesValue)),
+		Skills:             c.A2ASkills,
 	}
 	copy(info.DefaultInputModes, c.A2ADefaultInputModesValue)
 	copy(info.DefaultOutputModes, c.A2ADefaultOutputModesValue)

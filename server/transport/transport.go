@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/gate4ai/server/mcp"
 	"github.com/gate4ai/gate4ai/shared"
 	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	"github.com/gate4ai/gate4ai/shared/config"
@@ -23,8 +22,6 @@ const (
 	MCP2024_PATH       = "/sse"           // Unified endpoint path for V2024 (for V2024 compatibility)
 	MCP2025_PATH       = "/mcp"           // Unified endpoint path
 	MCP_SESSION_HEADER = "Mcp-Session-Id" // Header for session ID
-	//TODO: A2A - move to hendler files ?
-	//TODO: A2A - add well-known agent.json ?
 
 	// Content Types
 	contentTypeJSON = "application/json"
@@ -38,11 +35,11 @@ const (
 	statusInternalServerError = http.StatusInternalServerError // 500
 )
 
-var responseTimeout = 30 * time.Second // Default timeout for waiting on responses
+var responseTimeout = 600 * time.Second // Default timeout for waiting on responses
 
 // Transport manages MCP HTTP connections supporting multiple protocol versions.
 type Transport struct {
-	sessionManager  mcp.ISessionManager
+	sessionManager  ISessionManager
 	logger          *zap.Logger
 	authManager     AuthenticationManager
 	config          config.IConfig
@@ -86,7 +83,7 @@ func WithCleanupInterval(interval time.Duration) TransportOption {
 }
 
 // New creates a new MCP HTTP transport handler.
-func New(mcpManager mcp.ISessionManager, logger *zap.Logger, cfg config.IConfig, options ...TransportOption) (*Transport, error) {
+func New(mcpManager ISessionManager, logger *zap.Logger, cfg config.IConfig, options ...TransportOption) (*Transport, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -153,13 +150,18 @@ func (t *Transport) RegisterMCPHandlers(mux *http.ServeMux) {
 }
 
 // RegisterA2AHandlers registers only the A2A protocol handlers.
-func (t *Transport) RegisterA2AHandlers(mux *http.ServeMux, agentCard a2aSchema.AgentCard) {
+func (t *Transport) RegisterA2AHandlers(mux *http.ServeMux, agentCard *a2aSchema.AgentCard) {
 	mux.HandleFunc(A2A_PATH, t.HandleA2A())
 	// Register /.well-known only if A2A path is different
+
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		json.NewEncoder(w).Encode(agentCard)
+		urlCopy := *r.URL
+		urlCopy.Path = A2A_PATH
+		agentCardCopy := *agentCard
+		agentCardCopy.URL = urlCopy.String()
+		json.NewEncoder(w).Encode(agentCardCopy)
 	}
 	mux.HandleFunc("/.well-known/agent.json", handler)
 
@@ -305,16 +307,18 @@ func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, sessionID
 			logger.Debug("Retrieved existing session", zap.String("sessionId", sessionID))
 			return session, nil
 		}
-		// Log specific error if session was looked up but not found
-		logger.Warn("Session lookup failed", zap.String("lookupSessionId", sessionID), zap.Error(err))
-		http.Error(w, "Not Found: Session expired or invalid", statusNotFound)
-		return nil, fmt.Errorf("session %s not found: %w", sessionID, err)
+		if err == ErrSessionNotFound {
+			logger.Info("Session lookup failed", zap.String("lookupSessionId", sessionID), zap.Error(err))
+		} else {
+			http.Error(w, "Not Found: Session expired or invalid", statusNotFound)
+			return nil, fmt.Errorf("session %s not found: %w", sessionID, err)
+		}
 	}
 
 	// No session ID found in request
 	if !allowCreate {
 		logger.Warn("Session ID missing and creation not allowed for this request type", zap.String("path", r.URL.Path), zap.String("method", r.Method))
-		http.Error(w, "Bad Request: Session ID required", statusBadRequest) // Or 404? Let's use 400 as it's a missing identifier.
+		http.Error(w, "Unauthorized", statusUnauthorized)
 		return nil, errors.New("session id required but not found")
 	}
 
@@ -323,7 +327,7 @@ func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, sessionID
 	userID, sessionParams, err := t.authManager.Authenticate(authKey, r.RemoteAddr)
 	if err != nil {
 		logger.Warn("Authentication failed", zap.String("remoteAddr", r.RemoteAddr), zap.Error(err))
-		http.Error(w, "Unauthorized: "+err.Error(), statusUnauthorized)
+		http.Error(w, "Unauthorized", statusUnauthorized)
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
 
@@ -343,7 +347,7 @@ func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, sessionID
 		sessionParams = &sync.Map{} // Initialize if nil to avoid panics
 	}
 
-	newSession := t.sessionManager.CreateSession(userID, sessionParams)
+	newSession := t.sessionManager.CreateSession(userID, sessionID, sessionParams)
 	logger.Info("Created new session", zap.String("newSessionId", newSession.GetID()), zap.String("userId", userID))
 	return newSession, nil
 }

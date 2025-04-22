@@ -280,8 +280,8 @@ func (c *DatabaseConfig) SSLAcmeDomains() ([]string, error) {
 }
 
 // --- A2A Method ---
-func (c *DatabaseConfig) GetA2ACardBaseInfo(agentURL string) (A2ACardBaseInfo, error) {
-	info := A2ACardBaseInfo{AgentURL: agentURL}
+func (c *DatabaseConfig) GetA2AAgentCard(agentURL string) (*a2aSchema.AgentCard, error) {
+	info := &a2aSchema.AgentCard{URL: agentURL}
 	var err error
 
 	info.Name, err = c.getSettingString("a2a_agent_name", "Gate4AI A2A Agent")

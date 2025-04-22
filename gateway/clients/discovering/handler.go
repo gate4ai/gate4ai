@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gate4ai/gate4ai/gateway/clients" // Assuming MCP info is based on latest schema
@@ -42,87 +43,50 @@ func Handler(logger *zap.Logger) http.HandlerFunc {
 		}
 		handlerLogger = handlerLogger.With(zap.String("targetURL", targetURL))
 
-		// Create a context with timeout for the entire operation
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		w.WriteHeader(http.StatusOK)
+
+		var responseMCP, responseA2A, responseREST *DiscoveryResult
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		// Create a mutex for response and a channel to signal success
-		successChan := make(chan *DiscoveryResult)
-		errorChan := make(chan struct{})
+		waitGroup := sync.WaitGroup{}
+		waitGroup.Add(3)
 
-		checkCount := 1
-		// Launch MCP discovery in a goroutine
+		// Launch MCP discovery
 		go func() {
-			response, err := tryMCPDiscovery(ctx, targetURL, authBearer, handlerLogger)
-			if err == nil && response != nil {
-				select {
-				case successChan <- response:
-				default:
-				}
-			} else {
-				select {
-				case errorChan <- struct{}{}:
-				default:
-				}
-			}
+			defer waitGroup.Done()
+			responseMCP, _ = tryMCPDiscovery(ctx, targetURL, authBearer, handlerLogger)
 		}()
 
-		checkCount++
-		// Launch A2A discovery in a goroutine
+		// Launch A2A discovery
 		go func() {
-			response, err := tryA2ADiscovery(ctx, targetURL, http.DefaultClient, handlerLogger)
-			if err == nil && response != nil {
-				select {
-				case successChan <- response:
-				default:
-				}
-			} else {
-				select {
-				case errorChan <- struct{}{}:
-				default:
-				}
-			}
+			defer waitGroup.Done()
+			responseA2A, _ = tryA2ADiscovery(ctx, targetURL, http.DefaultClient, handlerLogger)
 		}()
 
-		checkCount++
-		// Launch REST discovery in a goroutine
+		// Launch REST discovery
 		go func() {
-			response, err := tryRESTDiscovery(ctx, targetURL, http.DefaultClient, handlerLogger)
-			if err == nil && response != nil {
-				select {
-				case successChan <- response:
-				default:
-				}
-			} else {
-				select {
-				case errorChan <- struct{}{}:
-				default:
-				}
-			}
+			defer waitGroup.Done()
+			responseREST, _ = tryRESTDiscovery(ctx, targetURL, http.DefaultClient, handlerLogger)
 		}()
 
-		errorCounter := 0
-		var response *DiscoveryResult
-	discoveryLoop:
-		for {
-			select {
-			case response = <-successChan:
-				break discoveryLoop
-			case <-errorChan:
-				errorCounter++
-				if errorCounter >= checkCount {
-					break discoveryLoop
-				}
-			case <-ctx.Done():
-				break discoveryLoop
-			}
+		waitGroup.Wait()
+
+		if responseMCP != nil {
+			json.NewEncoder(w).Encode(responseMCP)
+			return
 		}
-		w.WriteHeader(http.StatusOK)
-		if response == nil {
-			response = &DiscoveryResult{
-				Error: "no protocol found",
-			}
+		if responseA2A != nil {
+			json.NewEncoder(w).Encode(responseA2A)
+			return
 		}
-		json.NewEncoder(w).Encode(response)
+		if responseREST != nil {
+			json.NewEncoder(w).Encode(responseREST)
+			return
+		}
+
+		json.NewEncoder(w).Encode(&DiscoveryResult{
+			Error: "no protocol found",
+		})
 	}
 }

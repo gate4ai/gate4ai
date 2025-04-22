@@ -5,7 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema" // Import A2A schema
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
+	// Import A2A schema
 )
 
 // AuthorizationType represents different authorization strategies
@@ -32,20 +33,6 @@ func (at AuthorizationType) String() string {
 type Backend struct {
 	URL    string
 	Bearer string
-}
-
-// A2ACardBaseInfo holds the static configuration for an A2A Agent Card.
-// Skills are added dynamically via server options.
-type A2ACardBaseInfo struct {
-	Name               string
-	Description        *string
-	AgentURL           string // The server must provide this based on its listen address and A2A path
-	Provider           *a2aSchema.AgentProvider
-	Version            string
-	DocumentationURL   *string
-	DefaultInputModes  []string
-	DefaultOutputModes []string
-	Authentication     *a2aSchema.AgentAuthentication // If server requires auth *to* the agent
 }
 
 type IConfig interface {
@@ -76,7 +63,7 @@ type IConfig interface {
 	SSLAcmeCacheDir() (string, error)  // Directory to cache ACME certificates
 
 	// A2A Settings
-	GetA2ACardBaseInfo(agentURL string) (A2ACardBaseInfo, error) // New method to get A2A base info
+	GetA2AAgentCard(agentURL string) (*a2aSchema.AgentCard, error)
 
 	// Lifecycle & Status
 	Status(ctx context.Context) error

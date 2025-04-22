@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/gate4ai/server/mcp"
+	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/gate4ai/gate4ai/shared"
 
 	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
@@ -33,7 +33,7 @@ var _ shared.IServerCapability = (*ResourcesCapability)(nil) // Ensure interface
 // ResourcesCapability handles resource management, reading, and subscriptions.
 type ResourcesCapability struct {
 	logger                *zap.Logger
-	manager               *mcp.Manager
+	manager               *transport.Manager
 	mu                    sync.RWMutex
 	resources             map[string]*Resource
 	templates             map[string]*ResourceTemplate
@@ -56,7 +56,7 @@ type ResourceTemplate struct {
 }
 
 // NewResourcesCapability creates a new ResourcesCapability.
-func NewResourcesCapability(manager *mcp.Manager, logger *zap.Logger) *ResourcesCapability {
+func NewResourcesCapability(manager *transport.Manager, logger *zap.Logger) *ResourcesCapability {
 	rc := &ResourcesCapability{
 		manager:               manager,
 		logger:                logger.Named("resources-capability"),

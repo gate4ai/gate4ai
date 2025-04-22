@@ -14,6 +14,7 @@ import (
 	"github.com/gate4ai/gate4ai/server/a2a"                          // Import the server's a2a package
 	"github.com/gate4ai/gate4ai/server/cmd/a2a-example-server/agent" // Import the new agent package
 	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	"github.com/gate4ai/gate4ai/shared/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -66,6 +67,13 @@ func main() {
 		// Optionally add provider info
 		cfg.(*config.InternalConfig).A2AProviderOrgValue = shared.PointerTo("Gate4AI Examples")
 		cfg.(*config.InternalConfig).A2AProviderURLValue = shared.PointerTo("https://github.com/gate4ai")
+		cfg.(*config.InternalConfig).A2ASkills = []a2aSchema.AgentSkill{
+			{
+				ID:          "scenario_runner",
+				Name:        "A2A Scenario Runner",
+				Description: shared.PointerTo("Runs different A2A test scenarios based on input text ('error_test', 'input_test', 'cancel_test', 'stream_test')."),
+			},
+		}
 
 		logger.Info("Using default internal configuration")
 	}

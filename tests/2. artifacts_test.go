@@ -241,24 +241,26 @@ func (am *ArtifactManager) SaveLocatorDebugInfo(selector string, description str
 		return
 	}
 
+	filename := fmt.Sprintf("locator_not_found_%s", description)
+
 	// Take a screenshot of the current state
-	am.SaveScreenshot(fmt.Sprintf("locator_not_found_%s", description))
+	am.SaveScreenshot(filename)
 
 	// Save the page HTML
-	am.SaveHTML(fmt.Sprintf("locator_not_found_%s", description))
+	am.SaveHTML(filename)
 
 	// Save additional debug info
-	filename := filepath.Join(am.ArtifactDir, fmt.Sprintf("locator_debug_%s.txt", description))
+	debugInfoFilename := filepath.Join(am.ArtifactDir, filename+".txt")
 	debugInfo := fmt.Sprintf("Selector: %s\nDescription: %s\nURL: %s\nTimestamp: %s\n",
 		selector, description, am.Page.URL(), time.Now().Format(time.RFC3339))
 
-	err := os.WriteFile(filename, []byte(debugInfo), 0644)
+	err := os.WriteFile(debugInfoFilename, []byte(debugInfo), 0644)
 	if err != nil {
 		am.T.Logf("Failed to save debug info: %v", err)
 		return
 	}
 
-	am.T.Logf("Locator debug info saved to %s", filename)
+	am.T.Logf("Locator debug info saved to %s", debugInfoFilename)
 }
 
 // WaitForLocatorWithDebug waits for a locator and saves debug info if not found

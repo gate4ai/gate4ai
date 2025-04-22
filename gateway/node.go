@@ -12,7 +12,6 @@ import (
 	"github.com/gate4ai/gate4ai/gateway/clients/discovering"
 	"github.com/gate4ai/gate4ai/gateway/extra"
 	serverextra "github.com/gate4ai/gate4ai/server/extra"
-	"github.com/gate4ai/gate4ai/server/mcp"
 	serverCapabilities "github.com/gate4ai/gate4ai/server/mcp/capability"
 	"github.com/gate4ai/gate4ai/server/mcp/validators"
 	"github.com/gate4ai/gate4ai/server/transport"
@@ -25,7 +24,7 @@ type Node struct {
 	logger          *zap.Logger
 	cfg             config.IConfig
 	serverTransport *transport.Transport
-	sessionManager  *mcp.Manager
+	sessionManager  *transport.Manager
 	httpServer      *http.Server   // Store the server instance
 	listenerErrChan <-chan error   // Channel for listener errors
 	shutdownWg      sync.WaitGroup // WaitGroup for shutdown
@@ -51,7 +50,7 @@ func New(logger *zap.Logger, cfg config.IConfig) (*Node, error) {
 	n.shutdownWg.Add(1) // Initialize WaitGroup counter for the main server loop
 
 	var err error
-	n.sessionManager, err = mcp.NewManager(n.logger, n.cfg)
+	n.sessionManager, err = transport.NewManager(n.logger, n.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session manager: %w", err)
 	}

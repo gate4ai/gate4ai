@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gate4ai/gate4ai/server/mcp"
 	"github.com/gate4ai/gate4ai/server/mcp/capability"
 	"github.com/gate4ai/gate4ai/server/transport"
 	"github.com/gate4ai/gate4ai/shared"
@@ -27,11 +26,11 @@ import (
 
 // --- Mock Implementations ---
 
-var _ mcp.ISessionManager = &MockMCPManager{}
+var _ transport.ISessionManager = &MockMCPManager{}
 
 type MockMCPManager struct {
 	mu       sync.RWMutex
-	sessions map[string]mcp.IDownstreamSession
+	sessions map[string]transport.IDownstreamSession
 	Cfg      config.IConfig
 	Logger   *zap.Logger
 	// Control fields for testing
@@ -52,7 +51,7 @@ func NewMockMCPManager(cfg config.IConfig, logger *zap.Logger) *MockMCPManager {
 	serverVersion, _ := cfg.ServerVersion()
 
 	return &MockMCPManager{
-		sessions:          make(map[string]mcp.IDownstreamSession),
+		sessions:          make(map[string]transport.IDownstreamSession),
 		Cfg:               cfg,
 		Logger:            logger,
 		ClosedSessions:    make(map[string]bool),
@@ -120,12 +119,12 @@ func (m *MockTestCapability) GetHandlers() map[string]func(*shared.Message) (int
 // Implement IServerCapability (empty method is fine for this mock)
 func (m *MockTestCapability) SetCapabilities(s *schema2025.ServerCapabilities) {}
 
-func (m *MockMCPManager) CreateSession(userID string, params *sync.Map) shared.ISession {
+func (m *MockMCPManager) CreateSession(userID string, id string, params *sync.Map) shared.ISession {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Use a simplified mock session or BaseSession for testing
 	// For testing transport, BaseSession is often sufficient.
-	session := mcp.NewSession(m, "test-session-id", shared.NewInput(m.Logger), params)
+	session := transport.NewSession(m, id, userID, shared.NewInput(m.Logger), params)
 	m.sessions[session.ID] = session
 	m.Logger.Debug("MockManager: Created session", zap.String("sessionID", session.ID), zap.String("userID", userID))
 	session.Input().AddServerCapability(m.capabilities...)

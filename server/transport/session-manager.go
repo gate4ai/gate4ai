@@ -1,4 +1,4 @@
-package mcp
+package transport
 
 import (
 	"errors"
@@ -14,7 +14,7 @@ import (
 )
 
 type ISessionManager interface {
-	CreateSession(userID string, params *sync.Map) shared.ISession
+	CreateSession(userID string, id string, params *sync.Map) shared.ISession
 	GetSession(id string) (shared.ISession, error)
 	CloseSession(id string)
 	CloseAllSessions()
@@ -97,11 +97,11 @@ func (m *Manager) AddCapability(capabilities ...shared.ICapability) {
 }
 
 // CreateSession creates a new session with a unique ID
-func (m *Manager) CreateSession(userID string, params *sync.Map) shared.ISession {
+func (m *Manager) CreateSession(userID string, id string, params *sync.Map) shared.ISession {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	session := NewSession(m, userID, m.inputProcessor, params)
+	session := NewSession(m, userID, id, m.inputProcessor, params)
 	m.sessions[session.ID] = session
 
 	m.logger.Debug("Created new session",
@@ -111,6 +111,8 @@ func (m *Manager) CreateSession(userID string, params *sync.Map) shared.ISession
 	return session
 }
 
+var ErrSessionNotFound = errors.New("session not found")
+
 // GetSession retrieves a session by its ID
 func (m *Manager) GetSession(id string) (shared.ISession, error) {
 	m.mu.RLock()
@@ -118,7 +120,7 @@ func (m *Manager) GetSession(id string) (shared.ISession, error) {
 
 	session, exists := m.sessions[id]
 	if !exists {
-		return nil, errors.New("session not found")
+		return nil, ErrSessionNotFound
 	}
 
 	return session, nil
