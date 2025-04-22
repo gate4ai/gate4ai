@@ -39,6 +39,14 @@ async function main() {
   // Add Settings
   const settingRecords = [
     {
+      key: 'show_owner_email',
+      group: 'general',
+      name: 'Show Server Owner Email',
+      description: 'If enabled, server owner email addresses will be visible to users on server info pages',
+      value: false,
+      frontend: true
+    },
+    {
       key: 'email_do_not_send_email',
       group: 'email',
       name: "Don't send email",

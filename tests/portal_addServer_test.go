@@ -32,7 +32,7 @@ func addMCPServer(am *ArtifactManager, user *User, slug string) (*CatalogServer,
 	am.SaveScreenshot("servers_page_before_add")
 
 	// Click on Add Server button
-	if err := am.ClickWithDebug("#add-server-button", "add_server_button"); err != nil { // Keep original ID for now
+	if err := am.ClickWithDebug("#add-server-button", "add_server_button"); err != nil {
 		return nil, fmt.Errorf("could not click Add Server button: %w", err)
 	}
 

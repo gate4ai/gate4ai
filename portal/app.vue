@@ -9,7 +9,7 @@
         </router-link>
       </v-app-bar-title>
       <v-spacer/>
-      <v-btn to="/servers" text>Servers</v-btn>
+      <v-btn to="/servers" text>Catalog</v-btn>
 
       <!-- Wrap auth-dependent buttons in ClientOnly -->
       <ClientOnly>
@@ -81,6 +81,26 @@
 
     <v-footer app color="primary" dark>
       <v-row justify="center" no-gutters>
+        <v-col cols="12" sm="auto" class="py-2 px-3">
+          <a href="mailto:feedback@gate4.ai" class="text-white text-decoration-none">
+            <v-icon start>mdi-mail</v-icon> feedback@gate4.ai</a>
+        </v-col>
+
+        <v-col cols="12" sm="auto" class="py-2 px-3">
+          <a href="https://t.me/gate4ai" target="_blank" rel="noopener" class="text-white text-decoration-none mx-2">
+             <v-icon start>mdi-send</v-icon> CEO Feedback
+          </a>
+          <a href="https://t.me/gate4ai_chat" target="_blank" rel="noopener" class="text-white text-decoration-none mx-2">
+             <v-icon start>mdi-send</v-icon> Community Chat
+          </a>
+          <a href="https://t.me/gate4ai_channel" target="_blank" rel="noopener" class="text-white text-decoration-none mx-2">
+             <v-icon start>mdi-send</v-icon> Announcements
+          </a>
+         <a href="https://github.com/gate4ai/gate4ai" target="_blank" rel="noopener" class="text-white text-decoration-none mx-2">
+           <v-icon start>mdi-github</v-icon> GitHub
+         </a>
+       </v-col>
+
         <v-col class="text-center" cols="12">
           {{ new Date().getFullYear() }} — <strong>gate4.ai</strong>
         </v-col>

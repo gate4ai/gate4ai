@@ -92,3 +92,9 @@ This is the easiest way to get all services running locally.
 
 We greatly welcome contributors and are ready to assist with onboarding. Don't hesitate to ask questions and make suggestions!
 
+## Community & Support
+
+*   **Community Chat:** [https://t.me/gate4ai_chat](https://t.me/gate4ai_chat) - Ask questions, discuss features.
+*   **Announcements:** [https://t.me/gate4ai_channel](https://t.me/gate4ai_channel) - Stay updated on releases.
+*   **CEO Feedback:** [https://t.me/gate4ai](https://t.me/gate4ai) - Share your thoughts directly with the CEO.
+*   **Feedback Email:** feedback@gate4.ai

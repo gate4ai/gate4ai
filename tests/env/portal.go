@@ -99,6 +99,7 @@ func (e *PortalServerEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 			fmt.Sprintf("GATE4AI_DATABASE_URL=%s", databaseURL),
 			fmt.Sprintf("NUXT_JWT_SECRET=%s", jwtSecret),
 			fmt.Sprintf("NODE_ENV=%s", nodeEnv),
+			"DISABLE_ANALYTICS=true",
 		)
 
 		portalDir := filepath.Join(TestConfigWorkspaceFolder, "portal")
