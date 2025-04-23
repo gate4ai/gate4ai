@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -105,13 +107,19 @@ func (s *Session) executeSendRequest(msg *shared.Message) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 250))
+		if err != nil {
+			log.Printf("Error reading response body: %v", err)
+			return
+		}
 		// Log the unexpected status code
 		logger.Error("HTTP POST request returned non-success status",
 			zap.Int("status", resp.StatusCode),
 			zap.String("endpoint", endpoint),
 			zap.Duration("duration", duration),
+			zap.String("body", string(bodyBytes)),
 		)
-		notifyErr := fmt.Errorf("http request to %s failed with status %d", endpoint, resp.StatusCode)
+		notifyErr := fmt.Errorf("post http request to %s failed with status %d and body %s", endpoint, resp.StatusCode, string(bodyBytes))
 		notifyError(notifyErr)
 		return
 	}

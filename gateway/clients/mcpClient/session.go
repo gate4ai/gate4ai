@@ -32,6 +32,7 @@ type Session struct {
 	sseCh                        chan *sse.Event                         // Channel for receiving SSE events
 	closeCh                      chan struct{}                           // Channel to signal explicit session closure
 	initialization               chan error                              // Channel to signal completion/failure of initialization handshake
+	initializationClosed         bool                                    // Flag indicating if initialization channel has been closed
 	serverInfo                   *schema.Implementation                  // Backend server info (V2025 type)
 	tools                        []schema.Tool                           // Cached tools list (V2025 type)
 	toolsInitialized             bool                                    // Flag indicating if tools have been fetched
@@ -50,43 +51,43 @@ type Session struct {
 // writeInitializationErrorAndClose safely writes to the initialization channel and closes it.
 // It prevents double closes and handles existing errors.
 func (s *Session) writeInitializationErrorAndClose(newErr error) {
-	s.Locker.Lock() // Use client Locker to protect initialization channel access
+	s.Locker.Lock() // Use client Locker to protect initialization channel and flag access
 	defer s.Locker.Unlock()
 
-	// Check if the initialization channel exists and is not already closed
-	if s.initialization == nil {
+	// 1. Check if already closed using the flag
+	if s.initializationClosed {
 		if newErr != nil {
-			// Log the error even if the channel is already gone (e.g., subsequent errors after init)
-			s.BaseSession.Logger.Error("Initialization channel is nil, cannot signal error", zap.Error(newErr))
+			// Log the secondary error if it's important, but don't try to send/close again
+			s.BaseSession.Logger.Warn("Initialization channel already closed, discarding secondary error", zap.Error(newErr))
 		}
+		return // Already closed, nothing more to do
+	}
+
+	// 2. Safety check: ensure channel exists (shouldn't be nil if closed flag is false)
+	if s.initialization == nil {
+		s.BaseSession.Logger.Error("Internal state error: initializationClosed is false but initialization channel is nil")
+		s.initializationClosed = true // Mark as closed to prevent future attempts
 		return
 	}
 
-	// Attempt to read to see if it's closed or has a value
-	select {
-	case oldErr, ok := <-s.initialization:
-		if !ok {
-			// Channel was already closed. Log the new error if it exists.
-			if newErr != nil {
-				s.BaseSession.Logger.Error("Initialization channel already closed, encountered new error", zap.Error(newErr))
-			}
-			// Ensure initialization is set to nil after confirming it's closed
-		} else {
-			// Channel was open and contained an error (or nil).
-			s.BaseSession.Logger.Warn("Initialization channel already had value, combining errors", zap.Error(oldErr), zap.Error(newErr))
-			s.initialization <- errors.Join(oldErr, newErr)
-			close(s.initialization)
-		}
-	default:
-		// Channel was open and empty. Send the new error (if any) and close.
-		if newErr != nil {
-			s.initialization <- newErr
+	// 3. Send the error *if* it's the first one and non-nil
+	if newErr != nil {
+		select {
+		case s.initialization <- newErr:
+			// Successfully sent the error
 			s.BaseSession.Logger.Error("Signaling initialization failure", zap.Error(newErr))
-		} else {
-			s.BaseSession.Logger.Info("Signaling initialization success")
+		default:
+			// Channel was full (meaning another error was already sent concurrently) or closed.
+			// Log the secondary error. The first error sent will be the one received by the reader.
+			s.BaseSession.Logger.Warn("Initialization channel already contained an error or was closing; discarding secondary error", zap.Error(newErr))
 		}
-		close(s.initialization)
 	}
+
+	// 4. Close the channel and mark as closed
+	close(s.initialization)
+	s.initializationClosed = true
+
+	s.BaseSession.Logger.Debug("Initialization channel closed.")
 }
 
 // Open initiates the connection and handshake process with the backend server.
@@ -123,7 +124,8 @@ func (s *Session) Open() chan error {
 
 	// 3. Start new initialization process
 	logger.Info("Starting new session initialization")
-	s.initialization = make(chan error, 1) // Buffered channel to prevent blocking write
+	s.initialization = make(chan error, 1)
+	s.initializationClosed = false
 	s.SetStatus(shared.StatusConnecting)
 	// Ensure closeCh is (re)created if needed
 	if s.closeCh == nil {
@@ -183,10 +185,7 @@ func (s *Session) processLoop() {
 
 		// Set status back to New
 		s.SetStatus(shared.StatusNew)
-
-		// Ensure initialization channel is closed with an error if the loop exits unexpectedly
-		// before initialization completes successfully or fails explicitly.
-		s.writeInitializationErrorAndClose(errors.New("session processing loop exited unexpectedly"))
+		s.writeInitializationErrorAndClose(nil)
 	}()
 
 	output, ok := s.AcquireOutput()
@@ -280,13 +279,11 @@ func (s *Session) processLoop() {
 		// --- Handle explicit close signal ---
 		case <-s.closeCh:
 			loopLogger.Info("Session explicitly closed via closeCh")
-			// writeInitializationErrorAndClose will be called by the defer.
 			return // Exit loop
 
 		// --- Handle context cancellation ---
 		case <-s.ctx.Done():
 			loopLogger.Info("Session context cancelled", zap.Error(s.ctx.Err()))
-			// writeInitializationErrorAndClose will be called by the defer.
 			return // Exit loop
 		}
 	}
