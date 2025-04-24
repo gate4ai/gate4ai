@@ -1,4 +1,3 @@
-// /home/alex/go-ai/gate4ai/www/components/SubscribeButton.vue
 <template>
   <v-btn
     :color="buttonProps.color"
@@ -10,113 +9,70 @@
     <v-icon v-if="buttonProps.icon" start>{{ buttonProps.icon }}</v-icon>
     {{ buttonProps.text }}
   </v-btn>
+
+  <SubscriptionHeaderValuesDialog
+    v-if="showHeadersDialog"
+    v-model="showHeadersDialog"
+    :server-slug="server.slug"
+    @save="handleHeadersSave"
+  />
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue';
+import { ref, computed, reactive, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import type { ServerInfo } from '~/utils/server'; 
+import type { ServerInfo } from '~/utils/server';
 import { useSubscriptionPermissions } from '../composables/useSubscriptionPermissions';
-import { useSnackbar } from '../composables/useSnackbar'; 
+import { useSnackbar } from '../composables/useSnackbar';
+import SubscriptionHeaderValuesDialog from './SubscriptionHeaderValuesDialog.vue';
 
-const props = defineProps<{
-  server: ServerInfo; // Expect server object with id, isCurrentUserSubscribed, subscriptionId?, owners?
-  isAuthenticated: boolean;
-}>();
+interface TemplateItem { id: string; key: string; description?: string | null; required: boolean; }
+interface SubscriptionResponse { id: string; }
 
-// Emit events to notify parent about state change - useful for list views
-const emit = defineEmits<{
-  (e: 'update:subscription', payload: { serverId: string; isSubscribed: boolean; subscriptionId?: string }): void;
-}>();
-
-
+const props = defineProps<{ server: ServerInfo; isAuthenticated: boolean; }>();
+const emit = defineEmits<{(e: 'update:subscription', payload: { serverId: string; isSubscribed: boolean; subscriptionId?: string }): void;}>();
 const router = useRouter();
 const { $auth, $api } = useNuxtApp();
-const { showSuccess, showError } = useSnackbar(); // Use snackbar
-
-// --- State ---
+const { showSuccess, showError } = useSnackbar();
 const isLoading = ref(false);
-
-const localSubscriptionState = reactive({
-    isSubscribed: props.server.isCurrentUserSubscribed ?? false,
-    subscriptionId: props.server.subscriptionId
-});
-
-// --- Permissions ---
+const showHeadersDialog = ref(false);
+const headerTemplateCache = ref<TemplateItem[] | null>(null);
+const localSubscriptionState = reactive({ isSubscribed: props.server.isCurrentUserSubscribed ?? false, subscriptionId: props.server.subscriptionId });
 const currentUser = computed(() => $auth.getUser());
-// Pass reactive refs to the composable
 const serverRef = computed(() => props.server);
 const { canPerformAction, getSubscriptionAlert } = useSubscriptionPermissions(serverRef, currentUser);
+const isDisabled = computed(() => isLoading.value || !canPerformAction.value);
 
-const isDisabled = computed(() => {
-    return isLoading.value || !canPerformAction.value;
+const buttonProps = computed(() => { /* ... */
+  if (localSubscriptionState.isSubscribed) { return { text: 'Unsubscribe', color: 'error', icon: 'mdi-account-minus', variant: 'text' as const }; }
+  else { return { text: 'Subscribe', color: 'primary', icon: 'mdi-account-plus', variant: 'elevated' as const }; }
 });
 
-// --- Button Appearance ---
-const buttonProps = computed(() => {
-  if (localSubscriptionState.isSubscribed) {
-    return { text: 'Unsubscribe', color: 'error', icon: 'mdi-account-minus', variant: 'text' as const }; // Use 'text' variant for unsubscribe
-  } else {
-    return { text: 'Subscribe', color: 'primary', icon: 'mdi-account-plus', variant: 'elevated' as const }; // Use 'elevated' or 'tonal'
-  }
-});
-
-// --- Actions ---
-async function handleClick() {
-  if (!props.isAuthenticated) {
-    router.push(`/login?redirect=/servers/${props.server.id}`);
-    return;
-  }
-
-  // Double check permissions before action (though button should be disabled)
-  if (!canPerformAction.value) {
-    const alertMsg = getSubscriptionAlert.value; // Эта часть должна быть в порядке
-    if (alertMsg) {
-        showError(alertMsg);
-    }
-    return;
-  }
-
-  isLoading.value = true;
-
-  try {
-    if (localSubscriptionState.isSubscribed) {
-      // --- Unsubscribe ---
-      if (!localSubscriptionState.subscriptionId) {
-        throw new Error("Cannot unsubscribe: Subscription ID is missing.");
-      }
-      await $api.deleteJson(`/subscriptions/${localSubscriptionState.subscriptionId}`);
-      localSubscriptionState.isSubscribed = false;
-      localSubscriptionState.subscriptionId = undefined;
-      showSuccess('Successfully unsubscribed!');
-      // Emit update event
-       emit('update:subscription', { serverId: props.server.id, isSubscribed: false });
-
-    } else {
-      // --- Subscribe ---
-      const newSubscription = await $api.postJson('/subscriptions', { serverId: props.server.id });
-      localSubscriptionState.isSubscribed = true;
-      localSubscriptionState.subscriptionId = newSubscription.id; // Assuming API returns the created sub with ID
-      showSuccess('Successfully subscribed!');
-       // Emit update event
-       emit('update:subscription', { serverId: props.server.id, isSubscribed: true, subscriptionId: newSubscription.id });
-    }
-  } catch (err: unknown) {
-    if (err instanceof Error) {
-      showError(err.message);
-    } else {
-      showError('Subscription action failed. Please try again.');
-    }
-    console.error("Error handling subscription:", err);
-  } finally {
-    isLoading.value = false;
-  }
+async function handleClick() { /* ... */
+ if (!props.isAuthenticated) { router.push(`/login?redirect=/servers/${props.server.slug}`); return; }
+  if (!canPerformAction.value) { const msg = getSubscriptionAlert.value; if (msg) showError(msg); return; }
+  if (localSubscriptionState.isSubscribed) { await performUnsubscribe(); }
+  else { await checkTemplateAndSubscribe(); }
+}
+async function performUnsubscribe() { /* ... */
+ isLoading.value = true; try { if (!localSubscriptionState.subscriptionId) throw new Error("Subscription ID missing."); await $api.deleteJson(`/subscriptions/${localSubscriptionState.subscriptionId}`); localSubscriptionState.isSubscribed = false; localSubscriptionState.subscriptionId = undefined; showSuccess('Unsubscribed!'); emit('update:subscription', { serverId: props.server.id, isSubscribed: false }); } catch (err: unknown) { const message = err instanceof Error ? err.message : 'Unsubscription failed.'; showError(message); console.error("Error unsubscribing:", err); } finally { isLoading.value = false; }
+}
+async function checkTemplateAndSubscribe() { /* ... */
+ isLoading.value = true; try { if (headerTemplateCache.value === null) { headerTemplateCache.value = await $api.getJson<TemplateItem[]>(`/servers/${props.server.slug}/subscription-header-template`); } if (headerTemplateCache.value?.length > 0) { showHeadersDialog.value = true; } else { await performSubscribe(); } } catch (err) { const message = err instanceof Error ? err.message : 'Failed to check requirements.'; showError(message); console.error("Error checking template:", err); } finally { if (!showHeadersDialog.value) isLoading.value = false; }
+}
+async function handleHeadersSave(headerValues: Record<string, string>) { /* ... */
+ showHeadersDialog.value = false; await performSubscribe(headerValues);
+}
+async function performSubscribe(headerValues?: Record<string, string>) { /* ... */
+ isLoading.value = true; try { const payload: { serverId: string; headerValues?: Record<string, string> } = { serverId: props.server.id }; if (headerValues) payload.headerValues = headerValues; const newSubscription = await $api.postJson<SubscriptionResponse>('/subscriptions', payload); localSubscriptionState.isSubscribed = true; localSubscriptionState.subscriptionId = newSubscription.id; showSuccess('Subscribed!'); emit('update:subscription', { serverId: props.server.id, isSubscribed: true, subscriptionId: newSubscription.id }); } catch (err: unknown) { const message = err instanceof Error ? err.message : 'Subscription failed.'; showError(message); console.error("Error subscribing:", err); } finally { isLoading.value = false; }
 }
 
-// Watch for prop changes to update local state if parent refreshes data
-watch(() => [props.server.isCurrentUserSubscribed, props.server.subscriptionId], ([newIsSubscribed, newSubId]) => {
+// Watch for prop changes - Explicitly type the destructured values
+watch(() => [props.server.isCurrentUserSubscribed, props.server.subscriptionId],
+    ([newIsSubscribed, newSubId]: [boolean | undefined, string | undefined]) => {
+    // Now TS knows the types correctly
     localSubscriptionState.isSubscribed = newIsSubscribed ?? false;
-    localSubscriptionState.subscriptionId = newSubId;
+    localSubscriptionState.subscriptionId = newSubId ?? undefined;
 });
 
 </script>

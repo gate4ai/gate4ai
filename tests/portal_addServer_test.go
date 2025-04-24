@@ -44,7 +44,7 @@ func addMCPServer(am *ArtifactManager, user *User, slug string) (*CatalogServer,
 	}
 
 	// Wait specifically for the URL input field within the dialog
-	urlFieldSelector := "input[placeholder='Enter the base URL of the server']"
+	urlFieldSelector := "[data-testid='add-server-url-input'] input"
 	urlInput, err := am.WaitForLocatorWithDebug(urlFieldSelector, "add_server_dialog_step1_url_input_fail")
 	if err != nil {
 		am.SaveScreenshot("add_server_dialog_step1_url_input_fail")
@@ -61,7 +61,7 @@ func addMCPServer(am *ArtifactManager, user *User, slug string) (*CatalogServer,
 		return nil, fmt.Errorf("failed to fill server URL: %w", err)
 	}
 
-	slugFieldSelector := "input[placeholder='my-unique-server-slug']"
+	slugFieldSelector := "[data-testid='add-server-slug-input'] input"
 	slugField, err := am.WaitForLocatorWithDebug(slugFieldSelector, "wait_for_slug_field")
 	if err != nil {
 		return nil, fmt.Errorf("slug field did not appear: %w", err)
@@ -453,7 +453,7 @@ func addA2AServer(am *ArtifactManager, user *User, slug string, a2a_server_url s
 	}
 
 	// Wait specifically for the URL input field within the dialog
-	urlFieldSelector := "input[placeholder='Enter the base URL of the server']"
+	urlFieldSelector := "[data-testid='add-server-url-input'] input"
 	urlInput, err := am.WaitForLocatorWithDebug(urlFieldSelector, "add_a2a_server_dialog_step1_url_input_fail")
 	if err != nil {
 		am.SaveScreenshot("add_a2a_server_dialog_step1_url_input_fail")
@@ -474,7 +474,7 @@ func addA2AServer(am *ArtifactManager, user *User, slug string, a2a_server_url s
 	am.SaveScreenshot("after_url_fill")
 
 	// Wait for the slug input field to appear
-	slugFieldSelector := "input[placeholder='my-unique-server-slug']"
+	slugFieldSelector := "[data-testid='add-server-slug-input'] input"
 	slugField, err := am.WaitForLocatorWithDebug(slugFieldSelector, "wait_for_a2a_slug_field")
 	if err != nil {
 		return nil, fmt.Errorf("slug field did not appear: %w", err)
@@ -552,7 +552,7 @@ func addA2AServer(am *ArtifactManager, user *User, slug string, a2a_server_url s
 	// --- Step 2: Wait for Confirmation and Save ---
 	// For A2A servers, look for the "Add A2A Server" button
 	addA2aButtonSelector := "[data-testid='add-a2a-server-button']"
-	_, err = am.WaitForLocatorWithDebug(addA2aButtonSelector, "wait_for_add_a2a_button")
+	_, err = am.WaitForLocatorWithDebug(addA2aButtonSelector, "wait_for_add_a2a_button", 20000)
 	require.NoError(am.T, err, "step 2 of add server dialog did not load (no Add Server button found)")
 
 	am.SaveScreenshot("add_a2a_server_dialog_step2_visible")

@@ -296,11 +296,18 @@ func sendJSONRPCErrorResponse(w http.ResponseWriter, id *schema.RequestID, code 
 		zap.Any("data", data),
 		zap.Any("reqID", id),
 	)
-	// According to JSON-RPC spec, errors should still return 200 OK at HTTP level
-	sendJSONResponse(w, http.StatusOK, errResp, logger)
+	if code == shared.JSONRPCErrorUnauthorized {
+		//Yes, it's not according to the JSON-RPC standard, but the HTTP code is clearer in this case.
+		sendJSONResponse(w, http.StatusUnauthorized, errResp, logger)
+	} else {
+		// According to JSON-RPC spec, errors should still return 200 OK at HTTP level
+		sendJSONResponse(w, http.StatusOK, errResp, logger)
+	}
 }
 
-func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, sessionID string, logger *zap.Logger, allowCreate bool) (shared.ISession, error) {
+const HEADERKEY = "received_headers"
+
+func (t *Transport) getSession(r *http.Request, sessionID string, logger *zap.Logger, allowCreate bool) (shared.ISession, error) {
 	if sessionID != "" {
 		session, err := t.sessionManager.GetSession(sessionID)
 		if err == nil {
@@ -310,7 +317,6 @@ func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, sessionID
 		if err == ErrSessionNotFound {
 			logger.Info("Session lookup failed", zap.String("lookupSessionId", sessionID), zap.Error(err))
 		} else {
-			http.Error(w, "Not Found: Session expired or invalid", statusNotFound)
 			return nil, fmt.Errorf("session %s not found: %w", sessionID, err)
 		}
 	}
@@ -318,7 +324,6 @@ func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, sessionID
 	// No session ID found in request
 	if !allowCreate {
 		logger.Warn("Session ID missing and creation not allowed for this request type", zap.String("path", r.URL.Path), zap.String("method", r.Method))
-		http.Error(w, "Unauthorized", statusUnauthorized)
 		return nil, errors.New("session id required but not found")
 	}
 
@@ -327,25 +332,14 @@ func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, sessionID
 	userID, sessionParams, err := t.authManager.Authenticate(authKey, r.RemoteAddr)
 	if err != nil {
 		logger.Warn("Authentication failed", zap.String("remoteAddr", r.RemoteAddr), zap.Error(err))
-		http.Error(w, "Unauthorized", statusUnauthorized)
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
 
-	// Add User-Agent and potentially other headers to session params
-	if sessionParams != nil {
-		userAgent := r.Header.Get("User-Agent")
-		if userAgent != "" {
-			sessionParams.Store("UserAgent", userAgent)
-		}
-		// Example: Add X-Forwarded-For if behind a proxy
-		forwardedFor := r.Header.Get("X-Forwarded-For")
-		if forwardedFor != "" {
-			sessionParams.Store("X-Forwarded-For", forwardedFor)
-		}
-	} else {
-		logger.Warn("SessionParams map was nil after authentication")
+	if sessionParams == nil {
 		sessionParams = &sync.Map{} // Initialize if nil to avoid panics
 	}
+
+	sessionParams.Store(HEADERKEY, r.Header)
 
 	newSession := t.sessionManager.CreateSession(userID, sessionID, sessionParams)
 	logger.Info("Created new session", zap.String("newSessionId", newSession.GetID()), zap.String("userId", userID))

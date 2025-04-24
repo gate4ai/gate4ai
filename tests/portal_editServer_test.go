@@ -38,10 +38,11 @@ func editServer(am *ArtifactManager, user *User, server *CatalogServer, newName,
 
 	// Wait for edit page URL to contain the SLUG
 	expectedEditURLPattern := fmt.Sprintf("**/servers/edit/%s", server.Slug)
-	if err := am.Page.WaitForURL(expectedEditURLPattern, playwright.PageWaitForURLOptions{
+	err := am.Page.WaitForURL(expectedEditURLPattern, playwright.PageWaitForURLOptions{
 		Timeout:   playwright.Float(15000),
 		WaitUntil: playwright.WaitUntilStateLoad,
-	}); err != nil {
+	})
+	if err != nil {
 		am.SaveScreenshot("edit_page_navigation_error")
 		am.SaveHTML("edit_page_navigation_error")
 		return fmt.Errorf("edit page did not load (URL: %s): %w", am.Page.URL(), err)
@@ -108,8 +109,18 @@ func editServer(am *ArtifactManager, user *User, server *CatalogServer, newName,
 	require.Equal(am.T, 0, protocolVersionInputCount, "Protocol and Version field should not be editable")
 
 	// --- Submit Form ---
-	submitButtonSelector := "button[type='submit']:has-text('Update Server')"
+	submitButtonSelector := "button[type='submit']:has-text('Update Core Details')"
 	if err := am.ClickWithDebug(submitButtonSelector, "update_button_click"); err != nil {
+		return fmt.Errorf("could not click Update Server button: %w", err)
+	}
+
+	// Wait for success message (optional but good)
+	if _, err := am.WaitForLocatorWithDebug(".v-snackbar:has-text('Server core details updated successfully')", "success_message_wait"); err != nil {
+		return fmt.Errorf("not found - Server core details updated successfully: %w", err)
+	}
+
+	cancelButtonSelector := "button[type='button']:has-text('Cancel')"
+	if err := am.ClickWithDebug(cancelButtonSelector, "cancel_button_click"); err != nil {
 		return fmt.Errorf("could not click Update Server button: %w", err)
 	}
 
@@ -122,11 +133,6 @@ func editServer(am *ArtifactManager, user *User, server *CatalogServer, newName,
 		am.SaveScreenshot("navigation_error_after_update")
 		am.SaveHTML("navigation_error_after_update")
 		return fmt.Errorf("navigation back to server details page failed (URL: %s): %w", am.Page.URL(), err)
-	}
-
-	// Wait for success message (optional but good)
-	if _, err := am.WaitForLocatorWithDebug(".v-snackbar:has-text('Server updated successfully')", "success_message_wait"); err != nil {
-		am.T.Logf("Warning: Server update success message not found - proceeding anyway")
 	}
 
 	// Verify the updated server name is displayed on the details page

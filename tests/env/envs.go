@@ -88,7 +88,8 @@ func (e *Envs) Execute(ctx context.Context) error {
 
 	// --- Phase 1: Configure Components and Build Dependency Graph ---
 	log.Println("Executing Configure phase...")
-	dependenciesMap := make(map[string][]string)              // component name -> list of dependency names
+	dependenciesMap := make(map[string][]string) // component name -> list of dependency names
+	var dependenciesMapLock sync.Mutex
 	configureGroup, configureCtx := errgroup.WithContext(ctx) // Allow early exit on configure error
 
 	for _, env := range e.components {
@@ -109,6 +110,8 @@ func (e *Envs) Execute(ctx context.Context) error {
 				}
 				// Safely store dependencies
 				// This access is safe because each goroutine writes to a unique key derived from its component
+				dependenciesMapLock.Lock()
+				defer dependenciesMapLock.Unlock()
 				dependenciesMap[currentName] = deps // Store dependencies returned by Configure
 				log.Printf("[%s] Component configured successfully, dependencies: %v", currentName, deps)
 				return nil

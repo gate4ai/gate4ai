@@ -17,141 +17,125 @@ import (
 	"gopkg.in/cenkalti/backoff.v1"
 )
 
-// Ensure Session implements ISession
 var _ shared.ISession = (*Session)(nil)
 
 // Session represents a connection to a single backend MCP server.
 type Session struct {
-	*shared.BaseSession                                                  // Embed BaseSession for common fields (ID, Logger, Status, Output, etc.)
-	Locker                       sync.RWMutex                            // Separate locker for client-specific fields if needed (or rely on BaseSession.Mu)
-	Backend                      *Backend                                // Information about the backend server
-	postEndpoint                 string                                  // POST endpoint URL received from backend
-	ctx                          context.Context                         // Context for managing the session lifecycle
-	sseClient                    *sse.Client                             // SSE client instance
-	httpClient                   *http.Client                            // HTTP client for POST requests
-	sseCh                        chan *sse.Event                         // Channel for receiving SSE events
-	closeCh                      chan struct{}                           // Channel to signal explicit session closure
-	initialization               chan error                              // Channel to signal completion/failure of initialization handshake
-	initializationClosed         bool                                    // Flag indicating if initialization channel has been closed
-	serverInfo                   *schema.Implementation                  // Backend server info (V2025 type)
-	tools                        []schema.Tool                           // Cached tools list (V2025 type)
-	toolsInitialized             bool                                    // Flag indicating if tools have been fetched
-	prompts                      []schema.Prompt                         // Cached prompts list (V2025 type)
-	promptsInitialized           bool                                    // Flag indicating if prompts have been fetched
-	resources                    []schema.Resource                       // Cached resources list (V2025 type)
-	resourcesInitialized         bool                                    // Flag indicating if resources have been fetched
-	resourceTemplates            []schema.ResourceTemplate               // Cached resource templates list (V2025 type)
-	resourceTemplatesInitialized bool                                    // Flag indicating if resource templates have been fetched
-	inputProcessor               *shared.Input                           // Input processor for this session
-	SamplingCapability           *capability.SamplingCapability          // Sampling capability instance
-	ResourcesCapability          *capability.ResourcesCapability         // Resources capability instance
-	ResourceTemplatesCapability  *capability.ResourceTemplatesCapability // Resource templates capability instance
+	*shared.BaseSession
+	Locker                       sync.RWMutex
+	Backend                      *Backend
+	postEndpoint                 string
+	ctx                          context.Context
+	sseClient                    *sse.Client
+	httpClient                   *http.Client
+	sseCh                        chan *sse.Event
+	closeCh                      chan struct{}
+	initialization               chan error
+	initializationClosed         bool
+	serverInfo                   *schema.Implementation
+	tools                        []schema.Tool
+	toolsInitialized             bool
+	prompts                      []schema.Prompt
+	promptsInitialized           bool
+	resources                    []schema.Resource
+	resourcesInitialized         bool
+	resourceTemplates            []schema.ResourceTemplate
+	resourceTemplatesInitialized bool
+	inputProcessor               *shared.Input
+	SamplingCapability           *capability.SamplingCapability
+	ResourcesCapability          *capability.ResourcesCapability
+	ResourceTemplatesCapability  *capability.ResourceTemplatesCapability
+	currentHeaders               map[string]string
 }
 
-// writeInitializationErrorAndClose safely writes to the initialization channel and closes it.
-// It prevents double closes and handles existing errors.
-func (s *Session) writeInitializationErrorAndClose(newErr error) {
-	s.Locker.Lock() // Use client Locker to protect initialization channel and flag access
+func (s *Session) GetCurrentHeaders() map[string]string { /* ... as before ... */
+	s.Locker.RLock()
+	defer s.Locker.RUnlock()
+	headersCopy := make(map[string]string, len(s.currentHeaders))
+	for k, v := range s.currentHeaders {
+		headersCopy[k] = v
+	}
+	return headersCopy
+}
+func (s *Session) writeInitializationErrorAndClose(newErr error) { /* ... as before ... */
+	s.Locker.Lock()
 	defer s.Locker.Unlock()
-
-	// 1. Check if already closed using the flag
 	if s.initializationClosed {
 		if newErr != nil {
-			// Log the secondary error if it's important, but don't try to send/close again
-			s.BaseSession.Logger.Warn("Initialization channel already closed, discarding secondary error", zap.Error(newErr))
+			s.BaseSession.Logger.Warn("Init channel closed, discarding secondary error", zap.Error(newErr))
 		}
-		return // Already closed, nothing more to do
-	}
-
-	// 2. Safety check: ensure channel exists (shouldn't be nil if closed flag is false)
-	if s.initialization == nil {
-		s.BaseSession.Logger.Error("Internal state error: initializationClosed is false but initialization channel is nil")
-		s.initializationClosed = true // Mark as closed to prevent future attempts
 		return
 	}
-
-	// 3. Send the error *if* it's the first one and non-nil
+	if s.initialization == nil {
+		s.BaseSession.Logger.Error("Internal state error: initClosed false but init chan nil")
+		s.initializationClosed = true
+		return
+	}
 	if newErr != nil {
 		select {
 		case s.initialization <- newErr:
-			// Successfully sent the error
 			s.BaseSession.Logger.Error("Signaling initialization failure", zap.Error(newErr))
 		default:
-			// Channel was full (meaning another error was already sent concurrently) or closed.
-			// Log the secondary error. The first error sent will be the one received by the reader.
-			s.BaseSession.Logger.Warn("Initialization channel already contained an error or was closing; discarding secondary error", zap.Error(newErr))
+			s.BaseSession.Logger.Warn("Init channel contained error or closing; discarding secondary error", zap.Error(newErr))
 		}
 	}
-
-	// 4. Close the channel and mark as closed
 	close(s.initialization)
 	s.initializationClosed = true
-
 	s.BaseSession.Logger.Debug("Initialization channel closed.")
 }
 
-// Open initiates the connection and handshake process with the backend server.
-// It returns a channel that signals the completion (nil error) or failure (non-nil error)
-// of the initialization process. Subsequent calls return the same channel.
 func (s *Session) Open() chan error {
-	logger := s.BaseSession.Logger // Logger already has backend and session context
+	logger := s.BaseSession.Logger
 	logger.Debug("Open() called")
-
-	s.Locker.Lock() // Use client Locker
-
-	// 1. Check if initialization is already complete (connected)
+	s.Locker.Lock()
 	if s.GetStatus() == shared.StatusConnected {
 		logger.Debug("Session already connected")
-		// If initialization channel exists (from previous successful open), return it.
 		if s.initialization != nil {
 			s.Locker.Unlock()
 			return s.initialization
 		}
-		// Otherwise, create and return a new, already closed channel signaling success.
 		closedChan := make(chan error)
 		close(closedChan)
-		s.initialization = closedChan // Store it
+		s.initialization = closedChan
 		s.Locker.Unlock()
 		return closedChan
 	}
-
-	// 2. Check if initialization is currently in progress
 	if s.initialization != nil {
-		logger.Debug("Initialization already in progress, returning existing channel")
+		logger.Debug("Initialization already in progress")
 		s.Locker.Unlock()
 		return s.initialization
 	}
 
-	// 3. Start new initialization process
 	logger.Info("Starting new session initialization")
 	s.initialization = make(chan error, 1)
 	s.initializationClosed = false
 	s.SetStatus(shared.StatusConnecting)
-	// Ensure closeCh is (re)created if needed
 	if s.closeCh == nil {
 		s.closeCh = make(chan struct{})
 	}
-	// Reset internal state related to connection (e.g., postEndpoint)
 	s.postEndpoint = ""
 	s.serverInfo = nil
+	s.Locker.Unlock()
 
-	s.Locker.Unlock() // Unlock before potentially blocking operations
-
-	// Subscribe to SSE events
 	logger.Debug("Subscribing to SSE channel")
-	sseContext, sseCancel := context.WithCancel(s.ctx)
+	sseContext, sseCancel := context.WithCancel(s.ctx) // sseCancel defined here
 	expBackoff := backoff.NewExponentialBackOff()
-	expBackoff.MaxElapsedTime = 60 * time.Second // Retry indefinitely until context is cancelled
+	expBackoff.MaxElapsedTime = 0
 	s.sseClient.ReconnectStrategy = backoff.WithContext(expBackoff, sseContext)
 	s.sseClient.ReconnectNotify = func(err error, t time.Duration) {
-		logger.Error("SSE connection error", zap.Error(err), zap.Duration("delay", t))
+		logger.Error("SSE connection error, retrying...", zap.Error(err), zap.Duration("delay", t))
 		if err.Error() == "could not connect to stream: Unauthorized" {
+			// If the SSE connection error is related to authorization, then there's no point in trying to reconnect;
+			// the attempts can be stopped immediately. Without this behavior, the client will hang indefinitely trying
+			// to establish a connection with incorrect connection credentials.
 			sseCancel()
 		}
 	}
-	err := s.sseClient.SubscribeChanWithContext(sseContext, "", s.sseCh) // Pass the context
+
+	err := s.sseClient.SubscribeChanWithContext(sseContext, "", s.sseCh)
 	if err != nil {
 		logger.Warn("Failed to subscribe to SSE events", zap.Error(err))
+		sseCancel() // <<< FIX: Call cancel here on immediate failure
 		s.SetStatus(shared.StatusNew)
 		s.writeInitializationErrorAndClose(fmt.Errorf("SSE subscription failed: %w", err))
 		return s.initialization
@@ -159,42 +143,36 @@ func (s *Session) Open() chan error {
 	logger.Debug("SSE subscription initiated")
 
 	if s.Input() == nil {
-		logger.Error("Input is nil, cannot process messages")
-		s.writeInitializationErrorAndClose(errors.New("input is nil, cannot process messages"))
+		logger.Error("Input is nil")
+		sseCancel() // <<< FIX: Call cancel here on immediate failure
+		s.writeInitializationErrorAndClose(errors.New("input is nil"))
 		return s.initialization
 	}
 
-	go s.processLoop()
+	go s.processLoop(sseCancel) // Pass cancel func
 
 	return s.initialization
 }
 
-// processLoop is the main event loop for the session.
-func (s *Session) processLoop() {
+func (s *Session) processLoop(sseCancel context.CancelFunc) { /* ... as before ... */
 	loopLogger := s.BaseSession.Logger.With(zap.String("goroutine", "processLoop"))
 	loopLogger.Debug("Starting session processing loop")
-
 	defer func() {
 		loopLogger.Info("Session processing loop ended")
-		// Cleanup resources when loop exits
+		sseCancel()
 		s.Locker.Lock()
 		if s.sseClient != nil {
-			s.sseClient.Unsubscribe(s.sseCh) // Unsubscribe from SSE channel
+			s.sseClient.Unsubscribe(s.sseCh)
 		}
 		s.Locker.Unlock()
-
-		// Set status back to New
 		s.SetStatus(shared.StatusNew)
-		s.writeInitializationErrorAndClose(nil)
 	}()
-
 	output, ok := s.AcquireOutput()
 	if !ok {
 		loopLogger.Error("Failed to acquire output channel")
 		return
 	}
 	defer s.ReleaseOutput()
-
 	for {
 		select {
 		case sendMsg, ok := <-output:
@@ -207,66 +185,52 @@ func (s *Session) processLoop() {
 			} else {
 				loopLogger.Warn("Received nil message from Output channel")
 			}
-
 		case event, ok := <-s.sseCh:
 			if !ok {
 				loopLogger.Info("SSE channel closed, exiting loop")
-				return // Exit loop if SSE channel is closed
+				return
 			}
 			if event == nil {
 				loopLogger.Warn("Received nil event from SSE channel, skipping")
 				continue
 			}
-
-			loopLogger.Debug("Received SSE event", zap.String("eventID", string(event.ID)), zap.String("eventName", string(event.Event)), zap.ByteString("data", event.Data))
-
+			loopLogger.Debug("Received SSE event", zap.String("eventID", string(event.ID)), zap.String("eventName", string(event.Event)))
 			switch string(event.Event) {
 			case "endpoint":
-				s.Locker.Lock()
+				s.Locker.RLock()
 				endpointSet := s.postEndpoint != ""
-				s.Locker.Unlock()
-				// Only process the first endpoint event after connection/reconnection
+				s.Locker.RUnlock()
 				if !endpointSet {
 					if len(event.Data) == 0 {
 						loopLogger.Error("Received endpoint event with empty data")
-						s.writeInitializationErrorAndClose(errors.New("protocol error: received empty endpoint data"))
-						return // Fatal error for initialization
+						s.writeInitializationErrorAndClose(errors.New("empty endpoint data"))
+						return
 					}
 					postURLStr := string(event.Data)
 					postURL, err := url.Parse(postURLStr)
 					if err != nil {
-						loopLogger.Error("Failed to parse postUrl from endpoint event", zap.Error(err), zap.String("data", postURLStr))
-						s.writeInitializationErrorAndClose(fmt.Errorf("invalid endpoint URL '%s': %w", postURLStr, err))
-						return // Fatal error for initialization
+						loopLogger.Error("Failed to parse postUrl", zap.Error(err))
+						s.writeInitializationErrorAndClose(fmt.Errorf("invalid endpoint URL: %w", err))
+						return
 					}
-
 					s.Locker.Lock()
-					// Resolve potentially relative endpoint URL against the base backend URL
 					s.postEndpoint = s.Backend.URL.ResolveReference(postURL).String()
 					s.Locker.Unlock()
 					loopLogger.Info("Received POST endpoint", zap.String("endpoint", s.postEndpoint))
-
-					// Now that we have the endpoint, initiate the MCP initialize handshake
-					// Use a background context for initialize as the main loop needs to continue
 					go s.sendInitialize()
 				} else {
 					loopLogger.Debug("Ignoring subsequent endpoint event")
 				}
-				continue // Continue loop after processing endpoint event
 			case "message":
 				if len(event.Data) == 0 {
 					loopLogger.Warn("Received message event with empty data, skipping")
 					continue
 				}
-
-				// Parse the JSON-RPC message
 				msgs, err := shared.ParseMessages(s, event.Data)
 				if err != nil {
-					loopLogger.Error("Failed to parse JSON-RPC message from SSE", zap.Error(err), zap.ByteString("data", event.Data))
-					continue // Don't stop the loop for one bad message
+					loopLogger.Error("Failed to parse JSON-RPC message from SSE", zap.Error(err))
+					continue
 				}
-
-				// Process the message (route to request manager or notification handlers)
 				for _, msg := range msgs {
 					s.Input().Put(msg)
 				}
@@ -275,76 +239,40 @@ func (s *Session) processLoop() {
 			default:
 				loopLogger.Warn("Received unknown SSE event type", zap.String("eventName", string(event.Event)))
 			}
-
-		// --- Handle explicit close signal ---
 		case <-s.closeCh:
 			loopLogger.Info("Session explicitly closed via closeCh")
-			return // Exit loop
-
-		// --- Handle context cancellation ---
+			return
 		case <-s.ctx.Done():
 			loopLogger.Info("Session context cancelled", zap.Error(s.ctx.Err()))
-			return // Exit loop
+			return
 		}
 	}
 }
-
-// Close signals the session to terminate its connection and processing loop.
-// It's safe to call multiple times.
-func (s *Session) Close() error {
+func (s *Session) Close() error { /* ... as before ... */
 	logger := s.BaseSession.Logger
-	logger.Info("Close() called, initiating session closure")
-
-	// 1. Check if already closed/closing (idempotency)
+	logger.Info("Close() called")
 	s.Locker.Lock()
-	// Check closeCh first
 	if s.closeCh == nil {
 		s.Locker.Unlock()
-		logger.Debug("Session already closed or closing (closeCh is nil)")
+		logger.Debug("Session already closed")
 		return nil
 	}
-
-	// 2. Signal the processing loop to stop via closeCh
-	// Ensure closeCh is closed only once
 	select {
 	case <-s.closeCh:
-		// Already closed
 		logger.Debug("closeCh already closed")
 	default:
 		close(s.closeCh)
-		s.closeCh = nil // Set to nil after closing to prevent reuse/double close
-		logger.Debug("Signaled processing loop to stop via closeCh")
-	}
-	s.Locker.Unlock() // Unlock after managing closeCh
-
-	// 3. Set status immediately (though loop will also set it on exit)
-	s.SetStatus(shared.StatusNew)
-
-	// 4. Close the BaseSession (which closes the Output channel)
-	// This will cause the loop to exit if it was blocked on reading Output.
-	// Call BaseSession.Close() which handles closing the Output channel safely.
-	baseErr := s.BaseSession.Close()
-	if baseErr != nil {
-		logger.Error("Error during BaseSession.Close (closing Output channel)", zap.Error(baseErr))
-		// Continue with other cleanup steps
-	} else {
-		logger.Debug("BaseSession Output channel closed")
-	}
-
-	// 5. Unsubscribe SSE client (important to stop potential reconnections)
-	// This might already be handled by context cancellation in SubscribeChanWithContext,
-	// but explicit unsubscribe here provides robustness.
-	s.Locker.Lock()
-	if s.sseClient != nil {
-		// sseClient.Unsubscribe() might block or panic if called concurrently,
-		// but since the loop is signaled to stop, this should be relatively safe.
-		// Alternatively, rely solely on context cancellation passed to SubscribeChanWithContext.
-		// Let's keep explicit unsubscribe for clarity, assuming library handles it safely.
-		s.sseClient.Unsubscribe(s.sseCh) // Unsubscribe from the specific channel
-		logger.Debug("Unsubscribed from SSE client channel")
+		s.closeCh = nil
+		logger.Debug("Signaled processing loop")
 	}
 	s.Locker.Unlock()
-
+	s.SetStatus(shared.StatusNew)
+	baseErr := s.BaseSession.Close()
+	if baseErr != nil {
+		logger.Error("Error closing BaseSession Output", zap.Error(baseErr))
+	} else {
+		logger.Debug("BaseSession Output closed")
+	}
 	logger.Info("Session close process completed")
-	return baseErr // Return error from BaseSession.Close if any occurred
+	return baseErr
 }

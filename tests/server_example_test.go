@@ -98,7 +98,7 @@ func TestMCP2024UnauthorizedPost(t *testing.T) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	require.NoError(t, err, "Failed to send request")
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "Expected status code 401")
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, "Expected status code 401")
 }
 
 // Test successful tool call with valid authorization

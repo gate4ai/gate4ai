@@ -25,7 +25,7 @@ type tool struct {
 // It handles combining results, resolving name conflicts, and caching.
 func (c *GatewayCapability) GetTools(inputMsg *shared.Message, logger *zap.Logger) ([]*tool, error) {
 	// Use a timeout for the overall operation
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // Adjusted timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second) // Adjusted timeout
 	defer cancel()
 
 	sessionParams := inputMsg.Session.GetParams()
@@ -81,12 +81,12 @@ func (c *GatewayCapability) GetTools(inputMsg *shared.Message, logger *zap.Logge
 	}
 
 	// Define the function to modify the tool name in case of duplicates
-	modifyToolKeyFunc := func(t *tool, serverID string) *tool {
+	modifyToolKeyFunc := func(t *tool, serverSlug string) *tool {
 		// Use serverID passed to the function for prefixing
-		newName := fmt.Sprintf("%s:%s", serverID, t.originalName) // Use originalName for prefixing
+		newName := fmt.Sprintf("%s:%s", serverSlug, t.originalName) // Use originalName for prefixing
 		logger.Debug("Modifying duplicate tool name",
 			zap.String("original", t.originalName),
-			zap.String("server", serverID),
+			zap.String("server", serverSlug),
 			zap.String("modified", newName),
 		)
 		t.Name = newName // Update the Name field

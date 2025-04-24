@@ -14,71 +14,67 @@ import (
 )
 
 // tryMCPDiscovery attempts to discover if the target URL hosts an MCP server.
-func tryMCPDiscovery(ctx context.Context, targetURL string, authBearer string, logger *zap.Logger) (*DiscoveryResult, error) {
-	logger.Debug("Attempting MCP discovery", zap.String("url", targetURL))
+// Now accepts discoveryHeaders map. authBearer is extracted from headers if present.
+func tryMCPDiscovery(ctx context.Context, targetURL string, discoveryHeaders map[string]string, logger *zap.Logger) (*DiscoveryResult, error) {
+	logger.Debug("Attempting MCP discovery", zap.String("url", targetURL), zap.Int("headerCount", len(discoveryHeaders)))
 
-	// Create a new MCP client for the target URL
-	mcpClient, err := mcpClient.New(shared.RandomID(), targetURL, logger.Named("mcp-discover-client"))
+	mcpClientInstance, err := mcpClient.New(shared.RandomID(), targetURL, logger.Named("mcp-discover-client"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create MCP client for discovery: %w", err)
 	}
 
-	// Use a default HTTP client with a reasonable timeout for discovery
-	httpClient := &http.Client{
-		Timeout: 5 * time.Second, // Shorter timeout for discovery handshake
+	httpClient := &http.Client{ // Use default client, timeout handled by context
+		// Timeout: 5 * time.Second, // Timeout handled by context passed to NewSession/GetServerInfo
 	}
 
-	// Create a new session with a derived context that includes the overall timeout
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
-	defer sessionCancel() // Ensure session context is cancelled when this function returns
+	defer sessionCancel()
 
-	mcpSession := mcpClient.NewSession(sessionCtx, httpClient, authBearer)
-	defer mcpSession.Close() // Ensure session resources are cleaned up
+	// Pass the discoveryHeaders (which might include Authorization) to NewSession
+	mcpSession := mcpClientInstance.NewSession(sessionCtx,
+		mcpClient.WithHTTPClient(httpClient),
+		mcpClient.WithHeaders(discoveryHeaders))
+	defer mcpSession.Close()
 
-	// Attempt to get server info. This implicitly calls Open() and performs the handshake.
-	// Use the parent context (ctx) for the GetServerInfo call itself.
-	serverInfoResultChan := mcpSession.GetServerInfo(ctx)
+	// GetServerInfo implicitly calls Open() and uses headers set during NewSession
+	serverInfoResultChan := mcpSession.GetServerInfo(ctx) // Use parent context for the call itself
 
-	// Wait for the result or timeout/cancellation from the parent context
 	select {
 	case serverInfoResult := <-serverInfoResultChan:
 		if serverInfoResult.Err != nil {
-			// Handshake failed (e.g., invalid URL, auth error, non-MCP server, timeout)
+			logger.Debug("MCP handshake failed", zap.Error(serverInfoResult.Err))
 			return nil, fmt.Errorf("MCP handshake failed: %w", serverInfoResult.Err)
 		}
-		// MCP Handshake successful!
+		logger.Info("MCP detected via successful handshake", zap.String("url", targetURL))
 
-		// Now, fetch tools (optional, but useful for the dialog)
-		toolsResultChan := mcpSession.GetTools(ctx)
+		// Fetch tools
+		toolsCtx, toolsCancel := context.WithTimeout(ctx, 500*time.Second) // Separate short timeout for tools fetch
+		defer toolsCancel()
+		toolsResultChan := mcpSession.GetTools(toolsCtx)
 		result := &DiscoveryResult{
 			ServerInfo: clients.ServerInfo{
-				URL:             targetURL,
+				URL:             targetURL, // Use original target URL
 				Name:            serverInfoResult.ServerInfo.Name,
 				Version:         serverInfoResult.ServerInfo.Version,
-				Description:     "",  // MCP doesn't provide a description
-				Website:         nil, // MCP doesn't provide a website
 				Protocol:        clients.ServerTypeMCP,
-				ProtocolVersion: schema.PROTOCOL_VERSION,
+				ProtocolVersion: schema.PROTOCOL_VERSION, // Assuming latest if handshake succeeds
 			},
 		}
 
-		// Wait for tools result or timeout/cancellation
 		select {
 		case toolsResult := <-toolsResultChan:
 			if toolsResult.Err != nil {
 				logger.Warn("MCP server detected, but failed to fetch tools", zap.Error(toolsResult.Err))
-				// Return success but without tools
 			} else {
 				result.MCPTools = toolsResult.Tools
+				logger.Debug("MCP tools fetched successfully", zap.Int("count", len(result.MCPTools)))
 			}
-			return result, nil // Return success (with or without tools)
-		case <-ctx.Done():
-			logger.Warn("MCP server detected, but timed out fetching tools", zap.Error(ctx.Err()))
-			return result, nil // Return success but without tools due to timeout
+		case <-toolsCtx.Done():
+			logger.Warn("MCP server detected, but timed out fetching tools", zap.Error(toolsCtx.Err()))
 		}
+		return result, nil
 
 	case <-ctx.Done():
-		// Parent context cancelled/timed out before handshake completed
-		return nil, fmt.Errorf("MCP discovery timed out or was cancelled: %w", ctx.Err())
+		return nil, fmt.Errorf("MCP discovery timed out or cancelled: %w", ctx.Err())
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"time"
 
 	"github.com/gate4ai/gate4ai/gateway/clients/mcpClient"
@@ -55,7 +54,7 @@ func GetToolsList(serverURL string, key string, logger *zap.Logger) ([]schema.To
 			resultChan <- mcpClient.GetToolsResult{Err: fmt.Errorf("failed to create client: %w", err)}
 			return
 		}
-		session := c.NewSession(ctxTimeout, http.DefaultClient, key)
+		session := c.NewSession(ctxTimeout, mcpClient.WithAuthenticationBearer(key))
 		defer session.Close()
 
 		r := <-session.GetTools(ctxTimeout)

@@ -65,9 +65,19 @@ func doServerAcvite(am *ArtifactManager, owner *User, server *CatalogServer) err
 	am.SaveScreenshot("status_set_to_active")
 
 	// --- Click Update Button ---
-	updateButtonSelector := "button[type='submit']:has-text('Update Server')"
+	updateButtonSelector := "button[type='submit']:has-text('Update Core Details')"
 	if err := am.ClickWithDebug(updateButtonSelector, "update_server_button"); err != nil {
-		return fmt.Errorf("failed to click Update Server button: %w", err)
+		return fmt.Errorf("failed to click Update Core Details button: %w", err)
+	}
+
+	// Wait for success message (optional but good)
+	if _, err := am.WaitForLocatorWithDebug(".v-snackbar:has-text('Server core details updated successfully')", "success_message_wait"); err != nil {
+		return fmt.Errorf("not found - Server core details updated successfully: %w", err)
+	}
+
+	cancelButtonSelector := "button[type='button']:has-text('Cancel')"
+	if err := am.ClickWithDebug(cancelButtonSelector, "cancel_button_click"); err != nil {
+		return fmt.Errorf("could not click Update Server button: %w", err)
 	}
 
 	// --- Wait for Navigation and Success ---

@@ -55,7 +55,6 @@ func TestGatewayAPIKeyAuthorization(t *testing.T) {
 	t.Logf("Non-subscriber API key created: %s...", nonSubscriberKey.Key[:8])
 
 	// 4. Make gateway API calls with each key
-	// Gateway uses V2025 endpoint /mcp
 	FULL_GATEWAY_URL := GATEWAY_URL + transport.MCP2024_PATH
 
 	// --- Test Owner Key ---
@@ -65,8 +64,8 @@ func TestGatewayAPIKeyAuthorization(t *testing.T) {
 	// They always see the tools of the servers they own, even if DRAFT.
 	require.NoError(t, err, "Failed to get owner tools list")
 	t.Logf("Owner tools list (server DRAFT): %v", list)
-	// Example server has 6 tools defined in startExample.go
-	require.Len(t, list, 6, "Owner API request returned incorrect number of tools (server DRAFT)")
+	// Example server has 7 tools defined in startExample.go
+	require.Len(t, list, 7, "Owner API request returned incorrect number of tools (server DRAFT)")
 	t.Log("Owner key test passed (server DRAFT).")
 
 	// --- Test Subscriber Key (Server DRAFT) ---
@@ -89,7 +88,7 @@ func TestGatewayAPIKeyAuthorization(t *testing.T) {
 	list, err = GetToolsList(FULL_GATEWAY_URL, subscriberKey.Key, am.Logger)
 	require.NoError(t, err, "Failed to get subscriber tools list (server ACTIVE)")
 	t.Logf("Subscriber tools list (server ACTIVE): %v", list)
-	require.Len(t, list, 6, "Subscriber API request returned incorrect number of tools (server ACTIVE)")
+	require.Len(t, list, 7, "Subscriber API request returned incorrect number of tools (server ACTIVE)")
 	t.Log("Subscriber key test passed (server ACTIVE).")
 
 	// --- Test Non-Subscriber Key (Server ACTIVE) ---

@@ -20,7 +20,6 @@ func (t *Transport) handleDELETE(w http.ResponseWriter, r *http.Request, logger 
 	_, err := t.sessionManager.GetSession(sessionIDHeader)
 	if err != nil {
 		logger.Warn("Session not found for DELETE request", zap.String("sessionId", sessionIDHeader), zap.Error(err))
-		// Spec says return 404 if session not found
 		http.Error(w, "Not Found: Session expired or invalid", statusNotFound)
 		return
 	}

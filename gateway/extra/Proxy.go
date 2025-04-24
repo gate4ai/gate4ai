@@ -15,6 +15,10 @@ const proxyErrorMessage = "Internal Server Error\n" +
 	"then specify the correct address in the portal settings\n" +
 	"[Open Portal as Admin] -> Settings -> Gateway -> [Frontend Address for Proxy] -> Reboot gateway"
 
+// NOTE: This proxy handler is intended EXCLUSIVELY for redirecting
+// UI requests from the user's browser to the Portal's internal backend (Nuxt).
+// It does NOT participate in proxying requests from the gateway to external REST API servers,
+// registered in the Portal's catalog. A separate REST client is required for this.
 func ProxyHandler(frontUrl string, logger *zap.Logger) http.HandlerFunc {
 	targetURL, err := url.Parse(frontUrl)
 	if err != nil {

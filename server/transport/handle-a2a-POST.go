@@ -71,7 +71,7 @@ func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger
 		}
 	}
 
-	session, err := t.getSession(w, r, sessionID, logger, true)
+	session, err := t.getSession(r, sessionID, logger, true)
 	if err != nil {
 		logger.Error("Failed to get/create session for A2A request", zap.Error(err))
 		http.Error(w, "Session creation failed", http.StatusInternalServerError)

@@ -264,7 +264,7 @@ func (am *ArtifactManager) SaveLocatorDebugInfo(selector string, description str
 }
 
 // WaitForLocatorWithDebug waits for a locator and saves debug info if not found
-func (am *ArtifactManager) WaitForLocatorWithDebug(selector string, description string) (playwright.Locator, error) {
+func (am *ArtifactManager) WaitForLocatorWithDebug(selector string, description string, timeout ...float64) (playwright.Locator, error) {
 	if am == nil || am.Page == nil {
 		if am != nil && am.T != nil {
 			am.T.Logf("Artifact manager or page is nil, cannot wait for locator")
@@ -272,10 +272,14 @@ func (am *ArtifactManager) WaitForLocatorWithDebug(selector string, description 
 		return nil, fmt.Errorf("artifact manager or page is nil")
 	}
 
+	t := 10000.0
+	if len(timeout) > 0 {
+		t = timeout[0]
+	}
 	locator := am.Page.Locator(selector)
 	err := locator.WaitFor(playwright.LocatorWaitForOptions{
 		State:   playwright.WaitForSelectorStateVisible,
-		Timeout: playwright.Float(10000),
+		Timeout: playwright.Float(t),
 	})
 
 	if err != nil {

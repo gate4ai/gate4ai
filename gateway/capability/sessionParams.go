@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/gate4ai/gate4ai/gateway/clients/mcpClient"
-	"github.com/gate4ai/gate4ai/server/transport"
 )
 
 // Constants for session parameter keys
@@ -46,33 +45,6 @@ func LoadBackendSessions(sessionParams *sync.Map) ([]*mcpClient.Session, time.Ti
 	}
 
 	return sessions, saved.Timestamp, true
-}
-
-func SaveClientSession(sessionParams *sync.Map, clientSession *transport.Session) {
-	sessionParams.Store(clientSessionsKey, &SavedValue{
-		Value:     clientSession,
-		Timestamp: time.Now(),
-	})
-}
-
-// GetClientSession returns client session with timestamp and success indicator
-func GetClientSession(sessionParams *sync.Map) (*transport.Session, time.Time, bool) {
-	savedValue, ok1 := sessionParams.Load(clientSessionsKey)
-	if !ok1 {
-		return nil, time.Time{}, false
-	}
-
-	saved, ok2 := savedValue.(*SavedValue)
-	if !ok2 {
-		return nil, time.Time{}, false
-	}
-
-	session, ok := saved.Value.(*transport.Session)
-	if !ok {
-		return nil, time.Time{}, false
-	}
-
-	return session, saved.Timestamp, true
 }
 
 func SaveServerSlug(sessionParams *sync.Map, serverSlug string) {

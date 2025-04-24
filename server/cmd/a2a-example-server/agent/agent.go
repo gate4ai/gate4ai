@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync" // Import sync
 	"time"
 
 	"github.com/gate4ai/gate4ai/server/a2a" // Use the server's a2a types
@@ -13,6 +14,9 @@ import (
 	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	"go.uber.org/zap"
 )
+
+// Define the key used to retrieve headers from session params
+const sessionHeadersKey = "gateway_received_headers"
 
 // DemoAgentHandler implements the A2AHandler interface.
 // It parses commands from the last message in the task history and executes them sequentially.
@@ -42,7 +46,7 @@ func DemoAgentHandler(ctx context.Context, task *a2aSchema.Task, updates chan<- 
 	var artifactSent bool = false // Track if any 'respond' command generated an artifact
 	var artifactsToYield []a2aSchema.Artifact
 	currentArtifactIndex := len(task.Artifacts) // Start index from existing artifacts
-	var stopProcessing bool = false             // Flag to stop processing commands in this request (DECLARE HERE)
+	var stopProcessing bool = false             // Flag to stop processing commands in this request
 
 	for _, cmd := range commands {
 		// 1. Apply Delay (if any)
@@ -69,7 +73,6 @@ func DemoAgentHandler(ctx context.Context, task *a2aSchema.Task, updates chan<- 
 
 		// 3. Execute Command
 		log.Info("Executing command", zap.String("type", cmd.Type), zap.Any("params", cmd.Params))
-		// stopProcessing := false // MOVED declaration outside loop
 
 		switch cmd.Type {
 		case "wait":
@@ -214,6 +217,28 @@ func DemoAgentHandler(ctx context.Context, task *a2aSchema.Task, updates chan<- 
 				_ = sendStatusUpdate(ctx, updates, a2aSchema.TaskStateFailed, errMsg)
 				return errors.New(errMsg) // Return internal Go error
 			}
+
+		case "get_headers": // NEW: Handle get_headers command
+			// Retrieve headers from the session associated with the task
+			// This assumes the session object is accessible or headers are stored in task metadata
+			// For this example, let's assume they are in task metadata or a lookup is possible
+			headers, err := getHeadersForTask(task) // Placeholder function
+			if err != nil {
+				log.Error("Failed to get headers for task", zap.Error(err))
+				_ = sendStatusUpdate(ctx, updates, a2aSchema.TaskStateFailed, "Failed to retrieve request headers.")
+				return fmt.Errorf("failed to get headers: %w", err)
+			}
+			log.Info("Retrieved headers", zap.Any("headers", headers))
+			// Create a data artifact to send the headers back
+			artifact := createDataArtifact(map[string]interface{}{
+				"received_headers": headers,
+			})
+			artifact.Name = shared.PointerTo("received_headers.json")
+			artifact.Index = currentArtifactIndex
+			currentArtifactIndex++
+			artifactsToYield = append(artifactsToYield, artifact)
+			artifactSent = true // Mark that an artifact was explicitly generated
+
 		default:
 			log.Warn("Unknown command type during execution", zap.String("type", cmd.Type))
 		}
@@ -245,9 +270,9 @@ func DemoAgentHandler(ctx context.Context, task *a2aSchema.Task, updates chan<- 
 	}
 
 	// --- Handle Default Artifact ---
-	// Only create default artifact if NO 'respond' command was processed and we didn't stop early.
-	if !artifactSent && !stopProcessing { // Check stopProcessing flag here
-		log.Info("No 'respond' command executed, creating default artifact.")
+	// Only create default artifact if NO 'respond' or 'get_headers' command was processed and we didn't stop early.
+	if !artifactSent && !stopProcessing {
+		log.Info("No explicit response/artifact command executed, creating default artifact.")
 		defaultText := "OK"
 		if firstTextPart != "" {
 			// Limit length of echoed text in default response
@@ -268,7 +293,7 @@ func DemoAgentHandler(ctx context.Context, task *a2aSchema.Task, updates chan<- 
 	}
 
 	// --- Send Final Completed Status (if not already stopped/failed/input-required) ---
-	if !stopProcessing { // Check stopProcessing flag here
+	if !stopProcessing {
 		log.Info("Agent handler finished normally, sending completed status.")
 		if err := sendStatusUpdate(ctx, updates, a2aSchema.TaskStateCompleted, "Task completed successfully."); err != nil {
 			log.Error("Failed to send final completed status", zap.Error(err))
@@ -279,4 +304,50 @@ func DemoAgentHandler(ctx context.Context, task *a2aSchema.Task, updates chan<- 
 	}
 
 	return nil // Handler finished successfully (or stopped early as expected)
+}
+
+// getHeadersForTask retrieves the headers associated with the task's session.
+// Placeholder implementation: Assumes headers are stored in task.Metadata under sessionHeadersKey
+// In a real scenario, this might involve looking up the session by task.SessionID.
+func getHeadersForTask(task *a2aSchema.Task) (map[string]interface{}, error) {
+	if task.Metadata == nil {
+		return nil, fmt.Errorf("task metadata is nil, cannot retrieve headers")
+	}
+	headersRaw, ok := (*task.Metadata)[sessionHeadersKey]
+	if !ok {
+		return nil, fmt.Errorf("headers not found in task metadata under key '%s'", sessionHeadersKey)
+	}
+
+	// Attempt to type-assert the stored headers
+	// Headers are likely stored as map[string]string by the transport layer
+	headersMapStrStr, ok := headersRaw.(map[string]string)
+	if ok {
+		// Convert map[string]string to map[string]interface{}
+		headersMapIf := make(map[string]interface{}, len(headersMapStrStr))
+		for k, v := range headersMapStrStr {
+			headersMapIf[k] = v
+		}
+		return headersMapIf, nil
+	}
+
+	// Try map[string]interface{} directly
+	headersMapIf, ok := headersRaw.(map[string]interface{})
+	if ok {
+		return headersMapIf, nil
+	}
+
+	// Try sync.Map (though less likely from transport)
+	headersSyncMap, ok := headersRaw.(*sync.Map)
+	if ok {
+		headersMapIf := make(map[string]interface{})
+		headersSyncMap.Range(func(key, value interface{}) bool {
+			if keyStr, okKey := key.(string); okKey {
+				headersMapIf[keyStr] = value
+			}
+			return true // continue iteration
+		})
+		return headersMapIf, nil
+	}
+
+	return nil, fmt.Errorf("headers found in metadata but have unexpected type: %T", headersRaw)
 }

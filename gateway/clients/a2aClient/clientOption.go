@@ -39,6 +39,6 @@ func DoNotTrustAgentInfoURL() ClientOption {
 
 func WithAuthenticationBearer(bearer string) ClientOption {
 	return func(c *Client) {
-		c.Headers["Authorization"] = "Bearer " + bearer
+		c.headers["Authorization"] = "Bearer " + bearer
 	}
 }

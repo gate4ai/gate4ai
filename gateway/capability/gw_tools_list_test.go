@@ -13,7 +13,7 @@ func TestGetToolsList(t *testing.T) {
 		t.Fatalf("Failed to get tools list: %v", err)
 	}
 	t.Logf("user1 tools list: %v", list)
-	if len(list) != 6 {
+	if len(list) != 7 {
 		t.Fatalf("No tools found")
 	}
 	list, err = tests.GetToolsList(GW_URL, "key-user2", LOGGER.With(zap.String("s", "TestGetToolsList2")))
@@ -21,7 +21,7 @@ func TestGetToolsList(t *testing.T) {
 		t.Fatalf("Failed to get tools list: %v", err)
 	}
 	t.Logf("user2 tools list: %v", list)
-	if len(list) != 6 {
+	if len(list) != 7 {
 		t.Fatalf("No tools found")
 	}
 	list, err = tests.GetToolsList(GW_URL, "key-user3", LOGGER.With(zap.String("s", "TestGetToolsList3")))
@@ -29,7 +29,7 @@ func TestGetToolsList(t *testing.T) {
 		t.Fatalf("Failed to get tools list: %v", err)
 	}
 	t.Logf("user3 tools list: %v", list)
-	if len(list) != 12 {
+	if len(list) != 14 {
 		t.Fatalf("No tools found")
 	}
 }

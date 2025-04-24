@@ -69,12 +69,24 @@ CREATE TABLE "Server" (
     "protocol" "ServerProtocol" NOT NULL DEFAULT 'MCP',
     "protocolVersion" TEXT,
     "serverUrl" TEXT NOT NULL,
+    "headers" JSONB,
     "status" "ServerStatus" NOT NULL DEFAULT 'DRAFT',
     "availability" "ServerAvailability" NOT NULL DEFAULT 'SUBSCRIPTION',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Server_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "SubscriptionHeaderTemplate" (
+    "id" TEXT NOT NULL,
+    "key" TEXT NOT NULL,
+    "description" TEXT,
+    "required" BOOLEAN NOT NULL DEFAULT false,
+    "serverId" TEXT NOT NULL,
+
+    CONSTRAINT "SubscriptionHeaderTemplate_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -105,6 +117,7 @@ CREATE TABLE "ToolParameter" (
 CREATE TABLE "Subscription" (
     "id" TEXT NOT NULL,
     "status" "SubscriptionStatus" NOT NULL DEFAULT 'ACTIVE',
+    "headerValues" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "userId" TEXT,
     "serverId" TEXT,
@@ -222,6 +235,9 @@ CREATE UNIQUE INDEX "ApiKey_keyHash_key" ON "ApiKey"("keyHash");
 CREATE UNIQUE INDEX "Server_slug_key" ON "Server"("slug");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "SubscriptionHeaderTemplate_serverId_key_key" ON "SubscriptionHeaderTemplate"("serverId", "key");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Tool_name_serverId_key" ON "Tool"("name", "serverId");
 
 -- CreateIndex
@@ -247,6 +263,9 @@ ALTER TABLE "ServerOwner" ADD CONSTRAINT "ServerOwner_serverId_fkey" FOREIGN KEY
 
 -- AddForeignKey
 ALTER TABLE "ApiKey" ADD CONSTRAINT "ApiKey_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SubscriptionHeaderTemplate" ADD CONSTRAINT "SubscriptionHeaderTemplate_serverId_fkey" FOREIGN KEY ("serverId") REFERENCES "Server"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Tool" ADD CONSTRAINT "Tool_serverId_fkey" FOREIGN KEY ("serverId") REFERENCES "Server"("id") ON DELETE CASCADE ON UPDATE CASCADE;

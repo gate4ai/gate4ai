@@ -21,9 +21,10 @@ const (
 func (t *Transport) handle2024GET(w http.ResponseWriter, r *http.Request, logger *zap.Logger) {
 	logger = logger.With(zap.String("method", "handle2024GET"))
 
-	session, err := t.getSession(w, r, r.URL.Query().Get(SESSION_ID_KEY2024), logger, true)
+	session, err := t.getSession(r, r.URL.Query().Get(SESSION_ID_KEY2024), logger, true)
 	if err != nil {
-		logger.Error("Failed to get session", zap.Error(err))
+		http.Error(w, "Session failed", http.StatusUnauthorized)
+		logger.Error("Failed to get or create session", zap.Error(err))
 		return
 	}
 

@@ -16,10 +16,10 @@ import (
 // handlePOST processes POST requests on the unified MCP endpoint.
 // It handles V2025 message posting according to the 2025-03-26 specification.
 func (t *Transport) handlePOST(w http.ResponseWriter, r *http.Request, logger *zap.Logger) {
-	session, err := t.getSession(w, r, r.Header.Get(MCP_SESSION_HEADER), logger, true)
+	session, err := t.getSession(r, r.Header.Get(MCP_SESSION_HEADER), logger, true)
 	if err != nil {
 		logger.Error("Failed to get session", zap.Error(err))
-		sendJSONRPCErrorResponse(w, nil, shared.JSONRPCErrorParseError, "Failed to get session", nil, logger)
+		sendJSONRPCErrorResponse(w, nil, shared.JSONRPCErrorUnauthorized, "Failed to get session", nil, logger)
 		return
 	}
 

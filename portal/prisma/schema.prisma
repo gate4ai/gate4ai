@@ -75,28 +75,44 @@ model ApiKey {
 
 // Server model
 model Server {
-  id           String             @id @default(uuid())
-  slug         String             @unique // Unique human-readable identifier
-  name         String
-  description  String?
-  website      String?
-  email        String?
-  imageUrl     String?
-  protocol     ServerProtocol     @default(MCP) // Type of the server protocol
-  protocolVersion String?
-  serverUrl    String // Hidden from non-owners
-  status       ServerStatus       @default(DRAFT)
-  availability ServerAvailability @default(SUBSCRIPTION) // Hidden from non-owners
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  id                       String                     @id @default(uuid())
+  slug                     String                     @unique // Unique human-readable identifier
+  name                     String
+  description              String?
+  website                  String?
+  email                    String?
+  imageUrl                 String?
+  protocol                 ServerProtocol             @default(MCP) // Type of the server protocol
+  protocolVersion          String?
+  serverUrl                String // Hidden from non-owners
+  headers                  Json? // Server-specific http headers (key-value)
+  status                   ServerStatus               @default(DRAFT)
+  availability             ServerAvailability         @default(SUBSCRIPTION) // Hidden from non-owners
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
 
   // Relations
-  owners        ServerOwner[] // Hidden from non-owners
-  tools         Tool[]
-  a2aSkills     A2ASkill[]
-  restEndpoints RESTEndpoint[]
-  subscriptions Subscription[] // Hidden from non-owners
-  toolCalls     ToolCall[] // Hidden from non-owners
+  owners                   ServerOwner[] // Hidden from non-owners
+  tools                    Tool[]
+  a2aSkills                A2ASkill[]
+  restEndpoints            RESTEndpoint[]
+  subscriptions            Subscription[] // Hidden from non-owners
+  subscriptionHeaderTemplate SubscriptionHeaderTemplate[] // Template for subscription http headers
+  toolCalls                ToolCall[] // Hidden from non-owners
+}
+
+// Subscription Header Template model
+model SubscriptionHeaderTemplate {
+  id          String  @id @default(uuid())
+  key         String  // Header key name
+  description String? // Description shown to subscriber
+  required    Boolean @default(false) // Whether the subscriber must provide a value
+
+  // Relations
+  serverId String
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, key]) // Ensure key names are unique per server
 }
 
 // Enum for Server Type
@@ -150,9 +166,10 @@ model ToolParameter {
 
 // Subscription model (for users or API keys subscribing to servers)
 model Subscription {
-  id        String             @id @default(uuid())
-  status    SubscriptionStatus @default(ACTIVE)
-  createdAt DateTime           @default(now())
+  id           String             @id @default(uuid())
+  status       SubscriptionStatus @default(ACTIVE)
+  headerValues Json? // Stores user-provided values for subscription http headers (key-value)
+  createdAt    DateTime           @default(now())
 
   // Relations - can be associated with either a user or an API key
   userId String?

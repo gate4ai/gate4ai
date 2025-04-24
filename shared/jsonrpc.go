@@ -19,6 +19,8 @@ const (
 
 	// -32000 to -32099 are reserved for implementation-defined server errors
 	JSONRPCErrorServerError = -32000 // Generic server error
+
+	JSONRPCErrorUnauthorized = -32001 // Unauthorized
 )
 
 type JSONRPCErrorResponse struct {

@@ -27,7 +27,7 @@ func (c *GatewayCapability) gw_resources_subscribe(inputMsg *shared.Message) (in
 	}
 
 	logger.Debug("Found resource, forwarding subscribe request to backend",
-		zap.String("backendServerID", targetResource.serverID),
+		zap.String("backendServerID", targetResource.serverSlug),
 		zap.String("originalURI", targetResource.originalURI),
 		zap.String("gatewayURI", targetResource.URI))
 
@@ -39,7 +39,7 @@ func (c *GatewayCapability) gw_resources_subscribe(inputMsg *shared.Message) (in
 	err = backendSession.SubscribeResource(ctx, targetResource.originalURI)
 	if err != nil {
 		logger.Error("Failed to subscribe to resource on backend server",
-			zap.String("server", targetResource.serverID),
+			zap.String("server", targetResource.serverSlug),
 			zap.String("originalURI", targetResource.originalURI),
 			zap.Error(err))
 		return nil, fmt.Errorf("failed to subscribe to resource '%s' on backend: %w", targetResource.originalURI, err)
@@ -47,7 +47,7 @@ func (c *GatewayCapability) gw_resources_subscribe(inputMsg *shared.Message) (in
 
 	logger.Info("Successfully subscribed to resource via backend",
 		zap.String("gatewayURI", targetResource.URI),
-		zap.String("backendServerID", targetResource.serverID),
+		zap.String("backendServerID", targetResource.serverSlug),
 		zap.String("originalURI", targetResource.originalURI))
 
 	// Return success response to the gateway client
@@ -70,7 +70,7 @@ func (c *GatewayCapability) gw_resources_unsubscribe(inputMsg *shared.Message) (
 	}
 
 	logger.Debug("Found resource, forwarding unsubscribe request to backend",
-		zap.String("backendServerID", targetResource.serverID),
+		zap.String("backendServerSlug", targetResource.serverSlug),
 		zap.String("originalURI", targetResource.originalURI),
 		zap.String("gatewayURI", targetResource.URI))
 
@@ -82,7 +82,7 @@ func (c *GatewayCapability) gw_resources_unsubscribe(inputMsg *shared.Message) (
 	err = backendSession.UnsubscribeResource(ctx, targetResource.originalURI)
 	if err != nil {
 		logger.Error("Failed to unsubscribe from resource on backend server",
-			zap.String("server", targetResource.serverID),
+			zap.String("server", targetResource.serverSlug),
 			zap.String("originalURI", targetResource.originalURI),
 			zap.Error(err))
 		return nil, fmt.Errorf("failed to unsubscribe from resource '%s' on backend: %w", targetResource.originalURI, err)
@@ -90,7 +90,7 @@ func (c *GatewayCapability) gw_resources_unsubscribe(inputMsg *shared.Message) (
 
 	logger.Info("Successfully unsubscribed from resource via backend",
 		zap.String("gatewayURI", targetResource.URI),
-		zap.String("backendServerID", targetResource.serverID),
+		zap.String("backendServerSlug", targetResource.serverSlug),
 		zap.String("originalURI", targetResource.originalURI))
 
 	// Return success response to the gateway client
@@ -121,8 +121,8 @@ func (c *GatewayCapability) gw_resources_notification_updated(backendMsg *shared
 	// Get the originating backend session's parameters to find the server ID and the target gateway client session
 	backendSessionParams := backendMsg.Session.GetParams()
 
-	serverID, _, okServer := GetServerSlug(backendSessionParams)
-	if !okServer || serverID == "" {
+	serverSlug, _, okServer := GetServerSlug(backendSessionParams)
+	if !okServer || serverSlug == "" {
 		logger.Error("Could not determine server ID from backend session receiving the update")
 		// backendMsg.Session.Close() // Consider closing inconsistent backend session
 		return
@@ -140,12 +140,12 @@ func (c *GatewayCapability) gw_resources_notification_updated(backendMsg *shared
 	// We need the cache to map originalURI@serverID back to the gateway URI
 	cachedResources, _, okCache := GetSavedResources(clientSession.GetParams())
 	if !okCache {
-		clientSessionLogger.Warn("No cached resources found for client session, cannot map updated URI", zap.String("originalURI", originalURI), zap.String("serverID", serverID))
+		clientSessionLogger.Warn("No cached resources found for client session, cannot map updated URI", zap.String("originalURI", originalURI), zap.String("serverSlug", serverSlug))
 		// Option 1: Force refresh cache?
 		// Option 2: Send notification with original URI (client might not recognize it)?
 		// Option 3: Send notification with prefixed URI (serverID:originalURI)?
 		// Let's try Option 3 as a fallback.
-		gatewayURI := fmt.Sprintf("%s:%s", serverID, originalURI)
+		gatewayURI := fmt.Sprintf("%s:%s", serverSlug, originalURI)
 		clientSessionLogger.Warn("Sending notification with prefixed URI as fallback", zap.String("gatewayURI", gatewayURI))
 		clientSession.SendNotification("notifications/resources/updated", map[string]interface{}{
 			"uri": gatewayURI,
@@ -155,20 +155,20 @@ func (c *GatewayCapability) gw_resources_notification_updated(backendMsg *shared
 
 	gatewayURI := ""
 	for _, res := range cachedResources {
-		if res != nil && res.originalURI == originalURI && res.serverID == serverID {
+		if res != nil && res.originalURI == originalURI && res.serverSlug == serverSlug {
 			gatewayURI = res.URI
 			break
 		}
 	}
 
 	if gatewayURI == "" {
-		clientSessionLogger.Error("Could not find gateway URI corresponding to updated resource", zap.String("originalURI", originalURI), zap.String("serverID", serverID))
+		clientSessionLogger.Error("Could not find gateway URI corresponding to updated resource", zap.String("originalURI", originalURI), zap.String("serverSlug", serverSlug))
 		// Fallback like above, or maybe don't send notification if mapping fails?
 		// Let's try sending prefixed URI again.
-		gatewayURI = fmt.Sprintf("%s:%s", serverID, originalURI)
+		gatewayURI = fmt.Sprintf("%s:%s", serverSlug, originalURI)
 		clientSessionLogger.Warn("Sending notification with prefixed URI as fallback (mapping failed)", zap.String("gatewayURI", gatewayURI))
 	} else {
-		clientSessionLogger.Debug("Mapped backend update to gateway URI", zap.String("originalURI", originalURI), zap.String("serverID", serverID), zap.String("gatewayURI", gatewayURI))
+		clientSessionLogger.Debug("Mapped backend update to gateway URI", zap.String("originalURI", originalURI), zap.String("serverSlug", serverSlug), zap.String("gatewayURI", gatewayURI))
 	}
 
 	// Send notification to the gateway client using the mapped (or fallback prefixed) URI

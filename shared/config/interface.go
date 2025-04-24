@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 
 	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
-	// Import A2A schema
 )
 
 // AuthorizationType represents different authorization strategies
@@ -48,19 +47,21 @@ type IConfig interface {
 	// User & Auth Settings
 	GetUserIDByKeyHash(keyHash string) (userID string, err error)
 	GetUserParams(userID string) (params map[string]string, err error)
-	GetUserSubscribes(userID string) (backends []string, err error)
 
 	// Backend & Subscription Settings
+	GetUserSubscribes(userID string) (backends []string, err error)
 	GetBackendBySlug(slug string) (backendCfg *Backend, err error)
+	GetServerHeaders(serverSlug string) (headers map[string]string, err error)
+	GetSubscriptionHeaders(userID, serverSlug string) (headers map[string]string, err error)
 
 	// SSL Settings
 	SSLEnabled() (bool, error)
-	SSLMode() (string, error)          // Returns "manual" or "acme"
-	SSLCertFile() (string, error)      // Path to certificate file (manual mode)
-	SSLKeyFile() (string, error)       // Path to private key file (manual mode)
-	SSLAcmeDomains() ([]string, error) // List of domains for ACME
-	SSLAcmeEmail() (string, error)     // Contact email for ACME
-	SSLAcmeCacheDir() (string, error)  // Directory to cache ACME certificates
+	SSLMode() (string, error)
+	SSLCertFile() (string, error)
+	SSLKeyFile() (string, error)
+	SSLAcmeDomains() ([]string, error)
+	SSLAcmeEmail() (string, error)
+	SSLAcmeCacheDir() (string, error)
 
 	// A2A Settings
 	GetA2AAgentCard(agentURL string) (*a2aSchema.AgentCard, error)

@@ -4,11 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"strconv"
+	"net/http"
+	"strconv" // Import sync package
 	"time"
 
 	"github.com/gate4ai/gate4ai/server"
-	"github.com/gate4ai/gate4ai/server/mcp/capability"
+	"github.com/gate4ai/gate4ai/server/mcp/capability" // Import transport for session param helpers
+	"github.com/gate4ai/gate4ai/server/transport"
 	"go.uber.org/zap"
 
 	// Removed capability import here, options will ensure creation
@@ -208,6 +210,58 @@ func PrintEnvHandler(_ *shared.Message, arguments schema.Arguments) (*schema.Met
 	}}, nil
 }
 
+// getHeaders Tool
+var GetHeadersTool = schema.Tool{
+	Name:        "getHeaders",
+	Description: "Returns the HTTP headers received by the server for this request.",
+	InputSchema: &schema.JSONSchemaProperty{Type: "object"}, // No input parameters needed
+}
+
+// getHeaders Tool Handler
+// This handler assumes the merged headers are stored in the session's sync.Map
+// under the key "gateway_received_headers" by the Gateway capability.
+func GetHeadersHandler(msg *shared.Message, arguments schema.Arguments) (*schema.Meta, []schema.Content, error) {
+	if msg == nil || msg.Session == nil {
+		return nil, nil, fmt.Errorf("session information is missing")
+	}
+	logger := msg.Session.GetLogger().With(zap.String("tool", "getHeaders"))
+
+	sessionParams := msg.Session.GetParams()
+	if sessionParams == nil {
+		logger.Warn("Session params map is nil")
+		return nil, nil, fmt.Errorf("session parameters not available")
+	}
+
+	// Retrieve the headers map stored by the gateway
+	// Use transport.GatewayReceivedHeadersKey constant? (Need to define it in transport)
+	headersValue, ok := sessionParams.Load(transport.HEADERKEY)
+	if !ok {
+		logger.Warn("Gateway received headers not found in session parameters")
+		return nil, nil, fmt.Errorf("received headers not found in session context")
+	}
+
+	header, ok := headersValue.(http.Header)
+	if !ok {
+		logger.Error("Gateway received headers found but have incorrect type", zap.Any("type", fmt.Sprintf("%T", headersValue)))
+		return nil, nil, fmt.Errorf("internal error: invalid header data type in session")
+	}
+
+	// Convert the map to a JSON string for the response
+	headersJSON, err := json.MarshalIndent(header, "", "  ") // Pretty print
+	if err != nil {
+		logger.Error("Failed to marshal received headers to JSON", zap.Error(err))
+		return nil, nil, fmt.Errorf("failed to format headers: %w", err)
+	}
+
+	jsonString := string(headersJSON)
+	logger.Debug("Returning received headers", zap.String("headersJson", jsonString))
+
+	return nil, []schema.Content{{
+		Type: "text", // Return headers as a JSON string in a text part
+		Text: &jsonString,
+	}}, nil
+}
+
 // --- Prompt Definitions ---
 var SimplePrompt = schema.Prompt{
 	Name:        "simple_prompt",
@@ -361,6 +415,7 @@ func BuildOptions(logger *zap.Logger) []server.ServerOption {
 		server.WithMCPTool(SampleLLMTool.Name, SampleLLMTool.Description, SampleLLMTool.InputSchema, SampleLLMTool.Annotations, SampleLLMHandler),
 		server.WithMCPTool(TinyImageTool.Name, TinyImageTool.Description, TinyImageTool.InputSchema, TinyImageTool.Annotations, TinyImageHandler),
 		server.WithMCPTool(PrintEnvTool.Name, PrintEnvTool.Description, PrintEnvTool.InputSchema, PrintEnvTool.Annotations, PrintEnvHandler),
+		server.WithMCPTool(GetHeadersTool.Name, GetHeadersTool.Description, GetHeadersTool.InputSchema, GetHeadersTool.Annotations, GetHeadersHandler), // NEW TOOL
 
 		// Add prompts
 		server.WithMCPPrompt(SimplePrompt.Name, SimplePrompt.Description, SimplePromptHandler),

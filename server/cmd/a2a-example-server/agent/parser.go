@@ -14,12 +14,13 @@ import (
 
 // Regular expressions for parsing commands - case insensitive (?i)
 var (
-	waitRegex      = regexp.MustCompile(`(?i)\bwait\s+(\d+)\s+seconds?\b`)
-	askRegex       = regexp.MustCompile(`(?i)\bask\s+for\s+input(?:\s+(?:"([^"]*)"|'([^']*)'|(\S+)))?\b`)
-	streamRegex    = regexp.MustCompile(`(?i)\bstream\s+(\d+)\s+chunks?\b`)
-	errorRegex     = regexp.MustCompile(`(?i)\btrigger\s+error\s+(-?\d+|fail)\b`)
-	respondRegex   = regexp.MustCompile(`(?i)\brespond\s+(?:with\s+)?(text|file|data)\s*(.*)`)
-	quotedStrRegex = regexp.MustCompile(`^(?:"([^"]*)"|'([^']*)')$`) // For quoted payloads like 'payload' or "payload"
+	waitRegex       = regexp.MustCompile(`(?i)\bwait\s+(\d+)\s+seconds?\b`)
+	askRegex        = regexp.MustCompile(`(?i)\bask\s+for\s+input(?:\s+(?:"([^"]*)"|'([^']*)'|(\S+)))?\b`)
+	streamRegex     = regexp.MustCompile(`(?i)\bstream\s+(\d+)\s+chunks?\b`)
+	errorRegex      = regexp.MustCompile(`(?i)\btrigger\s+error\s+(-?\d+|fail)\b`)
+	respondRegex    = regexp.MustCompile(`(?i)\brespond\s+(?:with\s+)?(text|file|data)\s*(.*)`)
+	getHeadersRegex = regexp.MustCompile(`(?i)\bget_headers\b`)       // NEW: Regex for get_headers command
+	quotedStrRegex  = regexp.MustCompile(`^(?:"([^"]*)"|'([^']*)')$`) // For quoted payloads like 'payload' or "payload"
 )
 
 // parseCommandsFromMessage extracts an ordered list of commands from all parts of a message.
@@ -126,6 +127,8 @@ func parseCommandsFromMessage(msg a2aSchema.Message, logger *zap.Logger) ([]Pars
 		updateMinIndex(errorMatches)
 		respondMatches := respondRegex.FindStringSubmatchIndex(remainingText)
 		updateMinIndex(respondMatches)
+		getHeadersMatches := getHeadersRegex.FindStringSubmatchIndex(remainingText) // NEW
+		updateMinIndex(getHeadersMatches)                                           // NEW
 
 		// If no command found in the remaining text, break
 		if minIndex == -1 {
@@ -135,7 +138,11 @@ func parseCommandsFromMessage(msg a2aSchema.Message, logger *zap.Logger) ([]Pars
 		// Determine which command matched at minIndex
 		absoluteMinIndex := currentIndex + minIndex
 
-		if waitMatches != nil && waitMatches[0] == minIndex {
+		if getHeadersMatches != nil && getHeadersMatches[0] == minIndex { // NEW: Handle get_headers
+			commands = append(commands, ParsedCommand{Type: "get_headers", Params: map[string]interface{}{}})
+			nextIndex = absoluteMinIndex + len(remainingText[getHeadersMatches[0]:getHeadersMatches[1]]) // Move past 'get_headers'
+			foundCmd = true
+		} else if waitMatches != nil && waitMatches[0] == minIndex {
 			delayStr := remainingText[waitMatches[2]:waitMatches[3]]
 			delay, _ := strconv.Atoi(delayStr) // Error ignored as regex ensures digits
 			commands = append(commands, ParsedCommand{Type: "wait", Params: map[string]interface{}{"duration": delay}})
@@ -302,6 +309,7 @@ func findNextCommandIndex(text string) int {
 	checkIndex(streamRegex.FindStringIndex(text))
 	checkIndex(errorRegex.FindStringIndex(text))
 	checkIndex(respondRegex.FindStringIndex(text))
+	checkIndex(getHeadersRegex.FindStringIndex(text)) // NEW
 
 	return minIndex
 }
