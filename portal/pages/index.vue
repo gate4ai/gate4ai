@@ -2,7 +2,7 @@
   <div>
     <!-- Hero Section -->
     <v-row class="hero-section py-12">
-      <v-col cols="12" md="6" class="d-flex flex-column justify-center">
+      <v-col class="d-flex flex-column justify-center">
         <h2 class="text-h4 font-weight-bold">Catalog:</h2>
         <!-- Loading/Error State for Carousel -->
         <div v-if="isLoadingServers" class="d-flex justify-center align-center my-8" style="min-height: 200px;">
@@ -13,7 +13,7 @@
         </v-alert>
 
         <!-- Server Carousel/Slider -->
-        <v-slide-group v-else-if="publicServers.length > 0" show-arrows class="mb-6">
+        <v-slide-group v-else-if="publicServers.length > 0" show-arrows>
           <v-slide-group-item v-for="server in publicServers" :key="server.id">
             <ServerCard
               :server="server"
@@ -23,24 +23,13 @@
             />
           </v-slide-group-item>
         </v-slide-group>
-        <p v-else class="text-body-1 mb-6">No public servers available in the catalog yet.</p>
+        <p v-else class="text-body-1">No public servers available in the catalog yet.</p>
 
         <div class="mt-4">
-           <v-btn color="primary" class="mr-4" to="/servers">
-            Explore Catalog
-          </v-btn>
+           <v-btn color="primary" class="mr-4" to="/servers">Explore Catalog</v-btn>
 
           <AddServerButton :is-authenticated="isAuthenticated" @open-add-dialog="showAddServerDialog = true" />
         </div>
-      </v-col>
-      <v-col cols="12" md="6" class="d-flex align-center justify-center">
-        <v-img
-          src="/images/logo.svg"
-          alt="gate4.ai"
-          width="200"
-          height="200"
-          contain
-        />
       </v-col>
     </v-row>
 

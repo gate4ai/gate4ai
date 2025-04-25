@@ -138,10 +138,17 @@ export default defineEventHandler(async (event) => {
   } catch (error) {
     console.error('Error fetching servers:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred while fetching servers';
-    console.error(`Server fetch error details: ${errorMessage}`);
-    throw createError({
-      statusCode: 500,
-      statusMessage: 'Failed to fetch servers',
-    });
+    if (errorMessage.includes("Please make sure your database server is running")) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Please make sure your database server is running',
+      });
+    } else {
+      console.error(`Server fetch error details: ${errorMessage}`);
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Failed to fetch servers',
+      });
+    }
   }
 });
