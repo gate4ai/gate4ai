@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/shared"
 )
 
 // MessageSizeValidator validates the size of incoming messages

@@ -1,24 +1,25 @@
 package config
 
 import (
-	"context"
+	"context" // Import errors package
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
 
+// Ensure YamlConfig implements IConfig
 var _ IConfig = (*YamlConfig)(nil)
 
 // YamlConfig implements all configuration interfaces with YAML file-based storage
 type YamlConfig struct {
-	mu         sync.RWMutex
-	configPath string
-	logger     *zap.Logger
-
-	// Parsed configuration
+	mu                          sync.RWMutex
+	configPath                  string
+	logger                      *zap.Logger
 	serverAddress               string
 	serverName                  string
 	serverVersion               string
@@ -26,10 +27,10 @@ type YamlConfig struct {
 	DiscoveringHandlerPathValue string
 	frontendAddressValue        string
 	authorizationType           AuthorizationType
-	userAuthKeys                map[string]string            // authKey -> userID
-	userParams                  map[string]map[string]string // userID -> paramName -> paramValue
-	userSubscribes              map[string][]string          // userID -> serverIDs
-	backends                    map[string]*Backend          // serverID -> Server
+	userKeyHashes               map[string]string
+	userParams                  map[string]map[string]string
+	userSubscribes              map[string][]string
+	backends                    map[string]*Backend
 
 	// SSL Fields
 	sslEnabled      bool
@@ -39,38 +40,46 @@ type YamlConfig struct {
 	sslAcmeDomains  []string
 	sslAcmeEmail    string
 	sslAcmeCacheDir string
+
+	// A2A Fields
+	a2a *a2aSchema.AgentCard
 }
 
 // YAML configuration structure matching the required format
 type yamlConfig struct {
 	Server struct {
-		Address                string   `yaml:"address"`
-		Name                   string   `yaml:"name"`
-		Version                string   `yaml:"version"`
-		LogLevel               string   `yaml:"log_level"`
-		DiscoveringHandlerPath string   `yaml:"info_handler"`
-		FrontendAddress        string   `yaml:"frontend_address"`
-		Authorization          string   `yaml:"authorization"` // Can be "users_only", "marked_methods", or "none"
-		SSL                    struct { // New SSL section
-			Enabled      bool     `yaml:"enabled"`
-			Mode         string   `yaml:"mode"`           // "manual" or "acme"
-			CertFile     string   `yaml:"cert_file"`      // Path for manual mode
-			KeyFile      string   `yaml:"key_file"`       // Path for manual mode
-			AcmeDomains  []string `yaml:"acme_domains"`   // Domains for ACME
-			AcmeEmail    string   `yaml:"acme_email"`     // Contact email for ACME
-			AcmeCacheDir string   `yaml:"acme_cache_dir"` // Cache directory for ACME
-		} `yaml:"ssl"`
+		Address                string               `yaml:"address"`
+		Name                   string               `yaml:"name"`
+		Version                string               `yaml:"version"`
+		LogLevel               string               `yaml:"log_level"`
+		DiscoveringHandlerPath string               `yaml:"info_handler"`
+		FrontendAddress        string               `yaml:"frontend_address"`
+		Authorization          string               `yaml:"authorization"`
+		SSL                    yamlSSLConfig        `yaml:"ssl"`
+		A2A                    *a2aSchema.AgentCard `yaml:"a2a"`
 	} `yaml:"server"`
+	Users    map[string]yamlUserConfig    `yaml:"users"`
+	Backends map[string]yamlBackendConfig `yaml:"backends"`
+}
 
-	Users map[string]struct {
-		Keys       []string `yaml:"keys"`
-		Subscribes []string `yaml:"subscribes"`
-	} `yaml:"users"`
+type yamlUserConfig struct {
+	Keys       []string `yaml:"keys"`
+	Subscribes []string `yaml:"subscribes"`
+}
 
-	Backends map[string]struct {
-		URL    string `yaml:"url"`
-		Bearer string `yaml:"bearer"`
-	} `yaml:"backends"`
+type yamlBackendConfig struct {
+	URL    string `yaml:"url"`
+	Bearer string `yaml:"bearer"` // Corrected yaml tag
+}
+
+type yamlSSLConfig struct {
+	Enabled      bool     `yaml:"enabled"`
+	Mode         string   `yaml:"mode"`
+	CertFile     string   `yaml:"cert_file"`
+	KeyFile      string   `yaml:"key_file"`
+	AcmeDomains  []string `yaml:"acme_domains"`
+	AcmeEmail    string   `yaml:"acme_email"`
+	AcmeCacheDir string   `yaml:"acme_cache_dir"`
 }
 
 // NewYamlConfig creates a new YAML-based configuration
@@ -81,32 +90,22 @@ func NewYamlConfig(configPath string, logger *zap.Logger) (*YamlConfig, error) {
 // NewYamlConfigWithOptions creates a new YAML-based configuration with specified options
 func NewYamlConfigWithOptions(configPath string, logger *zap.Logger) (*YamlConfig, error) {
 	if logger == nil {
-		// Create a default logger if none provided
-		var err error
-		logger, err = zap.NewProduction()
-		if err != nil {
-			return nil, err
-		}
+		logger, _ = zap.NewProduction()
 	}
-
 	config := &YamlConfig{
 		configPath:        configPath,
 		logger:            logger,
-		userAuthKeys:      make(map[string]string),
+		userKeyHashes:     make(map[string]string),
 		userParams:        make(map[string]map[string]string),
 		userSubscribes:    make(map[string][]string),
 		backends:          make(map[string]*Backend),
-		authorizationType: AuthorizedUsersOnly, // Default to requiring authorization
-		// Default SSL settings
-		sslMode:         "manual",
-		sslAcmeCacheDir: "./.autocert-cache", // Default cache dir
+		authorizationType: AuthorizedUsersOnly, // Default
+		sslMode:           "manual",
+		sslAcmeCacheDir:   "./.autocert-cache",
 	}
-
-	// Load initial configuration
 	if err := config.Update(); err != nil {
 		return nil, err
 	}
-
 	return config, nil
 }
 
@@ -114,279 +113,221 @@ func NewYamlConfigWithOptions(configPath string, logger *zap.Logger) (*YamlConfi
 func (c *YamlConfig) Update() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	c.logger.Info("Updating configuration from YAML file", zap.String("path", c.configPath))
-
-	// Read and parse the configuration file
+	c.logger.Debug("Updating configuration from YAML", zap.String("path", c.configPath))
 	data, err := os.ReadFile(c.configPath)
 	if err != nil {
-		c.logger.Error("Failed to read configuration file", zap.String("path", c.configPath), zap.Error(err))
-		return err
+		return fmt.Errorf("read config file: %w", err)
 	}
-
 	var yamlCfg yamlConfig
 	if err := yaml.Unmarshal(data, &yamlCfg); err != nil {
-		c.logger.Error("Failed to parse YAML configuration", zap.Error(err))
-		return err
+		return fmt.Errorf("parse YAML: %w", err)
 	}
 
-	// Process server configuration
+	// Process Server Section
 	c.serverAddress = yamlCfg.Server.Address
 	c.serverName = yamlCfg.Server.Name
 	c.serverVersion = yamlCfg.Server.Version
 	c.logLevel = yamlCfg.Server.LogLevel
 	c.DiscoveringHandlerPathValue = yamlCfg.Server.DiscoveringHandlerPath
 	c.frontendAddressValue = yamlCfg.Server.FrontendAddress
-
-	// Process SSL settings
-	c.sslEnabled = yamlCfg.Server.SSL.Enabled
-	c.sslMode = yamlCfg.Server.SSL.Mode
-	c.sslCertFile = yamlCfg.Server.SSL.CertFile
-	c.sslKeyFile = yamlCfg.Server.SSL.KeyFile
-	c.sslAcmeDomains = yamlCfg.Server.SSL.AcmeDomains
-	c.sslAcmeEmail = yamlCfg.Server.SSL.AcmeEmail
-	c.sslAcmeCacheDir = yamlCfg.Server.SSL.AcmeCacheDir
-	// Provide defaults if values are missing
-	if c.sslMode == "" {
-		c.sslMode = "manual"
-	}
-	if c.sslAcmeCacheDir == "" {
-		c.sslAcmeCacheDir = "./.autocert-cache"
-	}
-
-	// Process authorization type
-	switch yamlCfg.Server.Authorization {
-	case "users_only":
-		c.authorizationType = AuthorizedUsersOnly
+	switch strings.ToLower(yamlCfg.Server.Authorization) {
 	case "marked_methods":
 		c.authorizationType = NotAuthorizedToMarkedMethods
 	case "none":
 		c.authorizationType = NotAuthorizedEverywhere
 	default:
-		// Default to requiring authorization for all users if not specified
 		c.authorizationType = AuthorizedUsersOnly
 	}
 
-	// Process users and their auth keys
-	oldUserAuthKeys := c.userAuthKeys
-	c.userAuthKeys = make(map[string]string)
-	c.userSubscribes = make(map[string][]string)
+	// Process SSL Section
+	c.sslEnabled = yamlCfg.Server.SSL.Enabled
+	c.sslMode = strings.ToLower(yamlCfg.Server.SSL.Mode)
+	if c.sslMode != "acme" {
+		c.sslMode = "manual"
+	}
+	c.sslCertFile = yamlCfg.Server.SSL.CertFile
+	c.sslKeyFile = yamlCfg.Server.SSL.KeyFile
+	c.sslAcmeDomains = yamlCfg.Server.SSL.AcmeDomains
+	c.sslAcmeEmail = yamlCfg.Server.SSL.AcmeEmail
+	c.sslAcmeCacheDir = yamlCfg.Server.SSL.AcmeCacheDir
+	if c.sslAcmeCacheDir == "" {
+		c.sslAcmeCacheDir = "./.autocert-cache"
+	}
 
-	// Collect all users for which we need to call the callbacks
-	affectedUsers := make(map[string]bool)
+	// Process A2A section
+	c.a2a = yamlCfg.Server.A2A
 
+	// Process Users Section
+	newUserKeyHashes := make(map[string]string)
+	newUserSubscribes := make(map[string][]string)
 	for userID, user := range yamlCfg.Users {
-		// Process auth keys
-		for _, authKey := range user.Keys {
-			c.userAuthKeys[authKey] = userID
-			if oldUserID, exists := oldUserAuthKeys[authKey]; !exists || oldUserID != userID {
-				affectedUsers[userID] = true
-			}
+		for _, keyHash := range user.Keys {
+			newUserKeyHashes[keyHash] = userID
 		}
-
-		// Process subscribes
 		if len(user.Subscribes) > 0 {
-			c.userSubscribes[userID] = make([]string, len(user.Subscribes))
-			copy(c.userSubscribes[userID], user.Subscribes)
+			ns := make([]string, len(user.Subscribes))
+			copy(ns, user.Subscribes)
+			newUserSubscribes[userID] = ns
 		}
 	}
+	c.userKeyHashes = newUserKeyHashes
+	c.userSubscribes = newUserSubscribes
 
-	// Check for removed auth keys
-	for authKey, userID := range oldUserAuthKeys {
-		if _, exists := c.userAuthKeys[authKey]; !exists {
-			affectedUsers[userID] = true
-		}
-	}
-
-	// Process servers
-	c.backends = make(map[string]*Backend)
+	// Process Backends Section
+	newBackends := make(map[string]*Backend)
 	for backendID, backend := range yamlCfg.Backends {
-		c.backends[backendID] = &Backend{URL: backend.URL, Bearer: backend.Bearer}
+		newBackends[backendID] = &Backend{URL: backend.URL, Bearer: backend.Bearer}
 	}
+	c.backends = newBackends
 
 	return nil
 }
 
-// Close stops the file watcher and cleans up resources
-func (c *YamlConfig) Close() error {
-	return nil
-}
+// --- IConfig Implementation ---
 
-// ListenAddr returns the server address
+func (c *YamlConfig) Close() error { return nil }
 func (c *YamlConfig) ListenAddr() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.serverAddress, nil
 }
-
-func (c *YamlConfig) SetListenAddr(add string) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	c.serverAddress = add
-}
-
-// GetUserIDByKeyHash returns the user ID associated with the given key hash
-func (c *YamlConfig) GetUserIDByKeyHash(keyHash string) (string, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	// Load the file again to ensure we have the latest data
-	var config yamlConfig
-	data, err := os.ReadFile(c.configPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return "", fmt.Errorf("failed to parse YAML: %w", err)
-	}
-
-	// Iterate through users to find the matching key hash
-	for userID, user := range config.Users {
-		for _, hash := range user.Keys {
-			if hash == keyHash {
-				return userID, nil
-			}
-		}
-	}
-
-	return "", nil // Return empty string if hash not found
-}
-
-// GetUserParams returns the parameters for the given user ID
-func (c *YamlConfig) GetUserParams(userID string) (map[string]string, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	params, exists := c.userParams[userID]
-	if !exists {
-		return make(map[string]string), nil
-	}
-
-	// Return a copy to prevent concurrent map access
-	result := make(map[string]string, len(params))
-	for k, v := range params {
-		result[k] = v
-	}
-
-	return result, nil
-}
-
-// GetUserSubscribes returns the server IDs that the user is subscribed to
-func (c *YamlConfig) GetUserSubscribes(userID string) ([]string, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	servers, exists := c.userSubscribes[userID]
-	if !exists {
-		return []string{}, nil
-	}
-
-	serversCopy := make([]string, len(servers))
-	copy(serversCopy, servers)
-	return serversCopy, nil
-}
-
-// GetServer returns the URL for the given server ID
-func (c *YamlConfig) GetBackend(backendID string) (*Backend, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	backend, exists := c.backends[backendID]
-	if !exists {
-		return nil, ErrNotFound
-	}
-
-	return backend, nil
-}
-
-// Authorization returns the configured authorization type
 func (c *YamlConfig) AuthorizationType() (AuthorizationType, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.authorizationType, nil
 }
-
 func (c *YamlConfig) ServerName() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.serverName, nil
 }
-
 func (c *YamlConfig) ServerVersion() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.serverVersion, nil
 }
-
-// LogLevel returns the configured log level for Zap
 func (c *YamlConfig) LogLevel() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.logLevel, nil
 }
-
-// DiscoveringHandlerPath returns the configured info handler path
 func (c *YamlConfig) DiscoveringHandlerPath() (string, error) {
-	// For YAML config, we don't have this setting
-	// Return a default value or empty string
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.DiscoveringHandlerPathValue, nil
 }
-
-// FrontendAddressForProxy returns the frontend address for proxy
 func (c *YamlConfig) FrontendAddressForProxy() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.frontendAddressValue, nil
 }
-
-func (c *YamlConfig) Status(ctx context.Context) error {
-	return nil
-}
-
-// --- Implement SSL Methods ---
-
 func (c *YamlConfig) SSLEnabled() (bool, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.sslEnabled, nil
 }
-
 func (c *YamlConfig) SSLMode() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.sslMode, nil
 }
-
 func (c *YamlConfig) SSLCertFile() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.sslCertFile, nil
 }
-
 func (c *YamlConfig) SSLKeyFile() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.sslKeyFile, nil
 }
-
 func (c *YamlConfig) SSLAcmeDomains() ([]string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	// Return a copy to prevent modification of the internal slice
-	domainsCopy := make([]string, len(c.sslAcmeDomains))
-	copy(domainsCopy, c.sslAcmeDomains)
-	return domainsCopy, nil
+	dc := make([]string, len(c.sslAcmeDomains))
+	copy(dc, c.sslAcmeDomains)
+	return dc, nil
 }
-
 func (c *YamlConfig) SSLAcmeEmail() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.sslAcmeEmail, nil
 }
-
 func (c *YamlConfig) SSLAcmeCacheDir() (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.sslAcmeCacheDir, nil
+}
+func (c *YamlConfig) Status(ctx context.Context) error {
+	if _, err := os.Stat(c.configPath); err != nil {
+		return fmt.Errorf("config file error: %w", err)
+	}
+	return nil
+}
+
+func (c *YamlConfig) GetUserIDByKeyHash(keyHash string) (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if keyHash == "" {
+		return "", nil
+	}
+	userID, exists := c.userKeyHashes[keyHash]
+	if !exists {
+		return "", ErrNotFound
+	}
+	return userID, nil
+}
+func (c *YamlConfig) GetUserParams(userID string) (map[string]string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	params, exists := c.userParams[userID]
+	if !exists {
+		return make(map[string]string), nil
+	}
+	pc := make(map[string]string, len(params))
+	copyMap(params, pc)
+	return pc, nil
+}
+func (c *YamlConfig) GetUserSubscribes(userID string) ([]string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	servers, exists := c.userSubscribes[userID]
+	if !exists {
+		return []string{}, nil
+	}
+	sc := make([]string, len(servers))
+	copy(sc, servers)
+	return sc, nil
+}
+func (c *YamlConfig) GetBackendBySlug(backendID string) (*Backend, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	backend, exists := c.backends[backendID]
+	if !exists {
+		return nil, ErrNotFound
+	}
+	bc := *backend
+	return &bc, nil
+}
+
+// NEW: GetServerHeaders returns empty map for YAML config.
+func (c *YamlConfig) GetServerHeaders(serverSlug string) (map[string]string, error) {
+	return make(map[string]string), nil
+}
+
+// NEW: GetSubscriptionHeaders returns empty map for YAML config.
+func (c *YamlConfig) GetSubscriptionHeaders(userID, serverSlug string) (map[string]string, error) {
+	return make(map[string]string), nil
+}
+
+func (c *YamlConfig) GetA2AAgentCard(agentURL string) (*a2aSchema.AgentCard, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.a2a == nil {
+		return nil, fmt.Errorf("A2A configuration not present in YAML")
+	}
+	// Return a copy, updating the URL
+	cardCopy := *c.a2a
+	cardCopy.URL = agentURL
+	return &cardCopy, nil
 }

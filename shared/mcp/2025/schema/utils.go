@@ -1,6 +1,6 @@
 package schema
 
-import schema2024 "github.com/gate4ai/mcp/shared/mcp/2024/schema"
+import schema2024 "github.com/gate4ai/gate4ai/shared/mcp/2024/schema"
 
 // ProgressNotification provides updates for long-running requests.
 // An out-of-band notification used to inform the receiver of a progress update.

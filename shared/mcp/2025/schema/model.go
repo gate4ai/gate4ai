@@ -1,6 +1,6 @@
 package schema
 
-import schema2024 "github.com/gate4ai/mcp/shared/mcp/2024/schema"
+import schema2024 "github.com/gate4ai/gate4ai/shared/mcp/2024/schema"
 
 // ModelHint provides hints for model selection.
 // Keys not declared here are currently left unspecified by the spec and are up

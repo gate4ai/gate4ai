@@ -7,15 +7,7 @@
       <!-- Dynamically update title based on filter -->
       <h1 class="text-h3">{{ pageTitle }}</h1>
 
-      <!-- Show Add Server button only when viewing 'all' or 'owned' servers -->
-      <v-btn
-        v-if="canAddServer"
-        color="primary"
-        prepend-icon="mdi-plus"
-        @click="showAddServerDialog = true"
-      >
-        Add Server
-      </v-btn>
+      <AddServerButton :is-authenticated="isAuthenticated" @open-add-dialog="showAddServerDialog = true" />
     </div>
 
     <!-- Search and Filter (remains the same) -->
@@ -88,7 +80,9 @@ import AddServerDialog from '~/components/AddServerDialog.vue';
 import ServerCard from '~/components/ServerCard.vue';
 import ServerSearch from '~/components/ServerSearch.vue';
 import type { Server } from '~/utils/server';
-import { useSnackbar } from '~/composables/useSnackbar'; // Import useSnackbar
+import { useSnackbar } from '~/composables/useSnackbar';
+import AddServerButton from '~/components/AddServerButton.vue';
+
 
 const { $auth, $settings, $api } = useNuxtApp();
 const { showError } = useSnackbar(); // Use snackbar for errors
@@ -130,23 +124,6 @@ const emptyStateMessage = computed(() => {
     default:
       return 'There are currently no servers in the catalog.';
   }
-});
-
-// Update canAddServer logic based on filter type
-const canAddServer = computed(() => {
-  // User must be authenticated
-  if (!isAuthenticated.value) return false;
-
-  // Developers and Admins can always add
-  if (userRole.value === 'DEVELOPER' || userRole.value === 'ADMIN' || userRole.value === 'SECURITY') {
-    return true;
-  }
-
-  // Regular users can add if setting allows AND they are viewing 'all' or 'owned'
-  // (Doesn't make sense to show 'Add Server' when viewing 'subscribed')
-  const settingAllows = !$settings.get('only_developer_can_post_server');
-  // Show add button only on 'all' (no filter) or 'owned' pages if allowed
-  return settingAllows && (!filterType.value || filterType.value === 'owned');
 });
 
 // Fetch servers on component mount and when filter changes

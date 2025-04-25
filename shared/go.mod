@@ -1,4 +1,4 @@
-module github.com/gate4ai/mcp/shared
+module github.com/gate4ai/gate4ai/shared
 
 go 1.24.1
 

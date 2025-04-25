@@ -2,7 +2,7 @@ import { defineEventHandler, getRouterParam, createError } from 'h3';
 import prisma from '../../../utils/prisma';
 import { checkAuth } from '../../../utils/userUtils';
 import { getServerReadAccessLevel } from '../../../utils/serverPermissions'; // Import helper
-import type { User, Server as PrismaServer, SubscriptionStatus } from '@prisma/client';
+import type { Server } from '@prisma/client';
 
 export default defineEventHandler(async (event) => {
   const user = checkAuth(event); // Ensure user is authenticated
@@ -28,7 +28,7 @@ export default defineEventHandler(async (event) => {
 
     // 2. Check if the current user has permission to view subscriptions
     // Type assertion needed as Prisma select doesn't fully type nested relations easily
-    const serverWithOwnerUsers = server as unknown as PrismaServer & { owners: { user: { id: string } }[] };
+    const serverWithOwnerUsers = server as unknown as Server & { owners: { user: { id: string } }[] };
     const { isOwner, isAdminOrSecurity } = getServerReadAccessLevel(user, serverWithOwnerUsers);
 
     if (!isOwner && !isAdminOrSecurity) {

@@ -13,12 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gate4ai/mcp/server/mcp"
-	"github.com/gate4ai/mcp/server/mcp/capability"
-	"github.com/gate4ai/mcp/server/transport"
-	"github.com/gate4ai/mcp/shared"
-	"github.com/gate4ai/mcp/shared/config"
-	schema2025 "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/server/mcp/capability"
+	"github.com/gate4ai/gate4ai/server/transport"
+	"github.com/gate4ai/gate4ai/shared"
+	"github.com/gate4ai/gate4ai/shared/config"
+	schema2025 "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,10 +26,11 @@ import (
 
 // --- Mock Implementations ---
 
-// MockMCPManager implements mcp.ISessionManager for testing purposes
+var _ transport.ISessionManager = &MockMCPManager{}
+
 type MockMCPManager struct {
 	mu       sync.RWMutex
-	sessions map[string]mcp.IDownstreamSession
+	sessions map[string]transport.IDownstreamSession
 	Cfg      config.IConfig
 	Logger   *zap.Logger
 	// Control fields for testing
@@ -51,7 +51,7 @@ func NewMockMCPManager(cfg config.IConfig, logger *zap.Logger) *MockMCPManager {
 	serverVersion, _ := cfg.ServerVersion()
 
 	return &MockMCPManager{
-		sessions:          make(map[string]mcp.IDownstreamSession),
+		sessions:          make(map[string]transport.IDownstreamSession),
 		Cfg:               cfg,
 		Logger:            logger,
 		ClosedSessions:    make(map[string]bool),
@@ -119,12 +119,12 @@ func (m *MockTestCapability) GetHandlers() map[string]func(*shared.Message) (int
 // Implement IServerCapability (empty method is fine for this mock)
 func (m *MockTestCapability) SetCapabilities(s *schema2025.ServerCapabilities) {}
 
-func (m *MockMCPManager) CreateSession(userID string, params *sync.Map) shared.ISession {
+func (m *MockMCPManager) CreateSession(userID string, id string, params *sync.Map) shared.ISession {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Use a simplified mock session or BaseSession for testing
 	// For testing transport, BaseSession is often sufficient.
-	session := mcp.NewSession(m, "test-session-id", shared.NewInput(m.Logger), params)
+	session := transport.NewSession(m, id, userID, shared.NewInput(m.Logger), params)
 	m.sessions[session.ID] = session
 	m.Logger.Debug("MockManager: Created session", zap.String("sessionID", session.ID), zap.String("userID", userID))
 	session.Input().AddServerCapability(m.capabilities...)
@@ -242,7 +242,6 @@ func setupServerTest(t *testing.T) (*transport.Transport, *MockMCPManager, *conf
 	t.Helper()
 	logger, _ := zap.NewDevelopment() // Or NewNop() for less output
 	cfg := config.NewInternalConfig()
-	cfg.SetListenAddr(":0")            // Use ephemeral port
 	cfg.ServerNameValue = "TestServer" // Set a specific name for testing
 	cfg.ServerVersionValue = "1.2.3"
 
@@ -267,7 +266,7 @@ func setupServerTest(t *testing.T) (*transport.Transport, *MockMCPManager, *conf
 	mockManager.AddCapability(baseCap, testCap)
 
 	mux := http.NewServeMux()
-	tp.RegisterHandlers(mux)
+	tp.RegisterMCPHandlers(mux)
 	server := httptest.NewServer(mux)
 
 	// Update config with actual server URL (mainly for logging/debugging in tests)

@@ -6,18 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/client"
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/gateway/clients/mcpClient"
+	"github.com/gate4ai/gate4ai/shared"
 
 	// Use 2025 schema
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 
 // tool wrapper to include serverID and originalName
 type tool struct {
 	schema.Tool  // Embed 2025 schema type
-	serverID     string
+	serverSlug   string
 	originalName string // Store original name before potential modification
 }
 
@@ -25,7 +25,7 @@ type tool struct {
 // It handles combining results, resolving name conflicts, and caching.
 func (c *GatewayCapability) GetTools(inputMsg *shared.Message, logger *zap.Logger) ([]*tool, error) {
 	// Use a timeout for the overall operation
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // Adjusted timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second) // Adjusted timeout
 	defer cancel()
 
 	sessionParams := inputMsg.Session.GetParams()
@@ -45,8 +45,8 @@ func (c *GatewayCapability) GetTools(inputMsg *shared.Message, logger *zap.Logge
 	logger.Debug("Cache miss or expired, fetching fresh tools")
 
 	// Define the function to fetch tools from a single backend session
-	fetchToolsFunc := func(ctx context.Context, session *client.Session) ([]*tool, error) {
-		fetchLogger := logger.With(zap.String("server", session.Backend.ID))
+	fetchToolsFunc := func(ctx context.Context, session *mcpClient.Session) ([]*tool, error) {
+		fetchLogger := logger.With(zap.String("server", session.Backend.Slug))
 		fetchLogger.Debug("Getting tools from backend")
 
 		// GetTools now returns a channel GetToolsResult (using 2025 schema type)
@@ -63,7 +63,7 @@ func (c *GatewayCapability) GetTools(inputMsg *shared.Message, logger *zap.Logge
 				tCopy := t // Create a copy of the tool struct
 				results = append(results, &tool{
 					Tool:         tCopy,
-					serverID:     session.Backend.ID,
+					serverSlug:   session.Backend.Slug,
 					originalName: tCopy.Name, // Store original name
 				})
 			}
@@ -81,12 +81,12 @@ func (c *GatewayCapability) GetTools(inputMsg *shared.Message, logger *zap.Logge
 	}
 
 	// Define the function to modify the tool name in case of duplicates
-	modifyToolKeyFunc := func(t *tool, serverID string) *tool {
+	modifyToolKeyFunc := func(t *tool, serverSlug string) *tool {
 		// Use serverID passed to the function for prefixing
-		newName := fmt.Sprintf("%s:%s", serverID, t.originalName) // Use originalName for prefixing
+		newName := fmt.Sprintf("%s:%s", serverSlug, t.originalName) // Use originalName for prefixing
 		logger.Debug("Modifying duplicate tool name",
 			zap.String("original", t.originalName),
-			zap.String("server", serverID),
+			zap.String("server", serverSlug),
 			zap.String("modified", newName),
 		)
 		t.Name = newName // Update the Name field

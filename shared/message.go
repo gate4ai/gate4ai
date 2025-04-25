@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 )
 
 type Message struct {
@@ -39,14 +39,6 @@ func ParseMessages(s ISession, data []byte) ([]*Message, error) {
 	}
 	singleMessage.Session = s
 	return []*Message{&singleMessage}, nil
-}
-
-// NilIfNil returns "nil" if the string pointer is nil, otherwise returns the pointed-to string.
-func NilIfNil(s *string) string {
-	if s == nil {
-		return "nil"
-	}
-	return *s
 }
 
 // MarshalJSON ensures the JSONRPC field is properly set before marshaling

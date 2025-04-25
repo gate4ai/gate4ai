@@ -3,7 +3,7 @@ package schema
 import (
 	"encoding/json"
 
-	schema2024 "github.com/gate4ai/mcp/shared/mcp/2024/schema"
+	schema2024 "github.com/gate4ai/gate4ai/shared/mcp/2024/schema"
 )
 
 // PROTOCOL_VERSION specifies the version of the MCP protocol defined in this schema.

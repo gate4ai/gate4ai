@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gate4ai/mcp/shared"
-	"github.com/gate4ai/mcp/shared/mcp/2024/schema"
+	"github.com/gate4ai/gate4ai/shared"
+	"github.com/gate4ai/gate4ai/shared/mcp/2024/schema"
 	"go.uber.org/zap"
 )
 
@@ -54,18 +54,18 @@ func (c *GatewayCapability) gw_resources_read(inputMsg *shared.Message) (interfa
 	}
 
 	logger.Debug("Found resource, forwarding read request to backend",
-		zap.String("backendServerID", targetResource.serverID),
+		zap.String("backendServerSlug", targetResource.serverSlug),
 		zap.String("originalURI", targetResource.originalURI))
 
 	// Get the backend session for the server that owns this resource
-	backendSession, err := c.getBackendSession(inputMsg.Session, targetResource.serverID)
+	backendSession, err := c.getBackendSession(inputMsg.Session, targetResource.serverSlug)
 	if err != nil {
 		// Error logged by getBackendSession
 		return nil, err
 	}
 	if backendSession == nil {
-		logger.Error("Backend session is nil after successful retrieval", zap.String("serverID", targetResource.serverID))
-		return nil, fmt.Errorf("internal error: failed to get valid backend session for server %s", targetResource.serverID)
+		logger.Error("Backend session is nil after successful retrieval", zap.String("serverSlug", targetResource.serverSlug))
+		return nil, fmt.Errorf("internal error: failed to get valid backend session for server %s", targetResource.serverSlug)
 	}
 
 	// Use a timeout context for the backend call
@@ -78,7 +78,7 @@ func (c *GatewayCapability) gw_resources_read(inputMsg *shared.Message) (interfa
 
 	if result.Err != nil {
 		logger.Error("Failed to read resource from backend server",
-			zap.String("server", targetResource.serverID),
+			zap.String("server", targetResource.serverSlug),
 			zap.String("originalURI", targetResource.originalURI),
 			zap.Error(result.Err))
 		// Return the error received from the backend
@@ -88,7 +88,7 @@ func (c *GatewayCapability) gw_resources_read(inputMsg *shared.Message) (interfa
 	if result.Result == nil {
 		// Should not happen if Err is nil, but check defensively
 		err := fmt.Errorf("nil result received from backend %s for resource %s",
-			targetResource.serverID, targetResource.originalURI)
+			targetResource.serverSlug, targetResource.originalURI)
 		logger.Error(err.Error())
 		return nil, err
 	}

@@ -2,13 +2,15 @@ package tests
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/client"
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/gateway/clients/mcpClient"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/tests/env"
 	"go.uber.org/zap"
 )
 
@@ -45,14 +47,14 @@ func GetToolsList(serverURL string, key string, logger *zap.Logger) ([]schema.To
 	ctxTimeout, cancelTimeout := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelTimeout()
 
-	resultChan := make(chan client.GetToolsResult, 1)
+	resultChan := make(chan mcpClient.GetToolsResult, 1)
 	go func() {
-		c, err := client.New(serverURL, serverURL, logger)
+		c, err := mcpClient.New(serverURL, serverURL, logger)
 		if err != nil {
-			resultChan <- client.GetToolsResult{Err: fmt.Errorf("failed to create client: %w", err)}
+			resultChan <- mcpClient.GetToolsResult{Err: fmt.Errorf("failed to create client: %w", err)}
 			return
 		}
-		session := c.NewSession(ctxTimeout, http.DefaultClient, key)
+		session := c.NewSession(ctxTimeout, mcpClient.WithAuthenticationBearer(key))
 		defer session.Close()
 
 		r := <-session.GetTools(ctxTimeout)
@@ -65,4 +67,56 @@ func GetToolsList(serverURL string, key string, logger *zap.Logger) ([]schema.To
 	case <-ctxTimeout.Done():
 		return nil, ctxTimeout.Err()
 	}
+}
+
+// updateSetting updates a setting in the database
+func updateSetting(key string, value interface{}) error {
+	db_url := env.GetURL(env.DBComponentName)
+	if db_url == "" {
+		return fmt.Errorf("database URL not found")
+	}
+	// Connect to the database
+	db, err := sql.Open("postgres", db_url)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer db.Close()
+
+	// Marshal the value to JSON
+	var valueJSON []byte
+	switch v := value.(type) {
+	case string:
+		valueJSON = []byte(fmt.Sprintf("%q", v))
+	case json.RawMessage:
+		valueJSON = v
+	default:
+		valueJSON, err = json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("failed to marshal value to JSON: %w", err)
+		}
+	}
+
+	// Check if the setting exists
+	var count int
+	err = db.QueryRow(`SELECT COUNT(*) FROM "Settings" WHERE key = $1`, key).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to check if setting exists: %w", err)
+	}
+
+	if count > 0 {
+		// Update existing setting
+		_, err = db.Exec(`UPDATE "Settings" SET value = $1 WHERE key = $2`, valueJSON, key)
+		if err != nil {
+			return fmt.Errorf("failed to update setting: %w", err)
+		}
+	} else {
+		// Insert new setting with minimal required fields
+		_, err = db.Exec(`INSERT INTO "Settings" (key, "group", name, description, value, frontend) VALUES ($1, 'test', $1, $1, $2, false)`,
+			key, valueJSON)
+		if err != nil {
+			return fmt.Errorf("failed to insert setting: %w", err)
+		}
+	}
+
+	return nil
 }

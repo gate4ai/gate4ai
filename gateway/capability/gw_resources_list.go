@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/client"
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/gateway/clients/mcpClient"
+	"github.com/gate4ai/gate4ai/shared"
 
 	// Use 2025 schema
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 
@@ -18,7 +18,7 @@ import (
 type resourceWithServerInfo struct {
 	schema.Resource        // Embed 2025 schema type
 	originalURI     string // Store original URI before potential modification
-	serverID        string
+	serverSlug      string
 }
 
 // GetResources fetches resources from all subscribed backends for the user associated with inputMsg.
@@ -38,8 +38,8 @@ func (c *GatewayCapability) GetResources(inputMsg *shared.Message, logger *zap.L
 	logger.Debug("Cache miss or expired, fetching fresh resources")
 
 	// Define the function to fetch resources from a single backend session
-	fetchResourcesFunc := func(ctx context.Context, session *client.Session) ([]*resourceWithServerInfo, error) {
-		fetchLogger := logger.With(zap.String("server", session.Backend.ID))
+	fetchResourcesFunc := func(ctx context.Context, session *mcpClient.Session) ([]*resourceWithServerInfo, error) {
+		fetchLogger := logger.With(zap.String("server", session.Backend.Slug))
 		fetchLogger.Debug("Getting resources from backend")
 
 		// GetResources now returns a channel GetResourcesResult (using 2025 schema type)
@@ -58,7 +58,7 @@ func (c *GatewayCapability) GetResources(inputMsg *shared.Message, logger *zap.L
 				results = append(results, &resourceWithServerInfo{
 					Resource:    rCopy,
 					originalURI: rCopy.URI, // Store original URI
-					serverID:    session.Backend.ID,
+					serverSlug:  session.Backend.Slug,
 				})
 			}
 			fetchLogger.Debug("Received resources from backend", zap.Int("count", len(results)))
@@ -75,12 +75,12 @@ func (c *GatewayCapability) GetResources(inputMsg *shared.Message, logger *zap.L
 	}
 
 	// Define the function to modify the resource URI in case of duplicates
-	modifyResourceKeyFunc := func(r *resourceWithServerInfo, serverID string) *resourceWithServerInfo {
-		// Use serverID passed to the function for prefixing
-		newURI := fmt.Sprintf("%s:%s", serverID, r.originalURI) // Use originalURI for prefixing
+	modifyResourceKeyFunc := func(r *resourceWithServerInfo, serverSlug string) *resourceWithServerInfo {
+		// Use serverSlug passed to the function for prefixing
+		newURI := fmt.Sprintf("%s:%s", serverSlug, r.originalURI) // Use originalURI for prefixing
 		logger.Debug("Modifying duplicate resource URI",
 			zap.String("original", r.originalURI),
-			zap.String("server", serverID),
+			zap.String("server", serverSlug),
 			zap.String("modified", newURI),
 		)
 		r.URI = newURI // Update the URI field

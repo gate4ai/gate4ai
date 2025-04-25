@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time" // Import time
 
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/shared"
 	// Use 2025 schema for request parsing, although structure is same as 2024
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 
@@ -52,18 +52,18 @@ func (c *GatewayCapability) gw_tools_call(inputMsg *shared.Message) (interface{}
 	}
 
 	logger.Debugw("Found tool, forwarding call to backend",
-		"backendServerID", selectedTool.serverID,
+		"backendServerID", selectedTool.serverSlug,
 		"originalName", selectedTool.originalName)
 
 	// Get the backend session for the server that has this tool
-	backendSession, err := c.getBackendSession(inputMsg.Session, selectedTool.serverID)
+	backendSession, err := c.getBackendSession(inputMsg.Session, selectedTool.serverSlug)
 	if err != nil {
-		logger.Errorw("Failed to get backend session", "serverID", selectedTool.serverID, "error", err)
-		return nil, fmt.Errorf("failed to get backend session for server %s: %w", selectedTool.serverID, err)
+		logger.Errorw("Failed to get backend session", "serverID", selectedTool.serverSlug, "error", err)
+		return nil, fmt.Errorf("failed to get backend session for server %s: %w", selectedTool.serverSlug, err)
 	}
 	if backendSession == nil {
-		logger.Errorw("Backend session is nil after successful retrieval", "serverID", selectedTool.serverID)
-		return nil, fmt.Errorf("internal error: failed to get valid backend session for server %s", selectedTool.serverID)
+		logger.Errorw("Backend session is nil after successful retrieval", "serverID", selectedTool.serverSlug)
+		return nil, fmt.Errorf("internal error: failed to get valid backend session for server %s", selectedTool.serverSlug)
 	}
 
 	// Call the tool on the backend using the ORIGINAL tool name
@@ -83,7 +83,7 @@ func (c *GatewayCapability) gw_tools_call(inputMsg *shared.Message) (interface{}
 	if result.Error != nil {
 		// Error could be connection error OR IsError=true from backend
 		logger.Errorw("Failed to call tool on backend",
-			"server", selectedTool.serverID,
+			"server", selectedTool.serverSlug,
 			"tool", toolName,
 			"error", result.Error)
 		// Return the error received from the client call wrapper
@@ -92,7 +92,7 @@ func (c *GatewayCapability) gw_tools_call(inputMsg *shared.Message) (interface{}
 
 	if result.Result == nil {
 		// Should not happen if Error is nil, but check defensively
-		err := fmt.Errorf("nil result received from backend %s for tool '%s'", selectedTool.serverID, toolName)
+		err := fmt.Errorf("nil result received from backend %s for tool '%s'", selectedTool.serverSlug, toolName)
 		logger.Errorw(err.Error())
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (c *GatewayCapability) gw_tools_call(inputMsg *shared.Message) (interface{}
 	// Check IsError flag within the result from the backend
 	if result.Result.IsError {
 		logger.Warnw("Tool call succeeded but backend reported tool error",
-			"server", selectedTool.serverID,
+			"server", selectedTool.serverSlug,
 			"tool", toolName)
 		// Return the result structure which indicates IsError=true
 		// The error message itself is typically within the Content field in this case.

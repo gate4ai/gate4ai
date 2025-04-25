@@ -1,17 +1,17 @@
-module github.com/gate4ai/mcp/tests
+module github.com/gate4ai/gate4ai/tests
 
 go 1.24.1
 
 replace (
-	github.com/gate4ai/mcp/gateway => ../gateway
-	github.com/gate4ai/mcp/server => ../server
-	github.com/gate4ai/mcp/shared => ../shared
+	github.com/gate4ai/gate4ai/gateway => ../gateway
+	github.com/gate4ai/gate4ai/server => ../server
+	github.com/gate4ai/gate4ai/shared => ../shared
 )
 
 require (
-	github.com/gate4ai/mcp/gateway v0.0.0-00010101000000-000000000000
-	github.com/gate4ai/mcp/server v0.0.0-00010101000000-000000000000
-	github.com/gate4ai/mcp/shared v0.0.0-00010101000000-000000000000
+	github.com/gate4ai/gate4ai/gateway v0.0.0-00010101000000-000000000000
+	github.com/gate4ai/gate4ai/server v0.0.0-00010101000000-000000000000
+	github.com/gate4ai/gate4ai/shared v0.0.0-00010101000000-000000000000
 	github.com/lib/pq v1.10.9
 	github.com/playwright-community/playwright-go v0.5001.0
 	github.com/shirou/gopsutil/v3 v3.24.5
@@ -37,7 +37,6 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.8.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -77,7 +76,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.5.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
-	golang.org/x/net v0.33.0 // indirect
+	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 	golang.org/x/time v0.11.0 // indirect

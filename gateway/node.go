@@ -8,15 +8,14 @@ import (
 	"sync"
 	"time"
 
-	gwCapabilities "github.com/gate4ai/mcp/gateway/capability"
-	"github.com/gate4ai/mcp/gateway/discovering"
-	"github.com/gate4ai/mcp/gateway/extra"
-	serverextra "github.com/gate4ai/mcp/server/extra"
-	"github.com/gate4ai/mcp/server/mcp"
-	serverCapabilities "github.com/gate4ai/mcp/server/mcp/capability"
-	"github.com/gate4ai/mcp/server/mcp/validators"
-	"github.com/gate4ai/mcp/server/transport"
-	"github.com/gate4ai/mcp/shared/config"
+	gwCapabilities "github.com/gate4ai/gate4ai/gateway/capability"
+	"github.com/gate4ai/gate4ai/gateway/clients/discovering"
+	"github.com/gate4ai/gate4ai/gateway/extra"
+	serverextra "github.com/gate4ai/gate4ai/server/extra"
+	serverCapabilities "github.com/gate4ai/gate4ai/server/mcp/capability"
+	"github.com/gate4ai/gate4ai/server/mcp/validators"
+	"github.com/gate4ai/gate4ai/server/transport"
+	"github.com/gate4ai/gate4ai/shared/config"
 	"go.uber.org/zap"
 )
 
@@ -25,7 +24,7 @@ type Node struct {
 	logger          *zap.Logger
 	cfg             config.IConfig
 	serverTransport *transport.Transport
-	sessionManager  *mcp.Manager
+	sessionManager  *transport.Manager
 	httpServer      *http.Server   // Store the server instance
 	listenerErrChan <-chan error   // Channel for listener errors
 	shutdownWg      sync.WaitGroup // WaitGroup for shutdown
@@ -51,7 +50,7 @@ func New(logger *zap.Logger, cfg config.IConfig) (*Node, error) {
 	n.shutdownWg.Add(1) // Initialize WaitGroup counter for the main server loop
 
 	var err error
-	n.sessionManager, err = mcp.NewManager(n.logger, n.cfg)
+	n.sessionManager, err = transport.NewManager(n.logger, n.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session manager: %w", err)
 	}
@@ -73,7 +72,7 @@ func (n *Node) Start(ctx context.Context, mux *http.ServeMux, overwriteListenAdd
 	n.logger.Info("Starting gateway node...")
 
 	// --- Register Handlers ---
-	n.serverTransport.RegisterHandlers(mux)
+	n.serverTransport.RegisterMCPHandlers(mux)
 
 	discoveringHandlerPath, err := n.cfg.DiscoveringHandlerPath()
 	if err != nil {

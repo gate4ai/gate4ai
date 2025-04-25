@@ -48,9 +48,10 @@ services:
     depends_on:
       db-init:
         condition: service_completed_successfully
+    volumes:
+      - portal_uploads:/app/public/uploads # Mount persistent volume for uploads
     networks:
       - gate4ai-network
-    # The CMD ["node", ".output/server/index.mjs"] from the Dockerfile will run
 
   gateway:
     image: gate4ai/gateway:${VERSION:-latest}
@@ -84,6 +85,8 @@ networks:
 volumes:
   postgres_data:
     name: postgres_data_${APP_ENV:-prod}
+  portal_uploads:
+    name: portal_uploads_${APP_ENV:-prod}
   db_backups:
     name: db_backups_${APP_ENV:-prod}
     driver: local
@@ -91,3 +94,7 @@ volumes:
       type: none
       device: ${BACKUP_BASE_DIR:-./backups}/${APP_ENV} # Provide a default local path for backups
       o: bind
+# docker volume inspect portal_uploads_prod
+# docker volume inspect postgres_data_prod
+# docker volume inspect db_backups_prod
+

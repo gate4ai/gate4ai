@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/playwright-community/playwright-go"
+	"github.com/shirou/gopsutil/v3/process"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
@@ -44,6 +45,41 @@ type ArtifactManager struct {
 	Browser     playwright.Browser
 	Context     playwright.BrowserContext
 	Page        playwright.Page
+}
+
+func isDebugMode() bool {
+	pid := int32(os.Getppid())
+	parentProc, err := process.NewProcess(pid)
+	if err != nil {
+		log.Printf("Error getting parent process: %v", err)
+		return false
+	}
+
+	parentName, err := parentProc.Name()
+	if err != nil {
+		log.Printf("Error getting parent process name: %v", err)
+		return false
+	}
+
+	// Common debugger process names
+	debuggers := []string{"dlv", "debug"}
+	for _, dbg := range debuggers {
+		if parentName == dbg {
+			return true
+		}
+	}
+
+	// Check command line arguments for delve flags
+	parentCmdline, err := parentProc.CmdlineSlice()
+	if err == nil {
+		for _, arg := range parentCmdline {
+			if arg == "debug" || arg == "--" || strings.Contains(arg, "dlv") {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func NewArtifactManager(t *testing.T) *ArtifactManager {
@@ -205,28 +241,30 @@ func (am *ArtifactManager) SaveLocatorDebugInfo(selector string, description str
 		return
 	}
 
+	filename := fmt.Sprintf("locator_not_found_%s", description)
+
 	// Take a screenshot of the current state
-	am.SaveScreenshot(fmt.Sprintf("locator_not_found_%s", description))
+	am.SaveScreenshot(filename)
 
 	// Save the page HTML
-	am.SaveHTML(fmt.Sprintf("locator_not_found_%s", description))
+	am.SaveHTML(filename)
 
 	// Save additional debug info
-	filename := filepath.Join(am.ArtifactDir, fmt.Sprintf("locator_debug_%s.txt", description))
+	debugInfoFilename := filepath.Join(am.ArtifactDir, filename+".txt")
 	debugInfo := fmt.Sprintf("Selector: %s\nDescription: %s\nURL: %s\nTimestamp: %s\n",
 		selector, description, am.Page.URL(), time.Now().Format(time.RFC3339))
 
-	err := os.WriteFile(filename, []byte(debugInfo), 0644)
+	err := os.WriteFile(debugInfoFilename, []byte(debugInfo), 0644)
 	if err != nil {
 		am.T.Logf("Failed to save debug info: %v", err)
 		return
 	}
 
-	am.T.Logf("Locator debug info saved to %s", filename)
+	am.T.Logf("Locator debug info saved to %s", debugInfoFilename)
 }
 
 // WaitForLocatorWithDebug waits for a locator and saves debug info if not found
-func (am *ArtifactManager) WaitForLocatorWithDebug(selector string, description string) (playwright.Locator, error) {
+func (am *ArtifactManager) WaitForLocatorWithDebug(selector string, description string, timeout ...float64) (playwright.Locator, error) {
 	if am == nil || am.Page == nil {
 		if am != nil && am.T != nil {
 			am.T.Logf("Artifact manager or page is nil, cannot wait for locator")
@@ -234,10 +272,14 @@ func (am *ArtifactManager) WaitForLocatorWithDebug(selector string, description 
 		return nil, fmt.Errorf("artifact manager or page is nil")
 	}
 
+	t := 10000.0
+	if len(timeout) > 0 {
+		t = timeout[0]
+	}
 	locator := am.Page.Locator(selector)
 	err := locator.WaitFor(playwright.LocatorWaitForOptions{
 		State:   playwright.WaitForSelectorStateVisible,
-		Timeout: playwright.Float(10000),
+		Timeout: playwright.Float(t),
 	})
 
 	if err != nil {

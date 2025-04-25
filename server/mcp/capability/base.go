@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/gate4ai/mcp/server/mcp"
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/server/transport"
+	"github.com/gate4ai/gate4ai/shared"
 
 	// Import V2024 schema with an alias for checking supported versions
-	schemaV2024 "github.com/gate4ai/mcp/shared/mcp/2024/schema"
+	schemaV2024 "github.com/gate4ai/gate4ai/shared/mcp/2024/schema"
 	// Import V2025 schema as the default 'schema' for parsing, state, and response structure
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 
 	"go.uber.org/zap"
 )
@@ -29,12 +29,12 @@ var _ shared.IServerCapability = (*BaseCapability)(nil)
 // BaseCapability provides handlers for fundamental MCP methods like initialize and ping.
 type BaseCapability struct {
 	logger   *zap.Logger
-	manager  mcp.ISessionManager
+	manager  transport.ISessionManager
 	handlers map[string]func(*shared.Message) (interface{}, error) // Map method -> handler function
 }
 
 // NewBase creates a new BaseCapability.
-func NewBase(logger *zap.Logger, manager mcp.ISessionManager) *BaseCapability {
+func NewBase(logger *zap.Logger, manager transport.ISessionManager) *BaseCapability {
 	bc := &BaseCapability{
 		logger:  logger,
 		manager: manager,
@@ -59,16 +59,12 @@ func (bc *BaseCapability) GetHandlers() map[string]func(*shared.Message) (interf
 // This satisfies the shared.IServerCapability interface
 func (bc *BaseCapability) SetCapabilities(s *schema.ServerCapabilities) {
 	// The base capability doesn't have specific capability options
+	// It's implicitly required for the protocol handshake.
 	bc.logger.Debug("SetCapabilities called on BaseCapability")
 }
 
-// GetCapabilityOptions returns the capability options for this capability
-func (bc *BaseCapability) GetCapabilityOptions() map[string]interface{} {
-	// Base capability doesn't register specific capability options in the schema
-	return map[string]interface{}{}
-}
-
 func (bc *BaseCapability) handleNotificationPing(msg *shared.Message) (interface{}, error) {
+	// No response needed for notifications
 	return nil, nil
 }
 
@@ -82,13 +78,12 @@ func (bc *BaseCapability) handleInitialize(msg *shared.Message) (interface{}, er
 	var params schema.InitializeRequestParams // Use V2025 type for parsing client request
 	if msg.Params == nil {
 		logger.Warn("Received initialize request with missing params")
-		return nil, fmt.Errorf("invalid initialize request: missing params")
+		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: "Missing params"})
 	}
 	err := json.Unmarshal(*msg.Params, &params)
 	if err != nil {
 		logger.Error("Failed to unmarshal initialize params", zap.Error(err), zap.ByteString("params", *msg.Params))
-		// Return a specific JSON-RPC error if possible, TBD based on error handling strategy
-		return nil, fmt.Errorf("invalid initialize parameters: %w", err)
+		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: fmt.Sprintf("Invalid parameters: %v", err)})
 	}
 
 	requestedVersion := params.ProtocolVersion
@@ -107,57 +102,47 @@ func (bc *BaseCapability) handleInitialize(msg *shared.Message) (interface{}, er
 	clientRequestedSupportedVersion := false
 
 	if requestedVersion == "" {
-		// Client didn't specify a version (older client or error?) - default to latest
 		negotiatedVersion = latestSupportedVersion
 		logger.Warn("Client did not specify protocol version, defaulting to server's latest", zap.String("negotiatedVersion", negotiatedVersion))
 	} else if _, supported := supportedVersions[requestedVersion]; supported {
-		// Client requested a version we explicitly support, use it.
 		negotiatedVersion = requestedVersion
 		clientRequestedSupportedVersion = true
 		logger.Info("Negotiated protocol version (client requested supported)", zap.String("version", negotiatedVersion))
 	} else {
-		// Client requested an unsupported/unknown version.
-		// Respond with the latest version *this server* supports.
 		negotiatedVersion = latestSupportedVersion
 		logger.Warn("Client requested unsupported version, responding with server's latest",
 			zap.String("requestedVersion", requestedVersion),
 			zap.String("negotiatedVersion", negotiatedVersion))
-		// The client *should* disconnect if it doesn't support 'negotiatedVersion'.
 	}
 
 	// --- Store negotiated info in session ---
 	// Type assertion to access specific Session methods
-	session, ok := msg.Session.(mcp.IDownstreamSession)
+	session, ok := msg.Session.(transport.IDownstreamSession) // Assert to the interface
 	if !ok {
 		logger.Error("Session type assertion failed in handleInitialize")
-		// This indicates an internal server issue
-		return nil, fmt.Errorf("internal server error: invalid session type")
+		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Internal server error: invalid session type"})
 	}
 	session.SetNegotiatedVersion(negotiatedVersion)
-	// Store client info using V2025 types (already parsed as such)
 	session.SetClientInfo(clientInfo, clientCaps)
 
 	logger.Debug("Stored negotiated version and client info in session")
 
+	// --- Get Server Capabilities (Dynamically from registered capabilities) ---
 	capabilities := schema.ServerCapabilities{}
-	msg.Session.Input().SetCapabilities(&capabilities)
+	msg.Session.Input().SetCapabilities(&capabilities) // Pass pointer to be filled
 
 	response := schema.InitializeResult{
 		ProtocolVersion: negotiatedVersion,
-		Capabilities:    capabilities,
+		Capabilities:    capabilities, // Now filled by registered capabilities
 		ServerInfo:      *bc.manager.GetServerInfo(),
 	}
 
 	// Log detailed information about the response
-	jsonResponse, err := json.Marshal(response)
-	if err != nil {
-		logger.Error("Failed to marshal initialize response for logging", zap.Error(err))
-	} else {
-		logger.Debug("Initialize response contents",
-			zap.String("json", string(jsonResponse)),
-			zap.String("negotiatedVersion", negotiatedVersion),
-			zap.Any("serverInfo", response.ServerInfo))
-	}
+	jsonResponse, _ := json.Marshal(response) // Ignore marshalling error for logging
+	logger.Debug("Initialize response contents",
+		zap.String("json", string(jsonResponse)),
+		zap.String("negotiatedVersion", negotiatedVersion),
+		zap.Any("serverInfo", response.ServerInfo))
 
 	// Log if we are responding with a version the client might not support
 	if !clientRequestedSupportedVersion && requestedVersion != "" {
@@ -186,21 +171,18 @@ func (bc *BaseCapability) handleNotificationInitialized(msg *shared.Message) (in
 		logger.Warn("Received initialized notification for session not in connecting state",
 			zap.Int("status", int(currentStatus)))
 		// Allow transition to connected anyway, might recover from race condition.
-		// Alternative: return error: fmt.Errorf("invalid session state (%d) for initialized notification", currentStatus)
 	}
 
 	// Ensure negotiated version was set - indicates initialize handshake occurred.
-	mcpSession, ok := session.(*mcp.Session)
+	mcpSession, ok := session.(*transport.Session)
 	if !ok {
 		logger.Error("Session type assertion failed in handleNotificationInitialized")
-		return nil, fmt.Errorf("internal server error: invalid session type")
+		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Internal server error: invalid session type"})
 	}
 	negotiatedVersion := mcpSession.GetNegotiatedVersion()
 	if negotiatedVersion == "" {
 		logger.Error("Received initialized notification before successful initialize handshake (no negotiated version)")
-		// Optionally close the session here as it's a protocol violation
-		// session.Close()
-		return nil, fmt.Errorf("protocol error: received initialized notification before successful initialize")
+		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidRequest, Message: "Protocol error: received initialized notification before successful initialize"})
 	}
 
 	// --- Update Status and Log ---
@@ -213,13 +195,11 @@ func (bc *BaseCapability) handleNotificationInitialized(msg *shared.Message) (in
 		zap.String("clientName", clientInfo.Name),
 		zap.String("clientVersion", clientInfo.Version),
 	)
-	// Log capabilities if needed (can be verbose)
-	// logger.Debug("Client capabilities", zap.Any("clientCaps", mcpSession.GetClientCapabilities()))
 
-	return nil, nil // Notifications expect no response content (nil result, nil error)
+	return nil, nil // Notifications expect no response content
 }
 
-// handlePing handles the 'ping' request from the client.
+// handlePing handles the 'ping' request from the client or server.
 func (bc *BaseCapability) handlePing(msg *shared.Message) (interface{}, error) {
 	logger := bc.logger.With(zap.String("sessionID", msg.Session.GetID()), zap.String("method", "ping"))
 	logger.Debug("Received ping request, sending pong")

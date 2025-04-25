@@ -5,20 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
-	"github.com/gate4ai/mcp/server/mcp"
-	"github.com/gate4ai/mcp/shared"
-	"github.com/gate4ai/mcp/shared/config"
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/shared"
+	a2aSchema "github.com/gate4ai/gate4ai/shared/a2a/2025-draft/schema"
+	"github.com/gate4ai/gate4ai/shared/config"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 
 const (
 	SESSION_ID_KEY2024 = "session_id"     // Query parameter for session ID (for V2024 compatibility)
-	AUTH_KEY2024       = "key"            // Query parameter for authentication key (for V2024 compatibility)
-	PATH2024           = "/sse"           // Unified endpoint path for V2024 (for V2024 compatibility)
-	PATH               = "/mcp"           // Unified endpoint path
+	MCP2024_AUTH_KEY   = "key"            // Query parameter for authentication key (for V2024 compatibility)
+	A2A_PATH           = "/a2a"           // Dedicated path for A2A protocol
+	MCP2024_PATH       = "/sse"           // Unified endpoint path for V2024 (for V2024 compatibility)
+	MCP2025_PATH       = "/mcp"           // Unified endpoint path
 	MCP_SESSION_HEADER = "Mcp-Session-Id" // Header for session ID
 
 	// Content Types
@@ -33,9 +35,11 @@ const (
 	statusInternalServerError = http.StatusInternalServerError // 500
 )
 
+var responseTimeout = 600 * time.Second // Default timeout for waiting on responses
+
 // Transport manages MCP HTTP connections supporting multiple protocol versions.
 type Transport struct {
-	sessionManager  mcp.ISessionManager
+	sessionManager  ISessionManager
 	logger          *zap.Logger
 	authManager     AuthenticationManager
 	config          config.IConfig
@@ -67,8 +71,19 @@ func WithSessionTimeout(timeout time.Duration) TransportOption {
 	}
 }
 
+// WithCleanupInterval sets the interval for checking idle sessions
+func WithCleanupInterval(interval time.Duration) TransportOption {
+	return func(t *Transport) error {
+		if interval <= 0 {
+			return errors.New("cleanup interval must be positive")
+		}
+		t.cleanupInterval = interval
+		return nil
+	}
+}
+
 // New creates a new MCP HTTP transport handler.
-func New(mcpManager mcp.ISessionManager, logger *zap.Logger, cfg config.IConfig, options ...TransportOption) (*Transport, error) {
+func New(mcpManager ISessionManager, logger *zap.Logger, cfg config.IConfig, options ...TransportOption) (*Transport, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -90,15 +105,16 @@ func New(mcpManager mcp.ISessionManager, logger *zap.Logger, cfg config.IConfig,
 
 	transport := &Transport{
 		sessionManager: mcpManager,
-		logger:         logger.Named("mcp-transport"),
+		logger:         logger.Named("transport"),
 		authManager:    NewAuthenticator(cfg, logger), // Default authenticator
 		config:         cfg,
+		//TODO: A2A - need only for mcp
 		serverInfo: schema.Implementation{
 			Name:    serverName,
 			Version: serverVersion,
 		},
-		cleanupInterval: 1 * time.Minute, // Default cleanup interval
-		sessionTimeout:  5 * time.Minute, // Default session timeout
+		cleanupInterval: 5 * time.Minute,  // Default cleanup interval
+		sessionTimeout:  30 * time.Minute, // Default session timeout
 	}
 
 	// Apply configuration options
@@ -109,7 +125,7 @@ func New(mcpManager mcp.ISessionManager, logger *zap.Logger, cfg config.IConfig,
 	}
 
 	// Start background cleanup routine if timeout is set
-	if transport.sessionTimeout > 0 { // TODO Session manager function?
+	if transport.sessionTimeout > 0 { // TODO: Move cleanup to session manager?
 		go transport.startSessionCleanup()
 	}
 
@@ -126,11 +142,30 @@ func (t *Transport) SetAuthManager(authManager AuthenticationManager) {
 	t.authManager = authManager
 }
 
-// RegisterHandlers registers the unified MCP handler with the HTTP mux.
-func (t *Transport) RegisterHandlers(mux *http.ServeMux) {
-	mux.HandleFunc(PATH2024, t.Handle2024MCP())
-	mux.HandleFunc(PATH, t.HandleMCP())
-	t.logger.Info("Registered MCP handler", zap.String("path", PATH), zap.String("path2024", PATH2024))
+// RegisterMCPHandlers registers only the MCP protocol handlers.
+func (t *Transport) RegisterMCPHandlers(mux *http.ServeMux) {
+	mux.HandleFunc(MCP2024_PATH, t.Handle2024MCP())
+	mux.HandleFunc(MCP2025_PATH, t.HandleMCP())
+	t.logger.Info("Registered MCP protocol handlers", zap.String("path_v2025", MCP2025_PATH), zap.String("path_v2024", MCP2024_PATH))
+}
+
+// RegisterA2AHandlers registers only the A2A protocol handlers.
+func (t *Transport) RegisterA2AHandlers(mux *http.ServeMux, agentCard *a2aSchema.AgentCard) {
+	mux.HandleFunc(A2A_PATH, t.HandleA2A())
+	// Register /.well-known only if A2A path is different
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		urlCopy := *r.URL
+		urlCopy.Path = A2A_PATH
+		agentCardCopy := *agentCard
+		agentCardCopy.URL = urlCopy.String()
+		json.NewEncoder(w).Encode(agentCardCopy)
+	}
+	mux.HandleFunc("/.well-known/agent.json", handler)
+
+	t.logger.Info("Registered A2A protocol handlers", zap.String("path", A2A_PATH), zap.String("wellKnownPath", "/.well-known/agent.json"))
 }
 
 func (t *Transport) Handle2024MCP() http.HandlerFunc {
@@ -188,6 +223,35 @@ func (t *Transport) HandleMCP() http.HandlerFunc {
 	}
 }
 
+// HandleA2A handles requests on the dedicated /a2a path.
+func (t *Transport) HandleA2A() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Add CORS headers for all A2A responses, including errors and OPTIONS
+		w.Header().Set("Access-Control-Allow-Origin", "*")                   // Adjust as needed
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET") // Allow GET for .well-known even if routed here initially
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept")
+
+		logger := t.logger.With(zap.String("protocol", "A2A"))
+		logger.Debug("Received A2A request",
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+			zap.String("remoteAddr", r.RemoteAddr),
+		)
+
+		switch r.Method {
+		case http.MethodPost:
+			t.handleA2APOST(w, r, logger)
+		case http.MethodGet:
+			http.NotFound(w, r)
+		case http.MethodOptions:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			logger.Warn("Method not allowed for A2A", zap.String("method", r.Method))
+			http.Error(w, "Method Not Allowed", statusMethodNotAllowed)
+		}
+	}
+}
+
 // startSessionCleanup periodically checks for idle sessions and closes them.
 func (t *Transport) startSessionCleanup() {
 	ticker := time.NewTicker(t.cleanupInterval)
@@ -232,39 +296,52 @@ func sendJSONRPCErrorResponse(w http.ResponseWriter, id *schema.RequestID, code 
 		zap.Any("data", data),
 		zap.Any("reqID", id),
 	)
-	// According to JSON-RPC spec, errors should still return 200 OK at HTTP level
-	sendJSONResponse(w, http.StatusOK, errResp, logger)
+	if code == shared.JSONRPCErrorUnauthorized {
+		//Yes, it's not according to the JSON-RPC standard, but the HTTP code is clearer in this case.
+		sendJSONResponse(w, http.StatusUnauthorized, errResp, logger)
+	} else {
+		// According to JSON-RPC spec, errors should still return 200 OK at HTTP level
+		sendJSONResponse(w, http.StatusOK, errResp, logger)
+	}
 }
 
-func (t *Transport) getSession(w http.ResponseWriter, r *http.Request, logger *zap.Logger, allowCreate bool) (shared.ISession, error) {
-	sessionID := r.Header.Get(MCP_SESSION_HEADER)
-	if sessionID == "" {
-		sessionID = r.URL.Query().Get(SESSION_ID_KEY2024)
-	}
+const HEADERKEY = "received_headers"
 
+func (t *Transport) getSession(r *http.Request, sessionID string, logger *zap.Logger, allowCreate bool) (shared.ISession, error) {
 	if sessionID != "" {
 		session, err := t.sessionManager.GetSession(sessionID)
-		if err != nil {
-			logger.Warn("Session not found for V2 GET stream request", zap.String("sessionId", sessionID), zap.Error(err))
-			http.Error(w, "Not Found: Session expired or invalid", statusNotFound)
-			return nil, err
+		if err == nil {
+			logger.Debug("Retrieved existing session", zap.String("sessionId", sessionID))
+			return session, nil
 		}
-		return session, nil
-	} else {
-		if !allowCreate {
-			logger.Warn("Session not found for V2 GET stream request", zap.String("sessionId", sessionID))
-			http.Error(w, "Not Found: Session expired or invalid", statusNotFound)
-			return nil, errors.New("session not found")
+		if err == ErrSessionNotFound {
+			logger.Info("Session lookup failed", zap.String("lookupSessionId", sessionID), zap.Error(err))
+		} else {
+			return nil, fmt.Errorf("session %s not found: %w", sessionID, err)
 		}
-
-		authKey := t.extractAuthKey(r)
-		userID, sessionParams, err := t.authManager.Authenticate(authKey, r.RemoteAddr)
-		if err != nil {
-			logger.Warn("Authentication failed for V2024 SSE connection", zap.String("remoteAddr", r.RemoteAddr), zap.Error(err))
-			http.Error(w, "Authentication failed: "+err.Error(), statusUnauthorized)
-			return nil, err
-		}
-
-		return t.sessionManager.CreateSession(userID, sessionParams), nil
 	}
+
+	// No session ID found in request
+	if !allowCreate {
+		logger.Warn("Session ID missing and creation not allowed for this request type", zap.String("path", r.URL.Path), zap.String("method", r.Method))
+		return nil, errors.New("session id required but not found")
+	}
+
+	// Allow creation - Authenticate and create new session
+	authKey := t.extractAuthKey(r)
+	userID, sessionParams, err := t.authManager.Authenticate(authKey, r.RemoteAddr)
+	if err != nil {
+		logger.Warn("Authentication failed", zap.String("remoteAddr", r.RemoteAddr), zap.Error(err))
+		return nil, fmt.Errorf("authentication failed: %w", err)
+	}
+
+	if sessionParams == nil {
+		sessionParams = &sync.Map{} // Initialize if nil to avoid panics
+	}
+
+	sessionParams.Store(HEADERKEY, r.Header)
+
+	newSession := t.sessionManager.CreateSession(userID, sessionID, sessionParams)
+	logger.Info("Created new session", zap.String("newSessionId", newSession.GetID()), zap.String("userId", userID))
+	return newSession, nil
 }

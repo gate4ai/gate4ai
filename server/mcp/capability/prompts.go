@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/mcp/server/mcp"
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/server/transport"
+	"github.com/gate4ai/gate4ai/shared"
 
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 
@@ -17,10 +17,12 @@ import (
 // It receives the message (containing session and parameters) and returns metadata, prompt messages, and error.
 type PromptHandler func(msg *shared.Message) (*schema.Meta, []schema.PromptMessage, error)
 
+var _ shared.IServerCapability = (*PromptsCapability)(nil) // Ensure interface implementation
+
 // PromptsCapability handles prompt management and related requests.
 type PromptsCapability struct {
 	logger    *zap.Logger
-	manager   *mcp.Manager
+	manager   transport.ISessionManager // Keep manager reference if needed for notifications
 	mu        sync.RWMutex
 	prompts   map[string]*Prompt                                    // Regular prompts map: name -> Prompt
 	templates map[string]*Template                                  // Templates map: name -> Template
@@ -35,7 +37,6 @@ type Prompt struct {
 }
 
 // Template represents a prompt template entity (using 2025 schema).
-// Renamed from PromptTemplate for clarity.
 type Template struct {
 	schema.Prompt // Embed the V2025 Prompt definition (name, description, arguments)
 	Handler       PromptHandler
@@ -43,10 +44,10 @@ type Template struct {
 }
 
 // NewPromptsCapability creates a new PromptsCapability.
-func NewPromptsCapability(logger *zap.Logger, manager *mcp.Manager) *PromptsCapability {
+func NewPromptsCapability(logger *zap.Logger, manager transport.ISessionManager) *PromptsCapability {
 	pc := &PromptsCapability{
-		logger:    logger,
-		manager:   manager,
+		logger:    logger.Named("prompts-capability"),
+		manager:   manager, // Store the manager
 		prompts:   make(map[string]*Prompt),
 		templates: make(map[string]*Template),
 	}
@@ -63,36 +64,42 @@ func (pc *PromptsCapability) GetHandlers() map[string]func(*shared.Message) (int
 }
 
 func (pc *PromptsCapability) SetCapabilities(s *schema.ServerCapabilities) {
-	s.Prompts = &schema.Capability{}
+	pc.mu.RLock()
+	defer pc.mu.RUnlock()
+	// Only set the capability if prompts or templates are registered
+	if len(pc.prompts) > 0 || len(pc.templates) > 0 {
+		pc.logger.Debug("Setting Prompts capability in ServerCapabilities")
+		s.Prompts = &schema.Capability{
+			ListChanged: true, // Indicate that list can change
+		}
+	}
 }
 
 // AddPrompt adds a new prompt (not a template) with the specified details.
 func (pc *PromptsCapability) AddPrompt(name string, description string, handler PromptHandler) error {
-	// V2025 prompts don't have arguments defined directly on them, they are discovered by the client.
-	// Arguments are primarily for templates. If a non-template prompt needs args, handle in handler.
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 
 	if _, exists := pc.prompts[name]; exists {
-		return fmt.Errorf("prompt with name '%s' already exists", name)
+		return fmt.Errorf("prompt '%s' already exists", name)
 	}
-	// Check if name conflicts with a template
 	if _, exists := pc.templates[name]; exists {
-		return fmt.Errorf("a template with name '%s' already exists", name)
+		return fmt.Errorf("template '%s' already exists", name)
+	}
+	if handler == nil {
+		return fmt.Errorf("handler cannot be nil for prompt '%s'", name)
 	}
 
 	pc.prompts[name] = &Prompt{
 		Prompt: schema.Prompt{
 			Name:        name,
 			Description: description,
-			// Arguments field removed from Prompt struct in V2025 schema
 		},
 		Handler:      handler,
 		LastModified: time.Now(),
 	}
-
 	pc.logger.Info("Added prompt", zap.String("name", name))
-	go pc.broadcastPromptsChanged() // Notify clients
+	go pc.broadcastPromptsChanged()
 	return nil
 }
 
@@ -100,16 +107,16 @@ func (pc *PromptsCapability) AddPrompt(name string, description string, handler 
 func (pc *PromptsCapability) UpdatePrompt(name string, description string, handler PromptHandler) error {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-
 	prompt, exists := pc.prompts[name]
 	if !exists {
-		return fmt.Errorf("prompt with name '%s' does not exist", name)
+		return fmt.Errorf("prompt '%s' not found", name)
 	}
-
+	if handler == nil {
+		return fmt.Errorf("handler cannot be nil for prompt '%s'", name)
+	}
 	prompt.Description = description
 	prompt.Handler = handler
 	prompt.LastModified = time.Now()
-
 	pc.logger.Info("Updated prompt", zap.String("name", name))
 	go pc.broadcastPromptsChanged() // Notify clients
 	return nil
@@ -119,11 +126,9 @@ func (pc *PromptsCapability) UpdatePrompt(name string, description string, handl
 func (pc *PromptsCapability) DeletePrompt(name string) error {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-
 	if _, exists := pc.prompts[name]; !exists {
-		return fmt.Errorf("prompt with name '%s' does not exist", name)
+		return fmt.Errorf("prompt '%s' not found", name)
 	}
-
 	delete(pc.prompts, name)
 	pc.logger.Info("Deleted prompt", zap.String("name", name))
 	go pc.broadcastPromptsChanged() // Notify clients
@@ -134,25 +139,25 @@ func (pc *PromptsCapability) DeletePrompt(name string) error {
 func (pc *PromptsCapability) AddTemplate(name string, description string, arguments []schema.PromptArgument, handler PromptHandler) error {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-
 	if _, exists := pc.templates[name]; exists {
-		return fmt.Errorf("template with name '%s' already exists", name)
+		return fmt.Errorf("template '%s' already exists", name)
 	}
-	// Check if name conflicts with a regular prompt
 	if _, exists := pc.prompts[name]; exists {
-		return fmt.Errorf("a prompt with name '%s' already exists", name)
+		return fmt.Errorf("prompt '%s' already exists", name)
+	}
+	if handler == nil {
+		return fmt.Errorf("handler cannot be nil for template '%s'", name)
 	}
 
 	pc.templates[name] = &Template{
 		Prompt: schema.Prompt{
 			Name:        name,
 			Description: description,
-			Arguments:   arguments, // Arguments are part of the template definition in V2025
+			Arguments:   arguments,
 		},
 		Handler:      handler,
 		LastModified: time.Now(),
 	}
-
 	pc.logger.Info("Added prompt template", zap.String("name", name))
 	go pc.broadcastPromptsChanged() // Notify clients
 	return nil
@@ -162,29 +167,26 @@ func (pc *PromptsCapability) AddTemplate(name string, description string, argume
 func (pc *PromptsCapability) DeleteTemplate(name string) error {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-
 	if _, exists := pc.templates[name]; !exists {
-		return fmt.Errorf("template with name '%s' does not exist", name)
+		return fmt.Errorf("template '%s' not found", name)
 	}
-
 	delete(pc.templates, name)
 	pc.logger.Info("Deleted prompt template", zap.String("name", name))
 	go pc.broadcastPromptsChanged() // Notify clients
 	return nil
 }
 
-// broadcastPromptsChanged sends a "notifications/prompts/list_changed" notification to eligible sessions.
+// broadcastPromptsChanged sends notification (kept internal).
 func (pc *PromptsCapability) broadcastPromptsChanged() {
 	if pc.manager == nil {
-		pc.logger.Error("Cannot broadcast prompt list changed: manager not set")
+		pc.logger.Error("Manager not set for broadcast")
 		return
 	}
-	// Params are optional for this notification
 	pc.manager.NotifyEligibleSessions("notifications/prompts/list_changed", nil)
 	pc.logger.Debug("Broadcasted prompts list changed notification")
 }
 
-// handlePromptsList handles the "prompts/list" request from the client.
+// handlePromptsList handles the "prompts/list" request.
 func (pc *PromptsCapability) handlePromptsList(msg *shared.Message) (interface{}, error) {
 	logger := pc.logger.With(zap.String("sessionID", msg.Session.GetID()), zap.String("method", "prompts/list"))
 	logger.Debug("Handling prompts list request")
@@ -192,107 +194,82 @@ func (pc *PromptsCapability) handlePromptsList(msg *shared.Message) (interface{}
 	pc.mu.RLock()
 	defer pc.mu.RUnlock()
 
-	// Parse pagination parameters if any (using V2025 structure)
 	var params schema.ListPromptsRequestParams
 	if msg.Params != nil {
 		if err := json.Unmarshal(*msg.Params, &params); err != nil {
-			logger.Warn("Failed to unmarshal pagination params", zap.Error(err))
-			// Ignore pagination error and return the first page? Or return error?
-			// Let's return an error for invalid params.
-			return nil, fmt.Errorf("invalid parameters: %w", err)
+			logger.Warn("Failed to unmarshal list params", zap.Error(err))
+			return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: fmt.Sprintf("Invalid parameters: %v", err)})
 		}
 	}
-	// TODO: Implement actual pagination based on params.Cursor
 
-	// Combine regular prompts and templates into a single list
 	allPrompts := make([]schema.Prompt, 0, len(pc.prompts)+len(pc.templates))
-
 	for _, prompt := range pc.prompts {
-		allPrompts = append(allPrompts, prompt.Prompt) // Add embedded V2025 Prompt
+		allPrompts = append(allPrompts, prompt.Prompt)
 	}
 	for _, template := range pc.templates {
-		allPrompts = append(allPrompts, template.Prompt) // Add embedded V2025 Prompt
+		allPrompts = append(allPrompts, template.Prompt)
 	}
 
-	// Sort prompts/templates alphabetically by name for consistent ordering? (Optional)
-	// sort.Slice(allPrompts, func(i, j int) bool { return allPrompts[i].Name < allPrompts[j].Name })
+	// TODO: Implement pagination based on params.Cursor
 
-	// Apply pagination logic here based on params.Cursor and allPrompts
-
-	// For now, return all combined prompts without pagination
 	result := schema.ListPromptsResult{
-		Prompts: allPrompts,
-		PaginatedResult: schema.PaginatedResult{
-			NextCursor: nil, // Set NextCursor if pagination is implemented and there are more items
-		},
-		// Meta: Add metadata if needed
+		Prompts:         allPrompts,
+		PaginatedResult: schema.PaginatedResult{NextCursor: nil},
 	}
-
 	logger.Debug("Returning prompt list", zap.Int("count", len(result.Prompts)))
 	return result, nil
 }
 
-// handlePromptsGet handles the "prompts/get" request from the client.
+// handlePromptsGet handles the "prompts/get" request.
 func (pc *PromptsCapability) handlePromptsGet(msg *shared.Message) (interface{}, error) {
 	logger := pc.logger.With(zap.String("sessionID", msg.Session.GetID()), zap.String("method", "prompts/get"))
 
-	// Parse parameters using V2025 schema type
 	var params schema.GetPromptRequestParams
 	if msg.Params == nil {
-		logger.Warn("Missing parameters in prompts/get request")
-		return nil, fmt.Errorf("invalid request: missing params")
+		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: "Missing params"})
 	}
 	if err := json.Unmarshal(*msg.Params, &params); err != nil {
-		logger.Error("Failed to unmarshal prompts/get params", zap.Error(err))
-		return nil, fmt.Errorf("invalid parameters: %w", err)
+		logger.Error("Failed to unmarshal get params", zap.Error(err))
+		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInvalidParams, Message: fmt.Sprintf("Invalid parameters: %v", err)})
 	}
 	logger = logger.With(zap.String("promptName", params.Name))
 	logger.Debug("Handling get prompt request")
 
 	pc.mu.RLock()
-	// First check regular prompts
 	prompt, promptExists := pc.prompts[params.Name]
-	// Then check templates
 	template, templateExists := pc.templates[params.Name]
 	pc.mu.RUnlock()
 
 	var handler PromptHandler
 	var description string
-
 	if promptExists {
-		logger.Debug("Found matching regular prompt")
 		handler = prompt.Handler
 		description = prompt.Description
 	} else if templateExists {
-		logger.Debug("Found matching prompt template")
 		handler = template.Handler
 		description = template.Description
-		// TODO: Potentially validate provided arguments against template.Arguments definition?
 	} else {
 		logger.Warn("Prompt/template not found")
-		return nil, fmt.Errorf("prompt or template with name '%s' not found", params.Name)
-	}
+		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorServerError, Message: fmt.Sprintf("Prompt or template not found: %s", params.Name)})
+	} // Use ServerError range
 
 	if handler == nil {
-		logger.Error("Found prompt/template but handler is nil", zap.String("name", params.Name))
-		return nil, fmt.Errorf("internal error: handler not available for '%s'", params.Name)
+		logger.Error("Handler is nil", zap.String("name", params.Name))
+		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: fmt.Sprintf("Internal error: handler not available for '%s'", params.Name)})
 	}
 
-	// Call the handler associated with the prompt or template
 	logger.Debug("Calling handler")
-	meta, messages, err := handler(msg) // Pass the original message containing session and potentially arguments
+	meta, messages, err := handler(msg)
 	if err != nil {
-		logger.Error("Prompt handler returned an error", zap.Error(err))
-		return nil, fmt.Errorf("handler for '%s' failed: %w", params.Name, err)
-	}
+		logger.Error("Prompt handler error", zap.Error(err))
+		return nil, shared.NewJSONRPCError(&shared.JSONRPCError{Code: shared.JSONRPCErrorServerError, Message: fmt.Sprintf("Handler failed: %v", err)})
+	} // Use ServerError range
 
-	// Construct the V2025 result
 	result := schema.GetPromptResult{
 		Meta:        meta,
-		Description: description, // Use description from the found prompt/template
+		Description: description,
 		Messages:    messages,
 	}
-
 	logger.Debug("Successfully generated prompt content")
 	return result, nil
 }

@@ -8,10 +8,11 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/gate4ai/mcp/gateway"
-	"github.com/gate4ai/mcp/server"
-	"github.com/gate4ai/mcp/shared/config"
-	"github.com/gate4ai/mcp/tests"
+	"github.com/gate4ai/gate4ai/gateway"
+	"github.com/gate4ai/gate4ai/server"
+	"github.com/gate4ai/gate4ai/server/cmd/mcp-example-server/exampleCapability"
+	"github.com/gate4ai/gate4ai/shared/config"
+	"github.com/gate4ai/gate4ai/tests"
 	"go.uber.org/zap"
 )
 
@@ -45,21 +46,27 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Failed to find available port: %v", err)
 	}
 
-	//запустить Example Server1
+	// run Example Server1
 	cfg1 := config.NewInternalConfig()
 	cfg1.UserKeyHashes[config.HashAPIKey("gateway")] = "gw"
-	err = server.StartExample(ctx, LOGGER.With(zap.String("s", "server1")), cfg1, fmt.Sprintf(":%d", portForExampleServer1))
+	serverOptions1 := exampleCapability.BuildOptions(LOGGER.With(zap.String("s", "server1builder")))
+	serverOptions1 = append(serverOptions1, server.WithListenAddr(fmt.Sprintf(":%d", portForExampleServer1)))
+	_, err = server.Start(ctx, LOGGER.With(zap.String("s", "server1")), cfg1, serverOptions1...)
 	if err != nil {
-		log.Fatalf("Failed to find available port: %v", err)
+		LOGGER.Fatal("Failed to start server", zap.Error(err))
 	}
-	//запустить Example Server2
+
+	//run Example Server2
 	cfg2 := config.NewInternalConfig()
 	cfg2.UserKeyHashes[config.HashAPIKey("gateway")] = "gw"
-	err = server.StartExample(ctx, LOGGER.With(zap.String("s", "server2")), cfg2, fmt.Sprintf(":%d", portForExampleServer2))
+	serverOptions2 := exampleCapability.BuildOptions(LOGGER.With(zap.String("s", "server2builder")))
+	serverOptions2 = append(serverOptions2, server.WithListenAddr(fmt.Sprintf(":%d", portForExampleServer2)))
+	_, err = server.Start(ctx, LOGGER.With(zap.String("s", "server2")), cfg2, serverOptions2...)
 	if err != nil {
-		log.Fatalf("Failed to find available port: %v", err)
+		LOGGER.Fatal("Failed to start server", zap.Error(err))
 	}
-	//запустить GW
+
+	//run Gateway
 	cfgGw := config.NewInternalConfig()
 	cfgGw.UserKeyHashes[config.HashAPIKey("key-user0")] = "user0"
 	cfgGw.UserKeyHashes[config.HashAPIKey("key-user1")] = "user1"

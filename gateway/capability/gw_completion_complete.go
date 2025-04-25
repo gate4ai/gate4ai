@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/shared"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +43,7 @@ func (c *GatewayCapability) gw_completion_complete(inputMsg *shared.Message) (in
 		// Find the target prompt
 		for _, p := range prompts {
 			if p.Name == params.Argument.Ref.ID {
-				serverID = p.serverID
+				serverID = p.serverSlug
 				originalID = p.Name
 				break
 			}
@@ -62,7 +62,7 @@ func (c *GatewayCapability) gw_completion_complete(inputMsg *shared.Message) (in
 		// Find the target resource
 		for _, res := range resources {
 			if res.URI == params.Argument.Ref.URI {
-				serverID = res.serverID
+				serverID = res.serverSlug
 				originalURI = res.originalURI
 				break
 			}

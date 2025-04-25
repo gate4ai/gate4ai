@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 
@@ -20,6 +20,7 @@ const (
 	StatusNew SessionStatus = iota
 	StatusConnecting
 	StatusConnected
+	StatusDisconnected
 )
 
 type ISession interface {
@@ -32,6 +33,7 @@ type ISession interface {
 	SendResponse(msgId *schema.RequestID, result interface{}, err error)
 	SendNotification(method string, params map[string]any)
 	SendRequest(method string, params interface{}, callback RequestCallback) (*schema.RequestID, error)
+	SendA2AStreamEvent(event *A2AStreamEvent) error
 	SendRequestSync(method string, params interface{}) <-chan *Message
 
 	SetNegotiatedVersion(version string)
@@ -71,11 +73,14 @@ type BaseSession struct {
 }
 
 // NewBaseSession creates a new base session with default values
-func NewBaseSession(logger *zap.Logger, inputProcessor *Input, params *sync.Map) *BaseSession {
+func NewBaseSession(logger *zap.Logger, id string, inputProcessor *Input, params *sync.Map) *BaseSession {
 	if params == nil {
 		params = &sync.Map{}
 	}
-	sessionID := RandomID()
+	sessionID := id
+	if id == "" {
+		sessionID = RandomID()
+	}
 	sessionLogger := logger.With(zap.String("session_id", sessionID))
 	sessionLogger.Debug("Creating new session")
 	s := &BaseSession{
@@ -382,4 +387,98 @@ func (s *BaseSession) Input() *Input {
 
 func (s *BaseSession) GetLogger() *zap.Logger {
 	return s.Logger
+}
+
+// SendA2AStreamEvent sends an A2A SSE event to the output channel
+// Note: This is added to BaseSession to fulfill the ISession interface.
+// It marshals the *entire* A2AStreamEvent structure as the *result* of a JSON-RPC message.
+func (s *BaseSession) SendA2AStreamEvent(event *A2AStreamEvent) error {
+	if event == nil {
+		return fmt.Errorf("cannot send nil A2A event")
+	}
+
+	// The structure to be sent over SSE should match the spec's event definitions,
+	// typically wrapped in a basic JSON-RPC structure if needed by the transport layer.
+	// For SSE, we often send just the data payload of the event.
+	// Let's marshal the specific event type (Status or Artifact) as the result.
+	var payloadToMarshal interface{}
+	if event.Status != nil {
+		payloadToMarshal = event.Status
+	} else if event.Artifact != nil {
+		payloadToMarshal = event.Artifact
+	} else if event.Error != nil {
+		return s.sendErrorToOutput(nil, &JSONRPCError{Code: JSONRPCErrorInternal, Message: event.Error.Error()})
+	} else {
+		return fmt.Errorf("A2AStreamEvent has no content (Status, Artifact, or Error)")
+	}
+
+	jsonData, err := json.Marshal(payloadToMarshal)
+	if err != nil {
+		return fmt.Errorf("failed to marshal A2A event payload: %w", err)
+	}
+	rawResult := json.RawMessage(jsonData)
+	return s.sendResultToOutput(nil, &rawResult) // ID is nil for stream events
+}
+
+// Helper to reduce duplication in sending messages
+func (s *BaseSession) sendMessageToOutput(msg *Message) error {
+	s.Mu.RLock()
+	outputChan := s.output
+	currentStatus := s.status
+	s.Mu.RUnlock()
+
+	if outputChan == nil {
+		s.Logger.Warn("Cannot send message, session closed", zap.Any("msgId", msg.ID))
+		return fmt.Errorf("session closed")
+	}
+
+	// Allow sending on connecting state *only* for initialize response or stream events without ID
+	isInitializeResponse := false
+	if msg.Result != nil && msg.ID != nil { // Basic check for initialize response structure
+		// A more robust check might involve checking the request method stored somewhere
+	}
+	canSend := currentStatus == StatusConnected ||
+		(currentStatus == StatusConnecting && (isInitializeResponse || msg.ID == nil))
+
+	if !canSend {
+		s.Logger.Warn("Attempting to send message on non-connected/non-connecting session",
+			zap.Any("msgId", msg.ID),
+			zap.Int("status", int(currentStatus)),
+			zap.Error(msg.Error),
+		)
+		return fmt.Errorf("session not in sendable state (status %d)", currentStatus)
+	}
+
+	select {
+	case outputChan <- msg:
+		s.UpdateLastActivity()
+		return nil
+	default:
+		s.Logger.Error("Failed to send message, output channel full", zap.Any("msgId", msg.ID))
+		return fmt.Errorf("output channel full")
+	}
+}
+
+// Helper to send successful results
+func (s *BaseSession) sendResultToOutput(msgId *schema.RequestID, result *json.RawMessage) error {
+	msg := &Message{
+		Session:   s,
+		Timestamp: time.Now(),
+		ID:        msgId,
+		Result:    result,
+		Error:     nil,
+	}
+	return s.sendMessageToOutput(msg)
+}
+
+// Helper to send error results
+func (s *BaseSession) sendErrorToOutput(msgId *schema.RequestID, err *JSONRPCError) error {
+	msg := &Message{
+		Session:   s,
+		Timestamp: time.Now(),
+		ID:        msgId,
+		Result:    nil,
+		Error:     err,
+	}
+	return s.sendMessageToOutput(msg)
 }

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 )
 
 const (
@@ -19,6 +19,8 @@ const (
 
 	// -32000 to -32099 are reserved for implementation-defined server errors
 	JSONRPCErrorServerError = -32000 // Generic server error
+
+	JSONRPCErrorUnauthorized = -32001 // Unauthorized
 )
 
 type JSONRPCErrorResponse struct {
@@ -46,6 +48,13 @@ type JSONRPCNotification struct {
 	JSONRPC string           `json:"jsonrpc"` // Must be "2.0"
 	Method  *string          `json:"method"`
 	Params  *json.RawMessage `json:"params,omitempty"`
+}
+
+type JSONRPCRequest struct {
+	JSONRPC string           `json:"jsonrpc"` // Must be "2.0"
+	ID      schema.RequestID `json:"id,omitempty"`
+	Method  string           `json:"method"`
+	Params  map[string]any   `json:"params,omitempty"`
 }
 
 // JSONRPCError represents a JSON-RPC 2.0 error object.

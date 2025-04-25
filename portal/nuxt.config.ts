@@ -1,16 +1,30 @@
+const baseModules = [
+  '@nuxtjs/google-fonts',
+   // Vuetify will be configured in plugins
+];
+const analyticsModules = process.env.DISABLE_ANALYTICS === 'true' ? [] : [
+  'nuxt-gtag',
+  'yandex-metrika-module-nuxt3',
+];
+const enabledModules = [...baseModules, ...analyticsModules];
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2024-11-01',
   devtools: { enabled: true },
   
-  modules: [
-    '@nuxtjs/google-fonts',
-    'nuxt-gtag',
-    // Vuetify will be configured in plugins
-  ],
+  modules: enabledModules,
   
   gtag: { 
     id: 'G-SVYXLTWN67'
+  },
+
+  yandexMetrika: {
+    id: '101287823',
+    clickmap:true,
+    trackLinks:true,
+    accurateTrackBounce:true,
+    webvisor:true
   },
 
   // Google Fonts configuration
@@ -26,6 +40,7 @@ export default defineNuxtConfig({
   css: [
     'vuetify/lib/styles/main.sass',
     '@mdi/font/css/materialdesignicons.min.css',
+    
   ],
   
   build: {

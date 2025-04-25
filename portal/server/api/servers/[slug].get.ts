@@ -1,7 +1,8 @@
 import { defineEventHandler, getRouterParam, createError } from 'h3';
 import prisma from '../../utils/prisma';
-import type { User, SubscriptionStatus, Server as PrismaServer, ServerOwner } from '@prisma/client'; // Adjusted imports
+import type { User, SubscriptionStatus } from '@prisma/client'; // Adjusted imports
 import { getServerReadAccessLevel, getSubscriptionStatusCounts } from '../../utils/serverPermissions'; // Import helper functions
+import { mapDbA2ASkillToApiSkill, mapDbRestEndpointToApiEndpoint } from '../../utils/serverProtocols'; // Import mapping functions
 
 export default defineEventHandler(async (event) => {
   const slug = getRouterParam(event, 'slug'); // Get slug instead of id
@@ -55,11 +56,8 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 404, statusMessage: 'Server not found' });
     }
 
-    // Type assertion to help TypeScript understand the included relations
-    const serverWithOwners = server as PrismaServer & { owners: { user: User }[] };
-
     // 3. Determine user's read access level using the helper
-    const { hasExtendedAccess, isOwner } = getServerReadAccessLevel(user, serverWithOwners);
+    const { hasExtendedAccess, isOwner } = getServerReadAccessLevel(user, server);
 
     // 4. Check current user's subscription status and ID (only if user is logged in)
     let currentUserSubscriptionId: string | undefined = undefined;
@@ -86,12 +84,41 @@ export default defineEventHandler(async (event) => {
         subscriptionStatusCounts = await getSubscriptionStatusCounts(server.id); // Use ID here
     }
 
-    // 6. Construct the response object based on permissions
+    // 6. Fetch protocol-specific data based on server.protocol
+    let a2aSkills = undefined;
+    let restEndpoints = undefined;
+
+    // For A2A servers, fetch skills from the database
+    if (server.protocol === 'A2A' && (hasExtendedAccess || isCurrentUserSubscribed)) {
+      const skills = await prisma.a2ASkill.findMany({
+        where: { serverId: server.id }
+      });
+      if (skills.length > 0) {
+        a2aSkills = skills.map(mapDbA2ASkillToApiSkill);
+      }
+    }
+    // For REST servers, fetch endpoints with their relations from the database
+    else if (server.protocol === 'REST' && (hasExtendedAccess || isCurrentUserSubscribed)) {
+      const endpoints = await prisma.rESTEndpoint.findMany({
+        where: { serverId: server.id },
+        include: {
+          parameters: true,
+          requestBody: true,
+          responses: true
+        }
+      });
+      if (endpoints.length > 0) {
+        restEndpoints = endpoints.map(mapDbRestEndpointToApiEndpoint);
+      }
+    }
+
+    // 7. Construct the response object based on permissions
     const responseData = {
       // --- Always Visible Fields ---
       id: server.id, // Still include ID
       slug: server.slug, // Include slug
-      type: server.type, // Include type
+      protocol: server.protocol, // Include protocol
+      protocolVersion: server.protocolVersion, // Include protocol version
       name: server.name,
       description: server.description,
       website: server.website,
@@ -122,6 +149,10 @@ export default defineEventHandler(async (event) => {
         availability: server.availability,
         subscriptionStatusCounts: subscriptionStatusCounts,
       }),
+
+      // --- Protocol-specific data ---
+      ...(a2aSkills && { a2aSkills }),
+      ...(restEndpoints && { restEndpoints }),
     };
 
     return responseData;

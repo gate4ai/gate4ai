@@ -1,14 +1,10 @@
-// gate4ai/portal/utils/server.ts
 /**
  * Shared server and tool interfaces
  */
 // Import necessary enums directly from Prisma types if possible,
 // otherwise redeclare them here based on the schema definition.
 // Assuming Prisma enums are available:
-import type { SubscriptionStatus, ServerStatus, ServerAvailability, ServerType as PrismaServerType } from '@prisma/client';
-
-// Export the ServerType enum for use in components
-export type ServerType = PrismaServerType;
+import type { SubscriptionStatus, ServerStatus, ServerAvailability, ServerProtocol } from '@prisma/client';
 
 // Basic tool information remains the same
 export interface ToolInfo {
@@ -42,7 +38,7 @@ export interface ServerParameter {
   id: string;
   name: string;
   type: string;
-  description?: string; // Make optional
+  description?: string;
   required?: boolean;
 }
 
@@ -50,7 +46,7 @@ export interface ServerParameter {
 export interface ServerTool {
   id: string;
   name: string;
-  description?: string; // Make optional
+  description?: string;
   parameters: ServerParameter[];
 }
 
@@ -67,7 +63,8 @@ export interface ServerOwner {
 export interface ServerInfo {
   id: string;
   slug: string;
-  type: ServerType; // Use Prisma enum
+  protocol: ServerProtocol;
+  protocolVersion: string;
   name: string;
   description: string | null;
   imageUrl: string | null;
@@ -75,7 +72,7 @@ export interface ServerInfo {
   email?: string | null;
   createdAt: string; // Keep as string for simplicity or use Date
   updatedAt: string; // Keep as string
-  tools: ToolInfo[]; // Use basic ToolInfo for lists
+  tools?: ToolInfo[]; // Use basic ToolInfo for lists
   _count?: {
     tools: number;
     subscriptions: number; // Active subscriptions count
@@ -91,16 +88,20 @@ export interface Server extends ServerInfo {
   status: ServerStatus; // Use imported enum type
   availability: ServerAvailability; // Use imported enum type
   serverUrl: string;
-  tools: ServerTool[]; // Use ServerTool with detailed parameters
   owners: ServerOwner[];
   subscriptionStatusCounts?: Record<SubscriptionStatus, number>;
+  // Add new fields for A2A and REST data
+  tools?: ServerTool[]; // Use ServerTool with detailed parameters
+  a2aSkills?: AgentSkill[];
+  restEndpoints?: RestEndpoint[];
 }
 
 // Server data for forms (matches ServerFormData in ServerForm.vue)
 export interface ServerData {
   id?: string; // Optional for create, required for edit
   slug: string;
-  type: ServerType; // Use Prisma enum
+  protocol: ServerProtocol; // Use Prisma enum
+  protocolVersion: string;
   name: string;
   description?: string | null;
   website?: string | null;
@@ -110,4 +111,41 @@ export interface ServerData {
   status: ServerStatus; // Use Prisma type
   availability: ServerAvailability; // Use Prisma type
   // Tools are usually handled separately, not directly in the main form data object
+}
+
+// Agent to Agent (A2A) skill definitions
+export interface AgentSkill {
+  id: string;
+  name: string;
+  description?: string | null;
+  tags?: string[];
+  examples?: string[];
+  inputModes?: string[];
+  outputModes?: string[];
+}
+
+// REST API endpoint definitions
+export interface RestEndpoint {
+  path: string;
+  method: string;
+  description?: string;
+  queryParams?: RestParameter[];
+  requestBody?: {
+    description?: string;
+    example?: string;
+  };
+  responses?: RestResponse[];
+}
+
+export interface RestParameter {
+  name: string;
+  type: string;
+  description?: string;
+  required: boolean;
+}
+
+export interface RestResponse {
+  statusCode: number;
+  description: string;
+  example?: string;
 }

@@ -1,0 +1,38 @@
+server:
+  address: ":4001"
+  name: "Gate4ai Example Server"
+  version: "0.1.0"
+  log_level: "debug"
+  authorization: "users_only" # "users_only", "marked_methods", or "none"
+  a2a:
+    name: "Gate4AI A2A Agent"
+    version: "1.0.0"
+    description: "An example A2A agent for testing"
+    skills:
+      - id: "scenario_runner"
+        name: "A2A Scenario Runner"
+        description: "Runs different A2A test scenarios based on input text"
+        examples:
+          - Just a simple message
+          - respond with text "Hello!"
+          - wait 2 seconds
+          - wait 2 seconds and respond with text "Hello!"
+    input_modes:
+      - "text"
+      - "file"
+    output_modes:
+      - "text"
+      - "file"
+    provider:
+      name: "Gate4AI"
+      url: "https://github.com/gate4ai"
+
+users:
+  user1:
+    # In YAML, API keys should ideally be stored as their hashes.
+    # Hashing "test-key-user1" yields: 002d3590657193543ca073cbf1f43b51963e3478137a73c150782522cae93875
+    keys:
+      - "002d3590657193543ca073cbf1f43b51963e3478137a73c150782522cae93875" # Hash of "test-key-user1"
+    # subscribes: [] # No subscriptions needed for direct access testing
+
+backends: {} # No backends needed for the example server itself 

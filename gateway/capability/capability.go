@@ -1,23 +1,24 @@
+// gateway/capability/capability.go
 package capability
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/gate4ai/mcp/gateway/client"
-	"github.com/gate4ai/mcp/server/mcp"
-	"github.com/gate4ai/mcp/server/transport"
-	"github.com/gate4ai/mcp/shared"
-	"github.com/gate4ai/mcp/shared/config"
-	schema "github.com/gate4ai/mcp/shared/mcp/2025/schema" // Use 2025 schema
+	client "github.com/gate4ai/gate4ai/gateway/clients/mcpClient"
+	"github.com/gate4ai/gate4ai/server/transport"
+	"github.com/gate4ai/gate4ai/shared"
+	"github.com/gate4ai/gate4ai/shared/config"
+	schema "github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
 )
 
-// Cache expiration time
 const defaultCacheExpiration = 5 * time.Second
 
 // ServerConnection represents a connection to a remote SSE server
@@ -35,20 +36,19 @@ type GatewayCapability struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	refreshRate  time.Duration
-	userSessions map[string]*mcp.Session // UserID -> mcp session
+	userSessions map[string]*transport.Session // UserID -> mcp session
 	config       config.IConfig
 }
 
 // NewGatewayCapability creates a new gateway capability
 func NewGatewayCapability(logger *zap.Logger, cfg config.IConfig) *GatewayCapability {
 	ctx, cancel := context.WithCancel(context.Background())
-
 	cap := &GatewayCapability{
 		logger:       logger,
 		ctx:          ctx,
 		cancel:       cancel,
-		refreshRate:  5 * time.Minute, // Default refresh rate
-		userSessions: make(map[string]*mcp.Session),
+		refreshRate:  5 * time.Minute,
+		userSessions: make(map[string]*transport.Session),
 		config:       cfg,
 	}
 	return cap
@@ -56,8 +56,6 @@ func NewGatewayCapability(logger *zap.Logger, cfg config.IConfig) *GatewayCapabi
 
 func (c *GatewayCapability) GetHandlers() map[string]func(*shared.Message) (interface{}, error) {
 	handlers := make(map[string]func(*shared.Message) (interface{}, error))
-
-	// Register all handlers that the gateway implements
 	handlers["completion/complete"] = c.gw_completion_complete
 	handlers["prompts/list"] = c.gw_prompts_list
 	handlers["prompts/get"] = c.gw_prompts_get
@@ -67,60 +65,150 @@ func (c *GatewayCapability) GetHandlers() map[string]func(*shared.Message) (inte
 	handlers["resources/unsubscribe"] = c.gw_resources_unsubscribe
 	handlers["tools/list"] = c.gw_tools_list
 	handlers["tools/call"] = c.gw_tools_call
-
 	return handlers
 }
 
+// NEW: mergeHeaders merges headers with specific priority: System > Server > Subscription
+func mergeHeaders(system, server, subscription map[string]string) map[string]string {
+	merged := make(map[string]string)
+
+	// 1. Subscription headers (lowest priority)
+	for k, v := range subscription {
+		merged[strings.ToLower(k)] = v
+	}
+
+	// 2. Server headers (override subscription)
+	for k, v := range server {
+		merged[strings.ToLower(k)] = v
+	}
+
+	// 3. System headers (highest priority, override server/subscription)
+	for k, v := range system {
+		lowerK := strings.ToLower(k)
+		merged[lowerK] = v
+	}
+
+	return merged
+}
+
+// getMergedHeaders retrieves and merges headers for a given session and server.
+func (c *GatewayCapability) getMergedHeaders(clientSession shared.ISession, serverSlug string) map[string]string {
+	logger := c.logger.With(zap.String("sessionID", clientSession.GetID()), zap.String("serverSlug", serverSlug))
+
+	// 1. System Headers
+	systemHeaders := make(map[string]string)
+	userID := transport.GetUserId(clientSession.GetParams())
+	remoteAddr := transport.GetRemoteAddr(clientSession.GetParams()) // Assumes RemoteAddr is stored
+
+	if userID != "" {
+		systemHeaders["Gate4ai-User-Id"] = userID
+	}
+	if serverSlug != "" {
+		systemHeaders["Gate4ai-Server-Slug"] = serverSlug
+	}
+	headersValue, ok := clientSession.GetParams().Load(transport.HEADERKEY)
+	if !ok {
+		logger.Warn("Gateway received headers not found in session parameters")
+	} else {
+		header, ok := headersValue.(http.Header)
+		if !ok {
+			logger.Error("Gateway received headers found but have incorrect type", zap.Any("type", fmt.Sprintf("%T", headersValue)))
+		}
+		systemHeaders["X-Forwarded-For"] = header.Get("X-Forwarded-For")
+		if remoteAddr != "" {
+			systemHeaders["X-Forwarded-For"] = header.Get("X-Forwarded-For") + ", " + remoteAddr
+		}
+	}
+
+	// 2. Server Headers
+	serverHeaders, err := c.config.GetServerHeaders(serverSlug)
+	if err != nil && !errors.Is(err, config.ErrNotFound) {
+		logger.Warn("Failed to get server headers", zap.Error(err))
+		serverHeaders = make(map[string]string) // Use empty if error
+	} else if err != nil && errors.Is(err, config.ErrNotFound) {
+		serverHeaders = make(map[string]string) // Use empty if not found
+	}
+
+	// 3. Subscription Headers
+	subscriptionHeaders := make(map[string]string)
+	if userID != "" { // Only fetch if user is authenticated
+		var subErr error
+		subscriptionHeaders, subErr = c.config.GetSubscriptionHeaders(userID, serverSlug)
+		if subErr != nil && !errors.Is(subErr, config.ErrNotFound) {
+			logger.Warn("Failed to get subscription headers", zap.String("userID", userID), zap.Error(subErr))
+			// Use empty headers on error
+		} else if subErr != nil && errors.Is(subErr, config.ErrNotFound) {
+			// Not found is expected if user hasn't configured them
+		}
+	}
+
+	// 4. Merge
+	merged := mergeHeaders(systemHeaders, serverHeaders, subscriptionHeaders)
+	logger.Debug("Merged headers", zap.Any("headers", merged)) // Be careful logging headers in production
+	return merged
+}
+
 // newBackendSession creates a new backend session for the given server
-func (c *GatewayCapability) newBackendSession(serverID string, clientSession shared.ISession, logger *zap.Logger) *client.Session {
-	// Get the backend server by ID
-	backend, err := c.config.GetBackend(serverID)
+func (c *GatewayCapability) newBackendSession(serverSlug string, clientSession shared.ISession, logger *zap.Logger) *client.Session {
+	backend, err := c.config.GetBackendBySlug(serverSlug)
 	if err != nil {
-		logger.Error("Failed to get backend server", zap.String("serverID", serverID), zap.Error(err))
+		logger.Error("Failed to get backend server", zap.String("serverSlug", serverSlug), zap.Error(err))
 		return nil
 	}
 
-	backendServer, err := client.New(serverID, backend.URL, logger)
+	// Get merged headers
+	mergedHeaders := c.getMergedHeaders(clientSession, serverSlug)
+
+	backendServer, err := client.New(serverSlug, backend.URL, logger)
 	if err != nil {
-		logger.Error("Failed to create backend client", zap.String("server", serverID), zap.Error(err))
+		logger.Error("Failed to create backend client", zap.String("serverSlug", serverSlug), zap.Error(err))
 		return nil
 	}
 
-	newBackendSession := backendServer.NewSession(c.ctx, http.DefaultClient, backend.Bearer)
-	SaveServerID(newBackendSession.GetParams(), serverID)                          // Use GetParams()
-	SaveClientSession(newBackendSession.GetParams(), clientSession.(*mcp.Session)) // Use GetParams()
+	// --- Use functional options to create session ---
+	// Start with default HTTP client
+	options := []client.SessionOption{
+		client.WithHTTPClient(http.DefaultClient),
+	}
+	// Add merged headers
+	options = append(options, client.WithHeaders(mergedHeaders))
+
+	newBackendSession := backendServer.NewSession(c.ctx, options...)
+	SaveServerSlug(newBackendSession.GetParams(), serverSlug)
+	// clientSession is an ISession, GetParams() is available.
+	// We need to pass the clientSession itself for callbacks later.
+	SaveClientSession(newBackendSession.GetParams(), clientSession)
 	newBackendSession.SubscribeOnResourceUpdated(c.gw_resources_notification_updated)
 
 	return newBackendSession
 }
 
 // getBackendSession returns an existing backend session for the given server or creates a new one
-func (c *GatewayCapability) getBackendSession(clientSession shared.ISession, serverID string) (*client.Session, error) {
+// Updated to potentially refresh headers if needed (though current client design doesn't support dynamic header updates easily)
+func (c *GatewayCapability) getBackendSession(clientSession shared.ISession, serverSlug string) (*client.Session, error) {
 	backendSessions, err := c.getBackendSessions(clientSession)
 	if err != nil {
-		// Wrap error for better context
-		return nil, fmt.Errorf("failed to get backend sessions for server '%s': %w", serverID, err)
+		return nil, fmt.Errorf("failed to get backend sessions for server '%s': %w", serverSlug, err)
 	}
 
-	// Look for an existing session for the requested server
 	for _, session := range backendSessions {
-		if session != nil && session.Backend != nil && session.Backend.ID == serverID {
+		if session != nil && session.Backend != nil && session.Backend.Slug == serverSlug {
+			// Optional: Check if headers need refresh? Complex with current client design.
+			// For now, headers are set on creation.
 			return session, nil
 		}
 	}
-
-	return nil, fmt.Errorf("backend session not found for server: %s", serverID)
+	return nil, fmt.Errorf("backend session not found for server: %s", serverSlug)
 }
 
 // getBackendSessions returns all backend sessions for the client session
+// Mostly unchanged, but ensures new sessions get headers.
 func (c *GatewayCapability) getBackendSessions(clientSession shared.ISession) ([]*client.Session, error) {
 	logger := c.logger
 	params := clientSession.GetParams()
 
-	// Check if we already have backend sessions cached
 	backendSessions, timestamp, found := LoadBackendSessions(params)
 	if found && time.Since(timestamp) < defaultCacheExpiration {
-		// Filter out nil sessions from cache before returning
 		validSessions := make([]*client.Session, 0, len(backendSessions))
 		for _, s := range backendSessions {
 			if s != nil {
@@ -130,57 +218,51 @@ func (c *GatewayCapability) getBackendSessions(clientSession shared.ISession) ([
 		return validSessions, nil
 	}
 
-	// Get existing sessions by mapping
 	existingSessions := make(map[string]*client.Session)
 	for _, session := range backendSessions {
-		if session != nil && session.Backend != nil { // Add nil checks
-			existingSessions[session.Backend.ID] = session
+		if session != nil && session.Backend != nil {
+			existingSessions[session.Backend.Slug] = session
 		}
 	}
 
-	// Get the list of servers the user is subscribed to
 	userID := transport.GetUserId(clientSession.GetParams())
 	if userID == "" {
-		// Handle cases where user ID might not be available (e.g., anonymous access if allowed)
-		// Depending on policy, return error or empty list
 		logger.Warn("User ID not found in client session params, cannot get subscriptions")
 		return nil, fmt.Errorf("user ID not found in session")
 	}
+
 	userServers, err := c.config.GetUserSubscribes(userID)
 	if err != nil {
 		err = fmt.Errorf("failed to get user server subscriptions for user '%s': %w", userID, err)
-		logger.Error(err.Error(), zap.Error(err))
+		logger.Error(err.Error())
 		return nil, err
 	}
 	logger.Debug("User subscribed servers", zap.String("userID", userID), zap.Strings("servers", userServers))
 
-	// Create or reuse sessions for each server
 	var currentBackendSessions []*client.Session
 	var wg sync.WaitGroup
-	sessionChan := make(chan *client.Session, len(userServers)) // Buffered channel
+	sessionChan := make(chan *client.Session, len(userServers))
 
-	for _, serverID := range userServers {
+	for _, serverSlug := range userServers {
 		wg.Add(1)
-		go func(sID string) {
+		go func(serverSlug string) {
 			defer wg.Done()
 			var sess *client.Session
-			if session, exists := existingSessions[sID]; exists && session != nil { // Check if session exists and is not nil
-				// TODO: Add a check here to see if the existing session is still valid/connected
-				// If not valid, create a new one instead of reusing.
+			if session, exists := existingSessions[serverSlug]; exists && session != nil {
+				// Reuse existing. Headers won't update unless session is recreated.
 				sess = session
-				logger.Debug("Reusing existing backend session", zap.String("serverID", sID))
-				delete(existingSessions, sID) // Remove from map to track unused old sessions
+				logger.Debug("Reusing existing backend session", zap.String("serverSlug", serverSlug))
+				delete(existingSessions, serverSlug)
 			} else {
-				logger.Debug("Creating new backend session", zap.String("serverID", sID))
-				sess = c.newBackendSession(sID, clientSession, logger.With(zap.String("serverID", sID)))
-				// No need to call Open() here, fetchAndCombineFromBackends will handle it
+				logger.Debug("Creating new backend session", zap.String("serverSlug", serverSlug))
+				sess = c.newBackendSession(serverSlug, clientSession, logger.With(zap.String("serverSlug", serverSlug))) // Gets headers on creation
 			}
-			if sess != nil { // Only send non-nil sessions to the channel
+			if sess != nil {
 				sessionChan <- sess
 			} else {
-				logger.Error("Failed to create or reuse backend session", zap.String("serverID", sID))
+				logger.Error("Failed to create or reuse backend session", zap.String("serverSlug", serverSlug))
 			}
-		}(serverID)
+		}(serverSlug)
 	}
 
 	wg.Wait()
@@ -190,140 +272,127 @@ func (c *GatewayCapability) getBackendSessions(clientSession shared.ISession) ([
 		currentBackendSessions = append(currentBackendSessions, sess)
 	}
 
-	// Close any old sessions that are no longer needed
-	for serverID, oldSession := range existingSessions {
+	for serverSlug, oldSession := range existingSessions {
 		if oldSession != nil {
-			logger.Debug("Closing unused old backend session", zap.String("serverID", serverID))
-			oldSession.Close() // Assuming Close is safe to call multiple times
+			logger.Debug("Closing unused old backend session", zap.String("serverSlug", serverSlug))
+			oldSession.Close()
 		}
 	}
 
 	SaveBackendSessions(params, currentBackendSessions)
 
-	// Log server IDs from sessions
-	serverIDs := make([]string, 0, len(currentBackendSessions))
+	serverSlugs := make([]string, 0, len(currentBackendSessions))
 	for _, s := range currentBackendSessions {
-		if s != nil && s.Backend != nil { // Add nil checks
-			serverIDs = append(serverIDs, s.Backend.ID)
+		if s != nil && s.Backend != nil {
+			serverSlugs = append(serverSlugs, s.Backend.Slug)
 		}
 	}
-	logger.Debug("Current backend sessions established", zap.Strings("serverIDs", serverIDs))
+	logger.Debug("Current backend sessions established", zap.Strings("serverSlugs", serverSlugs))
 
 	return currentBackendSessions, nil
 }
 
+// fetchAndCombineFromBackends - No changes needed here, it just calls the fetchFunc which uses the session (with its headers).
 func fetchAndCombineFromBackends[T any](
 	c *GatewayCapability,
 	ctx context.Context,
 	clientSession shared.ISession,
-	fetchFunc func(context.Context, *client.Session) ([]T, error),
+	fetchFunc func(context.Context, *client.Session) ([]T, error), // Changed signature
 	getKeyFunc func(T) string,
-	modifyKeyFunc func(T, string) T, // Takes original item and serverID
+	modifyKeyFunc func(T, string) T,
 ) ([]T, error) {
 	logger := c.logger
-
 	backendSessions, err := c.getBackendSessions(clientSession)
 	if err != nil {
 		logger.Error("Failed to get backend sessions", zap.Error(err))
-		return nil, fmt.Errorf("failed to get backend sessions: %w", err)
+		return nil, err
 	}
-
 	logger.Debug("Fetching data from backend sessions", zap.Int("count", len(backendSessions)))
 
 	resultsChan := make(chan struct {
-		items    []T
-		serverID string
-		err      error
+		items      []T
+		serverSlug string
+		err        error
 	}, len(backendSessions))
 	var wg sync.WaitGroup
 
 	for _, session := range backendSessions {
-		if session == nil { // Skip nil sessions
+		if session == nil {
 			logger.Warn("Skipping nil backend session")
 			continue
 		}
 		wg.Add(1)
 		go func(s *client.Session) {
 			defer wg.Done()
-			serverID := "unknown"
+			serverSlug := "unknown"
 			if s != nil && s.Backend != nil {
-				serverID = s.Backend.ID
+				serverSlug = s.Backend.Slug
 			}
 
-			// Ensure session is open before fetching
-			initErr := <-s.Open() // Wait for initialization or failure
+			initErr := <-s.Open()
 			if initErr != nil {
-				logger.Error("Backend session failed to initialize", zap.String("server", serverID), zap.Error(initErr))
+				logger.Error("Backend session failed to initialize", zap.String("server", serverSlug), zap.Error(initErr))
 				resultsChan <- struct {
-					items    []T
-					serverID string
-					err      error
-				}{nil, serverID, fmt.Errorf("session init failed: %w", initErr)}
+					items      []T
+					serverSlug string
+					err        error
+				}{nil, serverSlug, fmt.Errorf("session init failed: %w", initErr)}
 				return
 			}
-
-			// Use a derived context with the overall timeout for the fetch operation
-			fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second) // Example: 10-second timeout per backend fetch
+			fetchCtx, cancel := context.WithTimeout(ctx, 1000*time.Second)
 			defer cancel()
-
-			// Fetch data from this backend
-			items, fetchErr := fetchFunc(fetchCtx, s)
+			items, fetchErr := fetchFunc(fetchCtx, s) // Pass session to fetchFunc
 			resultsChan <- struct {
-				items    []T
-				serverID string
-				err      error
-			}{items, serverID, fetchErr}
-
+				items      []T
+				serverSlug string
+				err        error
+			}{items, serverSlug, fetchErr}
 		}(session)
 	}
-
 	wg.Wait()
 	close(resultsChan)
 
 	allItems := make([]T, 0)
-	keyToServer := make(map[string][]string) // Map key -> list of serverIDs that have this key
-
+	keyToServer := make(map[string][]string)
 	for result := range resultsChan {
 		if result.err != nil {
-			// Log errors but potentially continue to combine results from other backends
-			logger.Error("Failed to get data from backend", zap.String("server", result.serverID), zap.Error(result.err))
-			continue // Skip results from failed backends
+			logger.Error("Failed to get data from backend", zap.String("server", result.serverSlug), zap.Error(result.err))
+			continue
 		}
 		if result.items == nil {
-			continue // Skip if no items were returned (e.g., empty list)
+			continue
 		}
 		for _, item := range result.items {
 			key := getKeyFunc(item)
-			keyToServer[key] = append(keyToServer[key], result.serverID)
+			keyToServer[key] = append(keyToServer[key], result.serverSlug)
 			allItems = append(allItems, item)
 		}
 	}
 
-	// Modify keys for duplicates
 	modifiedItems := make([]T, 0, len(allItems))
 	for _, item := range allItems {
 		key := getKeyFunc(item)
 		serverIDs := keyToServer[key]
 		if len(serverIDs) > 1 {
-			var itemServerID string
-			if ts, ok := any(item).(*tool); ok {
-				itemServerID = ts.serverID
-			} else if rs, ok := any(item).(*resourceWithServerInfo); ok {
-				itemServerID = rs.serverID
-			} else if ps, ok := any(item).(*prompt); ok {
-				itemServerID = ps.serverID
+			var serverSlug string
+			// Extract server ID based on type (ugly, needs refactor maybe)
+			switch concreteItem := any(item).(type) {
+			case *tool:
+				serverSlug = concreteItem.serverSlug
+			case *resourceWithServerInfo:
+				serverSlug = concreteItem.serverSlug
+			case *prompt:
+				serverSlug = concreteItem.serverSlug
+			default:
+				logger.Error("Could not determine serverID for item during duplicate modification", zap.String("key", key), zap.Any("type", fmt.Sprintf("%T", item)))
 			}
-			// TODO Add other types
-
-			if itemServerID == "" {
-				logger.Error("Could not determine serverID for item during duplicate modification", zap.String("key", key))
-				// Skip modification or handle error
-				modifiedItems = append(modifiedItems, item) // Add unmodified
+			if serverSlug == "" {
+				modifiedItems = append(modifiedItems, item)
 			} else {
-				modifiedItems = append(modifiedItems, modifyKeyFunc(item, itemServerID)) // Pass serverID
+				modifiedItems = append(modifiedItems, modifyKeyFunc(item, serverSlug))
 			}
 		} else {
-			modifiedItems = append(modifiedItems, item) // No conflict, add as is
+			modifiedItems = append(modifiedItems, item)
 		}
 	}
 
@@ -331,7 +400,7 @@ func fetchAndCombineFromBackends[T any](
 	return modifiedItems, nil
 }
 
-// findBackendSessionForResourceURI finds the backend session and resource for a given URI
+// findBackendSessionForResourceURI - No direct changes, relies on getBackendSession.
 func (c *GatewayCapability) findBackendSessionForResourceURI(inputMsg *shared.Message, logger *zap.Logger) (*client.Session, *resourceWithServerInfo, error) {
 	var params struct {
 		URI string `json:"uri"`
@@ -342,55 +411,70 @@ func (c *GatewayCapability) findBackendSessionForResourceURI(inputMsg *shared.Me
 	if err := json.Unmarshal(*inputMsg.Params, &params); err != nil {
 		return nil, nil, fmt.Errorf("invalid parameters: %w", err)
 	}
-
 	if params.URI == "" {
 		return nil, nil, fmt.Errorf("resource URI is required in parameters")
 	}
 
-	// Use GetResources which handles caching and fetching
-	resources, err := c.GetResources(inputMsg, logger)
+	resources, err := c.GetResources(inputMsg, logger) // Assumes GetResources is defined elsewhere
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get resources: %w", err)
 	}
 
 	var targetResource *resourceWithServerInfo
 	for _, res := range resources {
-		if res != nil && res.URI == params.URI { // Add nil check
+		if res != nil && res.URI == params.URI {
 			targetResource = res
 			break
 		}
 	}
-
 	if targetResource == nil {
 		logger.Error("Resource not found", zap.String("uri", params.URI))
 		return nil, nil, fmt.Errorf("resource not found: %s", params.URI)
 	}
 
-	backendSession, err := c.getBackendSession(inputMsg.Session, targetResource.serverID)
+	backendSession, err := c.getBackendSession(inputMsg.Session, targetResource.serverSlug)
 	if err != nil {
-		// Provide more context in the error message
-		return nil, nil, fmt.Errorf("failed to get backend session for server '%s' (resource URI '%s'): %w", targetResource.serverID, params.URI, err)
+		return nil, nil, fmt.Errorf("failed to get backend session for server '%s' (resource URI '%s'): %w", targetResource.serverSlug, params.URI, err)
 	}
-
 	if backendSession == nil {
-		// This case should ideally be covered by the error above, but added for robustness
-		return nil, nil, fmt.Errorf("backend session resolved to nil for server '%s'", targetResource.serverID)
+		return nil, nil, fmt.Errorf("backend session resolved to nil for server '%s'", targetResource.serverSlug)
 	}
 
 	return backendSession, targetResource, nil
 }
 
-// SetCapabilities implements the shared.IServerCapability interface
+// SetCapabilities - No changes needed.
 func (c *GatewayCapability) SetCapabilities(s *schema.ServerCapabilities) {
 	s.Completions = &struct{}{}
-	s.Prompts = &schema.Capability{
-		ListChanged: true,
+	s.Prompts = &schema.Capability{ListChanged: true}
+	s.Resources = &schema.CapabilityWithSubscribe{ListChanged: true, Subscribe: true}
+	s.Tools = &schema.Capability{ListChanged: true}
+}
+
+// Helper function to associate client session with backend session parameters
+func SaveClientSession(sessionParams *sync.Map, clientSession shared.ISession) {
+	sessionParams.Store(clientSessionsKey, &SavedValue{
+		Value:     clientSession,
+		Timestamp: time.Now(),
+	})
+}
+
+// Helper function to retrieve client session from backend session parameters
+func GetClientSession(sessionParams *sync.Map) (shared.ISession, time.Time, bool) {
+	savedValue, ok1 := sessionParams.Load(clientSessionsKey)
+	if !ok1 {
+		return nil, time.Time{}, false
 	}
-	s.Resources = &schema.CapabilityWithSubscribe{
-		ListChanged: true,
-		Subscribe:   true,
+
+	saved, ok2 := savedValue.(*SavedValue)
+	if !ok2 {
+		return nil, time.Time{}, false
 	}
-	s.Tools = &schema.Capability{
-		ListChanged: true,
+
+	session, ok := saved.Value.(shared.ISession)
+	if !ok {
+		return nil, time.Time{}, false
 	}
+
+	return session, saved.Timestamp, true
 }

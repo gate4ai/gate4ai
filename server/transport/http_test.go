@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gate4ai/mcp/server/transport"
-	"github.com/gate4ai/mcp/shared/config"
+	"github.com/gate4ai/gate4ai/server/transport"
+	"github.com/gate4ai/gate4ai/shared/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -26,8 +26,8 @@ func createDummyMux() *http.ServeMux {
 
 func TestStartHTTPServer_HTTPMode(t *testing.T) {
 	logger := zap.NewNop()
-	cfg := config.NewInternalConfig() // Use in-memory config
-	cfg.SetListenAddr("localhost:0")  // Use ephemeral port
+	cfg := config.NewInternalConfig()
+	cfg.ServerAddress = "localhost:0"
 	cfg.SSLEnabledValue = false
 
 	mux := createDummyMux()
@@ -68,7 +68,7 @@ func TestStartHTTPServer_ManualTLSMode(t *testing.T) {
 
 	logger := zap.NewNop()
 	cfg := config.NewInternalConfig()
-	cfg.SetListenAddr("localhost:0")
+	cfg.ServerAddress = "localhost:0"
 	cfg.SSLEnabledValue = true
 	cfg.SSLModeValue = "manual"
 	cfg.SSLCertFileValue = certFile
@@ -89,7 +89,7 @@ func TestStartHTTPServer_ManualTLSMode(t *testing.T) {
 func TestStartHTTPServer_ACMEMode(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := config.NewInternalConfig()
-	cfg.SetListenAddr("localhost:0") // Listen on dynamic port for HTTPS
+	cfg.ServerAddress = "localhost:0"
 	cfg.SSLEnabledValue = true
 	cfg.SSLModeValue = "acme"
 	cfg.SSLAcmeDomainsValue = []string{"example.com", "www.example.com"}

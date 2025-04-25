@@ -48,7 +48,7 @@
 
 This is the easiest way to get all services running locally.
 
-1.  **Clone:** `git clone https://github.com/gate4ai/mcp.git && cd mcp`
+1.  **Clone:** `git clone https://github.com/gate4ai/gate4ai.git && cd mcp`
 2.  **Environment:** Create a `.env` file in the root directory (copy from `.env.example` if provided) and configure `GATE4AI_DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `JWT_SECRET`.
     *Example `.env` for local Docker:*
     ```env
@@ -92,3 +92,9 @@ This is the easiest way to get all services running locally.
 
 We greatly welcome contributors and are ready to assist with onboarding. Don't hesitate to ask questions and make suggestions!
 
+## Community & Support
+
+*   **Community Chat:** [https://t.me/gate4ai_chat](https://t.me/gate4ai_chat) - Ask questions, discuss features.
+*   **Announcements:** [https://t.me/gate4ai_channel](https://t.me/gate4ai_channel) - Stay updated on releases.
+*   **CEO Feedback:** [https://t.me/gate4ai](https://t.me/gate4ai) - Share your thoughts directly with the CEO.
+*   **Feedback Email:** feedback@gate4.ai

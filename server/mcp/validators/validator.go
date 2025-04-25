@@ -1,7 +1,7 @@
 package validators
 
 import (
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/shared"
 )
 
 // CreateDefaultValidators returns the standard set of validators with default settings

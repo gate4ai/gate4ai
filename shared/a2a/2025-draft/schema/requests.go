@@ -1,12 +1,10 @@
 package schema
 
-import "encoding/json"
-
 // --- Request Parameter Structures ---
 
 // TaskIdParams provides the task ID for operations like cancel or get push config.
 type TaskIdParams struct {
-	// The unique identifier of the task.
+	// The unique identifier of the task. (Required)
 	ID string `json:"id"`
 	// Optional metadata for the request context.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
@@ -14,9 +12,10 @@ type TaskIdParams struct {
 
 // TaskQueryParams provides parameters for retrieving task state, including optional history.
 type TaskQueryParams struct {
-	// The unique identifier of the task.
+	// The unique identifier of the task. (Required)
 	ID string `json:"id"`
 	// Optional: Maximum number of historical messages to retrieve for the task.
+	// If omitted/negative, no history. If 0, empty history array.
 	HistoryLength *int `json:"historyLength,omitempty"`
 	// Optional metadata for the request context.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
@@ -24,11 +23,11 @@ type TaskQueryParams struct {
 
 // TaskSendParams provides parameters for sending a message to initiate or continue a task.
 type TaskSendParams struct {
-	// The unique identifier of the task.
+	// The unique identifier of the task. Client SHOULD generate a unique ID (e.g., UUID) for new tasks. (Required)
 	ID string `json:"id"`
-	// Optional identifier to group related tasks into a session.
-	SessionID *string `json:"sessionId,omitempty"` // Note: Schema shows sessionId as required, but summary implies optional for new tasks. Using pointer.
-	// The message content being sent.
+	// Optional identifier to group related tasks into a session. Server generates if omitted for new tasks.
+	SessionID *string `json:"sessionId,omitempty"`
+	// The message content being sent. (Required)
 	Message Message `json:"message"`
 	// Optional: Configuration for push notifications for this task.
 	PushNotification *PushNotificationConfig `json:"pushNotification,omitempty"`
@@ -39,6 +38,7 @@ type TaskSendParams struct {
 }
 
 // --- Concrete Request Structures ---
+// These represent the top-level JSON-RPC object for each method.
 
 // CancelTaskRequest represents a 'tasks/cancel' JSON-RPC request.
 type CancelTaskRequest struct {
@@ -92,12 +92,6 @@ type SetTaskPushNotificationRequest struct {
 type TaskResubscriptionRequest struct {
 	JSONRPC string          `json:"jsonrpc"` // Always "2.0"
 	Method  string          `json:"method"`  // Always "tasks/resubscribe"
-	Params  TaskQueryParams `json:"params"`
-	ID      any             `json:"id"` // Request ID
+	Params  TaskQueryParams `json:"params"`  // Uses QueryParams according to spec example
+	ID      any             `json:"id"`      // Request ID
 }
-
-// A2ARequest represents the union of all possible A2A request types.
-// In Go, this is often handled by trying to unmarshal into specific types
-// based on the 'method' field, rather than a direct union struct.
-// This definition is primarily for documentation or reflection purposes.
-type A2ARequest json.RawMessage

@@ -23,8 +23,8 @@
               prepend-inner-icon="mdi-lock"
               :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
               class="mb-4"
-              @click:append-inner="showPassword = !showPassword"
               :disabled="isLoading"
+              @click:append-inner="showPassword = !showPassword"
             />
 
              <v-text-field
@@ -37,8 +37,8 @@
                 prepend-inner-icon="mdi-lock-check"
                 :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
                 class="mb-4"
-                @click:append-inner="showPassword = !showPassword"
                 :disabled="isLoading"
+                @click:append-inner="showPassword = !showPassword"
               />
 
             <v-btn

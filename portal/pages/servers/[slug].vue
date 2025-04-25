@@ -1,26 +1,54 @@
 <template>
-  <div v-if="isLoading" class="d-flex justify-center align-center" style="height: 400px;">
-    <v-progress-circular indeterminate color="primary"/>
+  <div
+    v-if="isLoading"
+    class="d-flex justify-center align-center"
+    style="height: 400px"
+  >
+    <v-progress-circular indeterminate color="primary" />
   </div>
   <div v-else-if="server">
     <v-row>
-      <v-col cols="12" md="4">
-        <v-btn icon class="mr-2" @click="navigateTo('/servers')">
+      <!-- Left Column (Image, Info, Owner Info) -->
+      <v-col cols="12" md="4" class="d-flex flex-column">
+        <div class="d-flex align-center mb-4">
+          <!-- Back Button -->
+          <v-btn icon class="mr-2 mt-1" @click="navigateBack" size="small">
             <v-icon>mdi-arrow-left</v-icon>
           </v-btn>
 
-        <v-img
-          :src="server.imageUrl || '/images/default-server.svg'"
-          height="100"
-          width="200"
-          cover
-          class="rounded-lg"
-        />
+          <!-- Server Logo -->
+          <v-hover v-slot="{ isHovering, props: hoverProps }">
+            <v-img
+              v-bind="hoverProps"
+              :src="server.imageUrl || '/images/default-server.svg'"
+              :alt="`${server.name} logo`"
+              height="100"
+              width="200"
+              cover
+              class="rounded-lg server-logo"
+            >
+              <!-- Optional: Overlay for upload button on hover -->
+              <v-fade-transition>
+                <div
+                  v-if="isHovering && canManageServer"
+                  class="d-flex align-center justify-center fill-height bg-black bg-opacity-50"
+                >
+                  <v-btn
+                    icon="mdi-upload"
+                    variant="plain"
+                    @click.stop="showUploadLogoDialog = true"
+                  />
+                </div>
+              </v-fade-transition>
+            </v-img>
+          </v-hover>
+        </div>
 
         <ServerInfo
           :server="server"
           :is-authenticated="isAuthenticated"
           class="mt-4"
+          @subscribe="handleSubscriptionUpdate"
         />
 
         <ServerInfoForOwners
@@ -30,91 +58,158 @@
         />
       </v-col>
 
+      <!-- Right Column (Details, Tools/Skills/Endpoints, Actions) -->
       <v-col cols="12" md="8">
-        <div class="d-flex align-center mb-4">
-           <h1 class="text-h3 mr-2">{{ server.name }}</h1>
-           <v-chip v-if="server.type" color="info" size="small">{{ server.type }}</v-chip>
+        <div class="d-flex align-center mb-4 flex-wrap">
+          <h1 class="text-h3 mr-2">{{ server.name }}</h1>
+          <v-chip v-if="server.protocol" color="info" size="small">{{
+            server.protocol
+          }}</v-chip>
           <v-spacer />
 
-          <!-- Server management buttons for owners, admins and security -->
-          <div v-if="canManageServer" class="d-flex">
+          <!-- Action Buttons -->
+          <div class="d-flex align-center mt-2 mt-sm-0">
+            <!-- Configure Headers Button for Subscribers -->
             <v-btn
-              color="primary"
+              v-if="isSubscribedAndHasTemplate"
+              color="secondary"
               class="mx-1"
-              @click="openEditDialog"
+              size="small"
+              prepend-icon="mdi-tune"
+              @click="showSubscriptionHeadersDialog = true"
             >
-              <v-icon left>mdi-pencil</v-icon>
-              Edit
+              Configure Headers
             </v-btn>
-            <v-btn
-              color="error"
-              class="mx-1"
-              @click="openDeleteDialog"
-            >
-              <v-icon left>mdi-delete</v-icon>
-              Delete
-            </v-btn>
+
+            <!-- Server management buttons (Owner/Admin) -->
+            <template v-if="canManageServer">
+              <v-btn
+                color="primary"
+                class="mx-1"
+                size="small"
+                data-testid="upload-logo-button"
+                prepend-icon="mdi-upload"
+                @click="openUploadDialog"
+              >
+                Upload Logo
+              </v-btn>
+              <v-btn
+                color="primary"
+                class="mx-1"
+                size="small"
+                prepend-icon="mdi-pencil"
+                @click="openEditDialog"
+              >
+                Edit
+              </v-btn>
+              <v-btn
+                color="error"
+                class="mx-1"
+                size="small"
+                prepend-icon="mdi-delete"
+                @click="openDeleteDialog"
+              >
+                Delete
+              </v-btn>
+            </template>
           </div>
         </div>
 
         <p class="text-body-1 mb-6">{{ server.description }}</p>
 
-        <ServerTools :tools="server.tools" :is-authenticated="isAuthenticated" />
+        <!-- Display components based on server protocol -->
+        <MCPServerTools
+          v-if="server.protocol === 'MCP'"
+          :tools="server.tools"
+        />
+        <A2AServerSkills
+          v-else-if="server.protocol === 'A2A'"
+          :skills="server.a2aSkills"
+        />
+        <RESTServerFuncs
+          v-else-if="server.protocol === 'REST'"
+          :endpoints="server.restEndpoints"
+        />
       </v-col>
     </v-row>
 
-    <!-- Delete Confirmation Dialog -->
-    <DeleteServerDialog
-      v-model="deleteDialog"
-      @confirm="deleteServer"
+    <!-- Dialogs -->
+    <DeleteServerDialog v-model="deleteDialog" @confirm="deleteServer" />
+
+    <UploadServerLogoDialog
+      v-if="showUploadLogoDialog"
+      v-model="showUploadLogoDialog"
+      :server-slug="serverSlug"
+      @logo-updated="handleLogoUpdate"
+    />
+
+    <SubscriptionHeaderValuesDialog
+      v-if="showSubscriptionHeadersDialog && server"
+      v-model="showSubscriptionHeadersDialog"
+      :server-slug="serverSlug"
+      :subscription-id="server?.subscriptionId"
+      @save="onSubscriptionHeadersSaved"
     />
   </div>
-   <div v-else class="text-center py-10">
-      <v-alert type="error" variant="tonal">
-         Server not found or you do not have permission to view it.
-      </v-alert>
-       <v-btn color="primary" to="/servers" class="mt-4">Back to Catalog</v-btn>
-   </div>
+  <div v-else class="text-center py-10">
+    <v-alert type="error" variant="tonal">
+      Server not found or you do not have permission to view it.
+    </v-alert>
+    <v-btn color="primary" to="/servers" class="mt-4">Back to Catalog</v-btn>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import { useRoute, useRouter } from 'vue-router'; // Import useRouter
-import ServerInfo from '~/components/ServerInfo.vue';
-import ServerInfoForOwners from '~/components/ServerInfoForOwners.vue';
-import DeleteServerDialog from '~/components/DeleteServerDialog.vue';
-import ServerTools from '~/components/ServerTools.vue';
-import type { Server } from '~/utils/server'; // Use the updated Server type
-import { useSnackbar } from '~/composables/useSnackbar'; // Import useSnackbar
+import { ref, computed, onMounted } from "vue";
+import { useRoute, useRouter } from "vue-router"; // Import useRouter
+import ServerInfo from "~/components/ServerInfo.vue";
+import ServerInfoForOwners from "~/components/ServerInfoForOwners.vue";
+import DeleteServerDialog from "~/components/DeleteServerDialog.vue";
+import MCPServerTools from "~/components/MCPServerTools.vue";
+import A2AServerSkills from "~/components/A2AServerSkills.vue";
+import RESTServerFuncs from "~/components/RESTServerFuncs.vue";
+import UploadServerLogoDialog from "~/components/UploadServerLogoDialog.vue";
+import SubscriptionHeaderValuesDialog from "~/components/SubscriptionHeaderValuesDialog.vue";
+import type { Server } from "~/utils/server";
+import { useSnackbar } from "~/composables/useSnackbar";
 
 const { $auth, $api } = useNuxtApp();
 const route = useRoute();
-const router = useRouter(); // Use useRouter for navigation
-const { showError } = useSnackbar(); // Use snackbar for errors
+const router = useRouter(); // Use router for navigation
+const { showError, showSuccess } = useSnackbar();
 
-const serverSlug = route.params.slug as string; // Get slug from route
+const serverSlug = route.params.slug as string;
 const isLoading = ref(true);
 const deleteDialog = ref(false);
+const showSubscriptionHeadersDialog = ref(false);
+const showUploadLogoDialog = ref(false); // State for the logo upload dialog
 
-// Authentication
 const isAuthenticated = computed(() => $auth.check());
 const isSecurityOrAdmin = computed(() => $auth.isSecurityOrAdmin());
 
-// Check if user can manage the server (owner, admin, security)
+const server = ref<Server | null>(null);
+
+// Recalculate permissions based on fetched server data
 const canManageServer = computed(() => {
   if (!isAuthenticated.value || !server.value) return false;
   if (isSecurityOrAdmin.value) return true;
-
-  // Check if current user is an owner
   const currentUser = $auth.getUser();
   if (!currentUser) return false;
-
-  // Use optional chaining and check user.id
-  return server.value.owners?.some(owner => owner.user?.id === currentUser.id) || false;
+  // Ensure server.owners is an array before using .some()
+  return (
+    Array.isArray(server.value.owners) &&
+    server.value.owners.some((owner) => owner.user?.id === currentUser.id)
+  );
 });
 
-// Server data
-const server = ref<Server | null>(null);
+// Check if user is subscribed AND the server has a template
+const isSubscribedAndHasTemplate = computed(() => {
+  return (
+    server.value?.isCurrentUserSubscribed &&
+    (server.value as any).subscriptionHeaderTemplate && // Check if template exists (fetch adds this)
+    (server.value as any).subscriptionHeaderTemplate.length > 0
+  );
+});
 
 onMounted(async () => {
   await fetchServer();
@@ -122,54 +217,101 @@ onMounted(async () => {
 
 async function fetchServer() {
   isLoading.value = true;
-  server.value = null; // Reset server data before fetching
+  server.value = null; // Reset server data before fetch
 
   try {
-    // Fetch server using the SLUG
-    server.value = await $api.getJson<Server>(`/servers/${serverSlug}`);
+    // Fetch server using the SLUG, include template info
+    // Adjust the type to expect subscriptionHeaderTemplate potentially
+    // The API `/servers/[slug].get.ts` already includes owners, _count etc.
+    // and calculates `isCurrentUserSubscribed`, `isCurrentUserOwner`, `subscriptionId`
+    server.value = await $api.getJson<
+      Server & { subscriptionHeaderTemplate?: any[] }
+    >(`/servers/${serverSlug}`);
   } catch (error: unknown) {
-    console.error('Error fetching server details:', error);
-    const message = error instanceof Error ? error.message : 'Failed to load server details.';
+    console.error("Error fetching server details:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to load server details.";
     showError(message);
-    // Don't navigate away immediately, let the template show the error message
-    // if (error instanceof Error && error.message.includes('404')) {
-    //   // Server not found
-    //   navigateTo('/servers');
+    // Optionally redirect if server not found (e.g., error status 404)
+    // if (error?.response?.status === 404) {
+    //    router.push('/servers');
     // }
   } finally {
     isLoading.value = false;
   }
 }
 
-// Open the edit server page using SLUG
-function openEditDialog() {
-  navigateTo(`/servers/edit/${serverSlug}`); // Use slug
+function navigateBack() {
+  router.push("/servers"); // Navigate back to the catalog
 }
 
-// Open the delete confirmation dialog
+function openEditDialog() {
+  router.push(`/servers/edit/${serverSlug}`);
+}
+
+function openUploadDialog() {
+  console.log("openDeleteDialog");
+  showUploadLogoDialog.value = true;
+}
+
 function openDeleteDialog() {
   deleteDialog.value = true;
 }
 
-// Delete the server using SLUG
 async function deleteServer() {
-  if (!server.value) return; // Should not happen if button is visible
-
+  if (!server.value) return;
   try {
-    await $api.deleteJson(`/servers/${serverSlug}`); // Use slug
-    showSuccess('Server deleted successfully.');
-    navigateTo('/servers'); // Navigate back to servers list
+    await $api.deleteJson(`/servers/${serverSlug}`);
+    showSuccess("Server deleted successfully.");
+    router.push("/servers"); // Navigate back to catalog after delete
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Failed to delete server.';
+    const message =
+      error instanceof Error ? error.message : "Failed to delete server.";
     showError(message);
-    console.error('Error deleting server:', error);
+    console.error("Error deleting server:", error);
   } finally {
     deleteDialog.value = false;
   }
 }
 
-// Update Nuxt page meta dynamically
+// Handle subscription update from child (ServerInfo)
+function handleSubscriptionUpdate() {
+  // Re-fetch server data to get updated subscription status and potentially subscriptionId
+  // This will also update the `isCurrentUserSubscribed` flag used by `isSubscribedAndHasTemplate`
+  fetchServer();
+}
+
+// Handle header save from SubscriptionHeaderValuesDialog
+function onSubscriptionHeadersSaved() {
+  // Optionally refetch data if needed, but dialog already saved.
+  console.log("Subscription headers saved.");
+  showSuccess("Subscription headers updated!"); // Show feedback
+}
+
+// Handler for when the logo is successfully updated via UploadServerLogoDialog
+function handleLogoUpdate(newImageUrl: string) {
+  if (server.value) {
+    server.value.imageUrl = newImageUrl; // Update local data to refresh image instantly
+  }
+  // No need to close dialog here, component does it
+}
+
 useHead({
-  title: computed(() => server.value?.name || 'Server Details')
-})
+  title: computed(() => server.value?.name || "Server Details"),
+});
 </script>
+
+<style scoped>
+/* Optional: Add some styling for the logo hover effect */
+.server-logo {
+  transition: filter 0.3s ease;
+  position: relative; /* Needed for absolute positioning of overlay */
+}
+/* Example hover effect - could be removed if button overlay is enough */
+/* .server-logo:hover {
+  filter: brightness(0.8);
+} */
+.bg-opacity-50 {
+  background-color: rgba(0, 0, 0, 0.5);
+}
+</style>

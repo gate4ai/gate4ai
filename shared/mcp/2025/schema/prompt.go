@@ -1,6 +1,6 @@
 package schema
 
-import schema2024 "github.com/gate4ai/mcp/shared/mcp/2024/schema"
+import schema2024 "github.com/gate4ai/gate4ai/shared/mcp/2024/schema"
 
 // Role represents the sender or recipient of messages and data in a conversation.
 type Role = schema2024.Role

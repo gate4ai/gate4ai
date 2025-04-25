@@ -47,26 +47,26 @@ type AgentSkill struct {
 // AgentCard provides metadata about an AI agent, enabling discovery and capability understanding.
 // Typically served at `/.well-known/agent.json`.
 type AgentCard struct {
-	// Human-readable name of the agent.
+	// Human-readable name of the agent. (Required)
 	Name string `json:"name"`
-	// A brief description of the agent's purpose.
+	// A brief description of the agent's purpose. (Optional)
 	Description *string `json:"description,omitempty"`
-	// The base URL endpoint for the agent's A2A JSON-RPC service.
+	// The base URL endpoint for the agent's A2A JSON-RPC service. (Required)
 	URL string `json:"url"`
-	// Information about the agent's provider.
+	// Information about the agent's provider. (Optional)
 	Provider *AgentProvider `json:"provider,omitempty"`
-	// Version of the agent or its API.
+	// Version of the agent or its API. (Required)
 	Version string `json:"version"`
-	// URL pointing to the agent's documentation.
+	// URL pointing to the agent's documentation. (Optional)
 	DocumentationURL *string `json:"documentationUrl,omitempty"`
-	// Capabilities supported by the agent.
+	// Capabilities supported by the agent. (Required)
 	Capabilities AgentCapabilities `json:"capabilities"`
-	// Authentication details required to interact with the agent.
+	// Authentication details required to interact with the agent. (Optional)
 	Authentication *AgentAuthentication `json:"authentication,omitempty"`
-	// Default input content types supported by the agent (e.g., "text", "file"). Defaults to ["text"].
+	// Default input content types supported by the agent (e.g., "text", "file"). (Optional, defaults inferred)
 	DefaultInputModes []string `json:"defaultInputModes,omitempty"`
-	// Default output content types produced by the agent (e.g., "text", "file"). Defaults to ["text"].
+	// Default output content types produced by the agent (e.g., "text", "file"). (Optional, defaults inferred)
 	DefaultOutputModes []string `json:"defaultOutputModes,omitempty"`
-	// List of specific skills the agent offers.
+	// List of specific skills the agent offers. (Required, can be empty array if no specific skills)
 	Skills []AgentSkill `json:"skills"`
 }

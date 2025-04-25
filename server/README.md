@@ -46,7 +46,7 @@ go build -o example_server_app ./server/cmd/startExample.go
 
 *   **Directly:**
     ```bash
-    ./example_server_app --port 4001 --config ./server/cmd/config.yaml
+    ./example_server_app --port 4001 --config ./server/cmd/mcp-example-server/config.yaml
     # Or using default config path and port 4001:
     # ./example_server_app --port 4001
     ```

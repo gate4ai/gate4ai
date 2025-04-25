@@ -8,23 +8,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gate4ai/mcp/shared"
-	"github.com/gate4ai/mcp/shared/mcp/2025/schema"
+	"github.com/gate4ai/gate4ai/shared"
+	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"go.uber.org/zap"
-)
-
-const (
-	// Timeout for waiting on responses
-	responseTimeout = 5 * time.Second
 )
 
 // handlePOST processes POST requests on the unified MCP endpoint.
 // It handles V2025 message posting according to the 2025-03-26 specification.
 func (t *Transport) handlePOST(w http.ResponseWriter, r *http.Request, logger *zap.Logger) {
-	session, err := t.getSession(w, r, logger, true)
+	session, err := t.getSession(r, r.Header.Get(MCP_SESSION_HEADER), logger, true)
 	if err != nil {
 		logger.Error("Failed to get session", zap.Error(err))
-		sendJSONRPCErrorResponse(w, nil, shared.JSONRPCErrorParseError, "Failed to get session", nil, logger)
+		sendJSONRPCErrorResponse(w, nil, shared.JSONRPCErrorUnauthorized, "Failed to get session", nil, logger)
 		return
 	}
 
@@ -377,9 +372,9 @@ func (t *Transport) responseToStream(w http.ResponseWriter, r *http.Request, ses
 func (t *Transport) extractAuthKey(r *http.Request) string {
 	// Try Authorization header first
 	authHeader := r.Header.Get("Authorization")
-	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+	if strings.HasPrefix(authHeader, "Bearer ") {
 		return strings.TrimPrefix(authHeader, "Bearer ")
 	}
 	// Fallback to query parameter
-	return r.URL.Query().Get(AUTH_KEY2024)
+	return r.URL.Query().Get(MCP2024_AUTH_KEY)
 }

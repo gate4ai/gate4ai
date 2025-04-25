@@ -207,8 +207,6 @@ const hasViewedOrCopiedKey = ref(false); // Tracks if user has viewed or copied 
 const isCopyingNewKey = ref(false); // Loading state for copying the new key
 const isLoadingList = ref(true);
 const isCreating = ref(false);
-const isLoadingKey = reactive<Record<string, boolean>>({}); // Loading state for showing individual keys
-const isCopyingKey = reactive<Record<string, boolean>>({}); // Loading state for copying individual keys
 const isDeletingKey = reactive<Record<string, boolean>>({}); // Loading state for deleting individual keys
 const apiKeys = ref<ApiKeyLocalState[]>([]);
 const fetchError = ref<string | null>(null);
@@ -361,53 +359,6 @@ async function saveApiKey() {
     console.error('Error creating API key:', error);
   } finally {
     isCreating.value = false;
-  }
-}
-
-// Fetches and reveals the full API key temporarily
-async function showApiKey(keyId: string) {
-  const keyIndex = apiKeys.value.findIndex(k => k.id === keyId);
-  if (keyIndex === -1) return;
-
-  // If key is already shown, hide it
-  if (apiKeys.value[keyIndex].fullKeyValue) {
-      apiKeys.value[keyIndex].fullKeyValue = null;
-      return;
-  }
-
-  isLoadingKey[keyId] = true;
-  try {
-    const keyDetail = await $api.getJson<ApiKeyDetail>(`/keys/${keyId}`);
-    apiKeys.value[keyIndex].fullKeyValue = keyDetail.key;
-
-    // TODO: Audit log key view
-    // console.log(`AUDIT: User ${$auth.getUser()?.id} viewed key ${keyId}`);
-
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Failed to retrieve API key.';
-    showError(message);
-    console.error('Error showing API key:', error);
-  } finally {
-    isLoadingKey[keyId] = false;
-  }
-}
-
-// Fetches the full API key and copies it to the clipboard
-async function copyApiKey(keyId: string) {
-  isCopyingKey[keyId] = true;
-  try {
-    const keyDetail = await $api.getJson<ApiKeyDetail>(`/keys/${keyId}`);
-    await copyToClipboard(keyDetail.key, 'API key copied to clipboard!');
-
-    // TODO: Audit log key copy
-    // console.log(`AUDIT: User ${$auth.getUser()?.id} copied key ${keyId}`);
-
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Failed to retrieve API key for copying.';
-    showError(message);
-    console.error('Error copying API key:', error);
-  } finally {
-    isCopyingKey[keyId] = false;
   }
 }
 

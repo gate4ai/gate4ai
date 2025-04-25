@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gate4ai/mcp/shared"
+	"github.com/gate4ai/gate4ai/shared"
 	"go.uber.org/zap"
 )
 
@@ -20,9 +20,11 @@ const (
 // V2024 persistent SSE stream opening on GET request.
 func (t *Transport) handle2024GET(w http.ResponseWriter, r *http.Request, logger *zap.Logger) {
 	logger = logger.With(zap.String("method", "handle2024GET"))
-	session, err := t.getSession(w, r, logger, true)
+
+	session, err := t.getSession(r, r.URL.Query().Get(SESSION_ID_KEY2024), logger, true)
 	if err != nil {
-		logger.Error("Failed to get session", zap.Error(err))
+		http.Error(w, "Session failed", http.StatusUnauthorized)
+		logger.Error("Failed to get or create session", zap.Error(err))
 		return
 	}
 
@@ -39,7 +41,7 @@ func (t *Transport) handle2024GET(w http.ResponseWriter, r *http.Request, logger
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	endpointPath := PATH2024 + "?" + SESSION_ID_KEY2024 + "=" + session.GetID()
+	endpointPath := MCP2024_PATH + "?" + SESSION_ID_KEY2024 + "=" + session.GetID()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {

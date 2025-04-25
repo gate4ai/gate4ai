@@ -92,7 +92,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { useSnackbar } from '~/composables/useSnackbar';
 import type { SubscriptionStatus } from '@prisma/client'; // Import enum
 
@@ -125,7 +125,6 @@ interface Subscription {
 
 // Route and params
 const route = useRoute();
-const router = useRouter();
 const serverSlug = route.params.slug as string; // Get slug from route
 
 // State

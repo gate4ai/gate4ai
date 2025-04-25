@@ -8,7 +8,7 @@
     >
       <v-card-title class="text-white bg-black bg-opacity-50 w-100">
         {{ server.name }}
-        <v-chip v-if="server.type" size="small" class="ml-2">{{ server.type }}</v-chip>
+        <v-chip v-if="server.protocol" size="small" class="ml-2">{{ server.protocol }}</v-chip>
       </v-card-title>
     </v-img>
 
@@ -57,7 +57,7 @@
 import type { ServerInfo } from '~/utils/server'; // Import updated ServerInfo type
 
 defineProps<{
-  server: ServerInfo; // Use ServerInfo which now includes slug and type
+  server: ServerInfo;
   isAuthenticated: boolean;
 }>();
 
