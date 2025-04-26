@@ -119,16 +119,6 @@ func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
-		// A2A SSE Stream Handling
-		// The initial handler for tasks/sendSubscribe in A2ACapability will return the initial task state.
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			logger.Error("Streaming unsupported (http.Flusher missing) for A2A SSE", zap.String("sessionID", session.GetID()))
-			t.sessionManager.CloseSession(session.GetID()) // Clean up session
-			// Cannot send HTTP error here as headers might be sent already.
-			return
-		}
-
 		eventID := 0
 		// Wait for the response or timeout
 		for {
@@ -151,8 +141,7 @@ func (t *Transport) handleA2APOST(w http.ResponseWriter, r *http.Request, logger
 					sendA2AErrorResponse(w, msg.ID, shared.JSONRPCErrorInternal, "Failed to marshal A2A SSE event", nil, logger)
 					return
 				}
-				fmt.Fprintf(w, "id: %d\ndata: %s\n\n", eventID, data)
-				flusher.Flush()
+				shared.FlushIfNotDone(logger, r, w, "id: %d\ndata: %s\n\n", eventID, data)
 				logger.Debug("Sent A2A SSE event", zap.String("eventData", string(*response.Result)))
 
 				// Is final?

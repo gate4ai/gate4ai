@@ -2,7 +2,6 @@ package transport
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -43,17 +42,8 @@ func (t *Transport) handle2024GET(w http.ResponseWriter, r *http.Request, logger
 
 	endpointPath := MCP2024_PATH + "?" + SESSION_ID_KEY2024 + "=" + session.GetID()
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		logger.Error("Streaming unsupported for SSE", zap.String("sessionId", session.GetID()))
-		t.sessionManager.CloseSession(session.GetID()) // Clean up session
-		http.Error(w, "Streaming unsupported", statusInternalServerError)
-		return
-	}
-
 	// Send the mandatory 'endpoint' event for V2024
-	fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", "endpoint-event-id", sseEventEndpoint, endpointPath)
-	flusher.Flush()
+	shared.FlushIfNotDone(logger, r, w, "id: %s\nevent: %s\ndata: %s\n\n", "endpoint-event-id", sseEventEndpoint, endpointPath)
 	logger.Debug("Sent V2024 endpoint event", zap.String("sessionId", session.GetID()), zap.String("endpoint", endpointPath))
 
 	session.SetStatus(shared.StatusConnected)
@@ -86,21 +76,10 @@ func (t *Transport) handle2024GET(w http.ResponseWriter, r *http.Request, logger
 				}
 
 				// Send as 'message' event
-				fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", time.Now().UnixNano(), sseEventMessage, data)
-				flusher.Flush()
+				shared.FlushIfNotDone(logger, r, w, "id: %d\nevent: %s\ndata: %s\n\n", time.Now().UnixNano(), sseEventMessage, data)
 				session.UpdateLastActivity()
 			case <-ticker.C:
-				// Send keepalive ping event
-				// Double-check context before sending keepalive to avoid race condition on disconnect
-				select {
-				case <-r.Context().Done():
-					// Context was canceled, exit the loop silently
-					return
-				default:
-					// Context still active, send keepalive ping event
-					fmt.Fprintf(w, "event: %s\ndata: %s\n\n", sseEventPing, `{}`) // V2024 might not use ID for pings
-					flusher.Flush()
-				}
+				shared.FlushIfNotDone(logger, r, w, "event: %s\ndata: %s\n\n", sseEventPing, `{}`)
 			}
 		}
 	}()
