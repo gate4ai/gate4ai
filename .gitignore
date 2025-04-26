@@ -3,5 +3,6 @@
 .cursor
 .docs
 .env
+.localdb.docker-compose.yml
 
 __debug_bin*
