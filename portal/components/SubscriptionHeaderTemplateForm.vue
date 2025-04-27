@@ -22,8 +22,8 @@
           <v-row dense data-testid="template-item">
             <v-col cols="12" md="4">
               <v-text-field
-                data-testid="key"
                 v-model="item.key"
+                data-testid="key"
                 label="Header Key *"
                 variant="outlined"
                 density="compact"
@@ -33,8 +33,8 @@
             </v-col>
             <v-col cols="12" md="6">
               <v-text-field
-                data-testid="description"
                 v-model="item.description"
+                data-testid="description"
                 label="Description (for subscriber)"
                 variant="outlined"
                 density="compact"
@@ -48,8 +48,8 @@
               class="d-flex align-center justify-space-between"
             >
               <v-checkbox
-                data-testid="required"
                 v-model="item.required"
+                data-testid="required"
                 label="Required"
                 density="compact"
                 hide-details

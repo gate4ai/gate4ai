@@ -1,6 +1,5 @@
 import { defineEventHandler, getRouterParam, createError } from "h3";
 import { checkServerModificationRights } from "../../../utils/serverPermissions";
-import prisma from "../../../utils/prisma";
 import type { Prisma } from "@prisma/client";
 
 export default defineEventHandler(async (event) => {

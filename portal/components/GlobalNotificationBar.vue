@@ -8,7 +8,6 @@
     data-testid="global-notification-bar"
   >
     <v-icon start size="small">mdi-information-outline</v-icon>
-    <!-- Add data-testid to the span containing the text -->
     <span class="notification-text" data-testid="global-notification-text">{{
       notificationMessage
     }}</span>
@@ -20,23 +19,13 @@ import { computed } from "vue";
 import { useNuxtApp, useRuntimeConfig } from "#app"; // Import useRuntimeConfig again
 
 const { $settings } = useNuxtApp();
-const config = useRuntimeConfig(); // Use runtimeConfig again
-
-// Get static message from environment variable via runtimeConfig
-const staticMessage = computed(
-  () => (config.public.gate4aiNotification as string) || ""
-); // Restore reading from config
-
-// Get dynamic message from settings plugin (remains the same)
-const dynamicMessage = computed(() => {
-  const settingValue = $settings.get("general_notification_dynamic");
-  return typeof settingValue === "string" ? settingValue : "";
-});
+const config = useRuntimeConfig();
+const staticMsg = (config.public.gate4aiNotification as string) || "";
 
 // Combine messages logic remains the same
 const notificationMessage = computed(() => {
-  const staticMsg = staticMessage.value.trim();
-  const dynamicMsg = dynamicMessage.value.trim();
+  const settingValue = $settings.get("general_notification_dynamic");
+  const dynamicMsg = typeof settingValue === "string" ? settingValue : "";
 
   if (staticMsg && dynamicMsg) {
     return `${staticMsg} | ${dynamicMsg}`;

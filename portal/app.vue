@@ -4,7 +4,7 @@
 
     <v-app-bar app color="primary" dark>
       <v-app-bar-title>
-        <img src="/images/logo.svg" alt="gate4.ai" />
+        <img src="/images/logo.svg" alt="gate4.ai" >
         <router-link to="/" class="text-decoration-none text-white">
           GATE4.AI
         </router-link>

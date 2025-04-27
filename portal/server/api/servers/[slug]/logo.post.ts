@@ -8,7 +8,6 @@ import { checkServerModificationRights } from "../../../utils/serverPermissions"
 import prisma from "../../../utils/prisma";
 import fs from "node:fs/promises"; // Use promises API for async operations
 import path from "node:path";
-import { Prisma } from "@prisma/client"; // Needed for JsonNull
 
 // Configuration
 const MAX_FILE_SIZE_MB = 2;
