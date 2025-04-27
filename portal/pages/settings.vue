@@ -8,8 +8,8 @@
         type="error"
         class="alert-overlay"
         closable
-        @click:close="error = ''"
         data-testid="settings-error-alert"
+        @click:close="error = ''"
       >
         {{ error }}
       </v-alert>
@@ -19,8 +19,8 @@
         type="success"
         class="alert-overlay"
         closable
-        @click:close="success = ''"
         data-testid="settings-success-alert"
+        @click:close="success = ''"
       >
         {{ success }}
       </v-alert>
@@ -31,8 +31,8 @@
         type="warning"
         class="alert-overlay"
         closable
-        @click:close="envVarsError = ''"
         data-testid="settings-env-forbidden-alert"
+        @click:close="envVarsError = ''"
       >
         {{ envVarsError }}
       </v-alert>
@@ -42,8 +42,8 @@
         type="error"
         class="alert-overlay"
         closable
-        @click:close="envVarsError = ''"
         data-testid="settings-env-error-alert"
+        @click:close="envVarsError = ''"
       >
         Failed to load environment variables: {{ envVarsError }}
       </v-alert>
@@ -221,10 +221,10 @@
             <div v-else class="text-center pa-4">
               <p>Could not load environment variables.</p>
               <v-btn
-                @click="fetchEnvVars"
                 color="primary"
                 variant="text"
                 data-testid="retry-fetch-env-vars"
+                @click="fetchEnvVars"
                 >Retry</v-btn
               >
             </div>
@@ -250,14 +250,14 @@
           <v-spacer />
           <v-btn
             color="error"
-            @click="editDialog = false"
             data-testid="edit-json-cancel-button"
+            @click="editDialog = false"
             >Cancel</v-btn
           >
           <v-btn
             color="primary"
-            @click="saveComplexValue"
             data-testid="edit-json-save-button"
+            @click="saveComplexValue"
             >Save</v-btn
           >
         </v-card-actions>
@@ -306,8 +306,6 @@ const envVars = ref<Record<string, string> | null>(null);
 const isLoadingEnvVars = ref(false);
 const envVarsError = ref<string | null>(null);
 
-// Use $auth which is now typed
-const isAdmin = computed(() => $auth.isAdmin());
 const isAdminOrSecurity = computed(() => $auth.isSecurityOrAdmin());
 
 // Fetch core settings on mount

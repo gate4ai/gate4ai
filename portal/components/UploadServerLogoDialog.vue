@@ -17,8 +17,8 @@
           show-size
           :rules="fileRules"
           clearable
-          @click:clear="clearSelection"
           class="mb-4"
+          @click:clear="clearSelection"
         />
 
         <div v-if="previewUrl" class="d-flex justify-center mb-4">
@@ -67,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from "vue"; // Added watch
+import { ref, computed, watch, onUnmounted } from "vue";
 import { useSnackbar } from "~/composables/useSnackbar";
 
 const props = defineProps<{

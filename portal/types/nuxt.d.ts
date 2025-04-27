@@ -1,5 +1,5 @@
 import type { User } from "@prisma/client";
-import { type FetchOptions } from "ofetch";
+import type { FetchOptions } from "ofetch";
 
 // Define a basic structure for the auth plugin interface
 interface NuxtAuth {

@@ -42,6 +42,7 @@ services:
     environment:
       GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
       NUXT_JWT_SECRET: ${NUXT_JWT_SECRET}
+      NUXT_GATE4AI_NOTIFICATION: ${NUXT_GATE4AI_NOTIFICATION}
       HOST: "0.0.0.0"
       PORT: 3000
       NODE_ENV: ${NODE_ENV:-production}

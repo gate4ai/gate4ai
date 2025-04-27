@@ -12,7 +12,7 @@
       <v-col cols="12" md="4" class="d-flex flex-column">
         <div class="d-flex align-center mb-4">
           <!-- Back Button -->
-          <v-btn icon class="mr-2 mt-1" @click="navigateBack" size="small">
+          <v-btn icon class="mr-2 mt-1" size="small" @click="navigateBack">
             <v-icon>mdi-arrow-left</v-icon>
           </v-btn>
 

@@ -64,7 +64,7 @@
           >
             <v-alert type="warning" variant="tonal" class="mb-4">
               Detected: <strong>{{ discoveredPtrotocol }}</strong
-              ><br />Unsupported type.</v-alert
+              ><br >Unsupported type.</v-alert
             >
           </div>
           <div
@@ -77,7 +77,7 @@
             <v-alert type="error" variant="tonal" class="mb-4">
               Could not determine type or discovery error.<span
                 v-if="fetchError"
-                ><br />Details: {{ fetchError }}</span
+                ><br >Details: {{ fetchError }}</span
               >
             </v-alert>
           </div>
@@ -275,7 +275,7 @@ function autoGenerateSlug() {
   }
   try {
     const url = new URL(serverUrl.value);
-    let potentialSlug =
+    const potentialSlug =
       url.hostname
         .toLowerCase()
         .replace(/^www\./, "")
