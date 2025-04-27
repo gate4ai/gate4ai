@@ -8,7 +8,9 @@
     >
       <v-card-title class="text-white bg-black bg-opacity-50 w-100">
         {{ server.name }}
-        <v-chip v-if="server.protocol" size="small" class="ml-2">{{ server.protocol }}</v-chip>
+        <v-chip v-if="server.protocol" size="small" class="ml-2">{{
+          server.protocol
+        }}</v-chip>
       </v-card-title>
     </v-img>
 
@@ -36,14 +38,10 @@
     </v-card-text>
 
     <v-card-actions>
-      <v-btn
-        variant="text"
-        color="primary"
-        :to="`/servers/${server.slug}`"
-      >
+      <v-btn variant="text" color="primary" :to="`/servers/${server.slug}`">
         View Details
       </v-btn>
-      <v-spacer/>
+      <v-spacer />
       <SubscribeButton
         :server="server"
         :is-authenticated="isAuthenticated"
@@ -54,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import type { ServerInfo } from '~/utils/server'; // Import updated ServerInfo type
+import type { ServerInfo } from "~/utils/server"; // Import updated ServerInfo type
 
 defineProps<{
   server: ServerInfo;
@@ -62,11 +60,22 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'subscribe', payload: { serverId: string, isSubscribed: boolean, subscriptionId?: string }): void;
+  (
+    e: "subscribe",
+    payload: {
+      serverId: string;
+      isSubscribed: boolean;
+      subscriptionId?: string;
+    }
+  ): void;
 }>();
 
-function handleSubscriptionUpdate(payload: { serverId: string; isSubscribed: boolean; subscriptionId?: string }) {
+function handleSubscriptionUpdate(payload: {
+  serverId: string;
+  isSubscribed: boolean;
+  subscriptionId?: string;
+}) {
   // Just forward the subscription update to parent
-  emit('subscribe', payload);
+  emit("subscribe", payload);
 }
 </script>

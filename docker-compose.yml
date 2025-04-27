@@ -42,7 +42,7 @@ services:
     environment:
       GATE4AI_DATABASE_URL: "postgresql://${POSTGRES_USER:-gate4ai_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-gate4ai_db}?schema=public&sslmode=disable"
       NUXT_JWT_SECRET: ${NUXT_JWT_SECRET}
-      HOST: '0.0.0.0'
+      HOST: "0.0.0.0"
       PORT: 3000
       NODE_ENV: ${NODE_ENV:-production}
     depends_on:
@@ -65,15 +65,6 @@ services:
       # The gateway also depends on the database being initialized.
       db-init:
         condition: service_completed_successfully
-    networks:
-      - gate4ai-network
-
-  example-server: # Example server can start independently
-    image: gate4ai/example-server:${VERSION:-latest}
-    container_name: gate4ai-example-server-${APP_ENV:-prod}
-    restart: unless-stopped
-    ports:
-      - "${SERVER_PORT:-4000}:4000"
     networks:
       - gate4ai-network
 

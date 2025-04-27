@@ -1,7 +1,7 @@
 <template>
   <div>
     <h1 class="text-h3 mb-6">User Management</h1>
-    
+
     <!-- Search and Filter -->
     <v-row class="mb-6">
       <v-col cols="12" md="12">
@@ -15,12 +15,12 @@
         />
       </v-col>
     </v-row>
-    
+
     <!-- Loading State -->
     <div v-if="isLoading" class="d-flex justify-center py-12">
-      <v-progress-circular indeterminate color="primary"/>
+      <v-progress-circular indeterminate color="primary" />
     </div>
-    
+
     <!-- Users Table -->
     <v-table v-else>
       <thead>
@@ -33,23 +33,23 @@
         </tr>
       </thead>
       <tbody>
-        <tr 
-          v-for="user in filteredUsers" 
+        <tr
+          v-for="user in filteredUsers"
           :key="user.id"
           class="user-row"
           @click="viewUserProfile(user.id)"
         >
-          <td>{{ user.name || '-' }}</td>
+          <td>{{ user.name || "-" }}</td>
           <td>
             <a :href="`mailto:${user.email}`">{{ user.email }}</a>
           </td>
-          <td>{{ user.company || '-' }}</td>
+          <td>{{ user.company || "-" }}</td>
           <td>{{ formatRole(user.role) }}</td>
           <td>{{ formatStatus(user.status) }}</td>
         </tr>
       </tbody>
     </v-table>
-    
+
     <!-- Empty State -->
     <v-row v-if="!isLoading && filteredUsers.length === 0">
       <v-col cols="12" class="text-center py-12">
@@ -62,11 +62,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted } from "vue";
 
 definePageMeta({
-  middleware: ['auth'],
-  title: 'User Management',
+  middleware: ["auth"],
+  title: "User Management",
 });
 
 interface User {
@@ -80,7 +80,7 @@ interface User {
 }
 
 const users = ref<User[]>([]);
-const searchQuery = ref('');
+const searchQuery = ref("");
 const isLoading = ref(true);
 
 // Fetch users on component mount
@@ -90,12 +90,12 @@ onMounted(async () => {
 
 async function fetchUsers() {
   isLoading.value = true;
-  
+
   try {
     const { $api } = useNuxtApp();
-    users.value = await $api.getJson('/users');
+    users.value = await $api.getJson("/users");
   } catch (error) {
-    console.error('Error fetching users:', error);
+    console.error("Error fetching users:", error);
     // Show error message to user
   } finally {
     isLoading.value = false;
@@ -104,14 +104,15 @@ async function fetchUsers() {
 
 const filteredUsers = computed(() => {
   let result = [...users.value];
-  
+
   // Apply search filter
   if (searchQuery.value) {
     const query = searchQuery.value.toLowerCase();
-    result = result.filter(user => 
-      (user.name || '').toLowerCase().includes(query) || 
-      user.email.toLowerCase().includes(query) ||
-      (user.company || '').toLowerCase().includes(query)
+    result = result.filter(
+      (user) =>
+        (user.name || "").toLowerCase().includes(query) ||
+        user.email.toLowerCase().includes(query) ||
+        (user.company || "").toLowerCase().includes(query)
     );
   }
   return result;
@@ -119,7 +120,7 @@ const filteredUsers = computed(() => {
 
 function searchUsers() {
   // Client-side filtering is handled by the computed property
-  console.log('Searching for:', searchQuery.value);
+  console.log("Searching for:", searchQuery.value);
 }
 
 function viewUserProfile(userId: string) {
@@ -128,19 +129,26 @@ function viewUserProfile(userId: string) {
 
 function formatRole(role?: string) {
   switch (role) {
-    case 'ADMIN': return 'Admin';
-    case 'SECURITY': return 'Security';
-    case 'EMPTY':
-    default: return '-';
+    case "ADMIN":
+      return "Admin";
+    case "SECURITY":
+      return "Security";
+    case "EMPTY":
+    default:
+      return "-";
   }
 }
 
 function formatStatus(status?: string) {
   switch (status) {
-    case 'ACTIVE': return 'Active';
-    case 'BLOCKED': return 'Blocked';
-    case 'EMAIL_NOT_CONFIRMED': return 'Email not confirmed';
-    default: return '-';
+    case "ACTIVE":
+      return "Active";
+    case "BLOCKED":
+      return "Blocked";
+    case "EMAIL_NOT_CONFIRMED":
+      return "Email not confirmed";
+    default:
+      return "-";
   }
 }
 </script>
@@ -152,4 +160,4 @@ function formatStatus(status?: string) {
 .user-row:hover {
   background-color: var(--v-hover-color, rgba(0, 0, 0, 0.04));
 }
-</style> 
+</style>

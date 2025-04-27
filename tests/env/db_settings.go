@@ -137,7 +137,7 @@ func (e *DBSettingsEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 
 		for _, setting := range settingsToUpdate {
 			log.Printf("%sUpdating setting '%s'...", logPrefix, setting.key)
-			if err := updateSettingInDB(ctx, db, setting.key, setting.value); err != nil {
+			if err := UpdateSettingInDB(ctx, db, setting.key, setting.value); err != nil {
 				err = fmt.Errorf("%sfailed to update setting '%s': %w", logPrefix, setting.key, err)
 				log.Printf("%sERROR: %v", logPrefix, err)
 				resultChan <- err
@@ -154,7 +154,7 @@ func (e *DBSettingsEnv) Start(ctx context.Context, envs *Envs) <-chan error {
 }
 
 // Helper function to update a setting in the Settings table.
-func updateSettingInDB(ctx context.Context, db *sql.DB, key string, value interface{}) error {
+func UpdateSettingInDB(ctx context.Context, db *sql.DB, key string, value interface{}) error {
 	logPrefix := "[db-settings-updater] "
 	// Marshal the value to JSON
 	var valueJSON []byte

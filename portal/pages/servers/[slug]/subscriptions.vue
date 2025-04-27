@@ -4,22 +4,22 @@
       <v-btn icon class="mr-2" @click="navigateBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <h1 class="text-h4">Subscriptions for {{ serverName || 'Server' }}</h1>
+      <h1 class="text-h4">Subscriptions for {{ serverName || "Server" }}</h1>
     </div>
 
     <!-- Loading State -->
     <div v-if="isLoading" class="d-flex justify-center py-12">
-      <v-progress-circular indeterminate color="primary"/>
+      <v-progress-circular indeterminate color="primary" />
     </div>
 
-     <!-- Error State -->
-     <v-alert v-else-if="loadError" type="error" class="my-4" variant="tonal">
-        {{ loadError }}
-        <div class="mt-2">
-             <v-btn color="primary" variant="text" @click="fetchData">Retry</v-btn>
-             <v-btn variant="text" @click="navigateBack">Back to Server</v-btn>
-         </div>
-     </v-alert>
+    <!-- Error State -->
+    <v-alert v-else-if="loadError" type="error" class="my-4" variant="tonal">
+      {{ loadError }}
+      <div class="mt-2">
+        <v-btn color="primary" variant="text" @click="fetchData">Retry</v-btn>
+        <v-btn variant="text" @click="navigateBack">Back to Server</v-btn>
+      </div>
+    </v-alert>
 
     <!-- Subscriptions Table -->
     <div v-else-if="subscriptions.length > 0">
@@ -36,8 +36,12 @@
         <tbody>
           <tr v-for="subscription in subscriptions" :key="subscription.id">
             <td>{{ subscription.id }}</td>
-            <td v-if="canViewUserDetails">{{ subscription.user?.name || 'Unknown' }}</td>
-            <td v-if="canViewUserEmail">{{ subscription.user?.email || 'Unknown' }}</td>
+            <td v-if="canViewUserDetails">
+              {{ subscription.user?.name || "Unknown" }}
+            </td>
+            <td v-if="canViewUserEmail">
+              {{ subscription.user?.email || "Unknown" }}
+            </td>
             <td>
               <v-chip
                 :color="getStatusColor(subscription.status)"
@@ -64,7 +68,10 @@
                   <v-list-item
                     v-for="status in ['ACTIVE', 'BLOCKED', 'PENDING']"
                     :key="status"
-                    :disabled="subscription.status === status || isUpdating[subscription.id]"
+                    :disabled="
+                      subscription.status === status ||
+                      isUpdating[subscription.id]
+                    "
                     @click="updateSubscriptionStatus(subscription.id, status)"
                   >
                     <v-list-item-title>Set {{ status }}</v-list-item-title>
@@ -79,27 +86,22 @@
     </div>
 
     <!-- Empty State -->
-    <v-alert
-      v-else
-      type="info"
-      variant="tonal"
-      class="mt-4"
-    >
+    <v-alert v-else type="info" variant="tonal" class="mt-4">
       This server has no subscriptions yet.
     </v-alert>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue';
-import { useRoute } from 'vue-router';
-import { useSnackbar } from '~/composables/useSnackbar';
-import type { SubscriptionStatus } from '@prisma/client'; // Import enum
+import { ref, computed, onMounted, reactive } from "vue";
+import { useRoute } from "vue-router";
+import { useSnackbar } from "~/composables/useSnackbar";
+import type { SubscriptionStatus } from "@prisma/client"; // Import enum
 
 definePageMeta({
-  title: 'Server Subscriptions',
-  layout: 'default',
-  middleware: ['auth'],
+  title: "Server Subscriptions",
+  layout: "default",
+  middleware: ["auth"],
 });
 
 // Interfaces
@@ -142,11 +144,21 @@ const serverName = computed(() => server.value?.name || serverSlug); // Display 
 const currentUser = computed(() => $auth.getUser());
 
 const isAdminOrSecurity = computed(() => {
-  return currentUser.value && (currentUser.value.role === 'ADMIN' || currentUser.value.role === 'SECURITY');
+  return (
+    currentUser.value &&
+    (currentUser.value.role === "ADMIN" ||
+      currentUser.value.role === "SECURITY")
+  );
 });
 
 const isOwner = computed(() => {
-  return currentUser.value && server.value && server.value.owners?.some(owner => owner.user.id === currentUser.value!.id);
+  return (
+    currentUser.value &&
+    server.value &&
+    server.value.owners?.some(
+      (owner) => owner.user.id === currentUser.value!.id
+    )
+  );
 });
 
 // Permissions (depend on server data being loaded)
@@ -159,7 +171,7 @@ const canViewUserEmail = computed(() => {
   // Check setting only if the user is an owner
   if (isOwner.value) {
     // Default to false if setting is not loaded or not explicitly true
-    return $settings.get('server_owner_can_see_user_email') === true;
+    return $settings.get("server_owner_can_see_user_email") === true;
   }
   return false;
 });
@@ -176,10 +188,14 @@ function navigateBack() {
 
 function getStatusColor(status: SubscriptionStatus) {
   switch (status) {
-    case 'ACTIVE': return 'success';
-    case 'BLOCKED': return 'error';
-    case 'PENDING': return 'warning';
-    default: return 'grey';
+    case "ACTIVE":
+      return "success";
+    case "BLOCKED":
+      return "error";
+    case "PENDING":
+      return "warning";
+    default:
+      return "grey";
   }
 }
 
@@ -194,44 +210,62 @@ async function fetchData() {
     // Fetch server details (needed for name and permissions) first
     // Use a limited select to avoid fetching too much data
     server.value = await $api.getJson<SimpleServer>(`/servers/${serverSlug}`, {
-        query: { select: 'id,name,owners' } // Hypothetical query param, adjust if API supports sparse fieldsets
+      query: { select: "id,name,owners" }, // Hypothetical query param, adjust if API supports sparse fieldsets
     });
 
     // Check permissions *after* fetching server data
     if (!canManageSubscriptions.value) {
-       throw createError({ statusCode: 403, statusMessage: 'Forbidden: You do not have permission to view these subscriptions.' });
+      throw createError({
+        statusCode: 403,
+        statusMessage:
+          "Forbidden: You do not have permission to view these subscriptions.",
+      });
     }
 
     // Fetch subscriptions using the SLUG
-    subscriptions.value = await $api.getJson<Subscription[]>(`/subscriptions/server/${serverSlug}`);
-
+    subscriptions.value = await $api.getJson<Subscription[]>(
+      `/subscriptions/server/${serverSlug}`
+    );
   } catch (err: unknown) {
-    console.error('Error loading subscription data:', err);
-     const message = err instanceof Error ? err.message : 'Failed to load subscription data.';
-     loadError.value = message;
-     showError(message);
+    console.error("Error loading subscription data:", err);
+    const message =
+      err instanceof Error ? err.message : "Failed to load subscription data.";
+    loadError.value = message;
+    showError(message);
   } finally {
     isLoading.value = false;
   }
 }
 
-
-async function updateSubscriptionStatus(subscriptionId: string, status: SubscriptionStatus) {
-  const index = subscriptions.value.findIndex(sub => sub.id === subscriptionId);
+async function updateSubscriptionStatus(
+  subscriptionId: string,
+  status: SubscriptionStatus
+) {
+  const index = subscriptions.value.findIndex(
+    (sub) => sub.id === subscriptionId
+  );
   if (index === -1) return;
 
   isUpdating[subscriptionId] = true;
 
   try {
     // Call the PUT endpoint (uses subscription ID, not server slug)
-    const updatedSubscription = await $api.putJson<Subscription>(`/subscriptions/${subscriptionId}`, { status });
+    const updatedSubscription = await $api.putJson<Subscription>(
+      `/subscriptions/${subscriptionId}`,
+      { status }
+    );
 
     // Update local state reactively
-    subscriptions.value[index] = { ...subscriptions.value[index], ...updatedSubscription };
-    showSuccess('Subscription status updated successfully!');
-
+    subscriptions.value[index] = {
+      ...subscriptions.value[index],
+      ...updatedSubscription,
+    };
+    showSuccess("Subscription status updated successfully!");
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to update subscription status';
+    const message =
+      err instanceof Error
+        ? err.message
+        : "Failed to update subscription status";
     showError(message);
     console.error("Error updating subscription status:", err);
   } finally {
@@ -250,7 +284,6 @@ onMounted(async () => {
 
 // Update Nuxt page meta title dynamically
 useHead({
-  title: computed(() => `Subscriptions for ${serverName.value}`)
-})
-
+  title: computed(() => `Subscriptions for ${serverName.value}`),
+});
 </script>

@@ -62,20 +62,20 @@
       No skills discovered for this A2A agent.
     </v-alert>
 
-     <!-- Display Save Error Message -->
-     <v-alert
-       v-if="saveError && !isLoading"
-       type="error"
-       class="mt-4"
-       density="compact"
-     >
-       {{ saveError }}
-     </v-alert>
+    <!-- Display Save Error Message -->
+    <v-alert
+      v-if="saveError && !isLoading"
+      type="error"
+      class="mt-4"
+      density="compact"
+    >
+      {{ saveError }}
+    </v-alert>
   </div>
 </template>
 
 <script setup lang="ts">
-import { rules } from '~/utils/validation';
+import { rules } from "~/utils/validation";
 
 // Props define the data passed from the parent and v-model bindings
 defineProps<{
@@ -84,13 +84,20 @@ defineProps<{
   websiteUrl: string;
   email: string;
   isLoading: boolean;
-  a2aSkills: Array<{id: string, name: string, description?: string}>;
+  a2aSkills: Array<{ id: string; name: string; description?: string }>;
   saveError: string; // Error specific to the save operation
 }>();
 
 // Emits define events sent back to the parent for v-model updates
 defineEmits<{
-  (e: 'update:serverName' | 'update:description' | 'update:websiteUrl' | 'update:email', value: string): void;
+  (
+    e:
+      | "update:serverName"
+      | "update:description"
+      | "update:websiteUrl"
+      | "update:email",
+    value: string
+  ): void;
   // No 'save' emit needed here, parent dialog action handles it
 }>();
-</script> 
+</script>

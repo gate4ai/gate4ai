@@ -12,7 +12,10 @@
       variant="outlined"
       density="compact"
       data-testid="add-server-url-input"
-      @update:model-value="$emit('update:serverUrl', $event); $emit('url-input')"
+      @update:model-value="
+        $emit('update:serverUrl', $event);
+        $emit('url-input');
+      "
     />
 
     <v-text-field
@@ -29,25 +32,30 @@
       variant="outlined"
       density="compact"
       data-testid="add-server-slug-input"
-      @update:model-value="$emit('update:slug', $event); $emit('slug-input')"
+      @update:model-value="
+        $emit('update:slug', $event);
+        $emit('slug-input');
+      "
     />
 
-     <v-expansion-panels class="mb-4">
-       <v-expansion-panel>
-         <v-expansion-panel-title>
-           Discovery Headers (Optional)
-         </v-expansion-panel-title>
-         <v-expansion-panel-text>
-             <p class="text-caption mb-2">Headers to send *only* during the discovery process (e.g., for authentication).</p>
-             <KeyValueInput
-               :model-value="discoveryHeaders"
-               :disabled="isLoading || isDiscovering"
-               @update:model-value="$emit('update:discoveryHeaders', $event)"
-             />
-         </v-expansion-panel-text>
-       </v-expansion-panel>
-     </v-expansion-panels>
-
+    <v-expansion-panels class="mb-4">
+      <v-expansion-panel>
+        <v-expansion-panel-title>
+          Discovery Headers (Optional)
+        </v-expansion-panel-title>
+        <v-expansion-panel-text>
+          <p class="text-caption mb-2">
+            Headers to send *only* during the discovery process (e.g., for
+            authentication).
+          </p>
+          <KeyValueInput
+            :model-value="discoveryHeaders"
+            :disabled="isLoading || isDiscovering"
+            @update:model-value="$emit('update:discoveryHeaders', $event)"
+          />
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+    </v-expansion-panels>
 
     <v-btn
       id="discover-server-button"
@@ -76,27 +84,27 @@
 </template>
 
 <script setup lang="ts">
-import { rules } from '~/utils/validation';
-import KeyValueInput from './KeyValueInput.vue';
+import { rules } from "~/utils/validation";
+import KeyValueInput from "./KeyValueInput.vue";
 
 // Props define the data passed from the parent and v-model bindings
 defineProps<{
-serverUrl: string;
-slug: string;
-discoveryHeaders: Record<string, string>;
-isLoading: boolean;
-isDiscovering: boolean;
-isCheckingSlug: boolean;
-slugError: string;
-fetchError: string;
-isStep1Valid: boolean; // Prop type is boolean
-slugUniqueRule: () => string | boolean;
+  serverUrl: string;
+  slug: string;
+  discoveryHeaders: Record<string, string>;
+  isLoading: boolean;
+  isDiscovering: boolean;
+  isCheckingSlug: boolean;
+  slugError: string;
+  fetchError: string;
+  isStep1Valid: boolean; // Prop type is boolean
+  slugUniqueRule: () => string | boolean;
 }>();
 
 // Emits define events sent back to the parent
 defineEmits<{
-(e: 'update:serverUrl' | 'update:slug', value: string): void;
-(e: 'update:discoveryHeaders', value: Record<string, string>): void;
-(e: 'url-input' | 'slug-input' | 'discover' | 'clear-fetch-error'): void;
+  (e: "update:serverUrl" | "update:slug", value: string): void;
+  (e: "update:discoveryHeaders", value: Record<string, string>): void;
+  (e: "url-input" | "slug-input" | "discover" | "clear-fetch-error"): void;
 }>();
 </script>

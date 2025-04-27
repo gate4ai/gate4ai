@@ -13,7 +13,7 @@
             </a>
           </v-list-item-title>
         </v-list-item>
-        
+
         <v-list-item v-if="server.email && showOwnerEmail">
           <template #prepend>
             <v-icon color="primary">mdi-email</v-icon>
@@ -24,7 +24,7 @@
             </a>
           </v-list-item-title>
         </v-list-item>
-        
+
         <v-list-item>
           <template #prepend>
             <v-icon color="primary">mdi-account-group</v-icon>
@@ -33,7 +33,7 @@
             {{ server._count?.subscriptions || 0 }} subscribers
           </v-list-item-title>
         </v-list-item>
-        
+
         <v-list-item v-if="server.protocol">
           <template #prepend>
             <v-icon color="primary">mdi-protocol</v-icon>
@@ -41,24 +41,24 @@
           <v-list-item-title>
             Protocol: {{ server.protocol }} - {{ server.protocolVersion }}
           </v-list-item-title>
-        </v-list-item>        
+        </v-list-item>
       </v-list>
     </v-card-text>
-    
+
     <v-card-actions>
       <SubscribeButton
-     :server="server"
-     :is-authenticated="isAuthenticated"
-     @update:subscription="handleSubscriptionUpdate"
-     />
+        :server="server"
+        :is-authenticated="isAuthenticated"
+        @update:subscription="handleSubscriptionUpdate"
+      />
     </v-card-actions>
   </v-card>
 </template>
 
 <script setup lang="ts">
-import type { Server } from '~/utils/server';
-import { useRuntimeConfig } from '#app';
-import { computed } from 'vue';
+import type { Server } from "~/utils/server";
+import { useRuntimeConfig } from "#app";
+import { computed } from "vue";
 
 const _props = defineProps<{
   server: Server;
@@ -66,14 +66,16 @@ const _props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'subscribe'): void;
+  (e: "subscribe"): void;
 }>();
 
 const config = useRuntimeConfig();
-const showOwnerEmail = computed(() => config.public.settings?.show_owner_email || false);
+const showOwnerEmail = computed(
+  () => config.public.settings?.show_owner_email || false
+);
 
 function handleSubscriptionUpdate() {
   // Emit event to parent to handle subscription update
-  emit('subscribe');
+  emit("subscribe");
 }
 </script>

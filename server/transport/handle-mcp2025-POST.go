@@ -2,7 +2,6 @@ package transport
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -328,9 +327,8 @@ func (t *Transport) responseToStream(w http.ResponseWriter, r *http.Request, ses
 						}
 
 						// Send event with incrementing ID for potential resumption
-						fmt.Fprintf(w, "id: %d\ndata: %s\n\n", eventID, eventData)
+						shared.FlushIfNotDone(logger, r, w, "id: %d\ndata: %s\n\n", eventID, eventData)
 						eventID++
-						flusher.Flush()
 
 						// Remove from pending requests
 						delete(pendingRequests, msgID)
@@ -345,14 +343,7 @@ func (t *Transport) responseToStream(w http.ResponseWriter, r *http.Request, ses
 				}
 			case <-ticker.C:
 				// Send keepalive ping event
-				// Check context again before sending
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					fmt.Fprintf(w, "event: %s\ndata: %s\n\n", sseEventPing, `{}`)
-					flusher.Flush()
-				}
+				shared.FlushIfNotDone(logger, r, w, "event: %s\ndata: {}\n\n", sseEventPing)
 			}
 		}
 	}()

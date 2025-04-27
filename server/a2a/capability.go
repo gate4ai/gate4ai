@@ -28,7 +28,6 @@ var _ shared.IServerCapability = (*A2ACapability)(nil)
 type A2ACapability struct {
 	logger       *zap.Logger
 	manager      transport.ISessionManager // To interact with sessions for SSE/Resubscribe
-	agentCard    a2aSchema.AgentCard
 	taskStore    TaskStore  // Interface for task persistence
 	agentHandler A2AHandler // The actual agent logic implementation
 	handlers     map[string]func(*shared.Message) (interface{}, error)
@@ -162,9 +161,11 @@ func (ac *A2ACapability) handleTaskSend(msg *shared.Message) (interface{}, error
 		case update, ok := <-updates:
 			if !ok {
 				// Updates channel closed, handler finished or panicked
+				logger.Debug("Updates channel closed by handler.")
 				keepProcessing = false
 				break // Exit select
 			}
+			logger.Debug("Received update from handler", zap.Any("update", update)) // Log received update
 
 			// Apply the update yielded by the handler
 			var applyErr error
@@ -208,13 +209,46 @@ func (ac *A2ACapability) handleTaskSend(msg *shared.Message) (interface{}, error
 
 		case errFromHandler := <-handlerErrChan:
 			// Handler goroutine finished, capture its return error
+			logger.Debug("Handler goroutine finished", zap.Error(errFromHandler))
 			handlerError = errFromHandler
 			// Drain any remaining updates that might have been sent just before finishing
-			for range updates {
-			}
-			keepProcessing = false // Stop processing loop
+			// Keep processing variable set to false here to prevent re-entering loop after handler error
+			keepProcessing = false // Stop main processing loop
 		}
 	} // End processing loop
+
+	// Drain any remaining updates that might have been sent just before finishing,
+	// *after* the main loop has exited.
+	logger.Debug("Draining remaining updates channel after main loop")
+	for update := range updates { // Read until the channel is closed and empty
+		logger.Debug("Draining remaining update after handler finished", zap.Any("update", update))
+		var applyErr error
+		lastTaskState, applyErr = ac.applyUpdateToTask(lastTaskState, update)
+		if applyErr != nil {
+			// Handle potential error during draining, maybe log and mark task as failed
+			logger.Error("Error applying drained update", zap.Error(applyErr), zap.Any("update", update))
+			// Prioritize the original handlerError if it exists
+			if handlerError == nil {
+				handlerError = fmt.Errorf("failed applying drained update: %w", applyErr) // Record error
+			}
+			lastTaskState.Status = createErrorStatus(handlerError, nil) // Use potentially updated handlerError
+			break                                                       // Stop draining on error
+		}
+		// Also check for yielded errors during drain
+		if update.Error != nil {
+			logger.Error("Handler yielded JSONRPCError during drain", zap.Any("error", update.Error))
+			if handlerError == nil { // Prioritize original error
+				handlerError = update.Error
+			}
+			lastTaskState.Status = createErrorStatus(handlerError, update.Error)
+			// Prepare error for client only if no specific error was already set
+			if finalJsonRpcError == nil {
+				finalJsonRpcError = shared.NewJSONRPCError(update.Error)
+			}
+			break // Stop draining on error
+		}
+	}
+	logger.Debug("Finished draining updates channel")
 
 	// --- Final State Handling and Response Preparation ---
 	// Ensure task is in a final state if the handler finished without error or yielding input-required/terminal
@@ -229,16 +263,24 @@ func (ac *A2ACapability) handleTaskSend(msg *shared.Message) (interface{}, error
 		if lastTaskState.Status.State != a2aSchema.TaskStateFailed {
 			if jsonErr, ok := handlerError.(*a2aSchema.JSONRPCError); ok {
 				lastTaskState.Status = createErrorStatus(jsonErr, jsonErr)
-				finalJsonRpcError = shared.NewJSONRPCError(jsonErr) // Prepare error for client
+				if finalJsonRpcError == nil { // Don't overwrite specific error yielded during drain/main loop
+					finalJsonRpcError = shared.NewJSONRPCError(jsonErr) // Prepare error for client
+				}
 			} else {
 				lastTaskState.Status = createErrorStatus(handlerError, nil) // Generic internal error status
-				// Prepare generic internal error for client
-				finalJsonRpcError = &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Internal agent error occurred"}
+				// Prepare generic internal error for client if none set yet
+				if finalJsonRpcError == nil {
+					finalJsonRpcError = &shared.JSONRPCError{Code: shared.JSONRPCErrorInternal, Message: "Internal agent error occurred"}
+				}
 			}
 		}
 	} else if errors.Is(handlerError, context.Canceled) {
 		logger.Info("Handler execution cancelled", zap.Error(handlerError))
-		lastTaskState.Status.State = a2aSchema.TaskStateCanceled
+		// Update status only if not already Canceled (e.g., by handleTaskCancel)
+		if lastTaskState.Status.State != a2aSchema.TaskStateCanceled {
+			lastTaskState.Status.State = a2aSchema.TaskStateCanceled
+			lastTaskState.Status.Timestamp = time.Now()
+		}
 	}
 
 	// --- Save the final determined state ---

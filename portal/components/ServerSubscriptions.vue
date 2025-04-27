@@ -1,7 +1,11 @@
 <template>
   <div>
     <h3 class="text-h6 mb-2">
-      <v-btn variant="text" color="primary" :to="`/servers/${serverSlug}/subscriptions`">
+      <v-btn
+        variant="text"
+        color="primary"
+        :to="`/servers/${serverSlug}/subscriptions`"
+      >
         Subscriptions
         <v-icon class="ml-1">mdi-arrow-right</v-icon>
       </v-btn>
@@ -25,9 +29,11 @@
     </div>
     <!-- Show message if counts are not available (e.g., user doesn't have permission) -->
     <div v-else>
-       <v-list-item>
-         <v-list-item-title class="text-grey">Subscription details available to owners.</v-list-item-title>
-       </v-list-item>
+      <v-list-item>
+        <v-list-item-title class="text-grey"
+          >Subscription details available to owners.</v-list-item-title
+        >
+      </v-list-item>
     </div>
     <!-- Removed v-progress-circular as loading is handled by parent -->
   </div>
@@ -44,9 +50,9 @@ const _props = defineProps<{
 // Format subscription status for display (remains the same)
 function formatStatus(status: string): string {
   const statusMap: Record<string, string> = {
-    'PENDING': 'Pending',
-    'ACTIVE': 'Active',
-    'BLOCKED': 'Blocked'
+    PENDING: "Pending",
+    ACTIVE: "Active",
+    BLOCKED: "Blocked",
   };
   return statusMap[status] || status;
 }

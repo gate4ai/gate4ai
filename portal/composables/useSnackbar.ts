@@ -1,6 +1,6 @@
 // /home/alex/go-ai/gate4ai/www/composables/useSnackbar.ts
-import { readonly } from 'vue'; // ref is no longer needed as we're using let for timer
-import { useState } from '#app'; // Correct import
+import { readonly } from "vue"; // ref is no longer needed as we're using let for timer
+import { useState } from "#app"; // Correct import
 
 // Define the shape of the snackbar state
 interface SnackbarState {
@@ -17,10 +17,10 @@ export function useSnackbar() {
   // Call useState *inside* the composable function.
   // This ensures it's called within a valid Nuxt/Vue context (like setup).
   // The factory function () => ({...}) runs only once globally for this key.
-  const snackbarState = useState<SnackbarState>('snackbar', () => ({
+  const snackbarState = useState<SnackbarState>("snackbar", () => ({
     show: false,
-    text: '',
-    color: 'info', // Default color
+    text: "",
+    color: "info", // Default color
     timeout: 3000, // Default timeout
   }));
 
@@ -30,7 +30,11 @@ export function useSnackbar() {
   // Using let here as the state itself is the primary reactive element.
   let timer: NodeJS.Timeout | null = null;
 
-  const showSnackbar = (text: string, color: string = 'info', timeout: number = 3000) => {
+  const showSnackbar = (
+    text: string,
+    color: string = "info",
+    timeout: number = 3000
+  ) => {
     // Clear existing timer if a new snackbar is shown quickly
     if (timer) {
       clearTimeout(timer);
@@ -60,17 +64,21 @@ export function useSnackbar() {
     }
     // Ensure state exists before trying to modify
     if (snackbarState.value) {
-        snackbarState.value.show = false;
+      snackbarState.value.show = false;
     }
   };
 
   // Return the reactive state (read-only) and methods
   return {
     snackbar: readonly(snackbarState), // Use readonly for external safety
-    showSuccess: (text: string, timeout: number = 3000) => showSnackbar(text, 'success', timeout),
-    showError: (text: string, timeout: number = 5000) => showSnackbar(text, 'error', timeout), // Longer timeout for errors
-    showInfo: (text: string, timeout: number = 3000) => showSnackbar(text, 'info', timeout),
-    showWarning: (text: string, timeout: number = 4000) => showSnackbar(text, 'warning', timeout),
+    showSuccess: (text: string, timeout: number = 3000) =>
+      showSnackbar(text, "success", timeout),
+    showError: (text: string, timeout: number = 5000) =>
+      showSnackbar(text, "error", timeout), // Longer timeout for errors
+    showInfo: (text: string, timeout: number = 3000) =>
+      showSnackbar(text, "info", timeout),
+    showWarning: (text: string, timeout: number = 4000) =>
+      showSnackbar(text, "warning", timeout),
     hideSnackbar, // Expose hide method if needed externally
   };
 }

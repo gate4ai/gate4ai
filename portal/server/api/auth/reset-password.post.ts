@@ -1,22 +1,28 @@
-import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcrypt';
-import { z } from 'zod';
-import { defineEventHandler, readBody, createError } from 'h3';
+import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcrypt";
+import { z } from "zod";
+import { defineEventHandler, readBody, createError } from "h3";
 
 const prisma = new PrismaClient();
 
-const resetPasswordSchema = z.object({
-  token: z.string().min(1, "Reset token is required"),
-  newPassword: z.string().min(8, "Password must be at least 8 characters"),
-}).strict();
+const resetPasswordSchema = z
+  .object({
+    token: z.string().min(1, "Reset token is required"),
+    newPassword: z.string().min(8, "Password must be at least 8 characters"),
+  })
+  .strict();
 
 export default defineEventHandler(async (event) => {
   try {
     // Validate body
     const body = await readBody(event);
     const validationResult = resetPasswordSchema.safeParse(body);
-     if (!validationResult.success) {
-        throw createError({ statusCode: 400, statusMessage: 'Validation Error', data: validationResult.error.flatten().fieldErrors });
+    if (!validationResult.success) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Validation Error",
+        data: validationResult.error.flatten().fieldErrors,
+      });
     }
     const { token, newPassword } = validationResult.data;
 
@@ -31,7 +37,10 @@ export default defineEventHandler(async (event) => {
     });
 
     if (!user) {
-      throw createError({ statusCode: 400, statusMessage: 'Invalid or expired password reset token.' });
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid or expired password reset token.",
+      });
     }
 
     // Hash the new password
@@ -48,16 +57,20 @@ export default defineEventHandler(async (event) => {
     });
 
     console.log(`Password reset successfully for user: ${user.email}`);
-    return { message: 'Password has been reset successfully.' };
-
+    return { message: "Password has been reset successfully." };
   } catch (error: unknown) {
-    console.error('Reset password API error:', error);
-     if (error instanceof z.ZodError || 
-        (error && typeof error === 'object' && 'statusCode' in error)) {
-        throw error;
+    console.error("Reset password API error:", error);
+    if (
+      error instanceof z.ZodError ||
+      (error && typeof error === "object" && "statusCode" in error)
+    ) {
+      throw error;
     }
-    throw createError({ statusCode: 500, statusMessage: 'An error occurred while resetting the password.' });
+    throw createError({
+      statusCode: 500,
+      statusMessage: "An error occurred while resetting the password.",
+    });
   } finally {
-     await prisma.$disconnect();
+    await prisma.$disconnect();
   }
-}); 
+});
