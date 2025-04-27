@@ -1,17 +1,22 @@
-import { defineEventHandler, getRouterParam, readBody, createError } from 'h3';
-import { z, ZodError } from 'zod';
-import prisma from '../../../../utils/prisma';
-import { checkServerModificationRights } from '../../../../utils/serverPermissions'; // Adjust path
+import { defineEventHandler, getRouterParam, readBody, createError } from "h3";
+import { z, ZodError } from "zod";
+import prisma from "../../../../utils/prisma";
+import { checkServerModificationRights } from "../../../../utils/serverPermissions"; // Adjust path
 
 // Schema for request body validation
-const addOwnerSchema = z.object({
-  email: z.string().email("Invalid email format"),
-}).strict();
+const addOwnerSchema = z
+  .object({
+    email: z.string().email("Invalid email format"),
+  })
+  .strict();
 
 export default defineEventHandler(async (event) => {
-  const serverSlug = getRouterParam(event, 'slug'); // Use slug
+  const serverSlug = getRouterParam(event, "slug"); // Use slug
   if (!serverSlug) {
-    throw createError({ statusCode: 400, statusMessage: 'Server slug is required' });
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Server slug is required",
+    });
   }
 
   try {
@@ -23,7 +28,11 @@ export default defineEventHandler(async (event) => {
     const body = await readBody(event);
     const validationResult = addOwnerSchema.safeParse(body);
     if (!validationResult.success) {
-      throw createError({ statusCode: 400, statusMessage: 'Validation Error', data: validationResult.error.flatten().fieldErrors });
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Validation Error",
+        data: validationResult.error.flatten().fieldErrors,
+      });
     }
     const { email } = validationResult.data;
 
@@ -34,7 +43,10 @@ export default defineEventHandler(async (event) => {
     });
 
     if (!userToAdd) {
-      throw createError({ statusCode: 404, statusMessage: `User with email ${email} not found` });
+      throw createError({
+        statusCode: 404,
+        statusMessage: `User with email ${email} not found`,
+      });
     }
 
     // 4. Add the user as an owner using the actual server ID (UUID)
@@ -47,30 +59,42 @@ export default defineEventHandler(async (event) => {
 
     // 5. Fetch the updated owner list using the server ID
     const updatedOwners = await prisma.serverOwner.findMany({
-       where: { serverId: server.id }, // Use internal ID
-       select: {
-         user: {
-           select: {
-             id: true,
-             name: true,
-             email: true,
-           },
-         },
-       },
-     });
+      where: { serverId: server.id }, // Use internal ID
+      select: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
 
     // Return the updated list of owners (just the user part)
-    return updatedOwners.map(o => o.user);
-
+    return updatedOwners.map((o) => o.user);
   } catch (error: unknown) {
-    console.error(`Error adding owner to server with slug ${serverSlug}:`, error);
-    if (error instanceof ZodError || (error instanceof Error && 'statusCode' in error)) { // Re-throw Zod and H3 errors
+    console.error(
+      `Error adding owner to server with slug ${serverSlug}:`,
+      error
+    );
+    if (
+      error instanceof ZodError ||
+      (error instanceof Error && "statusCode" in error)
+    ) {
+      // Re-throw Zod and H3 errors
       throw error;
     }
     // Handle potential Prisma errors (e.g., user already an owner - P2002)
-     if (error instanceof Error && 'code' in error && error.code === 'P2002') {
-        throw createError({ statusCode: 409, statusMessage: 'User is already an owner of this server.' });
-     }
-    throw createError({ statusCode: 500, statusMessage: 'Failed to add owner' });
+    if (error instanceof Error && "code" in error && error.code === "P2002") {
+      throw createError({
+        statusCode: 409,
+        statusMessage: "User is already an owner of this server.",
+      });
+    }
+    throw createError({
+      statusCode: 500,
+      statusMessage: "Failed to add owner",
+    });
   }
 });

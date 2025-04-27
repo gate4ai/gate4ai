@@ -1,7 +1,11 @@
 // /home/alex/go-ai/gate4ai/www/server/api/servers/index.get.ts
-import prisma from '../../utils/prisma';
-import { defineEventHandler, createError, getQuery } from 'h3';
-import type { Prisma, SubscriptionStatus, Server as _Server } from '@prisma/client'; // Combine imports and rename Server
+import prisma from "../../utils/prisma";
+import { defineEventHandler, createError, getQuery } from "h3";
+import type {
+  Prisma,
+  SubscriptionStatus,
+  Server as _Server,
+} from "@prisma/client"; // Combine imports and rename Server
 
 // Define the structure of the public server data we want to RETURN
 // Note: This is NOT a Prisma select object anymore
@@ -40,7 +44,7 @@ const publicServerSelectFields: Prisma.ServerSelect = {
   _count: {
     select: {
       tools: true,
-      subscriptions: { where: { status: 'ACTIVE' } },
+      subscriptions: { where: { status: "ACTIVE" } },
     },
   },
 };
@@ -54,24 +58,24 @@ export default defineEventHandler(async (event) => {
     let prismaWhereClause: Prisma.ServerWhereInput = {}; // Initialize empty where clause
 
     // Build the WHERE clause based on the filter
-    if (filter === 'owned') {
+    if (filter === "owned") {
       if (!userId) {
-         // Cannot filter by owned if user is not logged in
-         return []; // Return empty array if user not logged in for 'owned' filter
+        // Cannot filter by owned if user is not logged in
+        return []; // Return empty array if user not logged in for 'owned' filter
       }
       prismaWhereClause = {
         owners: {
           some: { userId },
         },
       };
-    } else if (filter === 'subscribed') {
-       if (!userId) {
-         // Cannot filter by subscribed if user is not logged in
-         return []; // Return empty array if user not logged in for 'subscribed' filter
+    } else if (filter === "subscribed") {
+      if (!userId) {
+        // Cannot filter by subscribed if user is not logged in
+        return []; // Return empty array if user not logged in for 'subscribed' filter
       }
       prismaWhereClause = {
         subscriptions: {
-          some: { userId, status: 'ACTIVE' },
+          some: { userId, status: "ACTIVE" },
         },
       };
     }
@@ -83,7 +87,7 @@ export default defineEventHandler(async (event) => {
       // Conditionally include fields needed to determine ownership/subscription IF user is logged in
       ...(userId && {
         subscriptions: {
-          where: { userId, status: 'ACTIVE' },
+          where: { userId, status: "ACTIVE" },
           select: { id: true, status: true }, // Select ID and STATUS
         },
         owners: {
@@ -97,25 +101,34 @@ export default defineEventHandler(async (event) => {
       where: prismaWhereClause,
       select: selectClause,
       orderBy: {
-         name: 'asc',
-       }
+        name: "asc",
+      },
     });
 
     // Map the fetched Prisma data to the desired response structure
-    return servers.map(server => {
-      const typedServer = server as typeof server & { subscriptions?: {id: string, status: SubscriptionStatus}[], owners?: {id: string}[] };
+    return servers.map((server) => {
+      const typedServer = server as typeof server & {
+        subscriptions?: { id: string; status: SubscriptionStatus }[];
+        owners?: { id: string }[];
+      };
 
       // Determine subscription status and ID for the current user
       let currentUserSubscriptionId: string | undefined = undefined;
       let isCurrentUserSubscribed = false;
-      if (userId && typedServer.subscriptions && typedServer.subscriptions.length > 0) {
-         // Usually there's only one subscription per user/server
-         currentUserSubscriptionId = typedServer.subscriptions[0].id;
-         isCurrentUserSubscribed = typedServer.subscriptions[0].status === 'ACTIVE'; // Check status
+      if (
+        userId &&
+        typedServer.subscriptions &&
+        typedServer.subscriptions.length > 0
+      ) {
+        // Usually there's only one subscription per user/server
+        currentUserSubscriptionId = typedServer.subscriptions[0].id;
+        isCurrentUserSubscribed =
+          typedServer.subscriptions[0].status === "ACTIVE"; // Check status
       }
 
       // Construct the response object
-      const responseData = { // Define explicit type if needed
+      const responseData = {
+        // Define explicit type if needed
         id: typedServer.id,
         slug: typedServer.slug,
         name: typedServer.name,
@@ -129,25 +142,33 @@ export default defineEventHandler(async (event) => {
         _count: typedServer._count,
         // Add calculated flags and ID
         isCurrentUserSubscribed: isCurrentUserSubscribed,
-        isCurrentUserOwner: !!(userId && typedServer.owners && typedServer.owners.length > 0),
+        isCurrentUserOwner: !!(
+          userId &&
+          typedServer.owners &&
+          typedServer.owners.length > 0
+        ),
         subscriptionId: currentUserSubscriptionId, // Include the subscription ID
       };
       return responseData;
     });
-
   } catch (error) {
-    console.error('Error fetching servers:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred while fetching servers';
-    if (errorMessage.includes("Please make sure your database server is running")) {
+    console.error("Error fetching servers:", error);
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : "Unknown error occurred while fetching servers";
+    if (
+      errorMessage.includes("Please make sure your database server is running")
+    ) {
       throw createError({
         statusCode: 500,
-        statusMessage: 'Please make sure your database server is running',
+        statusMessage: "Please make sure your database server is running",
       });
     } else {
       console.error(`Server fetch error details: ${errorMessage}`);
       throw createError({
         statusCode: 500,
-        statusMessage: 'Failed to fetch servers',
+        statusMessage: "Failed to fetch servers",
       });
     }
   }

@@ -5,7 +5,7 @@
         <v-card-title class="text-center text-h4 mb-4">
           Login to gate4.ai
         </v-card-title>
-        
+
         <v-form ref="form" @submit.prevent="handleLogin">
           <v-card-text>
             <v-text-field
@@ -18,7 +18,7 @@
               prepend-inner-icon="mdi-email"
               class="mb-4"
             />
-            
+
             <v-text-field
               v-model="password"
               label="Password"
@@ -30,7 +30,7 @@
               :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
               @click:append-inner="showPassword = !showPassword"
             />
-            
+
             <div class="d-flex justify-end mb-4">
               <v-btn
                 variant="text"
@@ -41,7 +41,7 @@
                 Forgot Password?
               </v-btn>
             </div>
-            
+
             <v-btn
               type="submit"
               color="primary"
@@ -52,15 +52,10 @@
             >
               Login
             </v-btn>
-            
+
             <div class="text-center">
               <span class="text-medium-emphasis">Don't have an account?</span>
-              <v-btn
-                variant="text"
-                color="primary"
-                to="/register"
-                class="ml-2"
-              >
+              <v-btn variant="text" color="primary" to="/register" class="ml-2">
                 Register
               </v-btn>
             </div>
@@ -72,59 +67,59 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { rules } from '~/utils/validation';
-import { useSnackbar } from '~/composables/useSnackbar';
+import { ref } from "vue";
+import { rules } from "~/utils/validation";
+import { useSnackbar } from "~/composables/useSnackbar";
 
 definePageMeta({
-  title: 'Login',
-  layout: 'default',
+  title: "Login",
+  layout: "default",
 });
 
 const route = useRoute();
 const { $auth } = useNuxtApp();
-const redirectPath = route.query.redirect as string || '/servers';
+const redirectPath = (route.query.redirect as string) || "/servers";
 
-const email = ref('');
-const password = ref('');
+const email = ref("");
+const password = ref("");
 const showPassword = ref(false);
-const error = ref('');
+const error = ref("");
 const isLoading = ref(false);
 const form = ref<{ validate: () => Promise<{ valid: boolean }> } | null>(null);
 const { showError } = useSnackbar();
 
 async function handleLogin() {
   if (!form.value) return;
-  
+
   const { valid } = await form.value.validate();
-  
+
   if (!valid) {
     console.log("Validation failed");
     return;
   }
-  console.log("Form is valid, proceeding...");  
+  console.log("Form is valid, proceeding...");
 
   isLoading.value = true;
-  error.value = '';
-  
+  error.value = "";
+
   try {
     // Call the login API
     const { $api } = useNuxtApp();
-    const response = await $api.postJson('/auth/login', {
+    const response = await $api.postJson("/auth/login", {
       email: email.value,
-      password: password.value
+      password: password.value,
     });
 
     // Use the auth plugin to store token and handle login
     $auth.login(response.token, response.user);
-    
+
     // Redirect
     navigateTo(redirectPath);
   } catch (err: unknown) {
     if (err instanceof Error) {
       showError(err.message);
     } else {
-      showError('An error occurred during login. Please try again.');
+      showError("An error occurred during login. Please try again.");
     }
     console.error("Login error:", err);
   } finally {
@@ -137,4 +132,4 @@ async function handleLogin() {
 .auth-container {
   min-height: calc(100vh - 200px);
 }
-</style> 
+</style>

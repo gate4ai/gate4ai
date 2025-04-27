@@ -25,14 +25,11 @@
 
       <v-col cols="12" md="6">
         <v-chip-group>
-          <v-chip
-            color="primary"
-            label
-            class="text-body-1"
-            variant="elevated"
-          >
+          <v-chip color="primary" label class="text-body-1" variant="elevated">
             {{ localServerData.protocol }}
-            <span v-if="localServerData.protocolVersion" class="ml-1">v{{ localServerData.protocolVersion }}</span>
+            <span v-if="localServerData.protocolVersion" class="ml-1"
+              >v{{ localServerData.protocolVersion }}</span
+            >
           </v-chip>
         </v-chip-group>
       </v-col>
@@ -111,11 +108,7 @@
     <v-card-actions>
       <v-spacer />
       <v-btn variant="outlined" @click="$emit('cancel')">Cancel</v-btn>
-      <v-btn
-        color="primary"
-        type="submit"
-        :loading="isSubmitting"
-      >
+      <v-btn color="primary" type="submit" :loading="isSubmitting">
         {{ submitLabel }}
       </v-btn>
     </v-card-actions>
@@ -123,10 +116,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import { rules } from '~/utils/validation';
-import type { ServerData } from '~/utils/server';
-
+import { ref, watch } from "vue";
+import { rules } from "~/utils/validation";
+import type { ServerData } from "~/utils/server";
 
 const props = defineProps<{
   serverData: ServerData;
@@ -144,37 +136,37 @@ const form = ref<HTMLFormElement | null>(null);
 const localServerData = ref<ServerData>({ ...props.serverData });
 
 // Watch for changes in the prop and update local data
-watch(() => props.serverData, (newVal) => {
-  localServerData.value = { ...newVal };
-}, { deep: true });
+watch(
+  () => props.serverData,
+  (newVal) => {
+    localServerData.value = { ...newVal };
+  },
+  { deep: true }
+);
 
 // Function to emit submit event with updated data
 async function submitForm() {
   if (form.value) {
     const { valid } = await form.value.validate();
     if (valid) {
-      emit('submit', localServerData.value);
+      emit("submit", localServerData.value);
     }
   }
 }
 
 // Server URL validation rules
-const serverUrlRules = [
-  rules.required,
-  rules.url
-];
+const serverUrlRules = [rules.required, rules.url];
 
 // Options for select fields
 const statusOptions = [
-  { title: 'Draft', value: 'DRAFT' },
-  { title: 'Active', value: 'ACTIVE' },
-  { title: 'Blocked', value: 'BLOCKED' }
+  { title: "Draft", value: "DRAFT" },
+  { title: "Active", value: "ACTIVE" },
+  { title: "Blocked", value: "BLOCKED" },
 ];
 
 const availabilityOptions = [
-  { title: 'Public', value: 'PUBLIC' },
-  { title: 'Private', value: 'PRIVATE' },
-  { title: 'Subscription', value: 'SUBSCRIPTION' }
+  { title: "Public", value: "PUBLIC" },
+  { title: "Private", value: "PRIVATE" },
+  { title: "Subscription", value: "SUBSCRIPTION" },
 ];
-
 </script>

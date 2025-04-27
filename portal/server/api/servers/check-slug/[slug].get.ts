@@ -1,16 +1,22 @@
-import { defineEventHandler, getRouterParam, createError } from 'h3';
-import prisma from '../../../utils/prisma';
+import { defineEventHandler, getRouterParam, createError } from "h3";
+import prisma from "../../../utils/prisma";
 
 export default defineEventHandler(async (event) => {
-  const slug = getRouterParam(event, 'slug');
+  const slug = getRouterParam(event, "slug");
 
   if (!slug) {
-    throw createError({ statusCode: 400, statusMessage: 'Slug parameter is required' });
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Slug parameter is required",
+    });
   }
 
   // Basic slug format check (optional, but good practice)
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
-      throw createError({ statusCode: 400, statusMessage: 'Invalid slug format.' });
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Invalid slug format.",
+    });
   }
 
   try {
@@ -25,6 +31,6 @@ export default defineEventHandler(async (event) => {
     // Or return an error indicator? For now, let's return exists: false and log.
     // A more robust approach might return an error object.
     // throw createError({ statusCode: 500, statusMessage: 'Failed to check slug uniqueness' });
-     return { exists: false, error: 'Failed to check uniqueness' }; // Indicate check failed but don't block UI unnecessarily
+    return { exists: false, error: "Failed to check uniqueness" }; // Indicate check failed but don't block UI unnecessarily
   }
 });

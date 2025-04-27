@@ -19,6 +19,6 @@ defineProps<{
 }>();
 
 defineEmits<{
-  (e: 'update:modelValue', value: string): void;
+  (e: "update:modelValue", value: string): void;
 }>();
-</script> 
+</script>

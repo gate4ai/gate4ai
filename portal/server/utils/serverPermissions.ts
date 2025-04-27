@@ -1,8 +1,8 @@
-import type { H3Event } from 'h3';
-import { createError } from 'h3';
-import prisma from './prisma';
-import type { User, Server, SubscriptionStatus } from '@prisma/client'; // Ensure correct types
-import { checkAuth } from './userUtils';
+import type { H3Event } from "h3";
+import { createError } from "h3";
+import prisma from "./prisma";
+import type { User, Server, SubscriptionStatus } from "@prisma/client"; // Ensure correct types
+import { checkAuth } from "./userUtils";
 
 /**
  * Checks if the authenticated user has ownership or administrative/security privileges
@@ -15,34 +15,44 @@ import { checkAuth } from './userUtils';
  * @returns {Promise<{ user: User, server: PrismaServer & { owners: ServerOwner[], subscriptionHeaderTemplate: SubscriptionHeaderTemplate[] } , isOwner: boolean, isAdminOrSecurity: boolean }>} Details if authorized, including the fetched server.
  * @throws {Error} 401 if not authenticated, 404 if server not found, 403 if forbidden.
  */
-export async function checkServerModificationRights(event: H3Event, serverSlug: string) {
+export async function checkServerModificationRights(
+  event: H3Event,
+  serverSlug: string
+) {
   const user = checkAuth(event); // Ensure user is authenticated
 
   const server = await prisma.server.findUnique({
     where: { slug: serverSlug }, // Find by SLUG
     include: {
-      owners: { // Include full owner relation
-        select: { userId: true } // Select only what's needed for the check
-       },
+      owners: {
+        // Include full owner relation
+        select: { userId: true }, // Select only what's needed for the check
+      },
       subscriptionHeaderTemplate: true, // Include template for context if needed
     },
   });
 
   if (!server) {
-    throw createError({ statusCode: 404, statusMessage: 'Server not found' });
+    throw createError({ statusCode: 404, statusMessage: "Server not found" });
   }
 
   // Type assertion needed as Prisma include type inference isn't perfect
-  const serverWithProperOwners = server as Server & { owners: { userId: string }[], subscriptionHeaderTemplate: any[] }; // Use appropriate type
+  const serverWithProperOwners = server as Server & {
+    owners: { userId: string }[];
+    subscriptionHeaderTemplate: any[];
+  }; // Use appropriate type
 
-  const isOwner = serverWithProperOwners.owners.some(owner => owner.userId === user.id);
-  const isAdminOrSecurity = user.role === 'ADMIN' || user.role === 'SECURITY';
+  const isOwner = serverWithProperOwners.owners.some(
+    (owner) => owner.userId === user.id
+  );
+  const isAdminOrSecurity = user.role === "ADMIN" || user.role === "SECURITY";
 
   // Only Owners, Admins, or Security can modify/delete
   if (!isOwner && !isAdminOrSecurity) {
     throw createError({
       statusCode: 403,
-      statusMessage: 'Forbidden: You do not have permission to modify or delete this server.',
+      statusMessage:
+        "Forbidden: You do not have permission to modify or delete this server.",
     });
   }
 
@@ -60,51 +70,59 @@ export async function checkServerModificationRights(event: H3Event, serverSlug: 
  * @throws {Error} 401 if not authenticated, 403 if forbidden.
  */
 export async function checkServerCreationRights(event: H3Event) {
-    const user = checkAuth(event); // Ensure user is authenticated
+  const user = checkAuth(event); // Ensure user is authenticated
 
-    // Admins and Security can always create
-    if (user.role === 'ADMIN' || user.role === 'SECURITY') {
-        return { user };
+  // Admins and Security can always create
+  if (user.role === "ADMIN" || user.role === "SECURITY") {
+    return { user };
+  }
+
+  // Developers can always create
+  if (user.role === "DEVELOPER") {
+    return { user };
+  }
+
+  // Regular users depend on the setting
+  if (user.role === "USER") {
+    let onlyDevsCanPost = false; // Default to false (permissive)
+    try {
+      const setting = await prisma.settings.findUnique({
+        where: { key: "only_developer_can_post_server" },
+        select: { value: true },
+      });
+      // Ensure setting exists and its value is explicitly true (assuming JSON boolean)
+      if (
+        setting &&
+        typeof setting.value === "boolean" &&
+        setting.value === true
+      ) {
+        onlyDevsCanPost = true;
+      }
+    } catch (e) {
+      console.error(
+        "Error fetching 'only_developer_can_post_server' setting:",
+        e
+      );
+      // Proceed with default permissive behavior in case of error? Or deny?
+      // Let's be permissive for now, assuming default is anyone can post.
     }
 
-    // Developers can always create
-    if (user.role === 'DEVELOPER') {
-        return { user };
-    }
-
-    // Regular users depend on the setting
-    if (user.role === 'USER') {
-        let onlyDevsCanPost = false; // Default to false (permissive)
-        try {
-            const setting = await prisma.settings.findUnique({
-                where: { key: 'only_developer_can_post_server' },
-                select: { value: true }
-            });
-            // Ensure setting exists and its value is explicitly true (assuming JSON boolean)
-            if (setting && typeof setting.value === 'boolean' && setting.value === true) {
-                onlyDevsCanPost = true;
-            }
-        } catch (e) {
-            console.error("Error fetching 'only_developer_can_post_server' setting:", e);
-            // Proceed with default permissive behavior in case of error? Or deny?
-            // Let's be permissive for now, assuming default is anyone can post.
-        }
-
-        if (onlyDevsCanPost) {
-             throw createError({
-                statusCode: 403,
-                statusMessage: 'Forbidden: Only developers, admins, or security personnel can create servers.',
-            });
-        }
-        // If setting is false or not found, USER is allowed
-        return { user };
-    }
-
-    // Should not happen if roles are exhaustive, but catch just in case
-    throw createError({
+    if (onlyDevsCanPost) {
+      throw createError({
         statusCode: 403,
-        statusMessage: 'Forbidden: Insufficient role to create a server.',
-    });
+        statusMessage:
+          "Forbidden: Only developers, admins, or security personnel can create servers.",
+      });
+    }
+    // If setting is false or not found, USER is allowed
+    return { user };
+  }
+
+  // Should not happen if roles are exhaustive, but catch just in case
+  throw createError({
+    statusCode: 403,
+    statusMessage: "Forbidden: Insufficient role to create a server.",
+  });
 }
 
 // Helper Function for Read Permissions (Updated to use correct types)
@@ -117,19 +135,26 @@ export async function checkServerCreationRights(event: H3Event) {
  * @returns {{ hasExtendedAccess: boolean, isOwner: boolean, isAdminOrSecurity: boolean }}
  */
 export function getServerReadAccessLevel(
-    user: User | undefined,
-    server: Server & { owners: { user?: { id: string } }[] } // Use PrismaServer and ServerOwner or similar structure
-): { hasExtendedAccess: boolean; isOwner: boolean; isAdminOrSecurity: boolean } {
-    if (!user) {
-        return { hasExtendedAccess: false, isOwner: false, isAdminOrSecurity: false };
-    }
-    // Check if user ID exists in the owners array
-    const isOwner = server.owners.some(owner => owner.user?.id === user.id); // Use optional chaining
-    const isAdminOrSecurity = user.role === 'ADMIN' || user.role === 'SECURITY';
-    const hasExtendedAccess = isOwner || isAdminOrSecurity;
-    return { hasExtendedAccess, isOwner, isAdminOrSecurity };
+  user: User | undefined,
+  server: Server & { owners: { user?: { id: string } }[] } // Use PrismaServer and ServerOwner or similar structure
+): {
+  hasExtendedAccess: boolean;
+  isOwner: boolean;
+  isAdminOrSecurity: boolean;
+} {
+  if (!user) {
+    return {
+      hasExtendedAccess: false,
+      isOwner: false,
+      isAdminOrSecurity: false,
+    };
+  }
+  // Check if user ID exists in the owners array
+  const isOwner = server.owners.some((owner) => owner.user?.id === user.id); // Use optional chaining
+  const isAdminOrSecurity = user.role === "ADMIN" || user.role === "SECURITY";
+  const hasExtendedAccess = isOwner || isAdminOrSecurity;
+  return { hasExtendedAccess, isOwner, isAdminOrSecurity };
 }
-
 
 /**
  * Fetches subscription counts grouped by status for a given server.
@@ -137,28 +162,30 @@ export function getServerReadAccessLevel(
  * @param serverId The ID (UUID) of the server.
  * @returns {Promise<Record<SubscriptionStatus, number>>} Counts for each status.
  */
-export async function getSubscriptionStatusCounts(serverId: string): Promise<Record<SubscriptionStatus, number>> {
-    const countsResult = await prisma.subscription.groupBy({
-        by: ['status'],
-        where: { serverId: serverId },
-        _count: {
-            status: true,
-        },
-    });
+export async function getSubscriptionStatusCounts(
+  serverId: string
+): Promise<Record<SubscriptionStatus, number>> {
+  const countsResult = await prisma.subscription.groupBy({
+    by: ["status"],
+    where: { serverId: serverId },
+    _count: {
+      status: true,
+    },
+  });
 
-    // Initialize counts with 0 for all possible statuses
-    const statusCounts: Record<SubscriptionStatus, number> = {
-        PENDING: 0,
-        ACTIVE: 0,
-        BLOCKED: 0,
-    };
+  // Initialize counts with 0 for all possible statuses
+  const statusCounts: Record<SubscriptionStatus, number> = {
+    PENDING: 0,
+    ACTIVE: 0,
+    BLOCKED: 0,
+  };
 
-    // Populate counts from the query result
-    countsResult.forEach(item => {
-        statusCounts[item.status] = item._count.status;
-    });
+  // Populate counts from the query result
+  countsResult.forEach((item) => {
+    statusCounts[item.status] = item._count.status;
+  });
 
-    return statusCounts;
+  return statusCounts;
 }
 
 /**
@@ -170,37 +197,59 @@ export async function getSubscriptionStatusCounts(serverId: string): Promise<Rec
  * @returns Promise resolving to the subscription and server data if permitted.
  * @throws Error 401, 404, 403
  */
-export async function checkSubscriptionAccessRights(event: H3Event, subscriptionId: string) {
-    const user = checkAuth(event);
+export async function checkSubscriptionAccessRights(
+  event: H3Event,
+  subscriptionId: string
+) {
+  const user = checkAuth(event);
 
-    const subscription = await prisma.subscription.findUnique({
-        where: { id: subscriptionId },
-        include: {
-            server: {
-                select: {
-                    id: true,
-                    owners: { select: { userId: true } },
-                    subscriptionHeaderTemplate: true, // Include template for validation
-                },
-            },
+  const subscription = await prisma.subscription.findUnique({
+    where: { id: subscriptionId },
+    include: {
+      server: {
+        select: {
+          id: true,
+          owners: { select: { userId: true } },
+          subscriptionHeaderTemplate: true, // Include template for validation
         },
+      },
+    },
+  });
+
+  if (!subscription) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Subscription not found",
     });
+  }
 
-    if (!subscription) {
-        throw createError({ statusCode: 404, statusMessage: 'Subscription not found' });
-    }
+  if (!subscription.server) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Associated server not found for subscription",
+    });
+  }
 
-    if (!subscription.server) {
-        throw createError({ statusCode: 404, statusMessage: 'Associated server not found for subscription' });
-    }
+  const isSubscriber = subscription.userId === user.id;
+  const isOwner = subscription.server.owners.some(
+    (owner) => owner.userId === user.id
+  );
+  const isAdminOrSecurity = user.role === "ADMIN" || user.role === "SECURITY";
 
-    const isSubscriber = subscription.userId === user.id;
-    const isOwner = subscription.server.owners.some(owner => owner.userId === user.id);
-    const isAdminOrSecurity = user.role === 'ADMIN' || user.role === 'SECURITY';
+  if (!isSubscriber && !isOwner && !isAdminOrSecurity) {
+    throw createError({
+      statusCode: 403,
+      statusMessage:
+        "Forbidden: You do not have permission to access this subscription.",
+    });
+  }
 
-    if (!isSubscriber && !isOwner && !isAdminOrSecurity) {
-        throw createError({ statusCode: 403, statusMessage: 'Forbidden: You do not have permission to access this subscription.' });
-    }
-
-    return { user, subscription, server: subscription.server, isSubscriber, isOwner, isAdminOrSecurity };
+  return {
+    user,
+    subscription,
+    server: subscription.server,
+    isSubscriber,
+    isOwner,
+    isAdminOrSecurity,
+  };
 }

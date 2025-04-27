@@ -30,36 +30,33 @@
           </v-list-item-title>
         </v-list-item>
 
-         <!-- Display Server Type -->
-         <v-list-item v-if="server.protocol">
-            <template #prepend>
-              <v-icon color="primary">mdi-protocol</v-icon>
-            </template>
-            <v-list-item-title>
-              Server Protocol: {{ server.protocol }}
-            </v-list-item-title>
-          </v-list-item>
+        <!-- Display Server Type -->
+        <v-list-item v-if="server.protocol">
+          <template #prepend>
+            <v-icon color="primary">mdi-protocol</v-icon>
+          </template>
+          <v-list-item-title>
+            Server Protocol: {{ server.protocol }}
+          </v-list-item-title>
+        </v-list-item>
 
-          <!-- Display Protocol Version -->
-          <v-list-item v-if="server.protocolVersion">
-            <template #prepend>
-              <v-icon color="primary">mdi-version</v-icon>
-            </template>
-            <v-list-item-title>
-              Protocol Version: {{ server.protocolVersion }}
-            </v-list-item-title>
-          </v-list-item>
+        <!-- Display Protocol Version -->
+        <v-list-item v-if="server.protocolVersion">
+          <template #prepend>
+            <v-icon color="primary">mdi-version</v-icon>
+          </template>
+          <v-list-item-title>
+            Protocol Version: {{ server.protocolVersion }}
+          </v-list-item-title>
+        </v-list-item>
 
-          <!-- Display Server Slug -->
-          <v-list-item v-if="server.slug">
-            <template #prepend>
-              <v-icon color="primary">mdi-link-variant</v-icon>
-            </template>
-            <v-list-item-title>
-              Slug: {{ server.slug }}
-            </v-list-item-title>
-          </v-list-item>
-
+        <!-- Display Server Slug -->
+        <v-list-item v-if="server.slug">
+          <template #prepend>
+            <v-icon color="primary">mdi-link-variant</v-icon>
+          </template>
+          <v-list-item-title> Slug: {{ server.slug }} </v-list-item-title>
+        </v-list-item>
       </v-list>
 
       <!-- Owners Section -->
@@ -83,12 +80,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed } from "vue";
 // Make sure the imported Server type includes subscriptionStatusCounts, slug, protocol, protocolVersion
-import type { Server } from '~/utils/server'; // Update import
-import type { ServerStatus, ServerAvailability } from '@prisma/client'; // Import from Prisma
-import ServerOwners from './ServerOwners.vue';
-import ServerSubscriptions from './ServerSubscriptions.vue';
+import type { Server } from "~/utils/server"; // Update import
+import type { ServerStatus, ServerAvailability } from "@prisma/client"; // Import from Prisma
+import ServerOwners from "./ServerOwners.vue";
+import ServerSubscriptions from "./ServerSubscriptions.vue";
 
 const props = defineProps<{
   server: Server; // Type should now include optional subscriptionStatusCounts, slug, type
@@ -109,27 +106,33 @@ const showForOwners = computed(() => {
 
   // Show for owners
   // Use optional chaining for owners array
-  return props.server.owners?.some(owner => owner.user.id === user.id) || false;
+  return (
+    props.server.owners?.some((owner) => owner.user.id === user.id) || false
+  );
 });
 
 // Format server status for display
-function formatServerStatus(status: ServerStatus | undefined): string { // Use enum type
-  if (!status) return 'Unknown';
+function formatServerStatus(status: ServerStatus | undefined): string {
+  // Use enum type
+  if (!status) return "Unknown";
   const statusMap: Record<ServerStatus, string> = {
-    'DRAFT': 'Draft',
-    'ACTIVE': 'Active',
-    'BLOCKED': 'Blocked'
+    DRAFT: "Draft",
+    ACTIVE: "Active",
+    BLOCKED: "Blocked",
   };
   return statusMap[status] || status;
 }
 
 // Format server availability for display
-function formatServerAvailability(availability: ServerAvailability | undefined): string { // Use enum type
-  if (!availability) return 'Unknown';
+function formatServerAvailability(
+  availability: ServerAvailability | undefined
+): string {
+  // Use enum type
+  if (!availability) return "Unknown";
   const availabilityMap: Record<ServerAvailability, string> = {
-    'PUBLIC': 'Public',
-    'PRIVATE': 'Private',
-    'SUBSCRIPTION': 'Subscription'
+    PUBLIC: "Public",
+    PRIVATE: "Private",
+    SUBSCRIPTION: "Subscription",
   };
   return availabilityMap[availability] || availability;
 }

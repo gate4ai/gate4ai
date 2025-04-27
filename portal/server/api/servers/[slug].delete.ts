@@ -1,13 +1,16 @@
-import { defineEventHandler, getRouterParam, createError } from 'h3';
+import { defineEventHandler, getRouterParam, createError } from "h3";
 // Import the specific check function
-import { checkServerModificationRights } from '../../utils/serverPermissions'; // Path might need adjustment
-import prisma from '../../utils/prisma';
+import { checkServerModificationRights } from "../../utils/serverPermissions"; // Path might need adjustment
+import prisma from "../../utils/prisma";
 
 export default defineEventHandler(async (event) => {
-  const slug = getRouterParam(event, 'slug'); // Get slug instead of id
+  const slug = getRouterParam(event, "slug"); // Get slug instead of id
 
   if (!slug) {
-    throw createError({ statusCode: 400, statusMessage: 'Server slug is required' });
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Server slug is required",
+    });
   }
 
   try {
@@ -23,24 +26,26 @@ export default defineEventHandler(async (event) => {
     // Set response code for successful deletion with no content
     event.node.res.statusCode = 204;
     return; // Explicitly return nothing
-
   } catch (error: unknown) {
     // Log the specific error
     console.error(`Error deleting server with slug ${slug}:`, error);
 
     // If the error already has a statusCode (e.g., from checkServerModificationRights or Prisma known errors), re-throw it
-    if (error instanceof Error && 'statusCode' in error) {
+    if (error instanceof Error && "statusCode" in error) {
       throw error;
     }
-     // Handle Prisma error if record not found (P2025)
-     if (error instanceof Error && 'code' in error && error.code === 'P2025') {
-        throw createError({ statusCode: 404, statusMessage: `Server with slug '${slug}' not found.` });
-     }
+    // Handle Prisma error if record not found (P2025)
+    if (error instanceof Error && "code" in error && error.code === "P2025") {
+      throw createError({
+        statusCode: 404,
+        statusMessage: `Server with slug '${slug}' not found.`,
+      });
+    }
 
     // Otherwise, throw a generic server error
     throw createError({
       statusCode: 500,
-      statusMessage: 'Failed to delete server due to an unexpected error.',
+      statusMessage: "Failed to delete server due to an unexpected error.",
     });
   }
 });

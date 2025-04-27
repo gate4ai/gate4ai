@@ -4,7 +4,12 @@
 // Import necessary enums directly from Prisma types if possible,
 // otherwise redeclare them here based on the schema definition.
 // Assuming Prisma enums are available:
-import type { SubscriptionStatus, ServerStatus, ServerAvailability, ServerProtocol } from '@prisma/client';
+import type {
+  SubscriptionStatus,
+  ServerStatus,
+  ServerAvailability,
+  ServerProtocol,
+} from "@prisma/client";
 
 // Basic tool information remains the same
 export interface ToolInfo {
@@ -56,7 +61,7 @@ export interface ServerOwner {
     id: string;
     name?: string | null; // Allow null from Prisma
     email: string; // Assume email is usually selected
-  }
+  };
 }
 
 // Basic server information - Used in lists/cards

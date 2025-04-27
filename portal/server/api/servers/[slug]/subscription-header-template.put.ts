@@ -1,22 +1,30 @@
-import { defineEventHandler, getRouterParam, readBody, createError } from 'h3';
-import { z, ZodError } from 'zod';
-import { checkServerModificationRights } from '../../../utils/serverPermissions';
-import prisma from '../../../utils/prisma';
+import { defineEventHandler, getRouterParam, readBody, createError } from "h3";
+import { z, ZodError } from "zod";
+import { checkServerModificationRights } from "../../../utils/serverPermissions";
+import prisma from "../../../utils/prisma";
 
 // Schema for a single template item
-const templateItemSchema = z.object({
-  key: z.string().min(1, "Header key cannot be empty").regex(/^[A-Za-z0-9-]+$/, "Invalid header key format"),
-  description: z.string().optional().nullable(),
-  required: z.boolean().optional().default(false),
-}).strict();
+const templateItemSchema = z
+  .object({
+    key: z
+      .string()
+      .min(1, "Header key cannot be empty")
+      .regex(/^[A-Za-z0-9-]+$/, "Invalid header key format"),
+    description: z.string().optional().nullable(),
+    required: z.boolean().optional().default(false),
+  })
+  .strict();
 
 // Schema for the entire template array
 const templateSchema = z.array(templateItemSchema);
 
 export default defineEventHandler(async (event) => {
-  const slug = getRouterParam(event, 'slug');
+  const slug = getRouterParam(event, "slug");
   if (!slug) {
-    throw createError({ statusCode: 400, statusMessage: 'Server slug is required' });
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Server slug is required",
+    });
   }
 
   try {
@@ -30,7 +38,7 @@ export default defineEventHandler(async (event) => {
     if (!validationResult.success) {
       throw createError({
         statusCode: 400,
-        statusMessage: 'Validation Error: Invalid template format.',
+        statusMessage: "Validation Error: Invalid template format.",
         data: validationResult.error.flatten().fieldErrors,
       });
     }
@@ -46,7 +54,7 @@ export default defineEventHandler(async (event) => {
 
       if (newTemplateData.length > 0) {
         await tx.subscriptionHeaderTemplate.createMany({
-          data: newTemplateData.map(item => ({
+          data: newTemplateData.map((item) => ({
             serverId: server.id,
             key: item.key,
             description: item.description,
@@ -58,23 +66,31 @@ export default defineEventHandler(async (event) => {
       // Fetch and return the newly created template for confirmation
       return tx.subscriptionHeaderTemplate.findMany({
         where: { serverId: server.id },
-         select: {
-            id: true,
-            key: true,
-            description: true,
-            required: true,
-         },
-         orderBy: { key: 'asc' },
+        select: {
+          id: true,
+          key: true,
+          description: true,
+          required: true,
+        },
+        orderBy: { key: "asc" },
       });
     });
 
     return updatedTemplate ?? []; // Return updated template or empty array
-
   } catch (error: unknown) {
-    console.error(`Error updating subscription header template for slug ${slug}:`, error);
-    if (error instanceof ZodError || (error instanceof Error && 'statusCode' in error)) {
+    console.error(
+      `Error updating subscription header template for slug ${slug}:`,
+      error
+    );
+    if (
+      error instanceof ZodError ||
+      (error instanceof Error && "statusCode" in error)
+    ) {
       throw error; // Re-throw validation and H3 errors
     }
-    throw createError({ statusCode: 500, statusMessage: 'Failed to update subscription header template' });
+    throw createError({
+      statusCode: 500,
+      statusMessage: "Failed to update subscription header template",
+    });
   }
 });

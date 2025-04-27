@@ -1,10 +1,10 @@
-import type { User } from '@prisma/client';
-import type { H3Event } from 'h3';
-import { createError } from 'h3';
+import type { User } from "@prisma/client";
+import type { H3Event } from "h3";
+import { createError } from "h3";
 
 // Check if a user is a security or admin user
 export const isSecurityOrAdminUser = (user: User) => {
-  return user?.role === 'ADMIN' || user?.role === 'SECURITY';
+  return user?.role === "ADMIN" || user?.role === "SECURITY";
 };
 
 // Check if a user is authenticated - Moved from api-helpers.ts
@@ -13,24 +13,27 @@ export function checkAuth(event: H3Event) {
   if (!user) {
     throw createError({
       statusCode: 401,
-      statusMessage: 'Unauthorized'
+      statusMessage: "Unauthorized",
     });
   }
   return user;
 }
 
 // Check if user has permission to access/modify user data
-export const checkUserPermissions = (currentUser: User, targetUserId: string) => {
+export const checkUserPermissions = (
+  currentUser: User,
+  targetUserId: string
+) => {
   const isSelfUpdate = currentUser.id === targetUserId;
   const hasAdminAccess = isSecurityOrAdminUser(currentUser);
-  
+
   if (!hasAdminAccess && !isSelfUpdate) {
     throw createError({
       statusCode: 403,
-      statusMessage: 'Forbidden'
+      statusMessage: "Forbidden",
     });
   }
-  
+
   return { isSelfUpdate, hasAdminAccess };
 };
 
@@ -46,10 +49,10 @@ export const getUserSelectFields = (hasAdminAccess: boolean) => {
       status: true,
       comment: true,
       createdAt: true,
-      updatedAt: true
+      updatedAt: true,
     };
   }
-  
+
   return {
     id: true,
     name: true,
@@ -57,6 +60,6 @@ export const getUserSelectFields = (hasAdminAccess: boolean) => {
     company: true,
     status: true,
     createdAt: true,
-    updatedAt: true
+    updatedAt: true,
   };
-}; 
+};

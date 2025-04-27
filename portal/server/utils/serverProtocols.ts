@@ -1,7 +1,7 @@
 /**
  * Utilities for handling protocol-specific data conversion between UI models and database models
  */
-import type { AgentSkill, RestEndpoint } from '~/utils/server';
+import type { AgentSkill, RestEndpoint } from "~/utils/server";
 
 // Database model type definitions (for compatibility before Prisma generates them)
 interface DbA2ASkill {
@@ -59,7 +59,7 @@ interface A2ASkillCreateInput {
   inputModes: string[];
   outputModes: string[];
   server: {
-    connect: { id: string }
+    connect: { id: string };
   };
 }
 
@@ -68,7 +68,7 @@ interface RESTEndpointCreateInput {
   method: string;
   description?: string | null;
   server: {
-    connect: { id: string }
+    connect: { id: string };
   };
   parameters?: {
     create: {
@@ -76,20 +76,20 @@ interface RESTEndpointCreateInput {
       type: string;
       description?: string | null;
       required: boolean;
-    }[]
+    }[];
   };
   requestBody?: {
     create: {
       description?: string | null;
       example?: string | null;
-    }
+    };
   };
   responses?: {
     create: {
       statusCode: number;
       description: string;
       example?: string | null;
-    }[]
+    }[];
   };
 }
 
@@ -116,17 +116,20 @@ export function mapDbA2ASkillToApiSkill(dbSkill: DbA2ASkill): AgentSkill {
  * @param serverId Server ID to associate with
  * @returns Database create input for the skill
  */
-export function mapApiSkillToDbCreateInput(apiSkill: AgentSkill, serverId: string): A2ASkillCreateInput {
+export function mapApiSkillToDbCreateInput(
+  apiSkill: AgentSkill,
+  serverId: string
+): A2ASkillCreateInput {
   return {
     name: apiSkill.name,
     description: apiSkill.description,
     tags: apiSkill.tags || [],
     examples: apiSkill.examples || [],
-    inputModes: apiSkill.inputModes || ['text'],
-    outputModes: apiSkill.outputModes || ['text'],
+    inputModes: apiSkill.inputModes || ["text"],
+    outputModes: apiSkill.outputModes || ["text"],
     server: {
-      connect: { id: serverId }
-    }
+      connect: { id: serverId },
+    },
   };
 }
 
@@ -135,22 +138,26 @@ export function mapApiSkillToDbCreateInput(apiSkill: AgentSkill, serverId: strin
  * @param dbEndpoint Endpoint from database with parameters, request body and responses
  * @returns API-formatted endpoint
  */
-export function mapDbRestEndpointToApiEndpoint(dbEndpoint: DbRESTEndpoint): RestEndpoint {
+export function mapDbRestEndpointToApiEndpoint(
+  dbEndpoint: DbRESTEndpoint
+): RestEndpoint {
   return {
     path: dbEndpoint.path,
     method: dbEndpoint.method,
     description: dbEndpoint.description,
-    queryParams: dbEndpoint.parameters.map(param => ({
+    queryParams: dbEndpoint.parameters.map((param) => ({
       name: param.name,
       type: param.type,
       description: param.description,
       required: param.required,
     })),
-    requestBody: dbEndpoint.requestBody ? {
-      description: dbEndpoint.requestBody.description,
-      example: dbEndpoint.requestBody.example,
-    } : undefined,
-    responses: dbEndpoint.responses.map(response => ({
+    requestBody: dbEndpoint.requestBody
+      ? {
+          description: dbEndpoint.requestBody.description,
+          example: dbEndpoint.requestBody.example,
+        }
+      : undefined,
+    responses: dbEndpoint.responses.map((response) => ({
       statusCode: response.statusCode,
       description: response.description,
       example: response.example,
@@ -164,34 +171,41 @@ export function mapDbRestEndpointToApiEndpoint(dbEndpoint: DbRESTEndpoint): Rest
  * @param serverId Server ID to associate with
  * @returns Database create input for the endpoint and its relations
  */
-export function mapApiEndpointToDbCreateInput(apiEndpoint: RestEndpoint, serverId: string): RESTEndpointCreateInput {
+export function mapApiEndpointToDbCreateInput(
+  apiEndpoint: RestEndpoint,
+  serverId: string
+): RESTEndpointCreateInput {
   return {
     path: apiEndpoint.path,
     method: apiEndpoint.method,
     description: apiEndpoint.description,
     server: {
-      connect: { id: serverId }
+      connect: { id: serverId },
     },
     parameters: {
-      create: apiEndpoint.queryParams?.map(param => ({
-        name: param.name,
-        type: param.type,
-        description: param.description,
-        required: param.required,
-      })) || [],
+      create:
+        apiEndpoint.queryParams?.map((param) => ({
+          name: param.name,
+          type: param.type,
+          description: param.description,
+          required: param.required,
+        })) || [],
     },
-    requestBody: apiEndpoint.requestBody ? {
-      create: {
-        description: apiEndpoint.requestBody.description,
-        example: apiEndpoint.requestBody.example,
-      }
-    } : undefined,
+    requestBody: apiEndpoint.requestBody
+      ? {
+          create: {
+            description: apiEndpoint.requestBody.description,
+            example: apiEndpoint.requestBody.example,
+          },
+        }
+      : undefined,
     responses: {
-      create: apiEndpoint.responses?.map(response => ({
-        statusCode: response.statusCode,
-        description: response.description,
-        example: response.example,
-      })) || [],
+      create:
+        apiEndpoint.responses?.map((response) => ({
+          statusCode: response.statusCode,
+          description: response.description,
+          example: response.example,
+        })) || [],
     },
   };
-} 
+}
