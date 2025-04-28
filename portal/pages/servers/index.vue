@@ -85,7 +85,7 @@ import type { Server } from "~/utils/server";
 import { useSnackbar } from "~/composables/useSnackbar";
 import AddServerButton from "~/components/AddServerButton.vue";
 
-const { $auth, $settings, $api } = useNuxtApp();
+const { $auth, $api } = useNuxtApp();
 const { showError } = useSnackbar(); // Use snackbar for errors
 const route = useRoute(); // Get route object
 
@@ -95,7 +95,6 @@ const isLoading = ref(true);
 const showAddServerDialog = ref(false);
 
 const isAuthenticated = computed(() => $auth.check());
-const userRole = computed(() => $auth.getUser()?.role);
 
 // Determine filter type from query parameter
 const filterType = computed(() => route.query.filter as string | undefined);

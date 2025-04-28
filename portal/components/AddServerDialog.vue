@@ -11,76 +11,58 @@
             v-model:slug="slug"
             v-model:discovery-headers="discoveryHeaders"
             :is-loading="isLoading"
-            :is-discovering="isDiscovering"
+            :is-discovering-s-s-e="isDiscoveringSSE"
             :is-checking-slug="isCheckingSlug"
             :slug-error="slugError"
             :fetch-error="fetchError"
             :is-step1-valid="isStep1Valid"
             :slug-unique-rule="slugUniqueRule"
+            :discovery-log="discoveryLogMap"
             @url-input="autoGenerateSlug"
             @slug-input="handleSlugInput"
-            @discover="fetchServerInfo"
-            @clear-fetch-error="fetchError = ''"
+            @discover="triggerDiscovery"
+            @clear-fetch-error="clearFetchError"
           />
           <!-- Step 2 -->
           <AddServerDialogStep2MCP
-            v-if="currentStep === 2 && discoveredPtrotocol === 'MCP'"
+            v-if="currentStep === 2 && discoveredProtocol === 'MCP'"
             v-model:server-name="serverName"
             v-model:description="description"
             v-model:website-url="websiteUrl"
             v-model:email="email"
             :is-loading="isLoading"
-            :discovered-tools="discoveredTools"
-            :save-error="fetchError"
+            :discovered-tools="discoveredInfo?.mcpTools || []"
+            :save-error="saveError"
           />
           <AddServerDialogStep2A2A
-            v-if="currentStep === 2 && discoveredPtrotocol === 'A2A'"
+            v-if="currentStep === 2 && discoveredProtocol === 'A2A'"
             v-model:server-name="serverName"
             v-model:description="description"
             v-model:website-url="websiteUrl"
             v-model:email="email"
             :is-loading="isLoading"
             :a2a-skills="discoveredInfo?.a2aSkills || []"
-            :save-error="fetchError"
+            :save-error="saveError"
           />
           <AddServerDialogStep2REST
-            v-if="currentStep === 2 && discoveredPtrotocol === 'REST'"
+            v-if="currentStep === 2 && discoveredProtocol === 'REST'"
             v-model:server-name="serverName"
             v-model:description="description"
             v-model:website-url="websiteUrl"
             v-model:email="email"
             :is-loading="isLoading"
             :protocol-version="discoveredInfo?.protocolVersion || 'Unknown'"
-            :save-error="fetchError"
+            :save-error="saveError"
           />
-          <!-- Step 2 Status -->
-          <div
-            v-if="
-              currentStep === 2 &&
-              !['MCP', 'A2A', 'REST', 'ERROR', 'UNKNOWN'].includes(
-                discoveredPtrotocol || ''
-              )
-            "
-          >
+          <!-- Step 2 Status - Only show if discovery ran but found no supported protocol -->
+          <div v-if="currentStep === 2 && discoveredProtocol === 'UNKNOWN'">
             <v-alert type="warning" variant="tonal" class="mb-4">
-              Detected: <strong>{{ discoveredPtrotocol }}</strong
-              ><br >Unsupported type.</v-alert
-            >
-          </div>
-          <div
-            v-if="
-              currentStep === 2 &&
-              (discoveredPtrotocol === 'UNKNOWN' ||
-                discoveredPtrotocol === 'ERROR')
-            "
-          >
-            <v-alert type="error" variant="tonal" class="mb-4">
-              Could not determine type or discovery error.<span
-                v-if="fetchError"
-                ><br >Details: {{ fetchError }}</span
-              >
+              Could not determine a supported server type (MCP, A2A, REST).
+              Please check the discovery log for details or verify the server
+              URL.
             </v-alert>
           </div>
+          <!-- Removed the v-if for discoveredProtocol === 'ERROR' here -->
         </v-card-text>
         <v-divider />
         <v-card-actions>
@@ -89,7 +71,7 @@
             v-if="currentStep === 2"
             color="grey-darken-1"
             variant="text"
-            :disabled="isLoading"
+            :disabled="isLoading || isDiscoveringSSE"
             @click="goBackToStep1"
           >
             Back
@@ -97,7 +79,7 @@
           <v-btn
             color="grey-darken-1"
             variant="text"
-            :disabled="isLoading || isDiscovering"
+            :disabled="isLoading || isDiscoveringSSE"
             @click="closeDialog"
           >
             Cancel
@@ -105,17 +87,17 @@
           <v-btn
             v-if="
               currentStep === 2 &&
-              ['MCP', 'A2A', 'REST'].includes(discoveredPtrotocol || '')
+              ['MCP', 'A2A', 'REST'].includes(discoveredProtocol || '')
             "
             id="add-server-button-step2"
             color="primary"
             variant="flat"
             :loading="isLoading"
-            :disabled="isDiscovering || !isStep2Valid"
-            :data-testid="`add-${discoveredPtrotocol?.toLowerCase()}-server-button`"
+            :disabled="isDiscoveringSSE || !isStep2Valid"
+            :data-testid="`add-${discoveredProtocol?.toLowerCase()}-server-button`"
             @click="saveServer"
           >
-            Add {{ discoveredPtrotocol }} Server
+            Add {{ discoveredProtocol }} Server
           </v-btn>
         </v-card-actions>
       </v-form>
@@ -124,7 +106,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from "vue";
+import { ref, watch, computed, onBeforeUnmount } from "vue";
 import { useDebounceFn } from "@vueuse/core";
 import { useRouter } from "vue-router";
 import AddServerDialogStep1 from "./AddServerDialogStep1.vue";
@@ -132,47 +114,72 @@ import AddServerDialogStep2MCP from "./AddServerDialogStep2MCP.vue";
 import AddServerDialogStep2A2A from "./AddServerDialogStep2A2A.vue";
 import AddServerDialogStep2REST from "./AddServerDialogStep2REST.vue";
 import { useSnackbar } from "~/composables/useSnackbar";
+import { useDiscovery } from "~/composables/useDiscovery"; // Import the composable
 import { rules } from "~/utils/validation";
 import type { ServerProtocol } from "@prisma/client";
 
 // --- Interface Definitions ---
-// NEW: Interface for JSON Schema property (simplified)
 interface JsonSchemaProperty {
   type?: string;
   description?: string;
-  // Add other fields if needed by UI or processing logic
+  properties?: Record<string, JsonSchemaProperty>; // For nested schemas
+  required?: string[];
 }
-
-// Use the new interface for Tool parameters
-interface DiscoveredTool {
+interface ToolParameter {
   name: string;
-  description?: string;
-  inputSchema?: {
-    type?: string;
-    properties?: Record<string, JsonSchemaProperty>; // Use defined interface
-    required?: string[];
-  };
-}
-
-// Other interfaces remain the same
-interface DiscoveringResponse {
-  url: string;
-  name: string;
-  version: string;
+  type: string;
   description: string;
-  website: string | null;
-  protocol: "MCP" | "A2A" | "REST";
-  protocolVersion: string;
-  mcpTools?: DiscoveredTool[];
-  a2aSkills?: Array<any>;
-  restEndpoints?: Array<any>;
-  error?: string;
+  required: boolean;
 }
+interface ProcessedTool {
+  name: string;
+  description: string | null;
+  parameters: ToolParameter[];
+}
+interface ProcessedSkill {
+  id: string;
+  name: string;
+  description: string | null;
+  tags: readonly string[]; // Use readonly string[]
+  examples: readonly string[]; // Use readonly string[]
+  inputModes: readonly string[]; // Use readonly string[]
+  outputModes: readonly string[]; // Use readonly string[]
+}
+interface ProcessedRestEndpoint {
+  // Define if needed for REST saving logic
+  path: string;
+  method: string;
+  description?: string | null;
+  // ... other REST fields
+  queryParams: {
+    name: string;
+    type: string;
+    description?: string | null;
+    required: boolean;
+  }[];
+  requestBody?: {
+    description?: string | null;
+    example?: string | null;
+  } | null;
+  responses: {
+    statusCode: number;
+    description: string;
+    example?: string | null;
+  }[];
+}
+
+// --- Props and Emits ---
 const props = defineProps({ modelValue: { type: Boolean, default: false } });
 const emit = defineEmits(["update:modelValue", "server-added"]);
+
+// --- State ---
 const dialog = ref(props.modelValue);
-const formRef = ref<HTMLFormElement | null>(null);
+const formRef = ref<any>(null);
 const currentStep = ref(1);
+const isLoading = ref(false); // Loading state for save/slug check
+const saveError = ref(""); // Error during save operation
+
+// Server Details State
 const serverUrl = ref("");
 const slug = ref("");
 const discoveryHeaders = ref<Record<string, string>>({});
@@ -180,35 +187,42 @@ const serverName = ref("");
 const description = ref("");
 const websiteUrl = ref("");
 const email = ref("");
-const discoveredInfo = ref<DiscoveringResponse | null>(null);
-const discoveredTools = ref<DiscoveredTool[]>([]);
-const discoveredPtrotocol = ref<ServerProtocol | "UNKNOWN" | "ERROR" | null>(
-  null
-);
-const fetchError = ref("");
-const wasSlugAutoGenerated = ref(false);
-const isLoading = ref(false);
-const isDiscovering = ref(false);
+
+// Slug Check State
 const isCheckingSlug = ref(false);
 const slugError = ref("");
-const { showError, showSuccess } = useSnackbar();
-const { $api, $settings, $auth } = useNuxtApp();
-const router = useRouter();
+const wasSlugAutoGenerated = ref(false);
 
-// --- Watchers remain the same ---
+// --- Composables ---
+const { showError, showSuccess } = useSnackbar();
+const { $api, $auth } = useNuxtApp();
+const router = useRouter();
+const {
+  isDiscoveringSSE,
+  fetchError, // This now only reflects discovery *initiation* errors
+  discoveryLogMap,
+  discoveredInfo,
+  discoveredProtocol,
+  startDiscoverySSE,
+  resetDiscoveryState,
+} = useDiscovery();
+
+// --- Watchers ---
 watch(
   () => props.modelValue,
   (val) => {
     dialog.value = val;
-    if (!val) resetForm();
+    if (!val) resetForm(); // Reset when dialog is closed
   }
 );
 watch(dialog, (val) => emit("update:modelValue", val));
 
-// --- Computed Properties remain the same ---
+// --- Computed Properties ---
 const isStep1Valid = computed(() => {
   const urlValid = rules.url(serverUrl.value) === true;
-  const slugValid = rules.slugFormat(slug.value) === true;
+  const slugFormatValid = rules.slugFormat(slug.value) === true;
+  // Ensure slugUniqueRule returns boolean true
+  const slugUniqueValid = slugUniqueRule() === true;
   const headersValid = Object.keys(discoveryHeaders.value).every(
     (k) => k.trim() !== ""
   );
@@ -218,27 +232,33 @@ const isStep1Valid = computed(() => {
     headersValid &&
     !slugError.value &&
     urlValid &&
-    slugValid &&
-    !isCheckingSlug.value
+    slugFormatValid &&
+    slugUniqueValid && // Use the stricter check here
+    !isCheckingSlug.value &&
+    !isDiscoveringSSE.value // Cannot proceed if discovery is running
   );
 });
+
 const isStep2Valid = computed(() => {
+  // Step 2 is valid if a *supported* protocol was found and required fields are filled
   return (
-    ["MCP", "A2A", "REST"].includes(discoveredPtrotocol.value || "") &&
-    serverName.value &&
-    slug.value &&
-    !slugError.value &&
-    !isCheckingSlug.value &&
-    rules.simpleUrl(websiteUrl.value) === true &&
+    ["MCP", "A2A", "REST"].includes(discoveredProtocol.value || "") &&
+    serverName.value && // Name is required in step 2
+    slug.value && // Slug still needed for saving
+    !slugError.value && // Slug must still be valid
+    rules.simpleUrl(websiteUrl.value) === true && // Validate optional fields
     rules.email(email.value) === true
   );
 });
 
 // --- Methods ---
 function closeDialog() {
+  resetDiscoveryState(); // Ensure SSE is closed if dialog is cancelled
   dialog.value = false;
 }
+
 function resetForm() {
+  resetDiscoveryState(); // Reset discovery state from composable
   currentStep.value = 1;
   serverUrl.value = "";
   slug.value = "";
@@ -247,29 +267,33 @@ function resetForm() {
   description.value = "";
   websiteUrl.value = "";
   email.value = "";
-  discoveredInfo.value = null;
-  discoveredTools.value = [];
-  discoveredPtrotocol.value = null;
-  fetchError.value = "";
+  saveError.value = "";
   slugError.value = "";
   isCheckingSlug.value = false;
-  isDiscovering.value = false;
   isLoading.value = false;
   wasSlugAutoGenerated.value = false;
   formRef.value?.resetValidation();
 }
+
 function goBackToStep1() {
+  resetDiscoveryState(); // Clear discovery results when going back
   currentStep.value = 1;
-  fetchError.value = "";
+  saveError.value = ""; // Clear save error from step 2
+  // Keep serverUrl, slug, headers from step 1
 }
 
-// --- Slug Logic (remains the same) ---
+function clearFetchError() {
+  // fetchError is now readonly from the composable, no need to clear it here
+  // The composable handles resetting it on new discovery attempts
+}
+
+// --- Slug Logic ---
 function autoGenerateSlug() {
   slugError.value = "";
-  isCheckingSlug.value = false;
+  isCheckingSlug.value = false; // Reset checking status on URL input
   if (!serverUrl.value || (slug.value && !wasSlugAutoGenerated.value)) {
     if (slug.value && !wasSlugAutoGenerated.value) {
-      checkSlugUniquenessDebounced();
+      checkSlugUniquenessDebounced(); // Re-check if manually entered slug exists
     }
     return;
   }
@@ -281,260 +305,238 @@ function autoGenerateSlug() {
         .replace(/^www\./, "")
         .replace(/[._]/g, "-")
         .replace(/[^a-z0-9-]+/g, "")
-        .replace(/^-+|-+$/g, "") || "server";
+        .replace(/^-+|-+$/g, "") || "server"; // Fallback slug
     slug.value = potentialSlug;
     wasSlugAutoGenerated.value = true;
-    checkSlugUniquenessDebounced();
+    checkSlugUniquenessDebounced(); // Check generated slug
   } catch {
-    slug.value = "";
+    slug.value = ""; // Clear slug if URL is invalid
     wasSlugAutoGenerated.value = false;
   }
 }
+
 const checkSlugUniqueness = async () => {
+  // Basic format check first
   if (!slug.value || rules.slugFormat(slug.value) !== true) {
-    slugError.value = "";
+    slugError.value = ""; // Clear error if format is invalid (rule handles message)
     isCheckingSlug.value = false;
-    formRef.value?.validate();
+    formRef.value?.validate(); // Trigger validation rules
     return;
   }
   isCheckingSlug.value = true;
-  slugError.value = "";
+  slugError.value = ""; // Clear previous error
   try {
+    // Short delay to allow UI update for loading state
     await new Promise((resolve) => setTimeout(resolve, 50));
-    const response = await $api.getJson<{ exists: boolean }>(
+    const response = await $api.getJson<{ exists: boolean; error?: string }>(
       `/servers/check-slug/${slug.value}`
     );
-    slugError.value = response.exists ? "This slug is already taken." : "";
+    if (response.error) {
+      slugError.value = `Could not verify slug: ${response.error}`;
+    } else if (response.exists) {
+      slugError.value = "This slug is already taken.";
+    } else {
+      slugError.value = ""; // Explicitly clear on success
+    }
   } catch (error) {
     console.error("Error checking slug:", error);
-    slugError.value = "Could not verify slug.";
+    slugError.value = "Could not verify slug uniqueness."; // Generic error
   } finally {
     isCheckingSlug.value = false;
-    formRef.value?.validate();
+    formRef.value?.validate(); // Re-validate form after check
   }
 };
 const checkSlugUniquenessDebounced = useDebounceFn(checkSlugUniqueness, 350);
-const slugUniqueRule = () => {
-  if (isCheckingSlug.value) return "Checking...";
-  return slugError.value || true;
+
+// This rule now directly checks the slugError ref
+const slugUniqueRule = (): string | boolean => {
+  if (isCheckingSlug.value) return "Checking..."; // Indicate loading state
+  return slugError.value || true; // Return error message or true if valid
 };
+
 function handleSlugInput() {
-  wasSlugAutoGenerated.value = false;
+  wasSlugAutoGenerated.value = false; // Manual input overrides auto-generation flag
   slugError.value = "";
-  isCheckingSlug.value = false;
-  checkSlugUniquenessDebounced();
+  isCheckingSlug.value = false; // Reset checking status
+  checkSlugUniquenessDebounced(); // Trigger debounced check on manual input
 }
 
-// --- Fetch Server Info (remains the same) ---
-async function fetchServerInfo() {
+// --- Discovery Trigger ---
+async function triggerDiscovery() {
   const validationResult = await formRef.value?.validate();
-  if (!validationResult?.valid || isCheckingSlug.value || !!slugError.value) {
-    showError("Please fix form errors.");
+  // Check computed property which now correctly evaluates slugUniqueRule result
+  if (!validationResult?.valid || !isStep1Valid.value) {
+    showError("Please fix errors in Step 1 before discovering.");
     return;
   }
-  isDiscovering.value = true;
-  fetchError.value = "";
-  discoveredInfo.value = null;
-  discoveredTools.value = [];
-  discoveredPtrotocol.value = null;
+
+  isLoading.value = true; // Use general loading indicator during discovery phase
   try {
-    const gatewayAddress = $settings.get("general_gateway_address") as string;
-    const discoveringHandlerPath = $settings.get(
-      "path_for_discovering_handler"
-    ) as string;
-    if (!discoveringHandlerPath)
-      throw new Error("Gateway discovery path not configured.");
-    const effectiveGatewayAddress = gatewayAddress || window.location.origin;
-    const discoveryUrlPath = discoveringHandlerPath.startsWith("/")
-      ? discoveringHandlerPath
-      : `/${discoveringHandlerPath}`;
-    const discoveryUrl = `${effectiveGatewayAddress}${discoveryUrlPath}`;
-    const headersToSend = Object.entries(discoveryHeaders.value)
-      .filter(([k, v]) => k.trim() !== "" && v.trim() !== "")
-      .reduce((obj, [k, v]) => {
-        obj[k.trim()] = v;
-        return obj;
-      }, {} as Record<string, string>);
-    const requestPayload = {
-      targetUrl: serverUrl.value,
-      headers: headersToSend,
-    };
-    const data = await $api.postJsonByRawURL<DiscoveringResponse>(
-      discoveryUrl,
-      requestPayload
+    const result = await startDiscoverySSE(
+      serverUrl.value,
+      discoveryHeaders.value
     );
-    discoveredInfo.value = data;
-    if (data.error) {
-      discoveredPtrotocol.value = "ERROR";
-      fetchError.value = `Discovery failed: ${data.error}`;
-    } else if (data.protocol) {
-      discoveredPtrotocol.value = data.protocol as ServerProtocol;
+
+    // Check the protocol value *after* the discovery attempt resolves/rejects
+    if (discoveredProtocol.value === "ERROR") {
+      // Discovery failed with a specific error reported via snackbar. Stay on Step 1.
+      console.log("Discovery resulted in ERROR, staying on Step 1.");
+    } else if (result) {
+      // Successfully received final result (MCP, A2A, REST, or UNKNOWN)
+      // Populate Step 2 fields based on result (if protocol is supported)
+      if (result.protocol === "MCP") {
+        serverName.value = result.name || slug.value || "MCP Server";
+        description.value = result.description || "";
+        websiteUrl.value = result.website || "";
+      } else if (result.protocol === "A2A") {
+        serverName.value = result.name || slug.value || "A2A Agent";
+        description.value = result.description || "";
+        websiteUrl.value = result.website || "";
+      } else if (result.protocol === "REST") {
+        serverName.value = result.name || slug.value || "REST API";
+        description.value = result.description || "";
+        websiteUrl.value = result.website || "";
+      }
+      // Move to Step 2 if protocol is known (MCP/A2A/REST) or UNKNOWN
+      currentStep.value = 2;
     } else {
-      discoveredPtrotocol.value = "UNKNOWN";
-      fetchError.value = "Could not determine server type.";
+      // Discovery promise resolved with null (e.g., stream ended unexpectedly)
+      // Error message handled by composable's snackbar via fetchError. Stay on Step 1.
+      console.log(
+        "Discovery stream ended unexpectedly or without final result, staying on Step 1."
+      );
     }
-    if (discoveredPtrotocol.value === "MCP") {
-      serverName.value = data.name || slug.value || "MCP Server";
-      description.value = data.description || "";
-      websiteUrl.value = data.website || "";
-      discoveredTools.value = data.mcpTools || [];
-    } else if (discoveredPtrotocol.value === "A2A") {
-      serverName.value = data.name || slug.value || "A2A Agent";
-      description.value = data.description || "";
-      websiteUrl.value = data.website || "";
-    } else if (discoveredPtrotocol.value === "REST") {
-      serverName.value = data.name || slug.value || "REST API";
-      description.value = data.description || "";
-      websiteUrl.value = data.website || "";
-    }
-    currentStep.value = 2;
-  } catch (error: unknown) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to discover server info.";
-    fetchError.value = message;
-    showError(message);
-    console.error("Error discovering server:", error);
-    discoveredPtrotocol.value = "ERROR";
+  } catch (error) {
+    // Catch errors from startDiscoverySSE promise rejection (fetch/setup errors)
+    // Error message handled by composable's snackbar via fetchError. Stay on Step 1.
+    console.error("Discovery initiation failed:", error);
   } finally {
-    isDiscovering.value = false;
+    isLoading.value = false; // Stop general loading indicator
   }
 }
 
-// --- Save Server (UPDATED types for paramSchema) ---
+// --- Save Server ---
 async function saveServer() {
-  if (!["MCP", "A2A", "REST"].includes(discoveredPtrotocol.value || "")) {
-    showError("Cannot add: unsupported type or discovery failed.");
+  if (!isStep2Valid.value) {
+    showError("Please fill required fields for the server details.");
     return;
   }
-  const validationResult = await formRef.value?.validate();
-  if (!validationResult?.valid || !isStep2Valid.value) {
-    showError("Please fix form errors.");
+  const validationResult = await formRef.value?.validate(); // Final validation
+  if (!validationResult?.valid) {
+    showError("Please fix validation errors before saving.");
     return;
   }
-  if (isCheckingSlug.value || !!slugError.value) {
-    showError("Slug invalid or checking.");
-    return;
-  }
+
   isLoading.value = true;
-  fetchError.value = "";
+  saveError.value = "";
+
   try {
     if (!$auth.check()) throw new Error("Not logged in.");
     const user = $auth.getUser();
     if (!user) throw new Error("User data missing.");
 
-    const processedTools =
-      discoveredPtrotocol.value === "MCP" && discoveredInfo.value?.mcpTools
-        ? discoveredInfo.value.mcpTools.map((tool) => {
-            let parameters: {
-              name: string;
-              type: string;
-              description: string;
-              required: boolean;
-            }[] = [];
-            // Use the specific JsonSchemaProperty interface here
-            if (tool.inputSchema?.properties) {
-              const requiredParams = new Set(tool.inputSchema.required || []);
-              parameters = Object.entries(tool.inputSchema.properties).map(
-                ([paramName, paramSchema]) => ({
-                  name: paramName,
-                  // Use type assertion or check type property
-                  type: paramSchema?.type || "string",
-                  description: paramSchema?.description || "",
-                  required: requiredParams.has(paramName),
-                })
-              );
-            }
-            return {
-              name: tool.name,
-              description: tool.description || "",
-              parameters,
-            };
-          })
-        : [];
+    // Process discovered data based on the final protocol
+    let processedTools: ProcessedTool[] = [];
+    let processedA2ASkills: ProcessedSkill[] = [];
+    const processedRESTEndpoints: ProcessedRestEndpoint[] = [];
 
-    const processedA2ASkills =
-      discoveredPtrotocol.value === "A2A" && discoveredInfo.value?.a2aSkills
-        ? discoveredInfo.value.a2aSkills.map((skill) => ({
-            id: skill.id || skill.name.toLowerCase().replace(/\s+/g, "-"),
-            name: skill.name,
-            description: skill.description || "",
-            tags: skill.tags || [],
-            examples: skill.examples || [],
-            inputModes: skill.inputModes || ["text"],
-            outputModes: skill.outputModes || ["text"],
-          }))
-        : [];
-    const processedRESTEndpoints =
-      discoveredPtrotocol.value === "REST" &&
-      discoveredInfo.value?.restEndpoints
-        ? discoveredInfo.value.restEndpoints.map((endpoint: any) => ({
-            path: endpoint.path,
-            method: endpoint.method || "GET",
-            description: endpoint.description || "",
-            queryParams: (endpoint.queryParams || []).map((param: any) => ({
-              name: param.name,
-              type: param.type || "string",
-              description: param.description || "",
-              required: param.required || false,
-            })),
-            requestBody: endpoint.requestBody
-              ? {
-                  description: endpoint.requestBody.description || "",
-                  example: endpoint.requestBody.example || "",
-                }
-              : null,
-            responses: (endpoint.responses || []).map((response: any) => ({
-              statusCode: response.statusCode || 200,
-              description: response.description || "",
-              example: response.example || "",
-            })),
-          }))
-        : [];
+    if (discoveredProtocol.value === "MCP" && discoveredInfo.value?.mcpTools) {
+      processedTools = discoveredInfo.value.mcpTools.map((tool) => {
+        let parameters: ToolParameter[] = [];
+        // Ensure inputSchema and properties exist before iterating
+        if (tool.inputSchema?.properties) {
+          const requiredParams = new Set(tool.inputSchema.required || []);
+          parameters = Object.entries(tool.inputSchema.properties).map(
+            ([paramName, paramSchema]: [string, unknown]) => {
+              // Assert paramSchema is JsonSchemaProperty or provide default
+              const schema = (paramSchema as JsonSchemaProperty) || {};
+              return {
+                name: paramName,
+                type: schema.type || "string",
+                description: schema.description || "",
+                required: requiredParams.has(paramName),
+              };
+            }
+          );
+        }
+        return {
+          name: tool.name,
+          description: tool.description || null, // Ensure null if empty
+          parameters,
+        };
+      });
+    } else if (
+      discoveredProtocol.value === "A2A" &&
+      discoveredInfo.value?.a2aSkills
+    ) {
+      // Direct assignment works because ProcessedSkill now accepts readonly arrays
+      processedA2ASkills = discoveredInfo.value.a2aSkills.map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description || null,
+        tags: skill.tags || [],
+        examples: skill.examples || [],
+        inputModes: skill.inputModes || ["text"],
+        outputModes: skill.outputModes || ["text"],
+      }));
+    }
+    // Add processing for REST endpoints if needed
+
     const payload = {
       name: serverName.value,
       slug: slug.value,
-      protocol: discoveredPtrotocol.value,
+      protocol: discoveredProtocol.value as ServerProtocol, // Assert type after check
       protocolVersion: discoveredInfo.value?.protocolVersion || "",
-      description: description.value || null,
-      website: websiteUrl.value || null,
-      email: email.value || user.email || null,
-      imageUrl: null,
-      serverUrl: serverUrl.value,
+      description: description.value || null, // Send null if empty
+      website: websiteUrl.value || null, // Send null if empty
+      email: email.value || user.email || null, // Fallback to user email
+      imageUrl: null, // Handle image upload separately
+      serverUrl: serverUrl.value, // URL from step 1
       tools: processedTools,
       a2aSkills: processedA2ASkills,
       restEndpoints: processedRESTEndpoints,
+      headers: {}, // Headers are managed separately
+      subscriptionHeaderTemplate: [], // Template managed separately
     };
+
+    // Use postJson for creating servers
     const createdServer = await $api.postJson<{ slug: string }>(
       "/servers",
       payload
     );
-    dialog.value = false;
-    emit("server-added", createdServer);
-    showSuccess(`${discoveredPtrotocol.value} Server added!`);
+
+    closeDialog();
+    emit("server-added", createdServer); // Emit event for parent
+    showSuccess(`${payload.protocol} Server added!`);
+
+    // Navigate to the newly created server's page
     if (createdServer?.slug) {
       router.push(`/servers/${createdServer.slug}`);
     } else {
-      router.push("/servers");
+      router.push("/servers"); // Fallback navigation
     }
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Failed to save server.";
-    fetchError.value = message;
-    showError(message);
+    saveError.value = message;
+    showError(`Save failed: ${message}`); // Show specific save error
     console.error("Error saving server:", error);
   } finally {
     isLoading.value = false;
   }
 }
 
-// --- Handle Submit (remains the same) ---
+// --- Handle Submit (delegates based on step) ---
 function handleSubmit() {
-  if (currentStep.value === 1 && isStep1Valid.value && !isCheckingSlug.value) {
-    fetchServerInfo();
-  } else if (currentStep.value === 2 && isStep2Valid.value) {
-    saveServer();
+  if (currentStep.value === 1) {
+    triggerDiscovery(); // Validation happens within triggerDiscovery
+  } else if (currentStep.value === 2) {
+    saveServer(); // Validation happens within saveServer
   }
 }
+
+// --- Lifecycle Hook ---
+onBeforeUnmount(() => {
+  resetDiscoveryState(); // Ensure cleanup on component unmount
+});
 </script>

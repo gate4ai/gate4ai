@@ -1,6 +1,7 @@
 <template>
   <v-btn
     id="add-server-button"
+    data-testid="add-server-button"
     color="primary"
     prepend-icon="mdi-plus"
     :disabled="disabled"

@@ -182,7 +182,7 @@ async function main() {
     {
       key: "path_for_discovering_handler",
       group: "general",
-      name: "Gateway address of info_handler",
+      name: "Gateway address of discovery handler",
       description: "/discovering  . If clear, then method disabled",
       value: "/discovering",
       frontend: true,

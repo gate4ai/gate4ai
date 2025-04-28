@@ -15,7 +15,10 @@
         <v-expansion-panel-text>
           <h3 class="text-h6 mt-4 mb-2">Parameters</h3>
           <!-- Check if parameters array exists and has items -->
-          <v-table v-if="tool.parameters && tool.parameters.length > 0">
+          <v-table
+            v-if="tool.parameters && tool.parameters.length > 0"
+            data-testid="tool-parameters-table"
+          >
             <thead>
               <tr>
                 <th>Name</th>
@@ -31,18 +34,20 @@
                 :key="param.id || param.name"
               >
                 <!-- Use id if available -->
-                <td>{{ param.name }}</td>
-                <td>
+                <td data-testid="param-name">{{ param.name }}</td>
+                <td data-testid="param-type">
                   <code>{{ param.type }}</code>
                 </td>
-                <td>
+                <td data-testid="param-required">
                   <!-- Directly use the required flag from the parameter object -->
                   <v-icon v-if="param.required" color="success">
                     mdi-check
                   </v-icon>
                   <v-icon v-else color="grey"> mdi-minus </v-icon>
                 </td>
-                <td>{{ param.description }}</td>
+                <td data-testid="param-description">
+                  {{ param.description }}
+                </td>
               </tr>
             </tbody>
           </v-table>

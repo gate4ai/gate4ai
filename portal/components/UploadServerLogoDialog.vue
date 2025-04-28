@@ -105,7 +105,7 @@ const fileRules = computed(() => [
 ]);
 
 // Watch for changes in the selected file
-watch(selectedFile, (newFile, oldFile) => {
+watch(selectedFile, (newFile) => {
   errorMessage.value = null; // Reset error message on any change
   cleanupPreviewUrl(); // Revoke old URL if it exists
 

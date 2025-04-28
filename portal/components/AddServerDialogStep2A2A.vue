@@ -77,6 +77,14 @@
 <script setup lang="ts">
 import { rules } from "~/utils/validation";
 
+// Define the expected skill structure, allowing null for description
+interface A2ASkillProp {
+  id: string;
+  name: string;
+  description?: string | null; // Accept string, null, or undefined
+  // Other fields like tags, examples, modes are not directly displayed here but could be added
+}
+
 // Props define the data passed from the parent and v-model bindings
 defineProps<{
   serverName: string;
@@ -84,8 +92,8 @@ defineProps<{
   websiteUrl: string;
   email: string;
   isLoading: boolean;
-  a2aSkills: Array<{ id: string; name: string; description?: string }>;
-  saveError: string; // Error specific to the save operation
+  a2aSkills: A2ASkillProp[]; // Use the refined interface
+  saveError: string;
 }>();
 
 // Emits define events sent back to the parent for v-model updates
@@ -98,6 +106,5 @@ defineEmits<{
       | "update:email",
     value: string
   ): void;
-  // No 'save' emit needed here, parent dialog action handles it
 }>();
 </script>
