@@ -77,6 +77,23 @@
 <script setup lang="ts">
 import { rules } from "~/utils/validation";
 
+// Define the expected structure for JSON Schema properties within tools
+interface JsonSchemaPropertyProp {
+  type?: string; // Allow type to be optional
+  description?: string;
+}
+
+// Define the expected tool structure, allowing inputSchema and its type to be optional
+interface DiscoveredToolProp {
+  name: string;
+  description?: string;
+  inputSchema?: {
+    type?: string; // Allow type to be optional
+    properties?: Record<string, JsonSchemaPropertyProp>;
+    required?: string[];
+  };
+}
+
 // Props define the data passed from the parent and v-model bindings
 defineProps<{
   serverName: string;
@@ -84,22 +101,8 @@ defineProps<{
   websiteUrl: string;
   email: string;
   isLoading: boolean;
-  discoveredTools: Array<{
-    name: string;
-    description?: string;
-    inputSchema?: {
-      type: string;
-      properties?: Record<
-        string,
-        {
-          type: string;
-          description?: string;
-        }
-      >;
-      required?: string[];
-    };
-  }>;
-  saveError: string; // Error specific to the save operation
+  discoveredTools: DiscoveredToolProp[]; // Use the refined interface
+  saveError: string;
 }>();
 
 // Emits define events sent back to the parent for v-model updates
@@ -112,6 +115,5 @@ defineEmits<{
       | "update:email",
     value: string
   ): void;
-  // No 'save' emit needed here, parent dialog action handles it
 }>();
 </script>

@@ -276,7 +276,7 @@ func (am *ArtifactManager) WaitForLocatorWithDebug(selector string, description 
 	if len(timeout) > 0 {
 		t = timeout[0]
 	}
-	locator := am.Page.Locator(selector)
+	locator := am.Page.Locator(selector).First()
 	err := locator.WaitFor(playwright.LocatorWaitForOptions{
 		State:   playwright.WaitForSelectorStateVisible,
 		Timeout: playwright.Float(t),
@@ -407,7 +407,7 @@ func (am *ArtifactManager) OpenPageWithURL(path string) {
 		am.T.Logf("Page [%s] navigated to %s, but response was nil (possible client-side redirect?)", am.TestName, path)
 	}
 
-	// Wait for the page content to be *loaded* (DOM ready), networkidle уже был
+	// Wait for the page content to be *loaded* (DOM ready)
 	if err := am.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 		State:   playwright.LoadStateLoad, // 'load' or 'domcontentloaded'
 		Timeout: playwright.Float(15000),  // Уменьшаем таймаут здесь
@@ -415,7 +415,6 @@ func (am *ArtifactManager) OpenPageWithURL(path string) {
 		am.T.Logf("Page [%s] load state timeout for %s: %v", am.TestName, path, err)
 		am.SaveScreenshot(debugName + "_load_timeout")
 		am.SaveHTML(debugName + "_load_timeout")
-		// Логируем как предупреждение, а не фатальную ошибку
 		am.T.Logf("Warning: Page load state timeout for %s, continuing test cautiously.", path)
 	}
 

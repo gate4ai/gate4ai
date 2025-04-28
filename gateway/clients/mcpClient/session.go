@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,11 +124,9 @@ func (s *Session) Open() chan error {
 	expBackoff.MaxElapsedTime = 0
 	s.sseClient.ReconnectStrategy = backoff.WithContext(expBackoff, sseContext)
 	s.sseClient.ReconnectNotify = func(err error, t time.Duration) {
-		logger.Error("SSE connection error, retrying...", zap.Error(err), zap.Duration("delay", t))
-		if err.Error() == "could not connect to stream: Unauthorized" {
-			// If the SSE connection error is related to authorization, then there's no point in trying to reconnect;
-			// the attempts can be stopped immediately. Without this behavior, the client will hang indefinitely trying
-			// to establish a connection with incorrect connection credentials.
+		logger.Warn("SSE connection error, retrying...", zap.Error(err), zap.Duration("delay", t))
+		if stopWords(err.Error()) {
+			logger.Debug("Stopping SSE connection attempts")
 			sseCancel()
 		}
 	}
@@ -135,7 +134,7 @@ func (s *Session) Open() chan error {
 	err := s.sseClient.SubscribeChanWithContext(sseContext, "", s.sseCh)
 	if err != nil {
 		logger.Warn("Failed to subscribe to SSE events", zap.Error(err))
-		sseCancel() // <<< FIX: Call cancel here on immediate failure
+		sseCancel() 
 		s.SetStatus(shared.StatusNew)
 		s.writeInitializationErrorAndClose(fmt.Errorf("SSE subscription failed: %w", err))
 		return s.initialization
@@ -144,7 +143,7 @@ func (s *Session) Open() chan error {
 
 	if s.Input() == nil {
 		logger.Error("Input is nil")
-		sseCancel() // <<< FIX: Call cancel here on immediate failure
+		sseCancel()
 		s.writeInitializationErrorAndClose(errors.New("input is nil"))
 		return s.initialization
 	}
@@ -152,6 +151,15 @@ func (s *Session) Open() chan error {
 	go s.processLoop(sseCancel) // Pass cancel func
 
 	return s.initialization
+}
+
+func stopWords(errMsg string) bool {
+    return strings.Contains(errMsg, "Unauthorized") ||
+	strings.Contains(errMsg, "no such host") ||
+	strings.Contains(errMsg, "connection refused") ||
+	strings.Contains(errMsg, "cannot resolve") ||
+	strings.Contains(errMsg, "unknown host") ||
+	strings.Contains(errMsg, "lookup") 
 }
 
 func (s *Session) processLoop(sseCancel context.CancelFunc) { /* ... as before ... */

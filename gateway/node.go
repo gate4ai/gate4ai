@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,9 +77,13 @@ func (n *Node) Start(ctx context.Context, mux *http.ServeMux, overwriteListenAdd
 
 	discoveringHandlerPath, err := n.cfg.DiscoveringHandlerPath()
 	if err != nil {
-		n.logger.Warn("Failed to get info handler path from config", zap.Error(err))
+		n.logger.Warn("Failed to get discovering handler path from config", zap.Error(err))
 	} else if discoveringHandlerPath != "" {
-		n.logger.Info("Registering info handler", zap.String("path", discoveringHandlerPath))
+		// Ensure the path starts with a slash for consistency
+		if !strings.HasPrefix(discoveringHandlerPath, "/") {
+			discoveringHandlerPath = "/" + discoveringHandlerPath
+		}
+		n.logger.Info("Registering discovering handler", zap.String("path", discoveringHandlerPath))
 		mux.HandleFunc(discoveringHandlerPath, discovering.Handler(n.logger))
 	}
 
@@ -118,11 +123,13 @@ func (n *Node) Start(ctx context.Context, mux *http.ServeMux, overwriteListenAdd
 		defer n.shutdownWg.Done() // Signal completion when this goroutine exits
 		select {
 		case err, ok := <-n.listenerErrChan:
-			if ok && err != nil {
+			if ok && err != nil && !errors.Is(err, http.ErrServerClosed) {
 				// This error occurred *after* successful startup
 				n.logger.Error("Gateway HTTP/S listener failed", zap.Error(err))
 				// Depending on the application, you might want to trigger a shutdown here
 				// or attempt a restart. For now, just log it.
+			} else if !ok {
+				n.logger.Info("Listener error channel closed normally.")
 			}
 		case <-ctx.Done():
 			// Context cancelled, shutdown initiated elsewhere

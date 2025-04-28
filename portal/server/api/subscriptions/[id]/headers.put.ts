@@ -23,8 +23,10 @@ export default defineEventHandler(async (event) => {
     });
   }
   try {
-    const { subscription, server, isSubscriber } =
-      await checkSubscriptionAccessRights(event, subscriptionId);
+    const { server, isSubscriber } = await checkSubscriptionAccessRights(
+      event,
+      subscriptionId
+    );
     if (!isSubscriber) {
       throw createError({
         statusCode: 403,
