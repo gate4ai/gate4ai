@@ -59,7 +59,7 @@
         >
           {{ formatGroupName(group) }}
         </v-tab>
-        <!-- NEW: Environment Tab (conditionally shown or disabled) -->
+        <!-- Environment Tab (conditionally shown or disabled) -->
         <v-tab
           value="environment"
           :disabled="!isAdminOrSecurity"
@@ -161,7 +161,7 @@
             </v-list>
           </v-window-item>
 
-          <!-- NEW: Environment Variables Window Item -->
+          <!-- Environment Variables Window Item -->
           <v-window-item
             key="environment"
             value="environment"
@@ -301,7 +301,7 @@ const jsonError = ref("");
 const isUpdating = ref<Record<string, boolean>>({});
 const { showSuccess, showError } = useSnackbar();
 
-// NEW: State for Environment Variables
+// State for Environment Variables
 const envVars = ref<Record<string, string> | null>(null);
 const isLoadingEnvVars = ref(false);
 const envVarsError = ref<string | null>(null);
@@ -345,7 +345,7 @@ async function fetchCoreSettings() {
   }
 }
 
-// --- NEW: Fetch Environment Variables ---
+// Fetch Environment Variables
 async function fetchEnvVars() {
   // Only fetch if user has permission and data isn't already loaded/loading
   if (
@@ -375,7 +375,7 @@ async function fetchEnvVars() {
   }
 }
 
-// --- NEW: Watch active tab to load Env Vars ---
+// Watch active tab to load Env Vars
 watch(activeTab, (newTab, _oldTab) => {
   if (newTab === "environment") {
     fetchEnvVars(); // Fetch when tab becomes active
