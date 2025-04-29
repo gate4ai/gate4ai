@@ -46,6 +46,19 @@ export const rules = {
     !v || /^https?:\/\//.test(v) || "URL must start with http:// or https://",
 
   /**
+   * Image URL format validation. Allows absolute URLs (http/https),
+   * relative paths starting with '/', or empty values.
+   * @param v - URL or path value
+   * @returns True if valid, true if empty, or error message
+   */
+  imageUrlFormat: (v: string): boolean | string => {
+    if (!v) return true; // Allow empty
+    if (/^https?:\/\//.test(v)) return true; // Allow absolute URLs
+    if (/^\//.test(v)) return true; // Allow relative paths starting with /
+    return "Must be a valid absolute URL (http/https) or relative path starting with /";
+  },
+
+  /**
    * Server URL validation (required and must be a URL)
    * @param v - URL value
    * @returns Array of validation rules

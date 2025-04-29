@@ -68,7 +68,7 @@
           v-model="localServerData.imageUrl"
           label="Image URL"
           hint="URL to server image"
-          :rules="[rules.simpleUrl]"
+          :rules="[rules.imageUrlFormat]"
           variant="outlined"
         />
       </v-col>

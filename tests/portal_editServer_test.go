@@ -181,3 +181,70 @@ func TestEditServer(t *testing.T) {
 
 	t.Logf("Successfully edited server. New name: %s", newName)
 }
+
+// TestEditServer_RelativeImageUrl tests editing the image URL with a relative path
+func TestEditServer_RelativeImageUrl(t *testing.T) {
+	am := NewArtifactManager(t)
+	defer am.Close()
+
+	// Create user and server
+	user, err := createUser(am)
+	require.NoError(t, err, "Failed to create user")
+	server, err := addMCPServer(am, user, "test-edit-relative-img-server")
+	require.NoError(t, err, "Failed to add server")
+	require.NotNil(t, server)
+
+	// Log in
+	require.NoError(t, loginUser(am, user.Email, user.Password), "Login failed")
+
+	// Navigate to edit page
+	editURL := fmt.Sprintf("/servers/edit/%s", server.Slug)
+	am.OpenPageWithURL(editURL)
+	_, err = am.WaitForLocatorWithDebug("h1:has-text('Edit Server')", "edit_server_heading_wait_relative_img")
+	require.NoError(t, err, "Failed to load edit server page")
+
+	// --- Define and Fill Relative Image URL ---
+	relativeImageUrl := "/uploads/servers/test-relative-" + am.Timestamp + ".png" // Example relative path
+	am.T.Logf("Attempting to set relative Image URL: %s", relativeImageUrl)
+
+	// More robust selector targeting the input within the component with the correct label
+	imageUrlFieldSelector := "div.v-input:has(label:has-text('Image URL')) input"
+	imageUrlField, err := am.WaitForLocatorWithDebug(imageUrlFieldSelector, "image_url_field")
+	require.NoError(t, err, "Could not find Image URL field")
+
+	require.NoError(t, imageUrlField.Clear(), "Failed to clear Image URL field")
+	require.NoError(t, imageUrlField.Fill(relativeImageUrl), "Failed to fill Image URL field with relative path")
+	am.SaveScreenshot("edit_server_form_relative_img_filled")
+
+	// --- Submit Form ---
+	submitButtonSelector := "button[type='submit']:has-text('Update Core Details')"
+	require.NoError(t, am.ClickWithDebug(submitButtonSelector, "update_button_relative_img"), "Failed to click update button")
+
+	// --- Verify Success Snackbar ---
+	_, err = am.WaitForLocatorWithDebug(".v-snackbar:has-text('Server core details updated successfully')", "success_snackbar_relative_img")
+	require.NoError(t, err, "Update success message not found")
+	am.T.Log("Update successful with relative image URL")
+
+	// --- Verify Value Persisted on Page ---
+	// Re-locate the field to ensure we get the current value
+	imageUrlField, err = am.WaitForLocatorWithDebug(imageUrlFieldSelector, "image_url_field_verify")
+	require.NoError(t, err, "Could not re-find Image URL field for verification")
+	currentValue, err := imageUrlField.InputValue()
+	require.NoError(t, err, "Failed to get Image URL field value after update")
+	require.Equal(t, relativeImageUrl, currentValue, "Image URL field did not retain the relative path")
+	am.T.Logf("Verified relative Image URL persisted on page: %s", currentValue)
+	am.SaveScreenshot("edit_server_form_relative_img_verified")
+
+	// --- (Optional but recommended) Verify Persistence after Reload ---
+	am.T.Logf("Reloading page to verify persistence...")
+	_, err = am.Page.Reload(playwright.PageReloadOptions{WaitUntil: playwright.WaitUntilStateNetworkidle})
+	require.NoError(t, err, "Failed to reload page")
+
+	imageUrlField, err = am.WaitForLocatorWithDebug(imageUrlFieldSelector, "image_url_field_verify_reload")
+	require.NoError(t, err, "Could not re-find Image URL field after reload")
+	currentValue, err = imageUrlField.InputValue()
+	require.NoError(t, err, "Failed to get Image URL field value after reload")
+	require.Equal(t, relativeImageUrl, currentValue, "Image URL field did not persist relative path after reload")
+	am.T.Logf("Verified relative Image URL persisted after reload: %s", currentValue)
+	am.SaveScreenshot("edit_server_form_relative_img_verified_reload")
+}
