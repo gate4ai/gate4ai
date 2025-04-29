@@ -173,20 +173,6 @@ import SubscriptionHeaderValuesDialog from "~/components/SubscriptionHeaderValue
 import type { Server } from "~/utils/server";
 import { useSnackbar } from "~/composables/useSnackbar";
 
-interface OwnerUser {
-  id: string;
-  name: string | null;
-  email: string;
-}
-
-interface ToolParameter {
-  id: string;
-  name: string;
-  type: string;
-  description: string | null;
-  required: boolean;
-}
-
 const { $auth, $api } = useNuxtApp();
 const route = useRoute();
 const router = useRouter(); // Use router for navigation

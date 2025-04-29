@@ -106,8 +106,7 @@
 import { ref, computed, onMounted } from "vue";
 import { rules } from "~/utils/validation";
 import { useSnackbar } from "~/composables/useSnackbar";
-// *** CHANGE HERE: Only import the TYPE for User ***
-import type { User as PrismaUser, Role, Status } from "@prisma/client";
+import type { Role, Status } from "@prisma/client";
 
 definePageMeta({
   middleware: ["auth"],
