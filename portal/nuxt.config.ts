@@ -46,6 +46,15 @@ export default defineNuxtConfig({
     transpile: ["vuetify"],
   },
 
+  nitro: {
+    serverHandlers: [
+      {
+        route: "/uploads/**", // Match any request starting with /uploads/
+        handler: "~/server/middleware/uploads.ts", // Path to your new middleware file
+      },
+    ],
+  },
+
   runtimeConfig: {
     jwtSecret: process.env.NUXT_JWT_SECRET,
     public: {

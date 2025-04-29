@@ -1,4 +1,4 @@
-export default defineNuxtRouteMiddleware((to, _from) => {
+export default defineNuxtRouteMiddleware((to: any) => {
   console.log("Auth middleware executing for route:", to.fullPath);
 
   // Only access localStorage in client-side

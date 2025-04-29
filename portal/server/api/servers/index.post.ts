@@ -2,9 +2,7 @@ import prisma from "../../utils/prisma";
 import { z, ZodError } from "zod";
 import { defineEventHandler, readBody, createError } from "h3";
 import { checkServerCreationRights } from "../../utils/serverPermissions";
-import type { User } from "@prisma/client";
-// Import enums for validation
-import { ServerProtocol } from "@prisma/client"; // Use ServerProtocol instead of ServerType
+import { type User, ServerProtocol } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 
 // --- Reusable Schemas ---
