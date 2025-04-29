@@ -1,13 +1,13 @@
-// /home/alex/go-ai/gate4ai/www/server/api/settings/[key].put.ts
 import { checkAuth } from "~/server/utils/userUtils";
 import { defineEventHandler, createError, readBody, getRouterParam } from "h3"; // Added getRouterParam
 import prisma from "../../utils/prisma";
 import { z, ZodError } from "zod"; // Add Zod for value validation
 
 // Define a schema for the expected body (only the value)
+// Use z.any() to allow any valid JSON value (object, array, primitive)
 const updateSettingSchema = z
   .object({
-    value: z.union([z.string(), z.number(), z.boolean(), z.null()]), // Accept JSON-compatible values
+    value: z.any(), // Allow any type that can be JSON-serialized
   })
   .strict();
 
@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
       });
     }
 
-    // *** CHANGE HERE: Get key from URL parameter ***
+    // Get key from URL parameter
     const key = getRouterParam(event, "key");
     if (!key) {
       throw createError({
@@ -52,7 +52,9 @@ export default defineEventHandler(async (event) => {
         key: key, // Use key from URL
       },
       data: {
-        value: value, // Use validated value from body
+        // Prisma expects JsonValue for Json fields
+        // The validated 'value' should be directly usable if it's a valid JSON structure
+        value: value as any, // Cast to any or Prisma.JsonValue if needed
       },
     });
 
