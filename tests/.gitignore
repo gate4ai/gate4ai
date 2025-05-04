@@ -2,3 +2,4 @@ artifacts/
 environment/
 tester.test
 old/
+__debug_bin*

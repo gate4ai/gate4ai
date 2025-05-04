@@ -175,7 +175,7 @@ func subscribeWithHeaders(am *ArtifactManager, user *User, server *CatalogServer
 	am.SaveScreenshot("server_details_for_subscribe_with_headers")
 
 	// Click Subscribe
-	subscribeBtnSelector := "button:has-text('Subscribe')"
+	subscribeBtnSelector := `[data-testid="server-subscribe-button"]`
 	if err := am.ClickWithDebug(subscribeBtnSelector, "subscribe_button"); err != nil {
 		return fmt.Errorf("failed to find/click subscribe button: %w", err)
 	}

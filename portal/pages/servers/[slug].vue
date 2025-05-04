@@ -58,7 +58,7 @@
         />
       </v-col>
 
-      <!-- Right Column (Details, Tools/Skills/Endpoints, Actions) -->
+      <!-- Right Column (Details, Connection Instructions, Tools/Skills/Endpoints, Actions) -->
       <v-col cols="12" md="8">
         <div class="d-flex align-center mb-4 flex-wrap">
           <h1 class="text-h3 mr-2">{{ server.name }}</h1>
@@ -117,6 +117,38 @@
 
         <p class="text-body-1 mb-6">{{ server.description }}</p>
 
+        <!-- Connection Instructions Section -->
+        <ClientOnly>
+          <!-- Log props before rendering ServerConnectionInstructions -->
+          {{
+            logConnectionInstructionProps({
+              isAuthenticated,
+              requiresSubscription,
+              isSubscribedFromComposable:
+                subscriptionComposable.subscriptionState.isSubscribed,
+              isSubscribedFromServer: server?.isCurrentUserSubscribed ?? false,
+              hasImplicitAccess: canManageServer,
+            })
+          }}
+          <ServerConnectionInstructions
+            :gateway-base-url="gatewayBaseUrl"
+            :server-slug="serverSlug"
+            :is-authenticated="isAuthenticated"
+            :requires-subscription="requiresSubscription"
+            :is-subscribed="
+              subscriptionComposable.subscriptionState.isSubscribed
+            "
+            :has-implicit-access="canManageServer"
+            @subscribe-now="triggerSubscriptionFlow"
+          />
+          <template #fallback>
+            <!-- Removed v-skeleton-loader, maybe add simple text -->
+            <div class="pa-4 text-center text-grey">
+              Loading connection instructions...
+            </div>
+          </template>
+        </ClientOnly>
+
         <!-- Display components based on server protocol -->
         <MCPServerTools
           v-if="server.protocol === 'MCP'"
@@ -143,11 +175,12 @@
       @logo-updated="handleLogoUpdate"
     />
 
+    <!-- Subscription Header Dialog - now uses composable state -->
     <SubscriptionHeaderValuesDialog
-      v-if="showSubscriptionHeadersDialog && server"
-      v-model="showSubscriptionHeadersDialog"
+      v-if="subscriptionComposable.showHeadersDialog.value"
+      v-model="subscriptionComposable.showHeadersDialog.value"
       :server-slug="serverSlug"
-      :subscription-id="server?.subscriptionId"
+      :subscription-id="subscriptionComposable.subscriptionState.subscriptionId"
       @save="onSubscriptionHeadersSaved"
     />
   </div>
@@ -160,7 +193,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, toRef } from "vue";
 import { useRoute, useRouter } from "vue-router"; // Import useRouter
 import ServerInfo from "~/components/ServerInfo.vue";
 import ServerInfoForOwners from "~/components/ServerInfoForOwners.vue";
@@ -170,10 +203,21 @@ import A2AServerSkills from "~/components/A2AServerSkills.vue";
 import RESTServerFuncs from "~/components/RESTServerFuncs.vue";
 import UploadServerLogoDialog from "~/components/UploadServerLogoDialog.vue";
 import SubscriptionHeaderValuesDialog from "~/components/SubscriptionHeaderValuesDialog.vue";
+import ServerConnectionInstructions from "~/components/ServerConnectionInstructions.vue"; // Import new component
 import type { Server } from "~/utils/server";
 import { useSnackbar } from "~/composables/useSnackbar";
+import { useNuxtApp } from "#app";
+import { useSubscription } from "~/composables/useSubscription"; // Import the subscription composable
 
-const { $auth, $api } = useNuxtApp();
+// Define a type for the template items if needed for better type checking
+interface SubscriptionHeaderTemplateItem {
+  id: string;
+  key: string;
+  description?: string | null;
+  required: boolean;
+}
+
+const { $auth, $api, $settings } = useNuxtApp(); // Add $settings
 const route = useRoute();
 const router = useRouter(); // Use router for navigation
 const { showError, showSuccess } = useSnackbar();
@@ -181,13 +225,21 @@ const { showError, showSuccess } = useSnackbar();
 const serverSlug = route.params.slug as string;
 const isLoading = ref(true);
 const deleteDialog = ref(false);
-const showSubscriptionHeadersDialog = ref(false);
 const showUploadLogoDialog = ref(false); // State for the logo upload dialog
 
 const isAuthenticated = computed(() => $auth.check());
+const isAuthenticatedRef = toRef(isAuthenticated); // Create Ref for composable
 const isSecurityOrAdmin = computed(() => $auth.isSecurityOrAdmin());
 
 const server = ref<Server | null>(null);
+const serverRef = toRef(server); // Create Ref for composable
+
+// --- Initialize Subscription Composable ---
+const subscriptionComposable = useSubscription(serverRef, isAuthenticatedRef);
+// Expose necessary state/methods from composable for template
+const { subscribe, handleHeadersSave } = subscriptionComposable;
+// Rename composable's showHeadersDialog to avoid conflict if needed, or use it directly
+const showSubscriptionHeadersDialog = subscriptionComposable.showHeadersDialog;
 
 // Recalculate permissions based on fetched server data
 const canManageServer = computed(() => {
@@ -202,13 +254,44 @@ const canManageServer = computed(() => {
   );
 });
 
+// Check if server requires subscription
+const requiresSubscription = computed(() => {
+  const availability = server.value?.availability;
+  console.log(
+    `[pages/servers/[slug]] requiresSubscription computed: server.value?.availability = ${availability}`
+  );
+  return availability === "SUBSCRIPTION";
+});
+
 // Check if user is subscribed AND the server has a template
 const isSubscribedAndHasTemplate = computed(() => {
+  // Safely access the template property and check its length
+  const template = (
+    server.value as Server & {
+      subscriptionHeaderTemplate?: SubscriptionHeaderTemplateItem[];
+    }
+  )?.subscriptionHeaderTemplate;
   return (
-    server.value?.isCurrentUserSubscribed &&
-    (server.value as any).subscriptionHeaderTemplate && // Check if template exists (fetch adds this)
-    (server.value as any).subscriptionHeaderTemplate.length > 0
+    subscriptionComposable.subscriptionState.isSubscribed && // Use composable state
+    template &&
+    template.length > 0
   );
+});
+
+// Get Gateway Base URL from settings, default to window origin on client
+const gatewayBaseUrl = computed(() => {
+  const settingUrl = $settings.get("general_gateway_address") as
+    | string
+    | undefined;
+  if (settingUrl) {
+    return settingUrl;
+  }
+  // Fallback to current origin if running on client
+  if (import.meta.client) {
+    return window.location.origin;
+  }
+  // Default fallback (should ideally not be reached if setting is configured)
+  return "http://gate4.ai";
 });
 
 onMounted(async () => {
@@ -221,13 +304,14 @@ async function fetchServer() {
 
   try {
     // Fetch server using the SLUG, include template info
-    // Adjust the type to expect subscriptionHeaderTemplate potentially
-    // The API `/servers/[slug].get.ts` already includes owners, _count etc.
-    // and calculates `isCurrentUserSubscribed`, `isCurrentUserOwner`, `subscriptionId`
-    server.value = await $api.getJson<
-      Server & { subscriptionHeaderTemplate?: any[] }
+    // Type assertion includes the optional template property
+    const fetchedServerData = await $api.getJson<
+      Server & { subscriptionHeaderTemplate?: SubscriptionHeaderTemplateItem[] }
     >(`/servers/${serverSlug}`);
+
+    server.value = fetchedServerData; // Update the ref, composable will react
   } catch (error: unknown) {
+    // Use unknown instead of any
     console.error("Error fetching server details:", error);
     const message =
       error instanceof Error ? error.message : "Failed to load server details.";
@@ -250,7 +334,6 @@ function openEditDialog() {
 }
 
 function openUploadDialog() {
-  console.log("openDeleteDialog");
   showUploadLogoDialog.value = true;
 }
 
@@ -261,10 +344,12 @@ function openDeleteDialog() {
 async function deleteServer() {
   if (!server.value) return;
   try {
+    // Use $api.deleteJson (Ensure this method exists in your $api plugin definition)
     await $api.deleteJson(`/servers/${serverSlug}`);
     showSuccess("Server deleted successfully.");
     router.push("/servers"); // Navigate back to catalog after delete
   } catch (error: unknown) {
+    // Use unknown instead of any
     const message =
       error instanceof Error ? error.message : "Failed to delete server.";
     showError(message);
@@ -277,15 +362,24 @@ async function deleteServer() {
 // Handle subscription update from child (ServerInfo)
 function handleSubscriptionUpdate() {
   // Re-fetch server data to get updated subscription status and potentially subscriptionId
-  // This will also update the `isCurrentUserSubscribed` flag used by `isSubscribedAndHasTemplate`
+  // The composable will automatically update its state via the watcher
   fetchServer();
 }
 
 // Handle header save from SubscriptionHeaderValuesDialog
-function onSubscriptionHeadersSaved() {
-  // Optionally refetch data if needed, but dialog already saved.
-  console.log("Subscription headers saved.");
-  showSuccess("Subscription headers updated!"); // Show feedback
+async function onSubscriptionHeadersSaved(
+  headerValues: Record<string, string>
+) {
+  // Call the composable's handler which performs the subscription
+  const success = await handleHeadersSave(headerValues);
+  if (success) {
+    // Optionally refetch data if needed, but dialog already saved.
+    // Composables state should be updated.
+    console.log("Subscription headers saved and subscription completed.");
+    // fetchServer(); // Might be redundant if state updates are sufficient
+  } else {
+    showError("Failed to complete subscription after saving headers.");
+  }
 }
 
 // Handler for when the logo is successfully updated via UploadServerLogoDialog
@@ -295,6 +389,41 @@ function handleLogoUpdate(newImageUrl: string) {
   }
   // No need to close dialog here, component does it
 }
+
+// --- Updated Subscription Trigger Function ---
+// Function to trigger the subscription flow using the composable
+async function triggerSubscriptionFlow() {
+  console.log("Triggering subscription flow via [slug].vue");
+  const success = await subscribe(); // Call the composable's subscribe method
+  // If subscribe() returns true, it means the process started successfully (might involve dialog)
+  // If it returns false, it means it was blocked (e.g., not authenticated, permissions error)
+  if (success) {
+    // If the process started and didn't immediately fail (e.g. permissions),
+    // we might need to refresh server data if the subscription happened directly
+    // or if the dialog was involved and finished successfully.
+    // Re-fetch after a short delay to allow state update or dialog interaction.
+    // This is a simpler approach than tracking the dialog's promise resolution here.
+    setTimeout(() => {
+      fetchServer();
+    }, 100); // Short delay
+  }
+}
+
+// --- LOGGING FUNCTION ---
+function logConnectionInstructionProps(props: {
+  isAuthenticated: boolean;
+  requiresSubscription: boolean;
+  isSubscribedFromComposable: boolean;
+  isSubscribedFromServer: boolean;
+  hasImplicitAccess: boolean;
+}) {
+  console.log(
+    `[pages/servers/[slug]] Props being passed to ServerConnectionInstructions:`,
+    props
+  );
+  return ""; // Return empty string so it doesn't render anything
+}
+// --- END LOGGING FUNCTION ---
 
 useHead({
   title: computed(() => server.value?.name || "Server Details"),
@@ -307,10 +436,6 @@ useHead({
   transition: filter 0.3s ease;
   position: relative; /* Needed for absolute positioning of overlay */
 }
-/* Example hover effect - could be removed if button overlay is enough */
-/* .server-logo:hover {
-  filter: brightness(0.8);
-} */
 .bg-opacity-50 {
   background-color: rgba(0, 0, 0, 0.5);
 }

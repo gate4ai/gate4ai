@@ -1,6 +1,10 @@
 import { defineEventHandler, getRouterParam, createError } from "h3";
 import prisma from "../../utils/prisma";
-import type { User, SubscriptionStatus } from "@prisma/client"; // Adjusted imports
+import type {
+  User,
+  SubscriptionStatus,
+  Server as _Server,
+} from "@prisma/client";
 import {
   getServerReadAccessLevel,
   getSubscriptionStatusCounts,
@@ -59,6 +63,8 @@ export default defineEventHandler(async (event) => {
             subscriptions: { where: { status: "ACTIVE" } },
           },
         },
+        // Include availability and status directly
+        // No need to include subscriptionHeaderTemplate unless needed elsewhere
       },
     });
 
@@ -151,6 +157,7 @@ export default defineEventHandler(async (event) => {
       isCurrentUserSubscribed: isCurrentUserSubscribed,
       isCurrentUserOwner: isOwner,
       subscriptionId: currentUserSubscriptionId,
+      availability: server.availability,
       tools: server.tools.map((tool) => ({
         id: tool.id,
         name: tool.name,
@@ -168,7 +175,6 @@ export default defineEventHandler(async (event) => {
       ...(hasExtendedAccess && {
         serverUrl: server.serverUrl,
         status: server.status,
-        availability: server.availability,
         subscriptionStatusCounts: subscriptionStatusCounts,
       }),
 

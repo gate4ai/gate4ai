@@ -2,15 +2,12 @@ import { defineEventHandler, getRouterParam, readBody, createError } from "h3";
 import { z, ZodError } from "zod";
 import prisma from "../../utils/prisma";
 import { checkServerModificationRights } from "../../utils/serverPermissions"; // Adjust path if needed
-// Import enums for validation - adjust path as needed
 import {
   ServerStatus,
   ServerAvailability,
   ServerProtocol,
 } from "@prisma/client";
 
-// Define the schema for updating a server.
-// Make fields optional as the client might only send updated ones.
 const updateServerSchema = z
   .object({
     name: z
@@ -18,7 +15,6 @@ const updateServerSchema = z
       .min(1, "Name is required")
       .max(100, "Name must be 100 characters or less")
       .optional(),
-    // slug is not allowed to be updated in this endpoint
     protocol: z.nativeEnum(ServerProtocol).optional(),
     protocolVersion: z.string().optional().nullable(),
     description: z
@@ -28,14 +24,32 @@ const updateServerSchema = z
       .nullable(),
     website: z.string().url("Invalid URL format").optional().nullable(),
     email: z.string().email("Invalid email format").optional().nullable(),
-    imageUrl: z.string().url("Invalid URL format").optional().nullable(),
+
+    imageUrl: z
+      .string()
+      .optional()
+      .nullable()
+      .refine(
+        (val) => {
+          // Allow null, undefined, or empty string if optional/nullable
+          if (val === null || val === undefined || val === "") return true;
+          // Check if it's an absolute URL OR a relative path starting with /
+          return /^https?:\/\//.test(val) || /^\//.test(val);
+        },
+        {
+          // Custom error message if the refine check fails
+          message:
+            "Must be a valid absolute URL (http/https) or relative path starting with /",
+        }
+      ),
+
     serverUrl: z.string().url("Server URL must be a valid URL").optional(),
     status: z.nativeEnum(ServerStatus).optional(),
     availability: z.nativeEnum(ServerAvailability).optional(),
-    // tools are usually managed via separate endpoints, not included in main server update
   })
-  .strict(); // Use strict to prevent unexpected fields
+  .strict();
 
+// The rest of the handler function remains the same...
 export default defineEventHandler(async (event) => {
   const serverSlug = getRouterParam(event, "slug"); // Get slug from URL
 
@@ -87,7 +101,7 @@ export default defineEventHandler(async (event) => {
     if (validatedData.email !== undefined)
       updateData.email = validatedData.email;
     if (validatedData.imageUrl !== undefined)
-      updateData.imageUrl = validatedData.imageUrl;
+      updateData.imageUrl = validatedData.imageUrl; // Assign validated imageUrl
 
     // 4. Update the server data using the fetched server ID
     const updatedServer = await prisma.server.update({
@@ -102,7 +116,7 @@ export default defineEventHandler(async (event) => {
         website: true,
         email: true,
         imageUrl: true,
-        protocol: true, // Ensure protocol is included
+        protocol: true,
         protocolVersion: true,
         serverUrl: true,
         status: true,

@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"testing" // Import testing package
 	"time"
 
 	"github.com/gate4ai/gate4ai/gateway/clients/mcpClient"
 	"github.com/gate4ai/gate4ai/shared/mcp/2025/schema"
 	"github.com/gate4ai/gate4ai/tests/env"
+	"github.com/stretchr/testify/require" // Import testify
 	"go.uber.org/zap"
 )
 
@@ -111,12 +113,45 @@ func updateSetting(key string, value interface{}) error {
 		}
 	} else {
 		// Insert new setting with minimal required fields
-		_, err = db.Exec(`INSERT INTO "Settings" (key, "group", name, description, value, frontend) VALUES ($1, 'test', $1, $1, $2, false)`,
+		_, err = db.Exec(`INSERT INTO "Settings" (id, key, "group", name, description, value, frontend, "createdAt", "updatedAt") VALUES (gen_random_uuid(), $1, 'test', $1, $1, $2, false, NOW(), NOW())`,
 			key, valueJSON)
 		if err != nil {
 			return fmt.Errorf("failed to insert setting: %w", err)
 		}
 	}
 
+	return nil
+}
+
+// updateServerAvailabilityInDB updates the availability of a server directly in the database.
+func updateServerAvailabilityInDB(t *testing.T, serverSlug string, availability string) error {
+	t.Helper()
+	validAvailabilities := map[string]bool{"PUBLIC": true, "PRIVATE": true, "SUBSCRIPTION": true}
+	if !validAvailabilities[availability] {
+		return fmt.Errorf("invalid availability value: %s", availability)
+	}
+
+	dbURL := env.GetURL(env.DBComponentName)
+	if dbURL == "" {
+		return fmt.Errorf("database URL not found")
+	}
+	db, err := sql.Open("postgres", dbURL)
+	require.NoError(t, err, "Failed to connect to database")
+	defer db.Close()
+
+	query := `UPDATE "Server" SET availability = $1 WHERE slug = $2`
+	result, err := db.Exec(query, availability, serverSlug)
+	if err != nil {
+		return fmt.Errorf("failed to execute update query for server %s: %w", serverSlug, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected for server %s update: %w", serverSlug, err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("no server found with slug %s to update availability", serverSlug)
+	}
+	t.Logf("Set availability for server '%s' to '%s'", serverSlug, availability)
 	return nil
 }
