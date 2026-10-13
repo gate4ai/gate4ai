@@ -150,12 +150,13 @@ func TestTelegramApprovalFlow(t *testing.T) {
 	runDone := make(chan struct{})
 	go func() { tg.Run(pctx); close(runDone) }()
 	st := d.Pipeline.WaitFor(ctx, res.ID, 3*time.Second)
-	// Дождаться ответа на нажатие (answerCallbackQuery) и остановить long polling.
-	for i := 0; i < 100; i++ {
+	// Дождаться ответа «Готово» на нажатие (answerCallbackQuery) и только потом
+	// остановить long polling: иначе фейковый сервер допишет этот ответ позже.
+	for i := 0; i < 300; i++ {
 		fake.mu.Lock()
-		n := len(fake.edits)
+		done := len(fake.answers) > 0 && fake.answers[len(fake.answers)-1] == "Готово"
 		fake.mu.Unlock()
-		if n > 0 {
+		if done {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -173,8 +174,11 @@ func TestTelegramApprovalFlow(t *testing.T) {
 	}
 	// Повторное нажатие — «уже решено».
 	tg.Handle(ctx, cbUpdate(11, owner, yes))
-	if fake.answers[len(fake.answers)-1] != "Решение уже принято" || m.sent != 1 {
-		t.Fatal("double approval")
+	fake.mu.Lock()
+	last := fake.answers[len(fake.answers)-1]
+	fake.mu.Unlock()
+	if last != "Решение уже принято" || m.sent != 1 {
+		t.Fatal("double approval", last)
 	}
 	// Ошибки Bot API не раскрывают токен.
 	bad := &BotAPI{Base: "http://127.0.0.1:1", Token: "123:SECRET"}
