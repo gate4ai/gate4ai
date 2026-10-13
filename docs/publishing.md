@@ -51,3 +51,15 @@ done
 - **Branch protection** на `main`: обязательный CI, ревью.
 - **Секреты:** `GATE4AI_PUBLISHER_KEY` (организация, для коннекторов) — приватный ключ издателя (`gate4ai connectors keygen`); ключ registry — вне GitHub, подпись индекса — вручную (`gate4ai registry sign`); `REGISTRY_PUBLIC_KEY` — переменная `registry` для CI.
 - **Релизы:** тег `v*` в `gate4ai` и `relay` — GoReleaser со сборкой под три ОС и подписью cosign (keyless); в коннекторах — пакет `.g4c`, подписанный ключом издателя, затем pull request в `registry`.
+
+## 5. После публикации: рабочие копии
+
+Репозитории уже опубликованы без истории (один начальный коммит), поэтому `split.sh` для них больше не запускается: он пересоздал бы историю. Правка делается в монорепозитории и переносится в клон обычным коммитом.
+
+Клоны лежат рядом с монорепозиторием, в `../gate4ai/<репозиторий>`: `gate4ai`, `sdk-go`, `relay`, `gate4ai-mail`, `gate4ai-files`, `gate4ai-browser`, `tray`, `registry`, `.github`. Соответствие каталогов — таблица в разделе 1.
+
+## 6. Выпуск версии коннектора
+
+1. Тег `v<version из manifest.yaml>` в репозитории коннектора (`version: "2"` → `v2`). CI собирает модуль, подписывает пакет ключом издателя и создаёт релиз с `<connector>-<version>.g4c` и `pack.json`.
+2. Из `pack.json` в `registry/index.json` переносятся `sha256`, `digest`, `capabilities`; `url` — ссылка на `.g4c` в релизе. Ключ издателя — в `publishers`.
+3. Владелец registry подписывает индекс (`gate4ai registry sign index.json --key registry.key`) и коммитит `index.json` вместе с `index.json.sig`.
