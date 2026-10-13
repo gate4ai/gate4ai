@@ -1,0 +1,13 @@
+gate4.ai (gate4ai)
+Copyright 2026 gate4.ai
+
+This repository is licensed under the Functional Source License, Version 1.1,
+ALv2 Future License (FSL-1.1-ALv2), see LICENSE. Each version becomes available
+under the Apache License, Version 2.0 two years after it is made available.
+
+Connectors (github.com/gate4ai/gate4ai-*) are licensed separately under
+AGPL-3.0-only with an additional permission for the gate4ai host. The connector
+SDK (github.com/gate4ai/sdk-go) is licensed under Apache-2.0.
+
+Third-party Go dependencies keep their own licenses (Apache-2.0, MIT, BSD,
+ISC, MPL-2.0); see go.mod.

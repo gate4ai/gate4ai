@@ -1,0 +1,5 @@
+{{template "head" .}}
+<h2>Квитанция <code>{{short .Data.Entry.Hash}}</code></h2>
+<p class="muted">sha256 {{.Data.Entry.Hash}}{{if .Data.Entry.Redacted}} · содержимое удалено по сроку хранения{{end}}</p>
+<div class="card"><pre>{{json .Data.Entry.Receipt}}</pre></div>
+{{template "foot"}}

@@ -1,0 +1,8 @@
+/bin/
+*.test
+*.out
+/tray/src-tauri/target/
+/tray/node_modules/
+.gate4ai-dev/
+*.g4c
+*.wasm

@@ -1,0 +1,16 @@
+connector: probe
+version: "1"
+runtime: wasm
+capabilities:
+  network: [ { host: 127.0.0.1, scheme: http } ]
+  secrets: [ { alias: "${setting:token}", bind: [127.0.0.1] } ]
+  storage: { quota_mb: 1 }
+limits: { memory_mb: 48, timeout_s: 3 }
+actions:
+  - { name: deny_all, class: read }
+  - { name: http, class: read, args: [ { name: url, type: string, required: true } ] }
+  - { name: settings, class: read }
+  - { name: kv, class: write }
+  - { name: spin, class: read }
+  - { name: hog, class: read }
+  - { name: crash, class: read }

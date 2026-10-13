@@ -1,0 +1,60 @@
+agents:
+  claude-ai:      { profile: assistant }
+  openclaw-cloud: { profile: drafts-only }
+  claude-code:    { profile: files-obsidian }
+
+lists:
+  contacts_trusted: ["landlord@example.com", "accountant@example.com"]
+  payees_utilities: ["@uk-dom", "@mosenergosbyt"]
+
+profiles:
+  assistant:
+    connectors: [email, files, browser, payments]
+    rules:
+      - id: email-send-trusted
+        action: email.send
+        when: to.all(r, r in lists.contacts_trusted)
+        effect: allow
+      - id: email-no-untrusted-recipients
+        action: email.send
+        when: "'untrusted_content' in provenance.to"
+        effect: deny
+        reason: "Адресат взят из входящего письма"
+      - id: obsidian-read
+        action: files.read
+        when: glob(path, "~/Documents/obsidian/**")
+        effect: allow
+      - id: obsidian-append
+        action: files.append
+        when: glob(path, "~/Documents/obsidian/**")
+        effect: allow
+      - id: browser-read-allowed
+        action: browser.read
+        when: domain_matches(url, ["*.gosuslugi.ru", "lk.mosenergosbyt.ru"])
+        effect: allow
+      - id: utilities-payments
+        action: payments.pay_bill
+        when: payee in lists.payees_utilities && amount <= 15000
+        effect: ask                      # каждый платёж — с подтверждением
+        obligations: [verify_statement]
+      - id: daily-cap
+        action: payments.*
+        when: counters.spent_today + amount > 30000
+        effect: deny
+        reason: "Дневной лимит 30 000 ₽"
+
+  drafts-only:
+    connectors: [email]
+    rules:
+      - { id: no-send, action: email.send, effect: deny }
+
+  files-obsidian:
+    connectors: [files]
+    rules:
+      - { id: obsidian-only, action: "files.*", when: '!glob(path, "~/Documents/obsidian/**")', effect: deny }
+
+approvals:
+  channels: [desktop, telegram]
+  timeout: 30m
+  on_timeout: deny
+  telegram: { token: "@telegram.bot", owner_id: 42 }

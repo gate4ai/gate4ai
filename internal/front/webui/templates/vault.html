@@ -1,0 +1,9 @@
+{{template "head" .}}
+<h2>Секреты</h2>
+<p class="muted">Агенты видят только алиасы. Значения хранятся в системном keychain и подставляются внутри коннекторов.</p>
+<table><tr><th>Алиас</th></tr>{{range .Data.Aliases}}<tr><td><code>{{.}}</code></td></tr>{{else}}<tr><td class="muted">Нет секретов</td></tr>{{end}}</table>
+<form method="post" action="/vault" class="card row" style="margin-top:1rem" autocomplete="off">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input name="alias" placeholder="@mail.work" required><input name="value" type="password" placeholder="значение" required>
+<button class="primary">Сохранить</button></form>
+{{template "foot"}}

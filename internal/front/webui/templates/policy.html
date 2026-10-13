@@ -1,0 +1,23 @@
+{{template "head" .}}
+<h2>Политика <span class="muted">версия {{.Data.Version}}</span></h2>
+<form method="post" action="/policy" class="card">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<textarea name="yaml" rows="28" spellcheck="false">{{.Data.YAML}}</textarea>
+<div class="row" style="margin-top:.5rem"><input name="comment" placeholder="комментарий к версии" size="40"><button class="primary">Сохранить новую версию</button></div>
+</form>
+<h3>Симулятор: что будет, если агент попробует…</h3>
+<form method="post" action="/policy/simulate" class="card">
+<input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="yaml" value="">
+<div class="row">
+<select name="agent">{{range $n, $a := .Data.Agents}}<option {{if eq $n ($.Data.SimAgent)}}selected{{end}}>{{$n}}</option>{{end}}</select>
+<select name="action">{{range .Data.Actions}}<option {{if eq . ($.Data.SimAction)}}selected{{end}}>{{.}}</option>{{end}}</select>
+<input name="args" size="50" value='{{if .Data.SimArgs}}{{.Data.SimArgs}}{{else}}{}{{end}}' placeholder='{"to":["x@example.com"],"subject":"…"}'>
+<button>Проверить</button></div>
+{{with .Data.Sim}}<p>Решение: <b class="{{.Effect}}">{{.Effect}}</b> — {{.Reason}}{{if .RuleIDs}} <span class="muted">[{{join .RuleIDs ", "}}]</span>{{end}}{{if .Obligations}} · обязательства: {{join .Obligations ", "}}{{end}}</p>{{end}}
+</form>
+<h3>Версии</h3>
+<table><tr><th>№</th><th>Когда</th><th>Кто</th><th>Комментарий</th><th></th></tr>
+{{range .Data.Versions}}<tr><td>{{.N}}</td><td>{{ts .At}}</td><td>{{.Author}}</td><td>{{.Comment}}</td>
+<td>{{if ne .N $.Data.Version}}<form method="post" action="/policy/rollback"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.N}}"><button>Откатить к этой</button></form>{{else}}<span class="muted">текущая</span>{{end}}</td></tr>{{end}}
+</table>
+{{template "foot"}}

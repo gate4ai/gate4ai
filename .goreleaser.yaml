@@ -1,0 +1,27 @@
+# Сборка и подпись релизов gate4ai (один бинарник ядра).
+version: 2
+project_name: gate4ai
+builds:
+  - id: gate4ai
+    main: ./cmd/gate4ai
+    binary: gate4ai
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X github.com/gate4ai/gate4ai/internal/platform/version.Version={{.Version}}"]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, NOTICE, README.md, docs/*]
+checksum:
+  name_template: checksums.txt
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args: ["sign-blob", "--yes", "--output-signature=${signature}", "--output-certificate=${certificate}", "${artifact}"]

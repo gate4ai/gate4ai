@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: FSL-1.1-ALv2
+
+package relayclient
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+
+	"github.com/gate4ai/gate4ai/internal/config"
+	"github.com/gate4ai/gate4ai/internal/daemon"
+	"github.com/gate4ai/gate4ai/internal/platform/auth"
+)
+
+// Attach подключает relay к daemon: маршруты владельца (регистрация, статус),
+// туннель устройства и свидетеля журнала; перезапускается при смене конфигурации.
+func Attach(ctx context.Context, d *daemon.Daemon) {
+	var mu sync.Mutex
+	var cur *Device
+	var stop context.CancelFunc
+	var key string
+	apply := func(c *config.Config) {
+		mu.Lock()
+		defer mu.Unlock()
+		r := c.Relay
+		tok := ""
+		if r.URL != "" && r.DeviceID != "" && r.Token != "" {
+			tok, _ = d.Vault.Get(r.Token)
+		}
+		k := r.URL + "|" + r.DeviceID + "|" + tok + "|" + r.ACMECA + "|" + r.CAFile
+		if r.SelfSigned {
+			k += "|self"
+		}
+		if k == key {
+			return
+		}
+		key = k
+		if stop != nil {
+			stop()
+			stop, cur = nil, nil
+			d.Journal.SetWitness(nil)
+		}
+		if tok == "" {
+			return
+		}
+		dctx, cancel := context.WithCancel(ctx)
+		stop = cancel
+		// Выпуск сертификата (ACME) может занять время — не блокируем daemon.
+		go func() {
+			dev, err := deviceFor(dctx, d, r, tok)
+			if err != nil {
+				d.Log.Error("relay disabled", "err", err)
+				return
+			}
+			mu.Lock()
+			if dctx.Err() != nil {
+				mu.Unlock()
+				return
+			}
+			cur = dev
+			mu.Unlock()
+			d.Journal.SetWitness(dev)
+			_ = d.Journal.RetryWitness()
+			dev.Run(dctx)
+		}()
+	}
+	d.AddRoutes(func(mux *http.ServeMux) {
+		mux.HandleFunc("POST /v1/relay/register", func(w http.ResponseWriter, r *http.Request) {
+			p := daemon.PrincipalFrom(r.Context())
+			if !p.IsOwner() {
+				http.Error(w, `{"error":{"code":"owner_only"}}`, 403)
+				return
+			}
+			var req struct {
+				URL        string `json:"url"`
+				CAFile     string `json:"ca_file"`
+				SelfSigned bool   `json:"self_signed"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			res, err := RegisterDevice(r.Context(), d, p, req.URL, req.CAFile, req.SelfSigned)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(400)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "relay", "message": err.Error()}})
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(res)
+		})
+		mux.HandleFunc("GET /v1/relay/status", func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			dev := cur
+			mu.Unlock()
+			c := d.Config.Current().Relay
+			st := map[string]any{"configured": c.DeviceID != "", "online": dev != nil && dev.Online()}
+			if c.DeviceID != "" {
+				st["mcp_url"] = "https://" + deviceHost(c) + "/mcp"
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(st)
+		})
+	})
+	apply(d.Config.Current())
+	d.Config.Subscribe(apply)
+}
+
+func deviceHost(r config.Relay) string {
+	u, err := url.Parse(r.URL)
+	if err != nil {
+		return ""
+	}
+	return r.DeviceID + "." + u.Hostname()
+}
+
+func relayTLS(r config.Relay) (*tls.Config, error) {
+	if r.CAFile == "" {
+		return nil, nil
+	}
+	pem, err := os.ReadFile(r.CAFile)
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, errors.New("relay.ca_file: no certificates")
+	}
+	return &tls.Config{RootCAs: pool}, nil
+}
+
+func deviceFor(ctx context.Context, d *daemon.Daemon, r config.Relay, tok string) (*Device, error) {
+	rt, err := relayTLS(r)
+	if err != nil {
+		return nil, err
+	}
+	dev := &Device{RelayURL: r.URL, ID: r.DeviceID, Token: tok, RelayTLS: rt, Handler: d.PublicHandler(), Log: d.Log}
+	host := deviceHost(r)
+	if r.SelfSigned {
+		cert, _, err := SelfSigned(host)
+		if err != nil {
+			return nil, err
+		}
+		dev.ServerTLS = &tls.Config{Certificates: []tls.Certificate{cert}}
+		return dev, nil
+	}
+	// ACME DNS-01 в фоне: туннель поднимается, когда сертификат готов.
+	t, err := ACMETLS(ctx, ACMEConfig{Host: host, StorageDir: filepath.Join(d.Home, "certs"), CA: r.ACMECA, Email: r.Email, Provider: DNSProvider{D: dev}})
+	if err != nil {
+		return nil, err
+	}
+	dev.ServerTLS = t
+	return dev, nil
+}
+
+// RegisterDevice регистрирует устройство на relay: токен — в Vault, адрес и id —
+// новой версией конфигурации (только владелец).
+func RegisterDevice(ctx context.Context, d *daemon.Daemon, p auth.Principal, relayURL, caFile string, selfSigned bool) (map[string]any, error) {
+	if err := p.RequireOwner(); err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(relayURL, "https://") {
+		return nil, errors.New("relay url must start with https://")
+	}
+	rc := config.Relay{URL: relayURL, CAFile: caFile}
+	rt, err := relayTLS(rc)
+	if err != nil {
+		return nil, err
+	}
+	id, tok, host, err := Register(ctx, relayURL, rt, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.Vault.Set("relay.token", tok); err != nil {
+		return nil, err
+	}
+	raw, _ := d.Config.CurrentRaw()
+	c, err := d.Config.Validate(raw)
+	if err != nil {
+		return nil, err
+	}
+	c.Relay.URL, c.Relay.DeviceID, c.Relay.Token, c.Relay.CAFile, c.Relay.SelfSigned = relayURL, id, "@relay.token", caFile, selfSigned
+	out, err := config.Marshal(c)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := d.Config.Put(p, out, "relay registration"); err != nil {
+		return nil, err
+	}
+	return map[string]any{"device_id": id, "host": host, "mcp_url": "https://" + host + "/mcp"}, nil
+}

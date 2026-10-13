@@ -1,0 +1,18 @@
+{{template "head" .}}
+<h2>Ждут решения</h2>
+{{range .Data.Pending}}
+<div class="card">
+  <div class="row"><b>{{.Agent}}</b> → <code>{{.Action}}</code> <span class="muted">{{short .PreviewHash}} · до {{ts .Expires}}</span></div>
+  <pre>{{.Preview}}</pre>
+  <form method="post" action="/approvals/{{.ID}}" class="row" style="margin-top:.6rem">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <button class="primary" name="decision" value="approve">Разрешить</button>
+    <button class="danger" name="decision" value="reject">Отклонить</button>
+  </form>
+</div>
+{{else}}<p class="muted">Нет запросов, ожидающих подтверждения.</p>{{end}}
+<h2>Недавние</h2>
+<table><tr><th>Время</th><th>Агент</th><th>Действие</th><th>Статус</th><th>Канал</th></tr>
+{{range .Data.Recent}}<tr><td>{{ts .Created}}</td><td>{{.Agent}}</td><td><code>{{.Action}}</code></td><td>{{.Status}}</td><td>{{.Channel}}</td></tr>{{end}}
+</table>
+{{template "foot"}}

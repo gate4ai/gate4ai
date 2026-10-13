@@ -1,0 +1,34 @@
+{{define "head"}}<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gate4.ai — {{.Nav}}</title>
+<style>
+:root{--bg:#fafafa;--fg:#1d1d1f;--muted:#6e6e73;--line:#e3e3e8;--accent:#0a58ca;--ok:#1a7f37;--bad:#b42318;--card:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f4;--muted:#a1a1a8;--line:#2c2c31;--accent:#6ea8fe;--ok:#4ac26b;--bad:#ff7b72;--card:#1c1c1f}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
+header{display:flex;gap:1.2rem;align-items:center;padding:.8rem 1.2rem;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
+header b{margin-right:1rem}header a{color:var(--muted);text-decoration:none}header a.on{color:var(--fg);font-weight:600}
+main{max-width:72rem;margin:0 auto;padding:1.2rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1rem;margin:0 0 1rem}
+table{width:100%;border-collapse:collapse}td,th{padding:.4rem .5rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:500}pre{white-space:pre-wrap;margin:0;font:13px/1.45 ui-monospace,Menlo,monospace}
+button{font:inherit;padding:.4rem .9rem;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.danger{color:var(--bad)}
+input,select,textarea{font:inherit;padding:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+textarea{width:100%;font-family:ui-monospace,Menlo,monospace;font-size:13px}
+.flash{padding:.6rem 1rem;border-radius:8px;background:color-mix(in srgb,var(--ok) 15%,transparent);margin-bottom:1rem}
+.error{padding:.6rem 1rem;border-radius:8px;background:color-mix(in srgb,var(--bad) 15%,transparent);margin-bottom:1rem;white-space:pre-wrap}
+.muted{color:var(--muted)}.allow{color:var(--ok)}.deny{color:var(--bad)}.ask{color:var(--accent)}code{font-family:ui-monospace,Menlo,monospace}
+.row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+</style></head><body>
+<header><b>gate4.ai</b>
+<a href="/" class="{{if eq .Nav "approvals"}}on{{end}}">Подтверждения</a>
+<a href="/agents" class="{{if eq .Nav "agents"}}on{{end}}">Агенты</a>
+<a href="/journal" class="{{if or (eq .Nav "journal") (eq .Nav "receipt")}}on{{end}}">Журнал</a>
+<a href="/policy" class="{{if eq .Nav "policy"}}on{{end}}">Политики</a>
+<a href="/vault" class="{{if eq .Nav "vault"}}on{{end}}">Секреты</a>
+<form method="post" action="/logout" style="margin-left:auto"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Выйти</button></form>
+</header><main>
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+{{end}}
+{{define "foot"}}</main></body></html>{{end}}
