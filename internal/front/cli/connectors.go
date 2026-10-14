@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,7 @@ const connectorsUsage = `usage:
   gate4ai connectors remove <name>
   gate4ai connectors refresh                       fetch the registry index (revocations)
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c]
+  gate4ai connectors verify <dir> <file.g4c>       rebuild from sources and compare (registry review)
   gate4ai connectors keygen [-o key]`
 
 // splitFlags отделяет позиционные аргументы от флагов (флаги могут идти после).
@@ -53,6 +55,8 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 		return e.pack(ctx, rest)
 	case "keygen":
 		return e.keygen(rest)
+	case "verify":
+		return e.verifyPackage(ctx, rest)
 	}
 	// Остальные команды — к daemon (сокет владельца).
 	c := e.Client()
@@ -197,19 +201,13 @@ func (e *Env) pack(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	bin := *wasmFile
-	if bin == "" {
-		tmp, err := os.MkdirTemp("", "g4apack")
-		if err != nil {
-			return e.fail(err)
-		}
-		defer os.RemoveAll(tmp)
-		bin = filepath.Join(tmp, store.ModuleFile)
-		if err := wasm.BuildGo(ctx, dir, bin); err != nil {
-			return e.fail(err)
-		}
+	var wb []byte
+	var toolchain string
+	if *wasmFile != "" {
+		wb, err = os.ReadFile(*wasmFile)
+	} else {
+		wb, toolchain, err = buildModule(ctx, dir)
 	}
-	wb, err := os.ReadFile(bin)
 	if err != nil {
 		return e.fail(err)
 	}
@@ -233,8 +231,71 @@ func (e *Env) pack(ctx context.Context, args []string) int {
 	if err := os.WriteFile(*out, pkg, 0o644); err != nil {
 		return e.fail(err)
 	}
-	e.printJSON(map[string]any{"package": *out, "connector": p.Manifest.Connector, "version": p.Manifest.Version,
-		"digest": p.Sig.Digest, "sha256": store.SHA256(pkg), "signed_by": p.Sig.PublicKey, "capabilities": p.Manifest.Capabilities.Summary()})
+	res := map[string]any{"package": *out, "connector": p.Manifest.Connector, "version": p.Manifest.Version,
+		"digest": p.Sig.Digest, "sha256": store.SHA256(pkg), "signed_by": p.Sig.PublicKey, "capabilities": p.Manifest.Capabilities.Summary()}
+	if toolchain != "" {
+		res["go"] = toolchain
+	}
+	e.printJSON(res)
+	return ExitOK
+}
+
+// buildModule собирает WASM-модуль из исходников dir и возвращает его и версию Go.
+func buildModule(ctx context.Context, dir string) ([]byte, string, error) {
+	tc, err := wasm.Toolchain(dir)
+	if err != nil {
+		return nil, "", err
+	}
+	tmp, err := os.MkdirTemp("", "g4apack")
+	if err != nil {
+		return nil, "", err
+	}
+	defer os.RemoveAll(tmp)
+	bin := filepath.Join(tmp, store.ModuleFile)
+	if err := wasm.BuildGo(ctx, dir, bin); err != nil {
+		return nil, "", err
+	}
+	wb, err := os.ReadFile(bin)
+	return wb, tc, err
+}
+
+// verifyPackage пересобирает пакет из исходников и сравнивает с готовым: так ревьюер
+// registry убеждается, что пакет собран из этого кода (подпись издателя этого
+// не доказывает).
+func (e *Env) verifyPackage(ctx context.Context, args []string) int {
+	if len(args) != 2 {
+		fmt.Fprintln(e.Stderr, connectorsUsage)
+		return ExitUsage
+	}
+	dir, file := args[0], args[1]
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return e.fail(err)
+	}
+	p, err := store.Open(raw)
+	if err != nil {
+		return e.fail(err)
+	}
+	man, err := os.ReadFile(filepath.Join(dir, store.ManifestFile))
+	if err != nil {
+		return e.fail(err)
+	}
+	wb, tc, err := buildModule(ctx, dir)
+	if err != nil {
+		return e.fail(err)
+	}
+	var diff []string
+	if !bytes.Equal(man, p.ManifestYAML) {
+		diff = append(diff, store.ManifestFile)
+	}
+	if !bytes.Equal(wb, p.Wasm) {
+		diff = append(diff, store.ModuleFile)
+	}
+	if len(diff) > 0 {
+		return e.fail(fmt.Errorf("%s does not match the sources in %s (built with %s): %s differs", file, dir, tc, strings.Join(diff, ", ")))
+	}
+	e.printJSON(map[string]any{"status": "ok", "reproducible": true, "connector": p.Manifest.Connector, "version": p.Manifest.Version,
+		"digest": p.Sig.Digest, "sha256": store.SHA256(raw), "signed_by": p.Sig.PublicKey, "go": tc})
 	return ExitOK
 }
 
@@ -249,32 +310,51 @@ func packWith(man, wb []byte, key string) ([]byte, error) {
 	return store.Pack(man, wb, k)
 }
 
-func (e *Env) registry(args []string) int {
+const registryUsage = `usage:
+  gate4ai registry check <index.json> [--key ed25519:…] [--fetch]   structure, signature; --fetch: download and verify every package
+  gate4ai registry sign <index.json> --key file                      sign the index (registry owner)
+  gate4ai registry add <index.json> <pack.json> --publisher name [--repo https://…] [--license id] [--description text] [--url package-url]`
+
+func (e *Env) registry(ctx context.Context, args []string) int {
 	if len(args) == 0 {
 		args = []string{"help"}
 	}
 	sub := args[0]
-	pos, fl := splitFlags(args[1:], map[string]bool{"key": true})
+	pos, fl := splitFlags(args[1:], map[string]bool{"key": true, "publisher": true, "repo": true, "license": true, "description": true, "url": true})
 	fs := flag.NewFlagSet("registry", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	key := fs.String("key", "", "check: registry public key (ed25519:…); sign: registry private key file")
-	if fs.Parse(fl) != nil || len(pos) != 1 {
-		fmt.Fprintln(e.Stderr, "usage: gate4ai registry check <index.json> [--key ed25519:…] | sign <index.json> --key file")
+	fetch := fs.Bool("fetch", false, "check: download every package and verify it against its entry")
+	publisher := fs.String("publisher", "", "add: publisher name in the index")
+	repo := fs.String("repo", "", "add: source repository (required for a new connector)")
+	license := fs.String("license", "", "add: SPDX license (required for a new connector)")
+	description := fs.String("description", "", "add: short description (new connector)")
+	pkgURL := fs.String("url", "", "add: package URL (default: GitHub release v<version> of --repo or of the existing entry)")
+	want := 1
+	if sub == "add" {
+		want = 2
+	}
+	if fs.Parse(fl) != nil || len(pos) != want {
+		fmt.Fprintln(e.Stderr, registryUsage)
 		return ExitUsage
 	}
 	raw, err := os.ReadFile(pos[0])
 	if err != nil {
 		return e.fail(err)
 	}
-	switch sub {
-	case "check":
+	decode := func() (*store.Index, error) {
 		var ix store.Index
 		dec := json.NewDecoder(strings.NewReader(string(raw)))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&ix); err != nil {
-			return e.fail(err)
+			return nil, err
 		}
-		if err := ix.Check(); err != nil {
+		return &ix, ix.Check()
+	}
+	switch sub {
+	case "check":
+		ix, err := decode()
+		if err != nil {
 			return e.fail(err)
 		}
 		res := map[string]any{"status": "ok", "connectors": len(ix.Connectors), "publishers": len(ix.Publishers), "revoked": len(ix.Revoked)}
@@ -287,6 +367,13 @@ func (e *Env) registry(args []string) int {
 				return e.fail(err)
 			}
 			res["signature"] = "valid"
+		}
+		if *fetch {
+			n, errs := ix.VerifyPackages(ctx, pos[0])
+			if len(errs) > 0 {
+				return e.fail(errors.New("packages: " + strings.Join(errs, "; ")))
+			}
+			res["packages_verified"] = n
 		}
 		e.printJSON(res)
 		return ExitOK
@@ -304,7 +391,41 @@ func (e *Env) registry(args []string) int {
 		}
 		e.printJSON(map[string]any{"status": "ok", "signature": pos[0] + ".sig"})
 		return ExitOK
+	case "add":
+		ix, err := decode()
+		if err != nil {
+			return e.fail(err)
+		}
+		pb, err := os.ReadFile(pos[1])
+		if err != nil {
+			return e.fail(err)
+		}
+		var p store.PackInfo
+		if err := json.Unmarshal(pb, &p); err != nil {
+			return e.fail(fmt.Errorf("%s: %w", pos[1], err))
+		}
+		u := *pkgURL
+		if u == "" {
+			r := *repo
+			if old, ok := ix.Connectors[p.Connector]; ok && r == "" {
+				r = old.Repo
+			}
+			if !strings.HasPrefix(r, "https://github.com/") {
+				return e.fail(errors.New("--url is required unless the repository is on GitHub"))
+			}
+			u = strings.TrimSuffix(r, "/") + "/releases/download/v" + p.Version + "/" + p.Connector + "-" + p.Version + store.PackageExt
+		}
+		if err := ix.AddRelease(*publisher, p, u, store.Entry{Repo: *repo, License: *license, Description: *description}); err != nil {
+			return e.fail(err)
+		}
+		out, _ := json.MarshalIndent(ix, "", "  ")
+		if err := os.WriteFile(pos[0], append(out, '\n'), 0o644); err != nil {
+			return e.fail(err)
+		}
+		e.printJSON(map[string]any{"status": "ok", "connector": p.Connector, "version": p.Version, "url": u,
+			"publisher": *publisher, "trust": ix.Publishers[*publisher].Trust, "note": "the index signature is now stale: the registry owner re-signs after review"})
+		return ExitOK
 	}
-	fmt.Fprintln(e.Stderr, "usage: gate4ai registry check <index.json> [--key ed25519:…] | sign <index.json> --key file")
+	fmt.Fprintln(e.Stderr, registryUsage)
 	return ExitUsage
 }

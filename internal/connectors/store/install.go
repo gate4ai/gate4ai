@@ -205,21 +205,9 @@ func (o Options) prepareRegistry(ctx context.Context, source string) (*Plan, err
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", ref, err)
 	}
-	if SHA256(b) != rel.SHA256 {
-		return nil, fmt.Errorf("package %s: sha256 does not match the registry", ref)
-	}
-	pkg, err := Open(b)
+	pkg, err := CheckRelease(b, name, e.Publisher, rel, pub)
 	if err != nil {
-		return nil, err
-	}
-	if pkg.Sig.Digest != rel.Digest || pkg.Manifest.Connector != name || pkg.Manifest.Version != rel.Version {
-		return nil, errors.New("package does not match the registry entry")
-	}
-	if _, ok := VerifySig(pub.Keys, pkg.Sig.Digest, pkg.Sig.Signature); !ok {
-		return nil, fmt.Errorf("package %s %s is not signed by publisher %s", name, rel.Version, e.Publisher)
-	}
-	if !slices.Equal(pkg.Manifest.Capabilities.Summary(), nonNil(rel.Capabilities)) {
-		return nil, errors.New("package capabilities differ from the reviewed capabilities in the registry")
+		return nil, fmt.Errorf("%s: %w", ref, err)
 	}
 	return &Plan{Source: "registry:" + name + "@" + rel.Version, Trust: pub.Trust, Publisher: e.Publisher, Repo: e.Repo, pkg: pkg}, nil
 }

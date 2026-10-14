@@ -98,8 +98,8 @@ Owner commands (local socket):
   gate4ai vault list | set <alias> (value from stdin) | rm <alias>
   gate4ai relay register --url https://relay.gate4.ai | status
   gate4ai connectors list | install <file.g4c | name[@version]> [--dev] [--yes] | update <name> [--yes] | remove <name> | refresh
-  gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c] | keygen [-o key]   (publisher, offline)
-  gate4ai registry check <index.json> [--key ed25519:…] | sign <index.json> --key file      (registry, offline)
+  gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c] | verify <dir> <file.g4c> | keygen [-o key]   (publisher / registry review, offline)
+  gate4ai registry check <index.json> [--key ed25519:…] [--fetch] | sign <index.json> --key file | add <index.json> <pack.json> --publisher name …   (registry)
   gate4ai ui [--print]                   open the web UI (one-time login link)
   gate4ai tray-state                     state for the tray app (JSON)
   gate4ai run <agent> [--workspace dir] [--container|--microvm] [--dry-run] [-- cmd]   isolated agent
@@ -150,7 +150,7 @@ func Run(ctx context.Context, e *Env, args []string) int {
 	case "connectors":
 		return e.connectors(ctx, rest)
 	case "registry":
-		return e.registry(rest)
+		return e.registry(ctx, rest)
 	case "ui":
 		return e.ui(ctx, rest)
 	case "run":
