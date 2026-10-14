@@ -15,7 +15,7 @@
 | `connectors/browser` | коннектор + CDP + Stagehand + запуск Chrome | браузерный воркер по connector-architecture.md — служба хоста, а не коннектор |
 | `connectors/*` → `internal/connector`, `internal/manifest` | SDK коннекторов внутри `internal` ядра | сторонний коннектор не может импортировать `internal/` |
 | `connectors/browser` → `internal/policy` | `DomainMatches` из движка политик | коннектор зависит от ядра |
-| `tray/` | Tauri (Rust) | другой тулчейн и подпись под каждую ОС |
+| `tray/` | Tauri (Rust) | другой тулчейн и подпись под каждую ОС (решено иначе: трей переписан на Go и живёт в ядре — `cmd/gate4ai-tray`, 2026-10-14) |
 
 Все сторонние Go-зависимости пермиссивные (Apache-2.0, MIT, BSD, ISC; yamux — MPL-2.0, пофайловый copyleft): ни одна не мешает сменить лицензию ядра.
 
@@ -127,7 +127,7 @@ docs/  e2e/
 4. **WASM-хост** по connector-architecture.md («План перехода», шаги 1–2): capabilities в манифесте, wazero/Extism, функции хоста ABI v1, `capability_denied`, лимиты.
 5. **Коннекторы на WASM** в `connectors/<имя>/` со своими `go.mod` (зависят только от `sdk-go`): files → mail (`tls_dial` с аутентификацией хостом) → browser (воркер уезжает в `internal/hostsvc/browser`). Убрать секреты из `Settings` и режим `gate4ai connector`.
 6. **Магазин.** Формат `registry` (индекс, подписи cosign, отзыв), установка в ядре, CI-шаблон коннектора: воспроизводимая сборка `.wasm`, подпись, релиз.
-7. **Разделение.** `git filter-repo --subdirectory-filter` для `relay/`, `sdk-go/`, `connectors/*`, `tray/` → отдельные репозитории с историей; в ядре остаются только `.wasm` официальных коннекторов как данные (или скачивание из registry).
+7. **Разделение.** `git filter-repo --subdirectory-filter` для `relay/`, `sdk-go/`, `connectors/*` → отдельные репозитории с историей; в ядре остаются только `.wasm` официальных коннекторов как данные (или скачивание из registry).
 8. **Публикация.** Проверить историю на секреты (`gitleaks`), CLA Assistant для ядра, DCO для коннекторов, branch protection, релизы GoReleaser + cosign, `.github` организации.
 
 Шаги 1–3 и 7–8 механические; 4–6 — существенная работа, но она и так в целевой архитектуре.
@@ -140,6 +140,6 @@ docs/  e2e/
 
 ## Решено
 
-- Ядро, relay и трей — FSL-1.1-ALv2 (2026-10-13).
+- Ядро (вместе с треем `gate4ai-tray`) и relay — FSL-1.1-ALv2 (2026-10-13).
 - Переход выполнен (этапы 13–20): один бинарник `gate4ai`, relay и sdk-go — отдельные модули, коннекторы — WASM-модули под AGPL с исключением, магазин с подписанными пакетами и registry, `scripts/split.sh` делит монорепозиторий на репозитории с историей и проверяет сборку каждого. Отличия от этого документа и connector-architecture.md — в «Допущениях» PLAN.md (свой ABI на wazero без Extism, подписи Ed25519 вместо cosign, `internal/sandbox` вместо `isolation/`, сквозные тесты relay — в ядре).
 - Организационный репозиторий `gate4ai/.github` живёт в монорепозитории как `github-org/` (каталог `.github/` занят CI самого ядра).

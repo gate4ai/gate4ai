@@ -29,11 +29,10 @@ COMPONENTS=(
   "connectors/mail:gate4ai-mail"
   "connectors/files:gate4ai-files"
   "connectors/browser:gate4ai-browser"
-  "tray:tray"
   "registry:registry"
   "github-org:.github"
 )
-EXTRACTED="relay sdk-go connectors tray registry github-org go.work go.work.sum"
+EXTRACTED="relay sdk-go connectors registry github-org go.work go.work.sum"
 
 split() {
   if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
@@ -94,7 +93,7 @@ check() {
 
 verify() {
   # В ядре нет кода коннекторов и выделенных каталогов.
-  for d in relay sdk-go connectors tray registry github-org; do
+  for d in relay sdk-go connectors registry github-org; do
     if [ -e "$OUT/gate4ai/$d" ]; then echo "core still has $d" >&2; exit 1; fi
   done
   if grep -rl "SPDX-License-Identifier: AGPL" "$OUT/gate4ai" --include='*.go' >/dev/null; then

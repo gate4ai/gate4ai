@@ -15,7 +15,6 @@
 | `sdk-go/` | `gate4ai/sdk-go` | Apache-2.0 |
 | `connectors/mail/`, `files/`, `browser/` | `gate4ai/gate4ai-mail`, `gate4ai-files`, `gate4ai-browser` | AGPL-3.0-only + исключение для хоста |
 | `relay/` | `gate4ai/relay` | FSL-1.1-ALv2 |
-| `tray/` | `gate4ai/tray` | FSL-1.1-ALv2 |
 | `registry/` | `gate4ai/registry` | CC0 |
 | `github-org/` | `gate4ai/.github` | — |
 
@@ -25,7 +24,7 @@
 
 ```sh
 cd ../gate4ai-split
-for r in sdk-go relay gate4ai-mail gate4ai-files gate4ai-browser gate4ai tray registry .github; do
+for r in sdk-go relay gate4ai-mail gate4ai-files gate4ai-browser gate4ai registry .github; do
   gh repo create "gate4ai/$r" --public --source "$r" --push
 done
 ```
