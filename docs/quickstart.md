@@ -166,4 +166,4 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 
 ## Тесты
 
-`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, и `e2e/` — поток из README на собранных бинарниках с фейковыми IMAP/SMTP и Telegram (`-short` его пропускает).
+`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из README на собранных бинарниках и настоящих коннекторах — в репозитории [gate4ai/e2e](https://github.com/gate4ai/e2e).

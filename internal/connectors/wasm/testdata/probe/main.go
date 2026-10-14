@@ -5,9 +5,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	_ "embed"
 	"errors"
+	"io"
 
 	"github.com/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/sdk-go/connector"
@@ -63,6 +65,19 @@ func (probe) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 		}
 		h.Log("info", "got "+string(resp.Body))
 		return abi.ExecResult{Result: map[string]any{"status": resp.Status, "body": string(resp.Body)}}, nil
+	case "imap":
+		// Вход выполняет хост (imap-login): модуль получает PREAUTH и сразу шлёт команду.
+		c, err := h.Dial(abi.DialRequest{Host: "127.0.0.1", Port: int(r.Args["port"].(float64)), TLS: abi.TLSNone, Protocol: abi.ProtoIMAP,
+			Auth: &abi.DialAuth{Scheme: abi.AuthIMAPLogin, Username: "probe", Secret: r.Settings["token"].(string)}})
+		if err != nil {
+			return abi.ExecResult{}, err
+		}
+		defer c.Close()
+		rd := bufio.NewReader(c)
+		greeting, _ := rd.ReadString('\n')
+		io.WriteString(c, "a1 NOOP\r\n")
+		reply, err := rd.ReadString('\n')
+		return abi.ExecResult{Result: map[string]any{"greeting": greeting, "reply": reply}}, err
 	case "settings":
 		return abi.ExecResult{Result: r.Settings}, nil
 	case "kv":

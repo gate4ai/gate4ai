@@ -22,5 +22,5 @@
 | Трей | `tray/` (отдельный репозиторий `gate4ai/tray`) |
 | Магазин: пакеты .g4c, индекс registry, установка с согласием, отзыв | `internal/connectors/store`, `registry/` |
 | Изоляция: Egress Proxy, `gate4ai run`, `doctor` | `internal/hostsvc/egress`, `internal/sandbox` |
-| Сквозной тест | `e2e/` |
+| Сквозной тест (хост + настоящие коннекторы) | отдельный репозиторий `gate4ai/e2e` |
 | Разделение на репозитории, проверка истории на секреты | `scripts/split.sh`, `scripts/secret-scan.sh`, [publishing.md](publishing.md) |

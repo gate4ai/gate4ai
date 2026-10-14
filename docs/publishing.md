@@ -43,11 +43,11 @@ done
 (cd gate4ai && go get github.com/gate4ai/sdk-go@v0.1.0 github.com/gate4ai/relay@v0.1.0 && go mod tidy && git commit -am "require sdk-go, relay" && git push)
 ```
 
-Тесты ядра, которые собирают коннекторы из исходников (`connectors/…`), в отдельном репозитории пропускаются; сквозную проверку на настоящих коннекторах продолжает делать монорепозиторий.
+Сквозные тесты на настоящих коннекторах — в репозитории `gate4ai/e2e`: он собирает соседние исходники через свой `go.work`, а `ci.yml` каждого ключевого репозитория (`gate4ai`, `sdk-go`, `relay`, коннекторы) вызывает его workflow со своим коммитом. Хост от коннекторов не зависит даже в тестах.
 
 ## 4. Настройки организации
 
-- **CLA Assistant** для `gate4ai`, `relay`, `tray` (текст CLA — от юриста); **DCO** (GitHub App) для `sdk-go`, коннекторов, `registry`.
+- **CLA Assistant** для `gate4ai`, `relay`, `tray` (текст CLA — от юриста); **DCO** (GitHub App) для `sdk-go`, коннекторов, `registry`, `e2e`.
 - **Branch protection** на `main`: обязательный CI, ревью.
 - **Секреты:** `GATE4AI_PUBLISHER_KEY` (организация, для коннекторов) — приватный ключ издателя (`gate4ai connectors keygen`); ключ registry — вне GitHub, подпись индекса — вручную (`gate4ai registry sign`); `REGISTRY_PUBLIC_KEY` — переменная `registry` для CI.
 - **Релизы:** тег `v*` в `gate4ai` и `relay` — GoReleaser со сборкой под три ОС и подписью cosign (keyless); в коннекторах — пакет `.g4c`, подписанный ключом издателя, затем pull request в `registry`.

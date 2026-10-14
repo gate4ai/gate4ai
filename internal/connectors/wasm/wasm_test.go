@@ -3,10 +3,13 @@
 package wasm
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -64,7 +67,7 @@ type logBuf struct {
 }
 
 func (l *logBuf) Write(p []byte) (int, error) { l.mu.Lock(); defer l.mu.Unlock(); return l.b.Write(p) }
-func (l *logBuf) String() string               { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
+func (l *logBuf) String() string              { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
 
 var engineCache = filepath.Join(os.TempDir(), "gate4ai-test-wasm-cache")
 
@@ -132,6 +135,62 @@ func TestSecretNeverReachesModule(t *testing.T) {
 	res, _ = run(t, c, "settings", nil)
 	if res.Result.(map[string]any)["token"] != "@probe" {
 		t.Fatal("module must see only the alias", res.Result)
+	}
+}
+
+// stubIMAP — минимальный IMAP: приветствие, LOGIN (запоминает строку), ответ OK на любую команду.
+func stubIMAP(t *testing.T) (port int, login <-chan string) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	ch := make(chan string, 1)
+	go func() {
+		c, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		r := bufio.NewReader(c)
+		io.WriteString(c, "* OK stub ready\r\n")
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			tag, cmd, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
+			if strings.HasPrefix(cmd, "LOGIN ") {
+				ch <- cmd
+			}
+			io.WriteString(c, tag+" OK "+strings.Fields(cmd)[0]+" done\r\n")
+		}
+	}()
+	return l.Addr().(*net.TCPAddr).Port, ch
+}
+
+func TestDialAuthenticatedByHost(t *testing.T) {
+	port, login := stubIMAP(t)
+	c := load(t, io.Discard)
+	res, err := run(t, c, "imap", map[string]any{"port": float64(port)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-login:
+		if got != `LOGIN "probe" "s3cr3t-value"` {
+			t.Fatal("host login:", got)
+		}
+	default:
+		t.Fatal("host did not log in")
+	}
+	out := res.Result.(map[string]any)
+	if !strings.HasPrefix(out["greeting"].(string), "* PREAUTH") || out["reply"] != "a1 OK NOOP done\r\n" {
+		t.Fatal("module side:", out)
+	}
+	if strings.Contains(fmt.Sprint(out), "s3cr3t") {
+		t.Fatal("secret reached the module:", out)
 	}
 }
 
