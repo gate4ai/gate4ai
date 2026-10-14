@@ -199,7 +199,7 @@ func FormatDuration(d time.Duration) string {
 	return d.String()
 }
 
-// Defaults заполняет значения по умолчанию из README.
+// Defaults заполняет значения по умолчанию из спецификации (docs/specification.md).
 func (c *Config) Defaults() {
 	if c.Approvals.Timeout == 0 {
 		c.Approvals.Timeout = Duration(30 * time.Minute)

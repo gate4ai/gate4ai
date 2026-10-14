@@ -1,6 +1,6 @@
 # Устройство кода
 
-| Компонент README | Пакет |
+| Компонент [спецификации](specification.md) | Пакет |
 |---|---|
 | Модель конфигурации, Config Store (версии, откат, права владельца) | `internal/config` |
 | Policy Engine (CEL, deny > ask > allow, умолчания по классу, лимиты) | `internal/policy` |
