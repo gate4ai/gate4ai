@@ -4,3 +4,4 @@
 .gate4ai-dev/
 *.g4c
 *.wasm
+/dist/
