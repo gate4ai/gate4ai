@@ -101,7 +101,6 @@ Owner commands (local socket):
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c] | verify <dir> <file.g4c> | keygen [-o key]   (publisher / registry review, offline)
   gate4ai registry check <index.json> [--key ed25519:…] [--fetch] | sign <index.json> --key file | add <index.json> <pack.json> --publisher name …   (registry)
   gate4ai ui [--print]                   open the web UI (one-time login link)
-  gate4ai tray-state                     state for the tray app (JSON)
   gate4ai run <agent> [--workspace dir] [--container|--microvm] [--dry-run] [-- cmd]   isolated agent
   gate4ai doctor                         look for ways around gate4ai
   gate4ai egress                         network connections of sandboxed agents
@@ -160,13 +159,6 @@ func Run(ctx context.Context, e *Env, args []string) int {
 	case "egress":
 		var res any
 		if err := e.Client().Do(ctx, "GET", "/v1/egress/log?limit=200", nil, &res); err != nil {
-			return e.fail(err)
-		}
-		e.printJSON(res)
-		return ExitOK
-	case "tray-state":
-		var res any
-		if err := e.Client().Do(ctx, "GET", "/v1/tray/state", nil, &res); err != nil {
 			return e.fail(err)
 		}
 		e.printJSON(res)

@@ -1,4 +1,5 @@
-# Сборка и подпись релизов gate4ai (один бинарник ядра).
+# Сборка и подпись релизов gate4ai: ядро и трей (трей под macOS собирает
+# отдельная задача release.yml на macOS-раннере — там нужен cgo).
 version: 2
 project_name: gate4ai
 builds:
@@ -10,6 +11,22 @@ builds:
     ldflags: ["-s -w -X github.com/gate4ai/gate4ai/internal/platform/version.Version={{.Version}}"]
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+  - id: gate4ai-tray
+    main: ./cmd/gate4ai-tray
+    binary: gate4ai-tray
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: ["-s -w"]
+    goos: [linux, windows]
+    goarch: [amd64, arm64]
+    overrides:
+      - goos: windows
+        goarch: amd64
+        ldflags: ["-s -w -H windowsgui"]
+      - goos: windows
+        goarch: arm64
+        ldflags: ["-s -w -H windowsgui"]
     mod_timestamp: "{{ .CommitTimestamp }}"
 archives:
   - formats: [tar.gz]

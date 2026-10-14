@@ -1,6 +1,6 @@
 # Структура репозиториев и лицензии gate4.ai
 
-> Версия 0.2, 2026-10-13. Лицензии выбраны человеком, переход выполнен (этапы 13–20 PLAN.md): монорепозиторий разделён на модули и готов к разделению на репозитории (`scripts/split.sh`, [docs/publishing.md](docs/publishing.md)). Опирается на [connector-architecture.md](connector-architecture.md).
+> Версия 0.2, 2026-10-13. Лицензии выбраны человеком, переход выполнен (этапы 13–20 PLAN.md): монорепозиторий разделён на модули и готов к разделению на репозитории (`scripts/split.sh`, [docs/publishing.md](docs/publishing.md)). Опирается на [connector-architecture.md](docs/connector-architecture.md).
 
 ## Что есть сейчас
 
@@ -23,32 +23,35 @@
 
 | Репозиторий | Что | Go-модуль | Лицензия |
 |---|---|---|---|
-| `gate4ai/gate4ai` | ядро: daemon, политики, pipeline, журнал, Vault, подтверждения, MCP, Web UI, Egress Proxy, песочницы, WASM-хост и функции хоста, браузерный воркер, установка коннекторов из магазина, клиент relay. **Один бинарник `gate4ai`** | `github.com/gate4ai/gate4ai` | FSL-1.1-ALv2 |
-| `gate4ai/sdk-go` | контракт с коннекторами: схема манифеста, типы ABI v1, обёртки функций хоста для Go (`GOOS=wasip1`), тестовый хост для unit-тестов коннекторов | `github.com/gate4ai/sdk-go` | Apache-2.0 |
+| `gate4ai/gate4ai` | ядро: daemon, политики, pipeline, журнал, Vault, подтверждения, MCP, Web UI, Egress Proxy, песочницы, WASM-хост и функции хоста, браузерный воркер, установка коннекторов из магазина, клиент relay. **Бинарник `gate4ai`** и трей `gate4ai-tray` (отдельный бинарник: на macOS трею нужен cgo, ядро собирается без него) | `github.com/gate4ai/gate4ai` | FSL-1.1-ALv2 |
+| `gate4ai/sdk-go` | контракт с коннекторами и auth-модулями: схема манифеста, типы ABI v1, обёртки функций хоста для Go (`GOOS=wasip1`), тестовые хосты для unit-тестов коннекторов и auth-модулей | `github.com/gate4ai/sdk-go` | Apache-2.0 |
 | `gate4ai/gate4ai-mail` | коннектор почты (WASM) | `github.com/gate4ai/gate4ai-mail` | AGPL-3.0 + исключение для хоста |
 | `gate4ai/gate4ai-files` | коннектор файлов (WASM) | `github.com/gate4ai/gate4ai-files` | AGPL-3.0 + исключение |
 | `gate4ai/gate4ai-browser` | тонкий коннектор поверх `browser_*` | `github.com/gate4ai/gate4ai-browser` | AGPL-3.0 + исключение |
 | `gate4ai/gate4ai-<сервис>` | сервисные коннекторы: `gate4ai-gosuslugi`, `gate4ai-tbank`, `gate4ai-mosenergosbyt` … | `github.com/gate4ai/gate4ai-<сервис>` | AGPL-3.0 + исключение |
+| `gate4ai/auth` | наши auth-модули ([secret-architecture.md](docs/secret-architecture.md)): `auth-imap`, `auth-smtp`, `auth-oauth2`, `auth-google-sa`, `auth-totp`, `auth-ssh`, `auth-sigv4`; каждый в своём каталоге со своим `go.mod`, общие тестовые фейки (IMAP / SMTP / SSH / OAuth-серверы) | `github.com/gate4ai/auth/<имя>` | AGPL-3.0 + исключение |
+| `<издатель>/gate4ai-auth-<имя>` | auth-модули сторонних издателей (банки, вендоры) | их модуль | AGPL-3.0 + исключение или пермиссивная |
 | `gate4ai/relay` | сервер relay (бинарник `gate4ai-relay`); **необязателен** — нужен, только если пользователь не обеспечил HTTPS до daemon сам | `github.com/gate4ai/relay` | FSL-1.1-ALv2 |
-| `gate4ai/tray` | трей на Tauri — оболочка над `gate4ai tray-state` / `approvals` / `ui` | — (Rust) | FSL-1.1-ALv2 |
-| `gate4ai/registry` | индекс магазина: коннекторы, версии, sha256, подписи, уровень доверия, список отозванных | — (данные) | CC0 / Apache-2.0 |
+| `gate4ai/registry` | индекс магазина: пакеты (`kind: connector \| auth`), версии, sha256, подписи, уровень доверия, список отозванных; шаблоны привязок популярных API (Anthropic, OpenAI, GitHub) | — (данные) | CC0 / Apache-2.0 |
 | `gate4ai/.github` | профиль организации, CONTRIBUTING, SECURITY.md, шаблоны issue/PR | — | — |
 
-Имена: ядро и бинарник — `gate4ai`; компоненты — по имени (`relay`, `tray`, `sdk-go`, `registry`); коннекторы — `gate4ai-<имя>`. `sdk-go` намеренно без префикса `gate4ai-`, чтобы не путать с коннекторами; под другие языки — `sdk-rust`, `sdk-js`.
+Имена: ядро и бинарник — `gate4ai`; компоненты — по имени (`relay`, `sdk-go`, `registry`); коннекторы — `gate4ai-<имя>`; auth-модули — `auth-<протокол>` в магазине (`gate4ai/auth-imap`), наши — в одном репозитории `gate4ai/auth`, сторонние — `gate4ai-auth-<имя>`. Auth-модуль — не коннектор: агенту он не виден, действий не имеет, его вызывает ядро для слота учётки. `sdk-go` намеренно без префикса `gate4ai-`, чтобы не путать с коннекторами; под другие языки — `sdk-rust`, `sdk-js`.
 
 ### Зависимости между репозиториями
 
 ```
           sdk-go  (Apache-2.0: контракт — манифест, ABI v1)
           ▲     ▲
-          │     └──────────────── gate4ai-mail / -files / -browser / -tbank …  (AGPL + исключение)
+          │     ├──────────────── gate4ai-mail / -files / -browser / -tbank …  (AGPL + исключение)
+          │     └──────────────── auth/auth-imap / -oauth2 / -ssh …            (AGPL + исключение)
           │                          ── собираются в .wasm, подписываются, попадают в registry
   gate4ai (FSL) ── скачивает .wasm по registry, проверяет подпись, исполняет в wazero/Extism
           ▲
-          └── только в тестах ──▶ relay (FSL)          tray (FSL) ── вызывает бинарник gate4ai
+          └── только в тестах ──▶ relay (FSL)
 ```
 
 - Ядро **не импортирует** код коннекторов: получает их как `.wasm` (официальные можно встроить в бинарник через `embed` как данные — это поставка рядом, а не линковка).
+- Коннекторы и auth-модули импортируют только `sdk-go`; друг от друга не зависят: коннектор ссылается на auth-модуль по имени в манифесте (`module: gate4ai/auth-imap@1`), связывает их ядро.
 - Коннекторы импортируют только `sdk-go`. `DomainMatches` и подобные утилиты — в `sdk-go`; проверку доменов всё равно делает хост.
 - Relay не импортирует ядро. Клиент relay (регистрация, туннель, DNS-провайдер для ACME) живёт в ядре (`internal/relayclient`). Протокол (HTTP API регистрации, `/tunnel`, свидетель) описан в `relay/docs/protocol.md`. Сквозные тесты «daemon через relay» — в ядре: они импортируют публичный пакет `github.com/gate4ai/relay` (только тесты; лицензии совпадают). Пакеты `internal/` ядра другой модуль импортировать не может, поэтому тест живёт там, где клиент.
 
@@ -66,20 +69,20 @@
 - Репозиторий ещё нигде не опубликован под AGPL, поэтому смена лицензии ядра чистая. Если какая-то версия уже была выложена под AGPL — она так и остаётся AGPL у получивших её.
 - Чтобы и дальше менять лицензию и выпускать платные версии, нужен **CLA** для внешних контрибьюторов ядра (CLA Assistant в GitHub). Для коннекторов достаточно DCO.
 
-### Коннекторы: AGPL-3.0 + исключение для хоста
+### Коннекторы и auth-модули: AGPL-3.0 + исключение для хоста
 
 Коннектор работает внутри процесса ядра (WASM, вызовы функций хоста). По позиции FSF плагин, обменивающийся с программой структурами данных в одном процессе, может считаться частью одного произведения — тогда AGPL коннектора потребовала бы AGPL от ядра при совместной поставке. Граница WASM + сериализованный ABI делает это спорным, но не нулевым риском.
 
-Снимается дополнительным разрешением по п. 7 AGPL (как GCC Runtime Exception / Classpath Exception) в каждом репозитории коннектора:
+Снимается дополнительным разрешением по п. 7 AGPL (как GCC Runtime Exception / Classpath Exception) в каждом репозитории коннектора и auth-модулей (auth-модуль исполняется в ядре так же):
 
 > Additional permission under GNU AGPL version 3 section 7: you may combine and distribute this Program, in source or compiled WebAssembly form, together with the gate4ai host (github.com/gate4ai/gate4ai) under that host's license, and execute it inside that host, without the host becoming subject to this License. This permission does not extend to modifications of this Program itself, which remain under the AGPL-3.0.
 
-Правило магазина (`connector-architecture.md`, «лицензия, совместимая с AGPL-3.0, исходник обязателен») дополнить: для уровня «проверен gate4.ai» — AGPL-3.0 с этим исключением или пермиссивная лицензия.
+Правило магазина (`connector-architecture.md`, «лицензия, совместимая с AGPL-3.0, исходник обязателен») дополнить: для уровня «проверен gate4.ai» — AGPL-3.0 с этим исключением или пермиссивная лицензия. То же для auth-модулей; доверие к ним даёт не лицензия, а ревью и уровень в магазине (auth-модули ставятся только с уровнями «проверен gate4.ai» и «проверенный издатель»).
 
 ### Остальное
 
 - `sdk-go`: Apache-2.0 — совместима с AGPL коннекторов и с FSL ядра, позволяет и платные коннекторы (README: «поддерживаемые платные коннекторы сервисов»).
-- `relay`, `tray`: FSL-1.1-ALv2, как ядро (relay — потенциальный платный сервис, его не должен хостить конкурент).
+- `relay`: FSL-1.1-ALv2, как ядро (relay — потенциальный платный сервис, его не должен хостить конкурент).
 - `registry`: CC0 (это данные).
 - В каждом файле — SPDX-заголовок (`// SPDX-License-Identifier: FSL-1.1-ALv2`), в корне — `LICENSE` и `NOTICE`.
 

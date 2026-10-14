@@ -20,7 +20,7 @@ make connectors      # bin/connectors/{mail,files,browser}.g4c — пакеты 
 |---|---|
 | `gate4ai` | единственный бинарник ядра: `gate4ai daemon` — политики, подтверждения, секреты, журнал, коннекторы, Web UI, Egress Proxy, туннель к relay; `gate4ai mcp` — MCP-сервер на stdio; остальные команды — CLI для агентов, скриптов и человека |
 | `gate4ai-relay` | relay (необязателен — нужен, только если нет своего HTTPS до daemon): публичный адрес устройства, TLS-passthrough, DNS для ACME, свидетель журнала |
-| `tray/` | трей на Tauri (сборка — см. `tray/README.md`) |
+| `gate4ai-tray` | трей (необязателен): статус daemon, уведомления о запросах подтверждения, «Разрешить / Отклонить», открытие Web UI. Ходит в сокет владельца, как CLI. На macOS собирается с cgo (`CGO_ENABLED=1 go build ./cmd/gate4ai-tray` на macOS) |
 
 ## 1. Daemon и коннекторы
 

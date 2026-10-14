@@ -5,12 +5,15 @@ go 1.27.1
 require (
 	cel.dev/cel-go v0.32.0
 	filippo.io/age v1.3.2
+	fyne.io/systray v1.12.2
+	git.sr.ht/~jackmordaunt/go-toast v1.1.2
 	github.com/Microsoft/go-winio v0.6.3
 	github.com/browserbase/stagehand/packages/sdk-go/v4 v4.2.1
 	github.com/caddyserver/certmagic v0.25.6
 	github.com/coder/websocket v1.8.15
 	github.com/gate4ai/relay v0.1.0
 	github.com/gate4ai/sdk-go v0.1.0
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gowebpki/jcs v1.0.2
 	github.com/hashicorp/yamux v0.1.2
 	github.com/libdns/libdns v1.1.1
@@ -36,7 +39,7 @@ require (
 	github.com/emersion/go-message v0.18.2 // indirect
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
 	github.com/emersion/go-smtp v0.25.0 // indirect
-	github.com/godbus/dbus/v5 v5.2.2 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect

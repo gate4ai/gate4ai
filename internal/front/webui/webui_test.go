@@ -3,9 +3,7 @@
 package webui
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -22,6 +20,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/connectors"
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/cli"
+	"github.com/gate4ai/gate4ai/internal/front/tray"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
@@ -226,8 +225,8 @@ func TestOwnerRoutesOnSocket(t *testing.T) {
 	}
 }
 
-// Контракт трея: команды CLI, которые вызывает tray/src-tauri/src/main.rs.
-func TestTrayContractViaCLI(t *testing.T) {
+// Контракт трея: запросы, которые делает cmd/gate4ai-tray через пакет tray.
+func TestTrayContract(t *testing.T) {
 	u, d, n, _ := setup(t)
 	d.AddRoutes(u.OwnerRoutes)
 	home := t.TempDir()
@@ -241,32 +240,30 @@ func TestTrayContractViaCLI(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	run := func(args ...string) (int, string) {
-		var out bytes.Buffer
-		env := &cli.Env{Stdout: &out, Stderr: &out, Getenv: func(string) string { return "" },
-			Connect: func(string) *cli.Client { return cli.NewSocketClient(sock, "") }}
-		return cli.Run(ctx, env, args), out.String()
-	}
+	tr := tray.New(cli.NewSocketClient(sock, ""))
 	res := d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "notes.append", Args: map[string]any{"text": "x"}})
-	code, out := run("tray-state")
-	var st struct {
-		OK      bool `json:"ok"`
-		Pending []struct {
-			ID, Agent, Action, Hash, Summary, Reason string
-		} `json:"pending"`
-		Receipts int64 `json:"receipts"`
-	}
-	if code != 0 || json.Unmarshal([]byte(out), &st) != nil || !st.OK || len(st.Pending) != 1 {
-		t.Fatal(code, out)
+	st := tr.Fetch(ctx)
+	if st == nil || len(st.Pending) != 1 {
+		t.Fatalf("%+v", st)
 	}
 	p := st.Pending[0]
 	if p.ID != res.ID || p.Agent != "bot" || p.Action != "notes.append" || !strings.HasPrefix(p.Hash, "#") || p.Summary == "" || p.Reason == "" {
 		t.Fatalf("%+v", p)
 	}
-	if code, out := run("approvals", "approve", p.ID); code != 0 || n.n != 1 {
-		t.Fatal(code, out)
+	if f := tr.Fresh(st); len(f) != 1 || len(tr.Fresh(st)) != 0 {
+		t.Fatal("each request must be notified once")
 	}
-	if code, out := run("ui", "--print"); code != 0 || !strings.Contains(out, "/login?t=") {
-		t.Fatal(code, out)
+	if err := tr.Decide(ctx, p.ID, true); err != nil || n.n != 1 {
+		t.Fatal(err, n.n)
+	}
+	if st := tr.Fetch(ctx); st == nil || len(st.Pending) != 0 || tray.MenuKey(st) != "ok" {
+		t.Fatalf("%+v", st)
+	}
+	if u, err := tr.LoginURL(ctx); err != nil || !strings.Contains(u, "/login?t=") {
+		t.Fatal(u, err)
+	}
+	// Агентский сокет трею ничего не отдаёт.
+	if tray.New(cli.NewSocketClient(asock, "")).Fetch(ctx) != nil {
+		t.Fatal("tray state on the agent socket")
 	}
 }

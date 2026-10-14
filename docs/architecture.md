@@ -19,7 +19,7 @@
 | Relay — сервер (туннель, passthrough, DNS/ACME, свидетель), отдельный модуль | `relay/` (`github.com/gate4ai/relay`), `relay/cmd/gate4ai-relay` |
 | Relay — клиент устройства | `internal/relayclient` |
 | Web UI | `internal/front/webui` |
-| Трей | `tray/` (отдельный репозиторий `gate4ai/tray`) |
+| Трей (бинарник `gate4ai-tray`) | `cmd/gate4ai-tray` (меню, fyne.io/systray), `internal/front/tray` (состояние, решения, уведомления) |
 | Магазин: пакеты .g4c, индекс registry, установка с согласием, отзыв | `internal/connectors/store`, `registry/` |
 | Изоляция: Egress Proxy, `gate4ai run`, `doctor` | `internal/hostsvc/egress`, `internal/sandbox` |
 | Сквозной тест (хост + настоящие коннекторы) | отдельный репозиторий `gate4ai/e2e` |

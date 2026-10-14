@@ -47,19 +47,29 @@ done
 
 ## 4. Настройки организации
 
-- **CLA Assistant** для `gate4ai`, `relay`, `tray` (текст CLA — от юриста); **DCO** (GitHub App) для `sdk-go`, коннекторов, `registry`, `e2e`.
+- **CLA Assistant** для `gate4ai`, `relay` (текст CLA — от юриста); **DCO** (GitHub App) для `sdk-go`, коннекторов, `registry`, `e2e`.
 - **Branch protection** на `main`: обязательный CI, ревью.
 - **Секреты:** `GATE4AI_PUBLISHER_KEY` (организация, для коннекторов) — приватный ключ издателя (`gate4ai connectors keygen`); ключ registry — вне GitHub, подпись индекса — вручную (`gate4ai registry sign`); `REGISTRY_PUBLIC_KEY` — переменная `registry` для CI.
 - **Релизы:** тег `v*` в `gate4ai` и `relay` — GoReleaser со сборкой под три ОС и подписью cosign (keyless); в коннекторах — пакет `.g4c`, подписанный ключом издателя, затем pull request в `registry`.
 
 ## 5. После публикации: рабочие копии
 
-Репозитории уже опубликованы без истории (один начальный коммит), поэтому `split.sh` для них больше не запускается: он пересоздал бы историю. Правка делается в монорепозитории и переносится в клон обычным коммитом.
+Репозитории уже опубликованы без истории (один начальный коммит), поэтому `split.sh` для них больше не запускается: он пересоздал бы историю. Изменения — обычными коммитами.
 
-Клоны лежат рядом с монорепозиторием, в `../gate4ai/<репозиторий>`: `gate4ai`, `sdk-go`, `relay`, `gate4ai-mail`, `gate4ai-files`, `gate4ai-browser`, `tray`, `registry`, `.github`. Соответствие каталогов — таблица в разделе 1.
+Монорепозитория больше нет (удалён 2026-10-14, история не сохранялась); разделы 1–3 описывают, как репозитории были созданы. Правки делаются прямо в клонах в общем каталоге `gate4ai/`:
+
+| Каталог | Репозиторий |
+|---|---|
+| `gate4ai/` | `gate4ai/gate4ai` |
+| `sdk-go/`, `relay/`, `registry/`, `.github/` | одноимённые `gate4ai/*` |
+| — | `gate4ai/tray` удалён 2026-10-14: трей теперь `cmd/gate4ai-tray` в `gate4ai/gate4ai` |
+| `connectors/mail/`, `connectors/files/`, `connectors/browser/` | `gate4ai/gate4ai-mail`, `gate4ai-files`, `gate4ai-browser` |
+| `e2e/` | `gate4ai/e2e` — сквозные тесты (AGPL-3.0-only), создан 2026-10-14, ещё не опубликован |
+| `connectors/auth/` | будущие auth-модули |
+| `.secrets/keys/` | ключ издателя и ключ registry; вне git |
 
 ## 6. Выпуск версии коннектора
 
-1. Тег `v<version из manifest.yaml>` в репозитории коннектора (`version: "2"` → `v2`). CI собирает модуль, подписывает пакет ключом издателя и создаёт релиз с `<connector>-<version>.g4c` и `pack.json`.
-2. Из `pack.json` в `registry/index.json` переносятся `sha256`, `digest`, `capabilities`; `url` — ссылка на `.g4c` в релизе. Ключ издателя — в `publishers`.
-3. Владелец registry подписывает индекс (`gate4ai registry sign index.json --key registry.key`) и коммитит `index.json` вместе с `index.json.sig`.
+1. `version` в `manifest.yaml` +1, коммит, тег `v<version>` (`version: "3"` → `v3`). CI собирает модуль воспроизводимо (Go из `go.mod`, без сведений о git), подписывает пакет ключом издателя и создаёт релиз с `<connector>-<version>.g4c` и `pack.json`. Выпущенную версию не перевыпускать: новая сборка — новая версия.
+2. В ветке `registry`: `gate4ai registry add index.json pack.json --publisher gate4ai`, затем `gate4ai registry sign index.json --key ../.secrets/keys/registry.key`; pull request. CI скачивает и сверяет каждый пакет, а новые версии пересобирает из тега и сравнивает с релизом.
+3. После ревью — слияние. Сторонние издатели проходят тот же путь без подписи индекса: [CONTRIBUTING.md registry](https://github.com/gate4ai/registry/blob/main/CONTRIBUTING.md).
