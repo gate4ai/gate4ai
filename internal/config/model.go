@@ -110,6 +110,9 @@ type Approvals struct {
 type Telegram struct {
 	Token   string `yaml:"token" json:"token"`       // алиас Vault, например "@telegram.bot"
 	OwnerID int64  `yaml:"owner_id" json:"owner_id"` // Telegram ID владельца
+	// Webhook — получать обновления вебхуком на публичный адрес устройства
+	// (<адрес>/telegram) вместо long polling; без публичного адреса — polling.
+	Webhook bool `yaml:"webhook,omitempty" json:"webhook,omitempty"`
 }
 
 // Retention — сроки хранения журнала; 0 — бессрочно.

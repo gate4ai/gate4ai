@@ -48,6 +48,10 @@ Everything outside your sandbox (the user's mail, host files, browser sessions, 
 
 Output is JSON. Exit codes: ` + "`0`" + ` ok · ` + "`2`" + ` denied_by_policy · ` + "`3`" + ` pending_approval · ` + "`4`" + ` verification_failed · ` + "`5`" + ` invalid arguments / unknown action · ` + "`6`" + ` gate4ai unavailable · ` + "`1`" + ` other error.
 
+## Connection
+
+` + "`gate4ai`" + ` reads your agent token from ` + "`GATE4AI_TOKEN`" + `. If gate4ai runs on another computer, ` + "`GATE4AI_URL`" + ` holds its address (` + "`https://…`" + `); the commands are the same. Exit code ` + "`6`" + ` then usually means the device is asleep or offline: retry later.
+
 ## Discovering actions
 
 - ` + "`gate4ai tools --json`" + ` — actions available to you (filtered by your profile).

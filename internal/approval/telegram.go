@@ -5,6 +5,9 @@ package approval
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +28,8 @@ type TelegramAPI interface {
 	EditMessage(ctx context.Context, chatID, msgID int64, text string) error
 	AnswerCallback(ctx context.Context, callbackID, text string) error
 	GetUpdates(ctx context.Context, offset int64, timeout int) ([]Update, error)
+	SetWebhook(ctx context.Context, url, secret string) error
+	DeleteWebhook(ctx context.Context) error
 }
 
 // Button — inline-кнопка.
@@ -130,6 +135,14 @@ func (b *BotAPI) GetUpdates(ctx context.Context, offset int64, timeout int) ([]U
 	return u, err
 }
 
+func (b *BotAPI) SetWebhook(ctx context.Context, url, secret string) error {
+	return b.call(ctx, "setWebhook", map[string]any{"url": url, "secret_token": secret, "allowed_updates": []string{"message", "callback_query"}}, nil)
+}
+
+func (b *BotAPI) DeleteWebhook(ctx context.Context) error {
+	return b.call(ctx, "deleteWebhook", map[string]any{}, nil)
+}
+
 // Telegram — канал подтверждений через личного бота пользователя. Принимает
 // команды и нажатия только от Telegram ID владельца.
 type Telegram struct {
@@ -138,9 +151,12 @@ type Telegram struct {
 	Decider Decider
 	State   *state.Store
 	Log     *slog.Logger
+	// Webhook — адрес вебхука (<публичный адрес>/telegram); "" — long polling.
+	Webhook string
 
-	mu   sync.Mutex
-	msgs map[string]int64 // approval id → message id
+	mu     sync.Mutex
+	msgs   map[string]int64 // approval id → message id
+	secret string           // секрет вебхука (заголовок X-Telegram-Bot-Api-Secret-Token)
 }
 
 // NewTelegram создаёт канал.
@@ -212,8 +228,60 @@ func (t *Telegram) Denied(agent, action, reason string) {
 	_, _ = t.API.SendMessage(ctx, t.OwnerID, fmt.Sprintf("⛔ %s: %s запрещено — %s", agent, action, reason), nil)
 }
 
-// Run — цикл long polling до отмены ctx.
+// Run получает обновления до отмены ctx: вебхуком, если задан Webhook и Telegram
+// его принял, иначе long polling.
 func (t *Telegram) Run(ctx context.Context) {
+	if t.Webhook != "" {
+		secret := randomSecret()
+		if err := t.API.SetWebhook(ctx, t.Webhook, secret); err == nil {
+			t.mu.Lock()
+			t.secret = secret
+			t.mu.Unlock()
+			<-ctx.Done()
+			t.mu.Lock()
+			t.secret = ""
+			t.mu.Unlock()
+			dctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = t.API.DeleteWebhook(dctx)
+			return
+		} else if ctx.Err() == nil {
+			t.Log.Warn("telegram webhook not set, falling back to polling", "err", err)
+		}
+	}
+	t.poll(ctx)
+}
+
+func randomSecret() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// ServeWebhook — вебхук Telegram: принимается только запрос с секретом,
+// выданным при setWebhook; остальное — 404, как будто маршрута нет.
+func (t *Telegram) ServeWebhook(w http.ResponseWriter, r *http.Request) {
+	t.mu.Lock()
+	secret := t.secret
+	t.mu.Unlock()
+	got := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
+	if secret == "" || subtle.ConstantTimeCompare([]byte(got), []byte(secret)) != 1 {
+		http.NotFound(w, r)
+		return
+	}
+	var u Update
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&u); err != nil {
+		http.Error(w, "bad update", http.StatusBadRequest)
+		return
+	}
+	t.Handle(r.Context(), u)
+	w.WriteHeader(http.StatusOK)
+}
+
+// poll — цикл long polling до отмены ctx.
+func (t *Telegram) poll(ctx context.Context) {
+	// Вебхук от прошлого запуска мешает getUpdates (409).
+	_ = t.API.DeleteWebhook(ctx)
 	var offset int64
 	backoff := time.Second
 	for ctx.Err() == nil {

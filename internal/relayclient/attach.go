@@ -27,6 +27,12 @@ func Attach(ctx context.Context, d *daemon.Daemon) {
 	var cur *Device
 	var stop context.CancelFunc
 	var key string
+	d.AddPublicURL(func() string {
+		if c := d.Config.Current().Relay; c.URL != "" && c.DeviceID != "" {
+			return "https://" + deviceHost(c)
+		}
+		return ""
+	})
 	apply := func(c *config.Config) {
 		mu.Lock()
 		defer mu.Unlock()

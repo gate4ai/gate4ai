@@ -5,6 +5,10 @@
 // откатом, алиасы Vault. Вход — одноразовая ссылка, которую выдаёт daemon по
 // сокету владельца (`gate4ai ui`, трей); дальше — сессия в HttpOnly-cookie.
 // Защита: проверка Host (DNS rebinding), SameSite=Strict, CSRF-токен в формах.
+//
+// Удалённо Web UI доступен на публичном адресе устройства под /ui/ (RemoteHandler):
+// своя ссылка входа (`gate4ai ui --remote`) и своя cookie, локальная сессия там
+// не действует и наоборот; изменения политик, агентов и секретов — только локально.
 package webui
 
 import (
@@ -17,6 +21,7 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,18 +56,40 @@ type UI struct {
 	Now  func() time.Time
 
 	mu       sync.Mutex
-	logins   map[string]time.Time // одноразовые токены входа
+	logins   map[string]login // одноразовые токены входа
 	sessions map[string]session
+}
+
+type login struct {
+	expires time.Time
+	remote  bool
 }
 
 type session struct {
 	csrf    string
 	expires time.Time
+	remote  bool
+}
+
+// mount — где обслуживается Web UI: локально (loopback) или удалённо (/ui/ на
+// публичном адресе устройства).
+type mount struct {
+	base   string // "" или "/ui"
+	remote bool
+}
+
+var local, remote = mount{}, mount{base: "/ui", remote: true}
+
+func (m mount) cookie() string {
+	if m.remote {
+		return "g4a_rsession"
+	}
+	return "g4a_session"
 }
 
 // New создаёт Web UI.
 func New(d *daemon.Daemon) *UI {
-	return &UI{D: d, Now: time.Now, logins: map[string]time.Time{}, sessions: map[string]session{}}
+	return &UI{D: d, Now: time.Now, logins: map[string]login{}, sessions: map[string]session{}}
 }
 
 func random() string {
@@ -73,11 +100,24 @@ func random() string {
 
 // LoginURL — одноразовая ссылка входа (2 минуты).
 func (u *UI) LoginURL() string {
+	return "http://" + u.Addr + "/login?t=" + u.newLogin(false)
+}
+
+// RemoteLoginURL — одноразовая ссылка входа в удалённый Web UI (2 минуты).
+func (u *UI) RemoteLoginURL() (string, error) {
+	pub := u.D.PublicURL()
+	if pub == "" {
+		return "", fmt.Errorf("no public address: register the device on a relay or start the daemon with --public")
+	}
+	return pub + remote.base + "/login?t=" + u.newLogin(true), nil
+}
+
+func (u *UI) newLogin(rem bool) string {
 	t := random()
 	u.mu.Lock()
-	u.logins[t] = u.Now().Add(2 * time.Minute)
+	u.logins[t] = login{expires: u.Now().Add(2 * time.Minute), remote: rem}
 	u.mu.Unlock()
-	return "http://" + u.Addr + "/login?t=" + t
+	return t
 }
 
 // Listen слушает только loopback.
@@ -105,7 +145,21 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"url": u.LoginURL()})
+		var req struct {
+			Remote bool `json:"remote"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		link := u.LoginURL()
+		if req.Remote {
+			var err error
+			if link, err = u.RemoteLoginURL(); err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(409)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "no_public_address", "message": err.Error()}})
+				return
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"url": link})
 	})
 	mux.HandleFunc("GET /v1/tray/state", func(w http.ResponseWriter, r *http.Request) {
 		if !daemon.PrincipalFrom(r.Context()).IsOwner() {
@@ -125,14 +179,17 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 	})
 }
 
-func (u *UI) session(r *http.Request) (string, session, bool) {
-	c, err := r.Cookie("g4a_session")
+func (u *UI) session(m mount, r *http.Request) (string, session, bool) {
+	c, err := r.Cookie(m.cookie())
 	if err != nil {
 		return "", session{}, false
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	s, ok := u.sessions[c.Value]
+	if ok && s.remote != m.remote {
+		return "", session{}, false
+	}
 	if !ok || u.Now().After(s.expires) {
 		delete(u.sessions, c.Value)
 		return "", session{}, false
@@ -140,41 +197,79 @@ func (u *UI) session(r *http.Request) (string, session, bool) {
 	return c.Value, s, true
 }
 
-// Handler — HTTP Web UI.
-func (u *UI) Handler() http.Handler {
+// Handler — HTTP Web UI на loopback.
+func (u *UI) Handler() http.Handler { return u.handler(local) }
+
+// RemoteHandler — Web UI для публичного адреса устройства (маршрут /ui/).
+func (u *UI) RemoteHandler() http.Handler { return u.handler(remote) }
+
+func (u *UI) handler(m mount) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /login", u.login)
-	mux.HandleFunc("GET /{$}", u.page(u.approvals))
-	mux.HandleFunc("GET /agents", u.page(u.agents))
-	mux.HandleFunc("GET /journal", u.page(u.journal))
-	mux.HandleFunc("GET /journal/{hash}", u.page(u.receipt))
-	mux.HandleFunc("GET /policy", u.page(u.policyPage))
-	mux.HandleFunc("GET /vault", u.page(u.vaultPage))
-	mux.HandleFunc("POST /approvals/{id}", u.post(u.decide))
-	mux.HandleFunc("POST /agents/{name}/token", u.post(u.token))
-	mux.HandleFunc("POST /agents/{name}/connect", u.post(u.connect))
-	mux.HandleFunc("POST /agents/{name}/revoke", u.post(u.revoke))
-	mux.HandleFunc("POST /policy", u.post(u.savePolicy))
-	mux.HandleFunc("POST /policy/rollback", u.post(u.rollback))
-	mux.HandleFunc("POST /policy/simulate", u.post(u.simulate))
-	mux.HandleFunc("POST /vault", u.post(u.setSecret))
-	mux.HandleFunc("POST /logout", u.post(func(w http.ResponseWriter, r *http.Request) map[string]any {
-		c, _ := r.Cookie("g4a_session")
+	b := m.base
+	mux.HandleFunc("GET "+b+"/login", u.login(m))
+	mux.HandleFunc("GET "+b+"/{$}", u.page(m, u.approvals))
+	mux.HandleFunc("GET "+b+"/agents", u.page(m, u.agents))
+	mux.HandleFunc("GET "+b+"/journal", u.page(m, u.journal))
+	mux.HandleFunc("GET "+b+"/journal/{hash}", u.page(m, u.receipt))
+	mux.HandleFunc("GET "+b+"/policy", u.page(m, u.policyPage))
+	mux.HandleFunc("GET "+b+"/vault", u.page(m, u.vaultPage))
+	mux.HandleFunc("POST "+b+"/approvals/{id}", u.post(m, u.decide(m)))
+	mux.HandleFunc("POST "+b+"/policy/simulate", u.post(m, u.simulate))
+	// Изменения политик, агентов и секретов — только локально.
+	mux.HandleFunc("POST "+b+"/agents/{name}/token", u.post(m, localOnly(m, u.token)))
+	mux.HandleFunc("POST "+b+"/agents/{name}/connect", u.post(m, localOnly(m, u.connect)))
+	mux.HandleFunc("POST "+b+"/agents/{name}/revoke", u.post(m, localOnly(m, u.revoke)))
+	mux.HandleFunc("POST "+b+"/policy", u.post(m, localOnly(m, u.savePolicy)))
+	mux.HandleFunc("POST "+b+"/policy/rollback", u.post(m, localOnly(m, u.rollback)))
+	mux.HandleFunc("POST "+b+"/vault", u.post(m, localOnly(m, u.setSecret)))
+	mux.HandleFunc("POST "+b+"/logout", u.post(m, func(w http.ResponseWriter, r *http.Request) map[string]any {
+		c, _ := r.Cookie(m.cookie())
 		u.mu.Lock()
 		delete(u.sessions, c.Value)
 		u.mu.Unlock()
-		http.SetCookie(w, &http.Cookie{Name: "g4a_session", Value: "", Path: "/", MaxAge: -1})
+		http.SetCookie(w, &http.Cookie{Name: m.cookie(), Value: "", Path: b + "/", MaxAge: -1, Secure: m.remote})
 		return map[string]any{"redirect": "/login"}
 	}))
-	return u.guard(mux)
+	return u.guard(m, mux)
+}
+
+// errLocalOnly — действие запрещено в удалённой сессии.
+const errLocalOnly = "local_only"
+
+func localOnly(m mount, f func(w http.ResponseWriter, r *http.Request) map[string]any) func(w http.ResponseWriter, r *http.Request) map[string]any {
+	if !m.remote {
+		return f
+	}
+	return func(w http.ResponseWriter, r *http.Request) map[string]any {
+		return map[string]any{"status": http.StatusForbidden, "page": "approvals", "error": errLocalOnly + ": this change is allowed only on this computer"}
+	}
+}
+
+// host — ожидаемый Host запроса.
+func (u *UI) hostOK(m mount, host string) bool {
+	if m.remote {
+		pu, err := url.Parse(u.D.PublicURL())
+		return err == nil && pu.Host != "" && host == pu.Host
+	}
+	_, port, _ := net.SplitHostPort(u.Addr)
+	return host == u.Addr || host == "localhost:"+port
+}
+
+func (u *UI) originOK(m mount, r *http.Request) bool {
+	o := r.Header.Get("Origin")
+	if o == "" {
+		return true
+	}
+	if m.remote {
+		return o == "https://"+r.Host
+	}
+	return o == "http://"+u.Addr || strings.HasPrefix(o, "http://localhost:")
 }
 
 // guard — проверка Host (защита от DNS rebinding) и заголовки безопасности.
-func (u *UI) guard(h http.Handler) http.Handler {
+func (u *UI) guard(m mount, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
-		_, port, _ := net.SplitHostPort(u.Addr)
-		if host != u.Addr && host != "localhost:"+port {
+		if !u.hostOK(m, r.Host) {
 			http.Error(w, "bad host", http.StatusMisdirectedRequest)
 			return
 		}
@@ -187,41 +282,52 @@ func (u *UI) guard(h http.Handler) http.Handler {
 	})
 }
 
-func (u *UI) login(w http.ResponseWriter, r *http.Request) {
-	t := r.URL.Query().Get("t")
-	u.mu.Lock()
-	exp, ok := u.logins[t]
-	delete(u.logins, t)
-	u.mu.Unlock()
-	if t == "" || !ok || u.Now().After(exp) {
-		w.WriteHeader(401)
-		_ = tpl.ExecuteTemplate(w, "login.html", nil)
-		return
+func (u *UI) login(m mount) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		t := r.URL.Query().Get("t")
+		u.mu.Lock()
+		l, ok := u.logins[t]
+		if ok && l.remote == m.remote {
+			delete(u.logins, t)
+		}
+		u.mu.Unlock()
+		if t == "" || !ok || l.remote != m.remote || u.Now().After(l.expires) {
+			loginPage(w, m)
+			return
+		}
+		sid := random()
+		u.mu.Lock()
+		u.sessions[sid] = session{csrf: random(), expires: u.Now().Add(12 * time.Hour), remote: m.remote}
+		u.mu.Unlock()
+		http.SetCookie(w, &http.Cookie{Name: m.cookie(), Value: sid, Path: m.base + "/", HttpOnly: true, Secure: m.remote,
+			SameSite: http.SameSiteStrictMode, MaxAge: 12 * 3600})
+		http.Redirect(w, r, m.base+"/", http.StatusSeeOther)
 	}
-	sid := random()
-	u.mu.Lock()
-	u.sessions[sid] = session{csrf: random(), expires: u.Now().Add(12 * time.Hour)}
-	u.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "g4a_session", Value: sid, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 12 * 3600})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func loginPage(w http.ResponseWriter, m mount) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(401)
+	_ = tpl.ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote})
 }
 
 type view struct {
+	Base             string // "" или "/ui"
+	Remote           bool
 	Title, Nav, CSRF string
 	Flash, Error     string
 	Data             map[string]any
 }
 
-func (u *UI) page(f func(r *http.Request) (string, map[string]any, error)) http.HandlerFunc {
+func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, s, ok := u.session(r)
+		_, s, ok := u.session(m, r)
 		if !ok {
-			w.WriteHeader(401)
-			_ = tpl.ExecuteTemplate(w, "login.html", nil)
+			loginPage(w, m)
 			return
 		}
 		name, data, err := f(r)
-		v := view{Nav: name, CSRF: s.csrf, Data: data, Flash: r.URL.Query().Get("flash")}
+		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: data, Flash: r.URL.Query().Get("flash")}
 		if err != nil {
 			v.Error = err.Error()
 		}
@@ -233,14 +339,14 @@ func (u *UI) page(f func(r *http.Request) (string, map[string]any, error)) http.
 }
 
 // post — действие формы: сессия, CSRF-токен, Origin; результат — редирект или страница.
-func (u *UI) post(f func(w http.ResponseWriter, r *http.Request) map[string]any) http.HandlerFunc {
+func (u *UI) post(m mount, f func(w http.ResponseWriter, r *http.Request) map[string]any) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, s, ok := u.session(r)
+		_, s, ok := u.session(m, r)
 		if !ok {
 			http.Error(w, "login required", 401)
 			return
 		}
-		if o := r.Header.Get("Origin"); o != "" && o != "http://"+u.Addr && !strings.HasPrefix(o, "http://localhost:") {
+		if !u.originOK(m, r) {
 			http.Error(w, "bad origin", 403)
 			return
 		}
@@ -251,11 +357,11 @@ func (u *UI) post(f func(w http.ResponseWriter, r *http.Request) map[string]any)
 		}
 		res := f(w, r)
 		if red, ok := res["redirect"].(string); ok {
-			http.Redirect(w, r, red, http.StatusSeeOther)
+			http.Redirect(w, r, m.base+red, http.StatusSeeOther)
 			return
 		}
 		name, _ := res["page"].(string)
-		v := view{Nav: name, CSRF: s.csrf, Data: res}
+		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: res}
 		if e, ok := res["error"].(string); ok {
 			v.Error = e
 		}
@@ -263,6 +369,9 @@ func (u *UI) post(f func(w http.ResponseWriter, r *http.Request) map[string]any)
 			v.Flash = fl
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if st, ok := res["status"].(int); ok {
+			w.WriteHeader(st)
+		}
 		if err := tpl.ExecuteTemplate(w, name+".html", v); err != nil {
 			http.Error(w, err.Error(), 500)
 		}
@@ -277,12 +386,19 @@ func (u *UI) approvals(r *http.Request) (string, map[string]any, error) {
 	return "approvals", map[string]any{"Pending": pend, "Recent": recent}, err
 }
 
-func (u *UI) decide(w http.ResponseWriter, r *http.Request) map[string]any {
-	res, err := u.D.Pipeline.Decide(r.Context(), r.PathValue("id"), r.PostForm.Get("decision") == "approve", "webui", "owner")
-	if err != nil {
-		return map[string]any{"redirect": "/?flash=" + urlq(err.Error())}
+// decide — решение по запросу; канал в квитанции различает локальный и удалённый вход.
+func (u *UI) decide(m mount) func(w http.ResponseWriter, r *http.Request) map[string]any {
+	channel := "webui"
+	if m.remote {
+		channel = "webui-remote"
 	}
-	return map[string]any{"redirect": "/?flash=" + urlq(res.Status+" "+res.Receipt)}
+	return func(w http.ResponseWriter, r *http.Request) map[string]any {
+		res, err := u.D.Pipeline.Decide(r.Context(), r.PathValue("id"), r.PostForm.Get("decision") == "approve", channel, "owner")
+		if err != nil {
+			return map[string]any{"redirect": "/?flash=" + urlq(err.Error())}
+		}
+		return map[string]any{"redirect": "/?flash=" + urlq(res.Status+" "+res.Receipt)}
+	}
 }
 
 func (u *UI) agents(r *http.Request) (string, map[string]any, error) {

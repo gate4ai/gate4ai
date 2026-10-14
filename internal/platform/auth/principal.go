@@ -21,7 +21,7 @@ const (
 type Principal struct {
 	Kind  Kind
 	Agent string // имя агента для Kind == Agent
-	Via   string // канал: "socket", "agent-socket", "webui", "mcp-http", "mcp-stdio"
+	Via   string // канал: "socket", "agent-socket", "webui", "mcp-http", "mcp-stdio", "https" (API агента на публичном адресе)
 }
 
 // ErrNotOwner — операция доступна только владельцу.

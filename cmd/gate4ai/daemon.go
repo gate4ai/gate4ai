@@ -41,6 +41,10 @@ func daemonMain(args []string) error {
 	showVersion := flag.Bool("version", false, "print version")
 	flag.StringVar(&uiAddr, "ui", uiAddr, "web UI address (loopback only; empty disables)")
 	flag.StringVar(&telegramAPI, "telegram-api", telegramAPI, "Telegram Bot API base URL")
+	flag.StringVar(&public.addr, "public", "", "public address without relay: listen here (HTTPS with --public-cert/--public-key, or loopback HTTP behind a reverse proxy)")
+	flag.StringVar(&public.url, "public-url", "", "external URL of --public, e.g. https://gate.example.com")
+	flag.StringVar(&public.cert, "public-cert", "", "TLS certificate (PEM) for --public")
+	flag.StringVar(&public.key, "public-key", "", "TLS key (PEM) for --public")
 	flag.StringVar(&egressAddr, "egress", egressAddr, "egress proxy address for sandboxed agents (authenticated per run)")
 	if err := flag.Parse(args); err != nil {
 		return err

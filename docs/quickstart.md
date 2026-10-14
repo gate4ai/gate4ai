@@ -148,10 +148,28 @@ gate4ai agents connect claude-ai          # одноразовый код под
 
 Добавьте `mcp_url` как custom connector и введите код на странице авторизации.
 
+**Агент с shell на другом компьютере (CLI + skill):** те же команды, адрес устройства — в `GATE4AI_URL`:
+
+```sh
+export GATE4AI_TOKEN=g4a_…                          # gate4ai agents token <agent> на устройстве
+export GATE4AI_URL=https://<device-id>.relay.gate4.ai
+gate4ai tools
+```
+
+**Без relay** (свой сертификат или reverse proxy на этом компьютере):
+
+```sh
+gate4ai daemon --public :8443 --public-url https://gate.example.com --public-cert gate.crt --public-key gate.key
+gate4ai daemon --public 127.0.0.1:8080 --public-url https://gate.example.com   # TLS снимает reverse proxy
+```
+
+Публичный адрес один на всё: `/mcp` — MCP, `/v1/…` — CLI агентов, `/ui/` — Web UI, `/telegram` — вебхук бота.
+
 ## 4. Подтверждения, Web UI, журнал
 
 - Подтверждения: Telegram-бот (кнопки «Разрешить / Отклонить / Показать текст»), уведомления ОС, трей, Web UI, `gate4ai approvals approve <id>`.
-- Web UI: `gate4ai ui` — откроет браузер по одноразовой ссылке (http://127.0.0.1:7431).
+- Web UI: `gate4ai ui` — откроет браузер по одноразовой ссылке (http://127.0.0.1:7431). С телефона: `gate4ai ui --remote` выдаёт одноразовую ссылку на `<публичный адрес>/ui/`; удалённо доступны подтверждения и журнал, политики, агенты и секреты меняются только на этом компьютере.
+- Telegram вебхуком вместо polling: `approvals.telegram.webhook: true` (нужен публичный адрес).
 - Журнал: `gate4ai log`, `gate4ai show '#a3f9c21e'`, `gate4ai journal verify`, `gate4ai export -o backup.tar.gz --passphrase-env PASS`, офлайн-проверка `gate4ai verify backup.tar.gz --pubkey <hex>`.
 - Политики: `gate4ai policy test --agent claude-ai --action email.send --args '{"to":["x@y.z"],"subject":"s"}'`, `gate4ai policy versions`, `gate4ai policy rollback <n>`.
 

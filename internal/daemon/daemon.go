@@ -75,6 +75,11 @@ type Daemon struct {
 	extra     []func(*http.ServeMux) // доп. маршруты владельца (MCP HTTP, Web UI)
 	oauth     *oauth.Server
 	browser   *browser.Service
+
+	// Публичный адрес устройства (relay, прямой HTTPS): маршруты по путям, адрес.
+	public     []publicRoute
+	publicURLs []func() string
+	publicMux  http.Handler
 }
 
 // New собирает daemon.

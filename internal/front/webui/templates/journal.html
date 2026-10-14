@@ -1,12 +1,12 @@
 {{template "head" .}}
 <h2>Журнал</h2>
 <p>Цепочка хэшей: {{if eq .Data.Chain "ok"}}<span class="allow">цела</span>{{else}}<span class="deny">{{.Data.Chain}}</span>{{end}}</p>
-<form class="row" method="get" action="/journal">
+<form class="row" method="get" action="{{$.Base}}/journal">
 <input name="agent" placeholder="агент" value="{{.Data.Q.Get "agent"}}"><input name="action" placeholder="действие" value="{{.Data.Q.Get "action"}}">
 <select name="effect"><option value="">все решения</option><option {{if eq (.Data.Q.Get "effect") "allow"}}selected{{end}}>allow</option><option {{if eq (.Data.Q.Get "effect") "ask"}}selected{{end}}>ask</option><option {{if eq (.Data.Q.Get "effect") "deny"}}selected{{end}}>deny</option></select>
 <button>Показать</button></form>
 <table><tr><th>Квитанция</th><th>Время</th><th>Агент</th><th>Действие</th><th>Решение</th><th>Исполнение</th><th>Проверка</th></tr>
-{{range .Data.Entries}}<tr><td><a href="/journal/{{.Hash}}"><code>{{short .Hash}}</code></a></td><td>{{ts .Receipt.TS}}</td><td>{{.Receipt.Agent}}</td><td><code>{{.Receipt.Action}}</code></td>
+{{range .Data.Entries}}<tr><td><a href="{{$.Base}}/journal/{{.Hash}}"><code>{{short .Hash}}</code></a></td><td>{{ts .Receipt.TS}}</td><td>{{.Receipt.Agent}}</td><td><code>{{.Receipt.Action}}</code></td>
 <td class="{{.Receipt.Decision.Effect}}">{{.Receipt.Decision.Effect}}{{if .Receipt.Decision.RuleIDs}} <span class="muted">{{join .Receipt.Decision.RuleIDs ", "}}</span>{{end}}</td>
 <td>{{.Receipt.Execution.Status}}</td><td>{{.Receipt.Verification.Status}}</td></tr>{{else}}<tr><td colspan="7" class="muted">Пусто</td></tr>{{end}}
 </table>

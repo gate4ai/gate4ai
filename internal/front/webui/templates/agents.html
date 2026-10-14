@@ -6,9 +6,9 @@
 <table><tr><th>Агент</th><th>Профиль</th><th></th></tr>
 {{range $name, $a := .Data.Agents}}<tr><td><b>{{$name}}</b><div class="muted">{{$a.Description}}</div></td><td>{{$a.Profile}}</td>
 <td><div class="row">
-<form method="post" action="/agents/{{$name}}/token"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input name="label" placeholder="метка" size="10"> <button>Выдать токен</button></form>
-<form method="post" action="/agents/{{$name}}/connect"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Подключить (remote MCP)</button></form>
-<form method="post" action="/agents/{{$name}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">Отозвать все токены</button></form>
+<form method="post" action="{{$.Base}}/agents/{{$name}}/token"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input name="label" placeholder="метка" size="10"> <button>Выдать токен</button></form>
+<form method="post" action="{{$.Base}}/agents/{{$name}}/connect"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Подключить (remote MCP)</button></form>
+<form method="post" action="{{$.Base}}/agents/{{$name}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">Отозвать все токены</button></form>
 </div></td></tr>{{end}}
 </table>
 <p class="muted">Новый агент добавляется в разделе «Политики» (agents:).</p>

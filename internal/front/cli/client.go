@@ -8,11 +8,16 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"strings"
 
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 )
@@ -28,10 +33,11 @@ const (
 	ExitUnavailable  = 6
 )
 
-// Client — HTTP поверх сокета daemon.
+// Client — HTTP к daemon: поверх сокета или по HTTPS к публичному адресу устройства.
 type Client struct {
 	HTTP  *http.Client
 	Token string
+	Base  string // "" — сокет; иначе https://<устройство> (удалённый агент)
 }
 
 // ErrUnavailable — daemon недоступен («устройство офлайн»).
@@ -57,7 +63,11 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 		}
 		rd = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, "http://gate4ai"+path, rd)
+	base := c.Base
+	if base == "" {
+		base = "http://gate4ai"
+	}
+	req, err := http.NewRequestWithContext(ctx, method, base+path, rd)
 	if err != nil {
 		return err
 	}
@@ -94,6 +104,28 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 	default:
 		return json.Unmarshal(b, out)
 	}
+}
+
+// NewRemoteClient — клиент агента к публичному адресу устройства (relay или
+// прямой HTTPS); caFile — свой CA (self-hosted relay, тесты), "" — системные.
+func NewRemoteClient(base, token, caFile string) (*Client, error) {
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, fmt.Errorf("GATE4AI_URL must be https://<device address>, got %q", base)
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if caFile != "" {
+		pem, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, err
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("no certificates in %s", caFile)
+		}
+		tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	}
+	return &Client{HTTP: &http.Client{Transport: tr}, Token: token, Base: strings.TrimSuffix(u.Scheme+"://"+u.Host, "/")}, nil
 }
 
 // NewSocketClient — клиент к сокету path.

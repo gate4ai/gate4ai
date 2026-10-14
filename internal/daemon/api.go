@@ -181,58 +181,7 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		_, n := d.Config.CurrentRaw()
 		writeJSON(w, 200, map[string]any{"ok": true, "config_version": n, "connectors": len(d.Registry.Manifests())})
 	})
-	mux.HandleFunc("GET /v1/whoami", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-		writeJSON(w, 200, map[string]any{"owner": p.IsOwner(), "agent": p.Agent, "via": p.Via})
-	}))
-	mux.HandleFunc("GET /v1/tools", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-		if as := r.URL.Query().Get("agent"); as != "" && p.IsOwner() {
-			p = auth.AgentVia(as, "socket")
-		}
-		writeJSON(w, 200, d.Tools(p))
-	}))
-	mux.HandleFunc("POST /v1/call", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-		var req struct {
-			Action string         `json:"action"`
-			Args   map[string]any `json:"args"`
-			Wait   string         `json:"wait"`
-			Agent  string         `json:"agent"` // только владелец: выполнить от имени агента (его профиль)
-		}
-		if err := readJSON(r, &req); err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
-			return
-		}
-		agent := p.Agent
-		if p.IsOwner() {
-			if req.Agent == "" {
-				writeErr(w, 400, "agent_required", "owner calls must name the agent whose profile applies (--as <agent>)")
-				return
-			}
-			agent = req.Agent
-		}
-		wait, err := config.ParseDuration(req.Wait)
-		if err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
-			return
-		}
-		args, _ := numbersToFloat(map[string]any(req.Args)).(map[string]any)
-		res := d.Pipeline.Execute(r.Context(), pipeline.Call{Agent: agent, Action: req.Action, Args: args, Wait: wait})
-		writeJSON(w, 200, res)
-	}))
-	mux.HandleFunc("GET /v1/status/{id}", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-		id := r.PathValue("id")
-		a, err := d.State.GetApproval(id)
-		if err != nil || (!p.IsOwner() && a.Agent != p.Agent) {
-			writeErr(w, 404, "not_found", "unknown id")
-			return
-		}
-		wait, _ := config.ParseDuration(r.URL.Query().Get("wait"))
-		if wait > 0 {
-			writeJSON(w, 200, d.Pipeline.WaitFor(r.Context(), id, wait))
-			return
-		}
-		res, _ := d.Pipeline.Status(id)
-		writeJSON(w, 200, res)
-	}))
+	d.agentRoutes(mux, anyp)
 
 	// ---- Только владелец ----
 	mux.HandleFunc("GET /v1/log", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -478,4 +427,62 @@ func (d *Daemon) policyTest(w http.ResponseWriter, agent, action string, args ma
 	}
 	dec := eng.Decide(policy.Request{Agent: agent, Action: action, Class: act.Class, Args: nargs, Now: time.Now()}, d.State.Counters())
 	writeJSON(w, 200, dec)
+}
+
+// agentRoutes — API агента (каталог, вызов, статус): на сокетах и на публичном
+// адресе (удалённый CLI). Ветки владельца срабатывают только для владельца,
+// а на публичном адресе собеседник — всегда агент.
+func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc) {
+	mux.HandleFunc("GET /v1/whoami", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		writeJSON(w, 200, map[string]any{"owner": p.IsOwner(), "agent": p.Agent, "via": p.Via})
+	}))
+	mux.HandleFunc("GET /v1/tools", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		if as := r.URL.Query().Get("agent"); as != "" && p.IsOwner() {
+			p = auth.AgentVia(as, "socket")
+		}
+		writeJSON(w, 200, d.Tools(p))
+	}))
+	mux.HandleFunc("POST /v1/call", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		var req struct {
+			Action string         `json:"action"`
+			Args   map[string]any `json:"args"`
+			Wait   string         `json:"wait"`
+			Agent  string         `json:"agent"` // только владелец: выполнить от имени агента (его профиль)
+		}
+		if err := readJSON(r, &req); err != nil {
+			writeErr(w, 400, "bad_request", err.Error())
+			return
+		}
+		agent := p.Agent
+		if p.IsOwner() {
+			if req.Agent == "" {
+				writeErr(w, 400, "agent_required", "owner calls must name the agent whose profile applies (--as <agent>)")
+				return
+			}
+			agent = req.Agent
+		}
+		wait, err := config.ParseDuration(req.Wait)
+		if err != nil {
+			writeErr(w, 400, "bad_request", err.Error())
+			return
+		}
+		args, _ := numbersToFloat(map[string]any(req.Args)).(map[string]any)
+		res := d.Pipeline.Execute(r.Context(), pipeline.Call{Agent: agent, Action: req.Action, Args: args, Wait: wait})
+		writeJSON(w, 200, res)
+	}))
+	mux.HandleFunc("GET /v1/status/{id}", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		id := r.PathValue("id")
+		a, err := d.State.GetApproval(id)
+		if err != nil || (!p.IsOwner() && a.Agent != p.Agent) {
+			writeErr(w, 404, "not_found", "unknown id")
+			return
+		}
+		wait, _ := config.ParseDuration(r.URL.Query().Get("wait"))
+		if wait > 0 {
+			writeJSON(w, 200, d.Pipeline.WaitFor(r.Context(), id, wait))
+			return
+		}
+		res, _ := d.Pipeline.Status(id)
+		writeJSON(w, 200, res)
+	}))
 }

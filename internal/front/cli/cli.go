@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -40,11 +41,24 @@ func DefaultEnv() *Env {
 	return &Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
 		Connect: func(token string) *Client {
 			if token != "" {
+				// Удалённый агент: daemon на другом компьютере, доступ по HTTPS.
+				if base := os.Getenv("GATE4AI_URL"); base != "" {
+					c, err := NewRemoteClient(base, token, os.Getenv("GATE4AI_CA_FILE"))
+					if err != nil {
+						return &Client{HTTP: &http.Client{Transport: failing{err}}, Token: token}
+					}
+					return c
+				}
 				return NewSocketClient(paths.AgentSocket(), token)
 			}
 			return NewSocketClient(paths.OwnerSocket(), "")
 		}, Extra: map[string]func(context.Context, *Env, []string) int{}}
 }
+
+// failing — транспорт, который возвращает ошибку настройки (неверный GATE4AI_URL).
+type failing struct{ err error }
+
+func (f failing) RoundTrip(*http.Request) (*http.Response, error) { return nil, f.err }
 
 // Client — клиент к daemon с токеном из GATE4AI_TOKEN.
 func (e *Env) Client() *Client { return e.Connect(e.Getenv("GATE4AI_TOKEN")) }
@@ -76,7 +90,7 @@ func (e *Env) fail(err error) int {
 
 const usage = `gate4ai — actions for AI agents under your policies
 
-Agent commands (token in GATE4AI_TOKEN):
+Agent commands (token in GATE4AI_TOKEN; daemon on another computer: GATE4AI_URL=https://<device address>):
   gate4ai tools [--json]                 actions available to this agent
   gate4ai <connector> <action> [--arg v] run an action (see --help on the action)
   gate4ai status <id> [--wait 10m]       result of an action pending approval
@@ -100,7 +114,7 @@ Owner commands (local socket):
   gate4ai connectors list | install <file.g4c | name[@version]> [--dev] [--yes] | update <name> [--yes] | remove <name> | refresh
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c] | verify <dir> <file.g4c> | keygen [-o key]   (publisher / registry review, offline)
   gate4ai registry check <index.json> [--key ed25519:…] [--fetch] | sign <index.json> --key file | add <index.json> <pack.json> --publisher name …   (registry)
-  gate4ai ui [--print]                   open the web UI (one-time login link)
+  gate4ai ui [--print] [--remote]        open the web UI (one-time login link; --remote: link for the public address)
   gate4ai run <agent> [--workspace dir] [--container|--microvm] [--dry-run] [-- cmd]   isolated agent
   gate4ai doctor                         look for ways around gate4ai
   gate4ai egress                         network connections of sandboxed agents
@@ -815,16 +829,17 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	printOnly := fs.Bool("print", false, "only print the login link")
+	remote := fs.Bool("remote", false, "link for the public address (relay or --public), to open on another device")
 	if fs.Parse(args) != nil {
 		return ExitUsage
 	}
 	var res struct {
 		URL string `json:"url"`
 	}
-	if err := e.Client().Do(ctx, "POST", "/v1/ui/session", nil, &res); err != nil {
+	if err := e.Client().Do(ctx, "POST", "/v1/ui/session", map[string]bool{"remote": *remote}, &res); err != nil {
 		return e.fail(err)
 	}
-	if !*printOnly {
+	if !*printOnly && !*remote {
 		if err := OpenURL(res.URL); err != nil {
 			fmt.Fprintln(e.Stderr, "could not open a browser:", err)
 		}

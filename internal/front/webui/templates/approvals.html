@@ -4,7 +4,7 @@
 <div class="card">
   <div class="row"><b>{{.Agent}}</b> → <code>{{.Action}}</code> <span class="muted">{{short .PreviewHash}} · до {{ts .Expires}}</span></div>
   <pre>{{.Preview}}</pre>
-  <form method="post" action="/approvals/{{.ID}}" class="row" style="margin-top:.6rem">
+  <form method="post" action="{{$.Base}}/approvals/{{.ID}}" class="row" style="margin-top:.6rem">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
     <button class="primary" name="decision" value="approve">Разрешить</button>
     <button class="danger" name="decision" value="reject">Отклонить</button>
