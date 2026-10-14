@@ -1,6 +1,8 @@
 # gate4.ai — локальный шлюз с политиками для AI-агентов
 
-gate4.ai — приложение для вашего компьютера, через которое любой AI-агент (Claude.ai, ChatGPT, Claude Code, OpenClaw, Hermes) получает доступ к почте, файлам, браузеру и сервисам этого компьютера. Агент не видит пароли и не действует напрямую: каждый его запрос проходит через политики, которые разрешают, запрещают или спрашивают вас (уведомление, Telegram, Web UI). Секреты подставляет сам gate4ai, а каждое действие попадает в журнал с доказательством.
+gate4.ai — страж для вашего компьютера: через него любой AI-агент (Claude.ai, ChatGPT, Claude Code, OpenClaw, Hermes) получает ограниченный и настраиваемый доступ к разнообразным [коннекторам](https://gate4.ai/connectors) — например, к почте, файлам, браузеру и сайтам, у которых нет API.
+
+Вы сами настраиваете, на что именно есть права у каждого AI-ассистента: что разрешено сразу, что запрещено, а что требует вашего подтверждения (уведомление, Telegram, Web UI). Ни AI-ассистент, ни коннекторы и скиллы не знают ваших паролей: секреты подставляет сам gate4ai, а каждое действие попадает в журнал с доказательством.
 
 Одни правила работают для всех ваших агентов: локальных (через CLI или MCP по stdio) и облачных (через relay или ваш HTTPS-адрес). Подробное описание продукта — в [спецификации](docs/specification.md).
 
@@ -8,37 +10,21 @@ gate4.ai — приложение для вашего компьютера, че
 
 ## Установка
 
-### Готовые сборки
-
-Скачайте архив для своей ОС со страницы [Releases](https://github.com/gate4ai/gate4ai/releases) (`gate4ai_<версия>_<ОС>_<архитектура>.tar.gz`, для Windows — `.zip`), распакуйте и положите `gate4ai` в `PATH`:
+macOS и Linux:
 
 ```sh
-tar xzf gate4ai_*_linux_amd64.tar.gz
-install -m 755 gate4ai ~/.local/bin/
-gate4ai --version
+curl -fsSL https://gate4.ai/install.sh | sh
 ```
 
-Необязательный значок в трее (статус, «Разрешить / Отклонить», открытие Web UI) — в отдельных архивах `gate4ai-tray_<версия>_<ОС>_<архитектура>`; его запускают рядом с работающим daemon.
+Windows (PowerShell):
 
-Проверка подлинности (необязательно): `checksums.txt` подписан [cosign](https://github.com/sigstore/cosign) без ключа:
-
-```sh
-sha256sum --ignore-missing -c checksums.txt
-cosign verify-blob checksums.txt --signature checksums.txt.sig --certificate checksums.txt.pem \
-  --certificate-identity-regexp '^https://github.com/gate4ai/gate4ai/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```powershell
+irm https://gate4.ai/install.ps1 | iex
 ```
 
-### Из исходников
+Установщик определяет ОС и архитектуру, скачивает последний релиз, сверяет контрольные суммы и кладёт `gate4ai` и `gate4ai-tray` (значок в трее: статус, «Разрешить / Отклонить», открытие Web UI) в каталог из `PATH`. Проверка: `gate4ai --version`.
 
-Нужен Go 1.27+:
-
-```sh
-go install github.com/gate4ai/gate4ai/cmd/gate4ai@latest
-go install github.com/gate4ai/gate4ai/cmd/gate4ai-tray@latest   # необязательно; на macOS нужен cgo (Xcode Command Line Tools)
-```
-
-Бинарник окажется в `$(go env GOPATH)/bin` — добавьте этот каталог в `PATH`.
+Вручную — архивы со страницы [Releases](https://github.com/gate4ai/gate4ai/releases) (контрольные суммы подписаны [cosign](https://github.com/sigstore/cosign)) или из исходников: `go install github.com/gate4ai/gate4ai/cmd/gate4ai@latest` (Go 1.27+).
 
 ## Первый запуск
 
