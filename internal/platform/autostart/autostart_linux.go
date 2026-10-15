@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-package cli
+package autostart
 
 import (
 	"os"
@@ -33,7 +33,7 @@ func systemdUser() bool {
 
 // unitFile — user unit daemon. Выход 1 при «already running» не крутит
 // перезапуски бесконечно: StartLimitBurst.
-func unitFile(s serviceSpec) string {
+func unitFile(s Spec) string {
 	exec := strings.ReplaceAll(quoteAll(append([]string{s.Bin, "daemon"}, s.Args...)), "%", "%%")
 	return `[Unit]
 Description=gate4.ai daemon: policies, approvals, secrets and journal for AI agents
@@ -64,8 +64,8 @@ X-GNOME-Autostart-enabled=true
 `
 }
 
-func installService(s serviceSpec) (serviceResult, error) {
-	var r serviceResult
+func Install(s Spec) (Result, error) {
+	var r Result
 	if err := os.MkdirAll(filepath.Dir(s.Log), 0o700); err != nil {
 		return r, err
 	}
@@ -78,10 +78,14 @@ func installService(s serviceSpec) (serviceResult, error) {
 		if out, err := runCmd("systemctl", "--user", "daemon-reload"); err != nil {
 			return r, cmdErr("systemctl --user daemon-reload", out, err)
 		}
-		if out, err := runCmd("systemctl", "--user", "enable", "--now", systemdUnit); err != nil {
-			return r, cmdErr("systemctl --user enable --now "+systemdUnit, out, err)
+		enable := []string{"--user", "enable", "--now", systemdUnit}
+		if s.NoStart {
+			enable = []string{"--user", "enable", systemdUnit}
 		}
-		r.Started = true
+		if out, err := runCmd("systemctl", enable...); err != nil {
+			return r, cmdErr("systemctl "+strings.Join(enable, " "), out, err)
+		}
+		r.Started = !s.NoStart
 		if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
 			r.Notes = append(r.Notes, "on a server without a login session the user services stop at logout; keep them running: loginctl enable-linger $USER")
 		}
@@ -103,12 +107,16 @@ func installService(s serviceSpec) (serviceResult, error) {
 	return r, nil
 }
 
-func uninstallService(home string) ([]string, []string, error) {
+func Uninstall(home string, keepRunning bool) ([]string, []string, error) {
 	var notes []string
 	unit := unitPath(home)
 	if fileExists(unit) {
-		_, _ = runCmd("systemctl", "--user", "disable", "--now", systemdUnit)
-		notes = append(notes, "the daemon started by systemd was stopped")
+		if keepRunning {
+			_, _ = runCmd("systemctl", "--user", "disable", systemdUnit)
+		} else {
+			_, _ = runCmd("systemctl", "--user", "disable", "--now", systemdUnit)
+			notes = append(notes, "the daemon started by systemd was stopped")
+		}
 	}
 	files := removeFiles(unit, desktopPath(home, "gate4ai"), desktopPath(home, "gate4ai-tray"))
 	if fileExists(filepath.Dir(unit)) {
@@ -117,7 +125,7 @@ func uninstallService(home string) ([]string, []string, error) {
 	return files, notes, nil
 }
 
-func serviceState(home string) map[string]any {
+func State(home string) map[string]any {
 	var files []string
 	for _, f := range []string{unitPath(home), desktopPath(home, "gate4ai"), desktopPath(home, "gate4ai-tray")} {
 		if fileExists(f) {

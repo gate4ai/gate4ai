@@ -118,6 +118,9 @@ func New(opt Options) (*Daemon, error) {
 	if eg, err := connectors.NewInProcess(egressConnector{}); err == nil {
 		d.Registry.Add(eg)
 	}
+	if sc, err := connectors.NewInProcess(selfConnector{d: d}); err == nil {
+		d.Registry.Add(sc)
+	}
 	// Каталог меняется при установке и удалении коннекторов — проверка по текущему.
 	validator := func(c *config.Config) config.Errors {
 		return policy.Validator(policy.Catalog(d.Registry.Catalog()))(c)
@@ -336,4 +339,19 @@ func (m *MultiNotifier) Resolved(a *state.Approval) {
 }
 func (m *MultiNotifier) Denied(agent, action, reason string) {
 	m.each(func(n pipeline.Notifier) { n.Denied(agent, action, reason) })
+}
+
+// ProposalNotifier — канал, который сообщает владельцу о предложении агента
+// (только сообщает: применяется предложение в локальном Web UI).
+type ProposalNotifier interface {
+	Proposed(p *state.Proposal)
+}
+
+// Proposed рассылает «агент предложил изменение» в каналы, которые это умеют.
+func (m *MultiNotifier) Proposed(p *state.Proposal) {
+	m.each(func(n pipeline.Notifier) {
+		if pn, ok := n.(ProposalNotifier); ok {
+			pn.Proposed(p)
+		}
+	})
 }

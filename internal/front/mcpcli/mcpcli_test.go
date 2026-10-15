@@ -77,7 +77,7 @@ func TestStdioMCPAgainstDaemon(t *testing.T) {
 	}
 	send(1, "initialize", map[string]any{"protocolVersion": mcp.ProtocolVersion})
 	tools := send(2, "tools/list", map[string]any{})["tools"].([]any)
-	if len(tools) != 2 || tools[0].(map[string]any)["name"] != "files_read" {
+	if len(tools) != 5 || tools[0].(map[string]any)["name"] != "files_read" || tools[1].(map[string]any)["name"] != "gate4ai_propose_change" {
 		t.Fatal(tools)
 	}
 	r := send(3, "tools/call", map[string]any{"name": "files_read", "arguments": map[string]any{"path": "/home/x/a.md"}})

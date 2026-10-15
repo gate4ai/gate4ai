@@ -156,7 +156,7 @@ func (d *Daemon) PublicHandler() http.Handler {
 }
 
 // publicAgent — агент по токену на публичном адресе; владельца здесь нет.
-func (d *Daemon) publicAgent(r *http.Request) (string, error) {
+func (d *Daemon) publicAgent(r *http.Request, via string) (string, error) {
 	tok := bearer(r)
 	if tok == "" {
 		return "", errors.New("authorization required")
@@ -168,6 +168,7 @@ func (d *Daemon) publicAgent(r *http.Request) (string, error) {
 	if _, ok := d.Config.Current().Agents[agent]; !ok {
 		return "", fmt.Errorf("agent %q is not in the configuration", agent)
 	}
+	d.State.Seen(agent, via, tok)
 	return agent, nil
 }
 
@@ -177,7 +178,7 @@ func (d *Daemon) buildPublic() http.Handler {
 	as.Routes(mux)
 	d.agentRoutes(mux, func(h func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			agent, err := d.publicAgent(r)
+			agent, err := d.publicAgent(r, "https")
 			if err != nil {
 				w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+as.ResourceMetadataURL(r)+`"`)
 				writeErr(w, http.StatusUnauthorized, "unauthorized", err.Error())
@@ -194,7 +195,7 @@ func (d *Daemon) buildPublic() http.Handler {
 		mux.Handle(rt.pattern, rt.h)
 	}
 	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
-		agent, err := d.publicAgent(r)
+		agent, err := d.publicAgent(r, "mcp-http")
 		if err != nil {
 			w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+as.ResourceMetadataURL(r)+`"`)
 			writeErr(w, http.StatusUnauthorized, "invalid_token", "authorization required")

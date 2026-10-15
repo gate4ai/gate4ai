@@ -63,32 +63,49 @@ func ExecRunner(name string, args ...string) error { return exec.Command(name, a
 type Desktop struct {
 	Run  Runner
 	GOOS string
+	// Result — итог показа уведомления (статистика канала); nil — не учитывать.
+	Result func(err error)
 }
 
 // NewDesktop — канал уведомлений для текущей ОС.
 func NewDesktop() *Desktop { return &Desktop{Run: ExecRunner, GOOS: runtime.GOOS} }
 
-func (d *Desktop) show(title, body string) {
+func (d *Desktop) show(title, body string) error {
+	var err error
 	switch d.GOOS {
 	case "darwin":
 		script := fmt.Sprintf("display notification %q with title %q", body, title)
-		_ = d.Run("osascript", "-e", script)
+		err = d.Run("osascript", "-e", script)
 	case "windows":
 		ps := `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;` +
 			`$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);` +
 			`$x = $t.GetElementsByTagName('text'); $x.Item(0).AppendChild($t.CreateTextNode($env:G4A_TITLE)) > $null; $x.Item(1).AppendChild($t.CreateTextNode($env:G4A_BODY)) > $null;` +
 			`[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('gate4.ai').Show([Windows.UI.Notifications.ToastNotification]::new($t))`
-		_ = d.Run("powershell", "-NoProfile", "-Command", "$env:G4A_TITLE='"+psQuote(title)+"'; $env:G4A_BODY='"+psQuote(body)+"'; "+ps)
+		err = d.Run("powershell", "-NoProfile", "-Command", "$env:G4A_TITLE='"+psQuote(title)+"'; $env:G4A_BODY='"+psQuote(body)+"'; "+ps)
 	default:
-		_ = d.Run("notify-send", "--app-name=gate4.ai", "--urgency=critical", title, body)
+		err = d.Run("notify-send", "--app-name=gate4.ai", "--urgency=critical", title, body)
 	}
+	if d.Result != nil {
+		d.Result(err)
+	}
+	return err
+}
+
+// Proposed — агент предложил изменение настроек.
+func (d *Desktop) Proposed(p *state.Proposal) {
+	_ = d.show("gate4.ai: агент предлагает изменение", p.Agent+": "+p.Summary+"\nПросмотрите и примените в Web UI: Обзор → Предложения агентов")
+}
+
+// Test показывает пробное уведомление.
+func (d *Desktop) Test() error {
+	return d.show("gate4.ai: проверка уведомлений", "Так будут приходить запросы подтверждения.")
 }
 
 func psQuote(s string) string { return strings.ReplaceAll(s, "'", "''") }
 
 // Notify — новый запрос подтверждения.
 func (d *Desktop) Notify(a *state.Approval) {
-	d.show("gate4.ai: нужно подтверждение", Summary(a)+"\n"+a.Decision.Reason+"\nПодтвердите в трее, Web UI или: gate4ai approvals approve "+a.ID)
+	_ = d.show("gate4.ai: нужно подтверждение", Summary(a)+"\n"+a.Decision.Reason+"\nПодтвердите в трее, Web UI или: gate4ai approvals approve "+a.ID)
 }
 
 // Resolved — решение принято (уведомление не нужно).
@@ -96,5 +113,5 @@ func (d *Desktop) Resolved(a *state.Approval) {}
 
 // Denied — агенту отказано политикой; пользователь узнаёт об этом.
 func (d *Desktop) Denied(agent, action, reason string) {
-	d.show("gate4.ai: действие запрещено", fmt.Sprintf("%s: %s — %s", agent, action, reason))
+	_ = d.show("gate4.ai: действие запрещено", fmt.Sprintf("%s: %s — %s", agent, action, reason))
 }

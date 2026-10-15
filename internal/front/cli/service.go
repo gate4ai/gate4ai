@@ -7,12 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
+	"github.com/gate4ai/gate4ai/internal/platform/autostart"
 	"github.com/gate4ai/gate4ai/internal/platform/paths"
 )
 
@@ -20,27 +19,6 @@ const serviceUsage = `usage:
   gate4ai service install [--no-tray] [-- daemon flags]   start the daemon (and the tray) at every login, and the daemon now
   gate4ai service uninstall                                remove the autostart
   gate4ai service status                                   what is installed and whether the daemon runs`
-
-// serviceSpec — что запускать при входе в систему.
-type serviceSpec struct {
-	Bin  string   // gate4ai
-	Tray string   // gate4ai-tray ("" — без трея)
-	Args []string // флаги daemon
-	Log  string   // журнал daemon
-	Home string   // домашний каталог пользователя
-}
-
-// serviceResult — что сделала установка автозапуска.
-type serviceResult struct {
-	Files   []string // файлы и ключи автозапуска
-	Started bool     // daemon уже запущен механизмом автозапуска
-	Notes   []string
-}
-
-// runCmd выполняет системную команду (systemctl, launchctl); подменяется в тестах.
-var runCmd = func(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).CombinedOutput()
-}
 
 func (e *Env) service(ctx context.Context, args []string) int {
 	sub := "status"
@@ -55,7 +33,7 @@ func (e *Env) service(ctx context.Context, args []string) int {
 	case "install":
 		return e.serviceInstall(ctx, home, args)
 	case "uninstall":
-		files, notes, err := uninstallService(home)
+		files, notes, err := autostart.Uninstall(home, false)
 		if err != nil {
 			return e.fail(err)
 		}
@@ -66,7 +44,7 @@ func (e *Env) service(ctx context.Context, args []string) int {
 		e.say("gate4ai autostart removed")
 		return ExitOK
 	case "status":
-		res := serviceState(home)
+		res := autostart.State(home)
 		res["status"] = "ok"
 		_, herr := e.health(ctx)
 		res["running"] = herr == nil
@@ -105,10 +83,10 @@ func (e *Env) serviceInstall(ctx context.Context, home string, args []string) in
 			bin = r
 		}
 	}
-	spec := serviceSpec{Bin: bin, Args: daemonArgs, Log: paths.DaemonLog(), Home: home}
+	spec := autostart.Spec{Bin: bin, Args: daemonArgs, Log: paths.DaemonLog(), Home: home}
 	var notes []string
 	if !noTray {
-		if spec.Tray = findTray(bin); spec.Tray == "" {
+		if spec.Tray = autostart.FindTray(bin); spec.Tray == "" {
 			notes = append(notes, "gate4ai-tray not found next to gate4ai: only the daemon starts at login")
 		}
 	}
@@ -120,7 +98,7 @@ func (e *Env) serviceInstall(ctx context.Context, home string, args []string) in
 		}
 		notes = append(notes, "the daemon you started by hand was stopped; it now runs from the autostart")
 	}
-	res, err := installService(spec)
+	res, err := autostart.Install(spec)
 	if err != nil {
 		return e.fail(err)
 	}
@@ -169,72 +147,9 @@ type discard struct{}
 
 func (discard) Write(p []byte) (int, error) { return len(p), nil }
 
-// findTray — gate4ai-tray рядом с gate4ai или в PATH.
-func findTray(bin string) string {
-	name := "gate4ai-tray"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	if p := filepath.Join(filepath.Dir(bin), name); fileExists(p) {
-		return p
-	}
-	if p, err := exec.LookPath(name); err == nil {
-		return p
-	}
-	return ""
-}
-
 func trayNowHint(tray string) string {
 	if runtime.GOOS == "windows" {
 		return "start " + tray
 	}
 	return tray + " &"
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
-// writeFile пишет файл автозапуска, создавая каталоги.
-func writeFile(p, body string) error {
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(p, []byte(body), 0o644)
-}
-
-// removeFiles удаляет существующие файлы и возвращает удалённые.
-func removeFiles(files ...string) []string {
-	var out []string
-	for _, f := range files {
-		if os.Remove(f) == nil {
-			out = append(out, f)
-		}
-	}
-	return out
-}
-
-// shellQuote — аргумент для Exec= (desktop entry) и ExecStart= (systemd).
-func shellQuote(s string) string {
-	if s != "" && !strings.ContainsAny(s, " \t\"'\\$`%") {
-		return s
-	}
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", "$", `\$`).Replace(s) + `"`
-}
-
-func quoteAll(args []string) string {
-	q := make([]string, len(args))
-	for i, a := range args {
-		q[i] = shellQuote(a)
-	}
-	return strings.Join(q, " ")
-}
-
-// cmdErr — ошибка системной команды с её выводом.
-func cmdErr(cmd string, out []byte, err error) error {
-	if s := strings.TrimSpace(string(out)); s != "" {
-		return fmt.Errorf("%s: %v: %s", cmd, err, s)
-	}
-	return fmt.Errorf("%s: %v", cmd, err)
 }

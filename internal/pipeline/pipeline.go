@@ -145,7 +145,7 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 		return res
 	}
 	conn := strings.SplitN(c.Action, ".", 2)[0]
-	if prof, ok := p.cfg().ProfileOf(c.Agent); !ok || (!prof.HasConnector(conn) && !(c.Internal && policy.Implicit[conn])) || (policy.Implicit[conn] && !c.Internal) {
+	if prof, ok := p.cfg().ProfileOf(c.Agent); !ok || (!prof.HasConnector(conn) && !(c.Internal && policy.Implicit[conn]) && !policy.Everyone[conn]) || (policy.Implicit[conn] && !c.Internal) {
 		// Коннекторы вне профиля агент не видит вовсе.
 		res.Status, res.Code = StatusError, CodeUnknownAction
 		res.Message = fmt.Sprintf("unknown action %q", c.Action)
@@ -205,6 +205,20 @@ func (p *Pipeline) deny(agent string, act manifest.Action, action string, args m
 	return res
 }
 
+type agentKey struct{}
+
+// WithAgent — агент, от имени которого исполняется действие (для встроенных
+// коннекторов хоста; WASM-коннекторы его не получают).
+func WithAgent(ctx context.Context, agent string) context.Context {
+	return context.WithValue(ctx, agentKey{}, agent)
+}
+
+// AgentFrom — агент исполняемого действия ("" — неизвестен).
+func AgentFrom(ctx context.Context) string {
+	a, _ := ctx.Value(agentKey{}).(string)
+	return a
+}
+
 // run — шаги 5–8 для разрешённого действия.
 func (p *Pipeline) run(ctx context.Context, agent, action string, cli connectors.Client, act manifest.Action, args map[string]any, dec policy.Decision, appr *audit.Approval) Result {
 	res := Result{Action: action, Reason: dec.Reason, RuleIDs: dec.RuleIDs}
@@ -218,7 +232,7 @@ func (p *Pipeline) run(ctx context.Context, agent, action string, cli connectors
 	if appr != nil {
 		receipt.Decision.Effect = config.EffectAsk
 	}
-	ex, err := cli.Execute(ctx, abi.ExecRequest{Action: act.Name, Args: args, Settings: settings})
+	ex, err := cli.Execute(WithAgent(ctx, agent), abi.ExecRequest{Action: act.Name, Args: args, Settings: settings})
 	if err != nil {
 		receipt.Execution = audit.Execution{Status: "error", Error: p.maskString(err.Error())}
 		receipt.Verification = audit.Verification{Status: "not_applicable"}

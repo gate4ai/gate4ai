@@ -45,6 +45,8 @@ type Client struct {
 	Addr func() string
 	// Err — ошибка настройки клиента (неверный GATE4AI_URL): возвращается из Do.
 	Err error
+	// Kind — кто клиент для «последнего обращения» в Web UI: "cli" (по умолчанию) или "mcp".
+	Kind string
 }
 
 // ErrUnavailable — daemon недоступен («устройство офлайн»).
@@ -85,6 +87,13 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.Token != "" {
+		kind := c.Kind
+		if kind == "" {
+			kind = "cli"
+		}
+		req.Header.Set("X-Gate4ai-Client", kind)
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-package cli
+package autostart
 
 import (
 	"golang.org/x/sys/windows/registry"
@@ -16,8 +16,8 @@ const (
 
 func winQuote(s string) string { return `"` + s + `"` }
 
-func installService(s serviceSpec) (serviceResult, error) {
-	var r serviceResult
+func Install(s Spec) (Result, error) {
+	var r Result
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
 	if err != nil {
 		return r, err
@@ -42,7 +42,7 @@ func installService(s serviceSpec) (serviceResult, error) {
 	return r, nil
 }
 
-func uninstallService(string) ([]string, []string, error) {
+func Uninstall(string, bool) ([]string, []string, error) {
 	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
 	if err != nil {
 		return nil, nil, nil
@@ -57,7 +57,7 @@ func uninstallService(string) ([]string, []string, error) {
 	return removed, []string{"a running daemon keeps running until gate4ai daemon stop or logout"}, nil
 }
 
-func serviceState(string) map[string]any {
+func State(string) map[string]any {
 	var files []string
 	if k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE); err == nil {
 		for _, v := range []string{runDaemon, runTray} {

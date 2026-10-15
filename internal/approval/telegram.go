@@ -59,7 +59,9 @@ type Update struct {
 
 // User — пользователь Telegram.
 type User struct {
-	ID int64 `json:"id"`
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name,omitempty"`
+	Username  string `json:"username,omitempty"`
 }
 
 // Chat — чат Telegram.
@@ -154,9 +156,24 @@ type Telegram struct {
 	// Webhook — адрес вебхука (<публичный адрес>/telegram); "" — long polling.
 	Webhook string
 
-	mu     sync.Mutex
-	msgs   map[string]int64 // approval id → message id
-	secret string           // секрет вебхука (заголовок X-Telegram-Bot-Api-Secret-Token)
+	mu      sync.Mutex
+	msgs    map[string]int64 // approval id → message id
+	secret  string           // секрет вебхука (заголовок X-Telegram-Bot-Api-Secret-Token)
+	lastErr string           // последняя ошибка получения обновлений ("" — работает)
+	mode    string           // polling | webhook
+}
+
+// Status — режим получения обновлений и последняя ошибка ("" — работает).
+func (t *Telegram) Status() (mode, lastErr string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.mode, t.lastErr
+}
+
+func (t *Telegram) setStatus(mode, err string) {
+	t.mu.Lock()
+	t.mode, t.lastErr = mode, err
+	t.mu.Unlock()
 }
 
 // NewTelegram создаёт канал.
@@ -182,6 +199,9 @@ func (t *Telegram) Notify(a *state.Approval) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	id, err := t.API.SendMessage(ctx, t.OwnerID, text, kb)
+	if t.State != nil {
+		t.State.ChannelResult("telegram", err)
+	}
 	if err != nil {
 		t.Log.Warn("telegram notify", "err", err)
 		return
@@ -221,6 +241,17 @@ func (t *Telegram) Resolved(a *state.Approval) {
 	_ = t.API.EditMessage(ctx, t.OwnerID, id, Summary(a)+"\n"+resultText(a)+via)
 }
 
+// Proposed — агент предложил изменение: только сообщение, применить можно
+// только в Web UI на компьютере.
+func (t *Telegram) Proposed(p *state.Proposal) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err := t.API.SendMessage(ctx, t.OwnerID, fmt.Sprintf("🛠 %s предлагает изменить настройки: %s\nПросмотреть и применить можно только в Web UI на компьютере (Обзор → Предложения агентов).", p.Agent, p.Summary), nil)
+	if t.State != nil {
+		t.State.ChannelResult("telegram", err)
+	}
+}
+
 // Denied — сообщение об отказе политикой.
 func (t *Telegram) Denied(agent, action, reason string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -235,7 +266,7 @@ func (t *Telegram) Run(ctx context.Context) {
 		secret := randomSecret()
 		if err := t.API.SetWebhook(ctx, t.Webhook, secret); err == nil {
 			t.mu.Lock()
-			t.secret = secret
+			t.secret, t.mode, t.lastErr = secret, "webhook", ""
 			t.mu.Unlock()
 			<-ctx.Done()
 			t.mu.Lock()
@@ -282,6 +313,7 @@ func (t *Telegram) ServeWebhook(w http.ResponseWriter, r *http.Request) {
 func (t *Telegram) poll(ctx context.Context) {
 	// Вебхук от прошлого запуска мешает getUpdates (409).
 	_ = t.API.DeleteWebhook(ctx)
+	t.setStatus("polling", "")
 	var offset int64
 	backoff := time.Second
 	for ctx.Err() == nil {
@@ -291,6 +323,7 @@ func (t *Telegram) poll(ctx context.Context) {
 				return
 			}
 			t.Log.Warn("telegram poll", "err", err)
+			t.setStatus("polling", err.Error())
 			select {
 			case <-time.After(backoff):
 			case <-ctx.Done():
@@ -302,6 +335,7 @@ func (t *Telegram) poll(ctx context.Context) {
 			continue
 		}
 		backoff = time.Second
+		t.setStatus("polling", "")
 		for _, u := range ups {
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1

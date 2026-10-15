@@ -40,6 +40,10 @@ func DefaultEffect(class string) string {
 // агентам напрямую (например, egress.connect — решение Egress Proxy о домене).
 var Implicit = map[string]bool{"egress": true}
 
+// Everyone — внутренние коннекторы daemon, видимые и доступные любому профилю
+// (gate4ai — предложения изменений настроек от агента; применяет владелец).
+var Everyone = map[string]bool{"gate4ai": true}
+
 // Reserved — имена входа условий, которые нельзя использовать как аргументы.
 var Reserved = []string{"provenance", "counters", "lists", "now", "hour", "weekday", "agent", "action", "args"}
 

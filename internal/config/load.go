@@ -181,9 +181,9 @@ func (c *Config) Validate() Errors {
 	}
 	for i, ch := range c.Approvals.Channels {
 		switch ch {
-		case "desktop", "telegram", "webui":
+		case "desktop", "telegram", "webui", "webpush":
 		default:
-			add(fmt.Sprintf("approvals.channels[%d]", i), "unknown channel %q (desktop | telegram | webui)", ch)
+			add(fmt.Sprintf("approvals.channels[%d]", i), "unknown channel %q (desktop | telegram | webui | webpush)", ch)
 		}
 	}
 	if t := c.Approvals.Telegram; t != nil {
@@ -223,6 +223,9 @@ func (c *Config) Validate() Errors {
 		if !strings.HasPrefix(k, "ed25519:") {
 			add(fmt.Sprintf("store.keys[%d]", i), "keys must look like ed25519:<base64>")
 		}
+	}
+	if c.Proposals.MaxOpen < 0 {
+		add("proposals.max_open", "must not be negative")
 	}
 	if c.Store.Registry != "" && len(c.Store.RegistryKeys) == 0 {
 		add("store.registry_keys", "a registry needs the keys its index is signed with")

@@ -49,8 +49,12 @@ func (d *Daemon) Tools(p auth.Principal) []Tool {
 		}
 	}
 	out := []Tool{}
+	selfConfig := !d.Config.Current().Proposals.Disabled
 	for _, m := range d.Registry.Manifests() {
-		if policy.Implicit[m.Connector] || (filter && !prof.HasConnector(m.Connector)) {
+		if policy.Implicit[m.Connector] || (filter && !prof.HasConnector(m.Connector) && !policy.Everyone[m.Connector]) {
+			continue
+		}
+		if m.Connector == SelfConnector && !selfConfig {
 			continue
 		}
 		for _, a := range m.Actions {
@@ -90,7 +94,14 @@ func (d *Daemon) identify(r *http.Request, ownerSock bool) (auth.Principal, erro
 		if _, ok := d.Config.Current().Agents[agent]; !ok {
 			return auth.Principal{}, fmt.Errorf("agent %q is not in the configuration", agent)
 		}
-		return auth.AgentVia(agent, map[bool]string{true: "socket", false: "agent-socket"}[ownerSock]), nil
+		via := map[bool]string{true: "socket", false: "agent-socket"}[ownerSock]
+		// Клиент сообщает, кто он (gate4ai mcp — "mcp"); на права это не влияет.
+		seen := via
+		if c := r.Header.Get(ClientHeader); c == "mcp" || c == "cli" {
+			seen = c
+		}
+		d.State.Seen(agent, seen, tok)
+		return auth.AgentVia(agent, via), nil
 	}
 	if ownerSock {
 		if _, ok := ipc.PeerFrom(r.Context()); ok {
@@ -100,6 +111,10 @@ func (d *Daemon) identify(r *http.Request, ownerSock bool) (auth.Principal, erro
 	}
 	return auth.Principal{}, errors.New("authentication required: pass an agent token (GATE4AI_TOKEN)")
 }
+
+// ClientHeader — заголовок, которым тонкий клиент называет себя (cli | mcp) —
+// только для «последнего обращения» в Web UI.
+const ClientHeader = "X-Gate4ai-Client"
 
 func bearer(r *http.Request) string {
 	h := r.Header.Get("Authorization")

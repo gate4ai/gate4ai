@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-package cli
+package autostart
 
 import (
 	"errors"
@@ -24,9 +24,9 @@ func TestServiceLinux(t *testing.T) {
 		}
 		return []byte("active\n"), nil
 	}
-	spec := serviceSpec{Bin: "/opt/my apps/gate4ai", Tray: "/opt/my apps/gate4ai-tray", Args: []string{"--keystore", "file"},
+	spec := Spec{Bin: "/opt/my apps/gate4ai", Tray: "/opt/my apps/gate4ai-tray", Args: []string{"--keystore", "file"},
 		Log: filepath.Join(home, "state", "daemon.log"), Home: home}
-	r, err := installService(spec)
+	r, err := Install(spec)
 	if err != nil || !r.Started {
 		t.Fatal(r, err)
 	}
@@ -43,17 +43,33 @@ func TestServiceLinux(t *testing.T) {
 	if !strings.Contains(strings.Join(calls, "\n"), "systemctl --user enable --now gate4ai.service") {
 		t.Fatal(calls)
 	}
-	if st := serviceState(home); st["installed"] != true || st["systemd"] != "active" {
+	if st := State(home); st["installed"] != true || st["systemd"] != "active" {
 		t.Fatal(st)
 	}
-	files, _, _ := uninstallService(home)
-	if len(files) != 2 || serviceState(home)["installed"] != false {
+	files, _, _ := Uninstall(home, false)
+	if len(files) != 2 || State(home)["installed"] != false {
 		t.Fatal(files)
 	}
 
+	// Из Web UI: daemon уже работает — включить без запуска и выключить без остановки.
+	calls = nil
+	spec.NoStart = true
+	if r, err := Install(spec); err != nil || r.Started {
+		t.Fatal(r, err)
+	}
+	if j := strings.Join(calls, "\n"); strings.Contains(j, "--now") || !strings.Contains(j, "systemctl --user enable gate4ai.service") {
+		t.Fatal(calls)
+	}
+	calls = nil
+	_, _, _ = Uninstall(home, true)
+	if j := strings.Join(calls, "\n"); strings.Contains(j, "--now") {
+		t.Fatal(calls)
+	}
+	spec.NoStart = false
+
 	// Без systemd --user: XDG autostart запускает `gate4ai daemon start`.
 	systemd = false
-	r, err = installService(spec)
+	r, err = Install(spec)
 	if err != nil || r.Started {
 		t.Fatal(r, err)
 	}

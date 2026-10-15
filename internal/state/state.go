@@ -29,6 +29,8 @@ type Store struct {
 	key []byte
 	Now func() time.Time
 	mu  sync.Mutex
+
+	seen map[string]time.Time // агент+канал → последняя запись agent_seen (Seen)
 }
 
 const schema = `
@@ -60,7 +62,7 @@ func Open(path string, ks keys.Store) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + uiSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -274,11 +276,14 @@ type TokenInfo struct {
 	Created time.Time `json:"created"`
 	Revoked bool      `json:"revoked"`
 	ID      string    `json:"id"` // первые 12 символов хэша
+	// LastUsed — последнее использование (с точностью до 10 с); нулевое — не использовался.
+	LastUsed time.Time `json:"last_used,omitempty"`
 }
 
 // Tokens — токены всех агентов.
 func (s *Store) Tokens() ([]TokenInfo, error) {
-	rows, err := s.db.Query(`SELECT hash,agent,label,kind,created,revoked FROM tokens ORDER BY created`)
+	rows, err := s.db.Query(`SELECT t.hash,t.agent,t.label,t.kind,t.created,t.revoked,COALESCE(s.ts,0) FROM tokens t
+		LEFT JOIN token_seen s ON s.hash=t.hash ORDER BY t.created`)
 	if err != nil {
 		return nil, err
 	}
@@ -289,10 +294,14 @@ func (s *Store) Tokens() ([]TokenInfo, error) {
 		var h string
 		var c int64
 		var r int
-		if err := rows.Scan(&h, &t.Agent, &t.Label, &t.Kind, &c, &r); err != nil {
+		var lu int64
+		if err := rows.Scan(&h, &t.Agent, &t.Label, &t.Kind, &c, &r, &lu); err != nil {
 			return nil, err
 		}
 		t.ID, t.Created, t.Revoked = h[:12], time.Unix(0, c), r != 0
+		if lu != 0 {
+			t.LastUsed = time.Unix(0, lu)
+		}
 		out = append(out, t)
 	}
 	return out, rows.Err()

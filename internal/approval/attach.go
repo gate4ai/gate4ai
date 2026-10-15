@@ -36,6 +36,11 @@ func (s *switchable) Resolved(a *state.Approval) {
 		n.Resolved(a)
 	}
 }
+func (s *switchable) Proposed(p *state.Proposal) {
+	if pn, ok := s.get().(daemon.ProposalNotifier); ok {
+		pn.Proposed(p)
+	}
+}
 func (s *switchable) Denied(ag, ac, r string) {
 	if n := s.get(); n != nil {
 		n.Denied(ag, ac, r)
@@ -46,10 +51,21 @@ func (s *switchable) Denied(ag, ac, r string) {
 // конфигурации: desktop — уведомления ОС, telegram — личный бот (токен из Vault;
 // вебхук — если включён и у устройства есть публичный адрес). Вызывать после
 // подключения источников публичного адреса (relay, прямой HTTPS).
-func Attach(ctx context.Context, d *daemon.Daemon, desktop *Desktop, telegramBase string) {
-	desk, tgSw := &switchable{}, &switchable{}
+func Attach(ctx context.Context, d *daemon.Daemon, desktop *Desktop, telegramBase string) *Channels {
+	desk, tgSw, pushSw := &switchable{}, &switchable{}, &switchable{}
 	d.AddNotifier(desk)
 	d.AddNotifier(tgSw)
+	d.AddNotifier(pushSw)
+	if desktop != nil && desktop.Result == nil {
+		desktop.Result = func(err error) { d.State.ChannelResult("desktop", err) }
+	}
+	push, err := NewWebPush(d.Keys, d.State)
+	if err != nil {
+		d.Log.Warn("browser push disabled: no VAPID key", "err", err)
+	} else {
+		push.Log = d.Log
+	}
+	ch := &Channels{d: d, Desktop: desktop, Push: push, TelegramBase: telegramBase, tg: tgSw}
 	// Вебхук на публичном адресе; без бота в режиме вебхука — 404.
 	d.AddPublic("POST /telegram", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tg, ok := tgSw.get().(*Telegram); ok {
@@ -69,6 +85,11 @@ func Attach(ctx context.Context, d *daemon.Daemon, desktop *Desktop, telegramBas
 			desk.set(desktop)
 		} else {
 			desk.set(nil)
+		}
+		if on["webpush"] && push != nil {
+			pushSw.set(push)
+		} else {
+			pushSw.set(nil)
 		}
 		key, hook := "", ""
 		var token string
@@ -111,4 +132,5 @@ func Attach(ctx context.Context, d *daemon.Daemon, desktop *Desktop, telegramBas
 	}
 	apply(d.Config.Current())
 	d.Config.Subscribe(apply)
+	return ch
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-package cli
+package autostart
 
 import (
 	"fmt"
@@ -47,8 +47,8 @@ func plist(label string, argv []string, log string, keepAlive bool) string {
 	return b.String()
 }
 
-func installService(s serviceSpec) (serviceResult, error) {
-	var r serviceResult
+func Install(s Spec) (Result, error) {
+	var r Result
 	if err := os.MkdirAll(filepath.Dir(s.Log), 0o700); err != nil {
 		return r, err
 	}
@@ -57,11 +57,13 @@ func installService(s serviceSpec) (serviceResult, error) {
 		return r, err
 	}
 	r.Files = append(r.Files, p)
-	_, _ = runCmd("launchctl", "bootout", gui()+"/"+launchDaemon)
-	if out, err := runCmd("launchctl", "bootstrap", gui(), p); err != nil {
-		return r, cmdErr("launchctl bootstrap "+gui()+" "+p, out, err)
+	if !s.NoStart {
+		_, _ = runCmd("launchctl", "bootout", gui()+"/"+launchDaemon)
+		if out, err := runCmd("launchctl", "bootstrap", gui(), p); err != nil {
+			return r, cmdErr("launchctl bootstrap "+gui()+" "+p, out, err)
+		}
+		r.Started = true
 	}
-	r.Started = true
 	if s.Tray != "" {
 		// Трей загрузится при следующем входе: сейчас он может быть уже запущен руками.
 		tp := plistPath(s.Home, launchTray)
@@ -73,16 +75,16 @@ func installService(s serviceSpec) (serviceResult, error) {
 	return r, nil
 }
 
-func uninstallService(home string) ([]string, []string, error) {
+func Uninstall(home string, keepRunning bool) ([]string, []string, error) {
 	var notes []string
-	if fileExists(plistPath(home, launchDaemon)) {
+	if !keepRunning && fileExists(plistPath(home, launchDaemon)) {
 		_, _ = runCmd("launchctl", "bootout", gui()+"/"+launchDaemon)
 		notes = append(notes, "the daemon started by launchd was stopped")
 	}
 	return removeFiles(plistPath(home, launchDaemon), plistPath(home, launchTray)), notes, nil
 }
 
-func serviceState(home string) map[string]any {
+func State(home string) map[string]any {
 	var files []string
 	for _, f := range []string{plistPath(home, launchDaemon), plistPath(home, launchTray)} {
 		if fileExists(f) {

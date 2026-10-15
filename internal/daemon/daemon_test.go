@@ -130,12 +130,13 @@ func TestDaemonSockets(t *testing.T) {
 	// Каталог агента — только коннекторы профиля.
 	var tools []Tool
 	agent.do(t, "GET", "/v1/tools", nil, &tools)
-	if len(tools) != 2 || tools[0].Connector != "notes" {
+	// Коннектор самонастройки gate4ai виден любому агенту (только предложения).
+	if len(tools) != 5 || tools[0].Connector != SelfConnector || tools[3].Connector != "notes" {
 		t.Fatalf("%+v", tools)
 	}
 	var all []Tool
 	owner.do(t, "GET", "/v1/tools", nil, &all)
-	if len(all) != 3 {
+	if len(all) != 6 {
 		t.Fatal("owner sees all", len(all))
 	}
 

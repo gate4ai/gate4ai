@@ -18,7 +18,9 @@ func register(env *cli.Env) {
 			fmt.Fprintln(e.Stderr, "gate4ai mcp: set GATE4AI_TOKEN to the agent token (gate4ai agents token <agent>)")
 			return cli.ExitUsage
 		}
-		srv := mcp.NewServer(mcpcli.ClientBackend{C: e.Client()})
+		c := e.Client()
+		c.Kind = "mcp"
+		srv := mcp.NewServer(mcpcli.ClientBackend{C: c})
 		if err := srv.ServeStdio(ctx, e.Stdin, e.Stdout); err != nil {
 			fmt.Fprintln(e.Stderr, "gate4ai mcp:", err)
 			return cli.ExitError

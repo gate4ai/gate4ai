@@ -28,7 +28,7 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 	if !ok {
 		return Decision{Effect: config.EffectDeny, RuleIDs: []string{"profile-missing"}, Reason: fmt.Sprintf("profile %q not found", agent.Profile)}
 	}
-	if !prof.cfg.HasConnector(req.Connector()) && !Implicit[req.Connector()] {
+	if !prof.cfg.HasConnector(req.Connector()) && !Implicit[req.Connector()] && !Everyone[req.Connector()] {
 		return Decision{Effect: config.EffectDeny, RuleIDs: []string{"connector-not-in-profile"},
 			Reason: fmt.Sprintf("connector %q is not available for profile %q", req.Connector(), agent.Profile)}
 	}
