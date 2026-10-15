@@ -94,12 +94,6 @@ func (w *WebPush) Notify(a *state.Approval) {
 // Resolved — решение принято (уведомление не нужно).
 func (w *WebPush) Resolved(*state.Approval) {}
 
-// Proposed — агент предложил изменение настроек.
-func (w *WebPush) Proposed(p *state.Proposal) {
-	w.sendAll(Message{Title: "gate4.ai: агент предлагает изменение", Body: p.Agent + ": " + p.Summary + " — примените в Web UI на компьютере",
-		URL: "/proposals/" + p.ID, Tag: p.ID})
-}
-
 // Denied — отказ политикой: в push не отправляем (шумно).
 func (w *WebPush) Denied(string, string, string) {}
 

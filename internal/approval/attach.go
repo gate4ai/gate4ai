@@ -36,11 +36,6 @@ func (s *switchable) Resolved(a *state.Approval) {
 		n.Resolved(a)
 	}
 }
-func (s *switchable) Proposed(p *state.Proposal) {
-	if pn, ok := s.get().(daemon.ProposalNotifier); ok {
-		pn.Proposed(p)
-	}
-}
 func (s *switchable) Denied(ag, ac, r string) {
 	if n := s.get(); n != nil {
 		n.Denied(ag, ac, r)

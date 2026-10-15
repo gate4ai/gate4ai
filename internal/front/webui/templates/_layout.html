@@ -52,7 +52,7 @@ form.inline{display:inline}
 <a href="{{.Base}}/approvals" class="{{if or (eq .Nav "approvals") (eq .Nav "telegram")}}on{{end}}">Подтверждения{{if .Pending}}<span class="count">{{.Pending}}</span>{{end}}</a>
 {{if not .Remote}}<a href="{{.Base}}/agents" class="{{if or (eq .Nav "agents") (eq .Nav "agent") (eq .Nav "agent_new")}}on{{end}}">Агенты</a>
 <a href="{{.Base}}/connectors" class="{{if or (eq .Nav "connectors") (eq .Nav "connector")}}on{{end}}">Коннекторы</a>
-<a href="{{.Base}}/policy" class="{{if or (eq .Nav "policy") (eq .Nav "rule") (eq .Nav "templates") (eq .Nav "policy_yaml") (eq .Nav "proposal")}}on{{end}}">Правила{{if .Proposals}}<span class="count" title="предложения агентов">{{.Proposals}}</span>{{end}}</a>{{end}}
+<a href="{{.Base}}/policy" class="{{if or (eq .Nav "policy") (eq .Nav "rule") (eq .Nav "templates") (eq .Nav "policy_yaml")}}on{{end}}">Правила</a>{{end}}
 <a href="{{.Base}}/journal" class="{{if or (eq .Nav "journal") (eq .Nav "receipt")}}on{{end}}">Журнал</a>
 {{if not .Remote}}<a href="{{.Base}}/vault" class="{{if eq .Nav "vault"}}on{{end}}">Секреты</a>
 <a href="{{.Base}}/settings" class="{{if eq .Nav "settings"}}on{{end}}">Настройки</a>{{end}}

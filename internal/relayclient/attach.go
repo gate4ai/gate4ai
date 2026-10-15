@@ -24,7 +24,7 @@ import (
 type Status struct {
 	Configured bool   `json:"configured"`
 	Online     bool   `json:"online"`
-	URL        string `json:"url,omitempty"`     // адрес relay
+	URL        string `json:"url,omitempty"` // адрес relay
 	DeviceID   string `json:"device_id,omitempty"`
 	Host       string `json:"host,omitempty"`    // <device-id>.<домен relay>
 	MCPURL     string `json:"mcp_url,omitempty"` // https://<host>/mcp

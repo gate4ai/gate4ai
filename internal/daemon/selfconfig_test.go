@@ -5,6 +5,7 @@ package daemon
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gate4ai/gate4ai/internal/config"
@@ -12,17 +13,9 @@ import (
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
-	"github.com/gate4ai/gate4ai/internal/state"
 )
 
-type proposalSink struct{ got []*state.Proposal }
-
-func (p *proposalSink) Notify(*state.Approval)        {}
-func (p *proposalSink) Resolved(*state.Approval)      {}
-func (p *proposalSink) Denied(string, string, string) {}
-func (p *proposalSink) Proposed(x *state.Proposal)    { p.got = append(p.got, x) }
-
-func TestSelfConfigProposal(t *testing.T) {
+func TestSelfConfigIsAnOrdinaryAction(t *testing.T) {
 	n := &notes{}
 	c, _ := connectors.NewInProcess(n)
 	d, err := New(Options{Home: filepath.Join(t.TempDir(), "d"), Keys: keys.NewMemory(), Connectors: []connectors.Client{c},
@@ -31,79 +24,56 @@ func TestSelfConfigProposal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	sink := &proposalSink{}
-	d.AddNotifier(sink)
 	ctx := context.Background()
 	call := func(action string, args map[string]any) pipeline.Result {
 		return d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: action, Args: args})
 	}
-	// Агент видит, что ему разрешено.
 	if r := call("gate4ai.policy_summary", map[string]any{}); r.Status != "ok" {
 		t.Fatalf("%+v", r)
 	}
-	// Секреты предлагать нельзя.
-	r := call("gate4ai.propose_change", map[string]any{"summary": "x", "changes": []any{
-		map[string]any{"op": "connector_settings", "connector": "notes", "settings_json": `{"password":"@mail.work"}`}}})
-	if r.Status == "ok" {
-		t.Fatalf("secret proposal accepted: %+v", r)
+	// Секреты задать нельзя, неверный CEL отклоняется ещё до запроса подтверждения.
+	for _, ch := range []map[string]any{
+		{"op": "connector_settings", "connector": "notes", "settings_json": `{"password":"@mail.work"}`},
+		{"op": "add_rule", "action": "notes.append", "when": "nosuch(", "effect": "allow"},
+	} {
+		if r := call("gate4ai.change_policy", map[string]any{"summary": "x", "changes": []any{ch}}); r.Code != pipeline.CodeInvalidArgs {
+			t.Fatalf("%+v", r)
+		}
 	}
-	// Неверный CEL не превращается в предложение.
-	r = call("gate4ai.propose_change", map[string]any{"summary": "x", "changes": []any{
-		map[string]any{"op": "add_rule", "action": "notes.append", "when": "nosuch(", "effect": "allow"}}})
-	if r.Status == "ok" {
-		t.Fatalf("invalid rule accepted: %+v", r)
-	}
-	v0 := d.Config.Current()
-	r = call("gate4ai.propose_change", map[string]any{"summary": "append without asking", "reason": "daily log", "changes": []any{
-		map[string]any{"op": "add_rule", "action": "notes.append", "effect": "allow", "rule_reason": "log"}}})
-	if r.Status != "ok" {
-		t.Fatalf("%+v", r)
-	}
-	id := r.Result.(map[string]any)["id"].(string)
-	if d.Config.Current() != v0 || len(sink.got) != 1 || sink.got[0].Agent != "bot" {
-		t.Fatal("proposal must not change the configuration by itself")
-	}
-	// Чужое предложение агент не видит.
-	if r := d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "gate4ai.proposal_status", Args: map[string]any{"id": "p_nope"}}); r.Status == "ok" {
-		t.Fatal("unknown proposal")
-	}
-	// Правка чужого профиля тоже предлагается (утверждает владелец).
-	r2 := call("gate4ai.propose_change", map[string]any{"summary": "other", "changes": []any{
+	// Класс write: по умолчанию — запрос подтверждения с понятным описанием.
+	r := call("gate4ai.change_policy", map[string]any{"summary": "append without asking", "reason": "daily log", "changes": []any{
+		map[string]any{"op": "add_rule", "action": "notes.append", "effect": "allow"},
 		map[string]any{"op": "add_rule", "profile": "other", "action": "notes.read", "effect": "deny"}}})
-	if r2.Status != "ok" {
-		t.Fatalf("%+v", r2)
-	}
-	if _, err := d.ApplyProposal(ctx, r2.Result.(map[string]any)["id"].(string), nil); err != nil {
-		t.Fatal(err)
-	}
-	if r := d.Config.Current().Profiles["other"].Rules; len(r) != 1 || r[0].Effect != "deny" {
+	if r.Status != pipeline.StatusPending {
 		t.Fatalf("%+v", r)
 	}
-	v, err := d.ApplyProposal(ctx, id, nil)
-	if err != nil {
-		t.Fatal(err)
+	a, _ := d.State.GetApproval(r.ID)
+	if !strings.Contains(a.Preview, "Правило: разрешать notes.append") || !strings.Contains(a.Preview, "(профиль other)") {
+		t.Fatal(a.Preview)
 	}
-	if rules := d.Config.Current().Profiles["p"].Rules; len(rules) != 2 || rules[1].Action != "notes.append" || rules[1].Effect != "allow" {
+	if len(d.Config.Current().Profiles["p"].Rules) != 1 {
+		t.Fatal("nothing changes before approval")
+	}
+	// Подтверждение в любом канале (здесь — Telegram) применяет изменение.
+	res, err := d.Pipeline.Decide(ctx, r.ID, true, "telegram", "owner")
+	if err != nil || res.Status != "ok" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	cur := d.Config.Current()
+	if rules := cur.Profiles["p"].Rules; len(rules) != 2 || rules[1].Effect != "allow" {
 		t.Fatalf("%+v", rules)
 	}
-	if _, err := d.ApplyProposal(ctx, id, nil); err == nil {
-		t.Fatal("applied twice")
+	if rules := cur.Profiles["other"].Rules; len(rules) != 1 || rules[0].Effect != "deny" {
+		t.Fatalf("%+v", rules)
 	}
-	p, _ := d.State.GetProposal(id)
-	if p.Status != state.ProposalApplied || p.Version != v.N {
-		t.Fatalf("%+v", p)
-	}
-	// Предложения выключены владельцем.
-	if _, err := d.Config.Edit(auth.OwnerVia("test"), "off", func(c *config.Config) error { c.Proposals.Disabled = true; return nil }); err != nil {
+	// Правило может запретить самонастройку, как любое действие.
+	if _, err := d.Config.Edit(auth.OwnerVia("test"), "deny", func(c *config.Config) error {
+		return c.PutRule("p", config.Rule{ID: "no-self", Action: "gate4ai.change_policy", Effect: "deny"})
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if r := call("gate4ai.policy_summary", map[string]any{}); r.Status == "ok" {
-		t.Fatal("disabled")
-	}
-	for _, tl := range d.Tools(auth.AgentVia("bot", "socket")) {
-		if tl.Connector == SelfConnector {
-			t.Fatal("hidden when disabled")
-		}
+	if r := call("gate4ai.change_policy", map[string]any{"summary": "x", "changes": []any{map[string]any{"op": "add_connector", "connector": "notes"}}}); r.Status != pipeline.StatusDenied {
+		t.Fatalf("%+v", r)
 	}
 }
 

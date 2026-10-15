@@ -250,7 +250,7 @@ func DescribeWhen(when string) (string, bool) {
 // TemplateParam — параметр шаблона, который спрашивает форма.
 type TemplateParam struct {
 	Name, Label, Placeholder, Help string
-	Multiline                       bool
+	Multiline                      bool
 }
 
 // Template — готовый набор правил.
@@ -403,6 +403,10 @@ var Templates = []Template{
 				}
 			}
 			return nil
+		}},
+	{ID: "no-self-config", Title: "Агентам нельзя менять настройки gate4.ai", Description: "Запретить действие gate4ai.change_policy: агент не сможет менять правила, списки и коннекторы даже с вашего подтверждения.",
+		Apply: func(c *config.Config, profile string, _ map[string]string, _ []daemon.Tool) error {
+			return putRule(c, profile, config.Rule{ID: "no-self-config", Action: daemon.SelfConnector + ".change_policy", Effect: config.EffectDeny, Reason: "Настройки gate4.ai меняет только владелец"})
 		}},
 	{ID: "money-ask", Title: "Деньги — всегда с подтверждением", Description: "Любое действие класса «деньги» требует подтверждения, даже если другое правило его разрешает.",
 		Apply: func(c *config.Config, profile string, _ map[string]string, tools []daemon.Tool) error {

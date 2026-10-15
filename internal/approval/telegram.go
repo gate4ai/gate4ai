@@ -241,17 +241,6 @@ func (t *Telegram) Resolved(a *state.Approval) {
 	_ = t.API.EditMessage(ctx, t.OwnerID, id, Summary(a)+"\n"+resultText(a)+via)
 }
 
-// Proposed — агент предложил изменение: только сообщение, применить можно
-// только в Web UI на компьютере.
-func (t *Telegram) Proposed(p *state.Proposal) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	_, err := t.API.SendMessage(ctx, t.OwnerID, fmt.Sprintf("🛠 %s предлагает изменить настройки: %s\nПросмотреть и применить можно только в Web UI на компьютере (Обзор → Предложения агентов).", p.Agent, p.Summary), nil)
-	if t.State != nil {
-		t.State.ChannelResult("telegram", err)
-	}
-}
-
 // Denied — сообщение об отказе политикой.
 func (t *Telegram) Denied(agent, action, reason string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

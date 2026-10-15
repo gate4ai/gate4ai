@@ -63,15 +63,8 @@ func (u *UI) edit(comment string, f func(c *config.Config) error) error {
 	return err
 }
 
-func (u *UI) tools() []daemon.Tool {
-	var out []daemon.Tool
-	for _, t := range u.D.Tools(owner) {
-		if t.Connector != daemon.SelfConnector {
-			out = append(out, t)
-		}
-	}
-	return out
-}
+// tools — каталог действий (вместе с gate4ai.* — на них тоже пишутся правила).
+func (u *UI) tools() []daemon.Tool { return u.D.Tools(owner) }
 
 func (u *UI) bin() string {
 	if u.Bin != "" {
@@ -135,8 +128,6 @@ func (u *UI) overview(m mount) func(r *http.Request) (string, map[string]any, er
 		if m.remote {
 			return "overview", data, err
 		}
-		props, _ := u.D.State.ListProposals(state.ProposalOpen, "", 20)
-		data["Proposals"] = props
 		conns := u.connectorNames()
 		anySeen := false
 		for a := range cfg.Agents {
@@ -362,14 +353,13 @@ func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any
 
 // agentRow — агент в списке.
 type agentRow struct {
-	Name     string
-	Agent    config.Agent
-	Seen     state.AgentSeen
-	Tokens   []state.TokenInfo
-	Clients  []string // подключённые клиенты (автоподключение)
-	Active   int
-	Profile  config.Profile
-	Proposal int
+	Name    string
+	Agent   config.Agent
+	Seen    state.AgentSeen
+	Tokens  []state.TokenInfo
+	Clients []string // подключённые клиенты (автоподключение)
+	Active  int
+	Profile config.Profile
 }
 
 func (u *UI) agentRows() []agentRow {
@@ -643,10 +633,10 @@ func (u *UI) disconnectClient(w http.ResponseWriter, r *http.Request) map[string
 // storeItem — карточка магазина.
 type storeItem struct {
 	Name, Description, Publisher, Trust, License, Repo, Version string
-	Capabilities                                               []string
-	Installed                                                  string // установленная версия
-	Loaded, Update, Revoked                                    bool
-	Profiles                                                   []string
+	Capabilities                                                []string
+	Installed                                                   string // установленная версия
+	Loaded, Update, Revoked                                     bool
+	Profiles                                                    []string
 }
 
 func (u *UI) storeItems(ctx context.Context, refresh bool) ([]storeItem, string) {
@@ -1306,118 +1296,6 @@ func (u *UI) saveList(w http.ResponseWriter, r *http.Request) map[string]any {
 	return redirect(back, "Список «"+name+"» сохранён")
 }
 
-// ---- Предложения агентов ----
-
-func (u *UI) proposalPage(r *http.Request) (string, map[string]any, error) {
-	p, err := u.D.State.GetProposal(r.PathValue("id"))
-	if err != nil {
-		return "proposal", map[string]any{}, err
-	}
-	var changes []config.Change
-	_ = json.Unmarshal(p.Changes, &changes)
-	var lines []string
-	var installs []map[string]any
-	cfg := u.D.Config.Current()
-	prof := cfg.Agents[p.Agent].Profile
-	for _, ch := range changes {
-		lines = append(lines, ch.Describe())
-		if ch.Op == config.OpInstallConnector {
-			if _, loaded := u.D.Registry.Get(ch.Connector); !loaded {
-				it := map[string]any{"Name": ch.Connector}
-				if plan, err := u.D.PrepareConnector(r.Context(), ch.Connector); err == nil {
-					it["Plan"] = plan
-				} else {
-					it["Error"] = err.Error()
-				}
-				installs = append(installs, it)
-			}
-		}
-	}
-	data := map[string]any{"P": p, "Lines": lines, "Installs": installs, "Profile": prof}
-	if p.Status == state.ProposalOpen {
-		before, after, perr := u.D.Config.Preview(func(c *config.Config) error {
-			for _, ch := range changes {
-				if ch.Op == config.OpInstallConnector {
-					if _, loaded := u.D.Registry.Get(ch.Connector); !loaded {
-						continue
-					}
-				}
-				if err := c.ApplyChange(prof, ch); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		data["Diff"] = lineDiff(string(before), string(after))
-		if perr != nil && len(installs) == 0 {
-			data["PreviewError"] = perr.Error()
-		}
-	}
-	return "proposal", data, nil
-}
-
-func (u *UI) applyProposal(w http.ResponseWriter, r *http.Request) map[string]any {
-	id := r.PathValue("id")
-	install := func(name string) error {
-		plan, err := u.D.PrepareConnector(r.Context(), name)
-		if err != nil {
-			return err
-		}
-		_, _, _, err = u.D.InstallConnector(r.Context(), name, plan.Capabilities)
-		return err
-	}
-	v, err := u.D.ApplyProposal(r.Context(), id, install)
-	if err != nil {
-		return redirectErr("/proposals/"+url.PathEscape(id), err)
-	}
-	return redirect("/", fmt.Sprintf("Предложение применено — версия политики %d (откатить можно в «Правилах»).", v.N))
-}
-
-func (u *UI) rejectProposal(w http.ResponseWriter, r *http.Request) map[string]any {
-	id := r.PathValue("id")
-	if err := u.D.State.DecideProposal(id, state.ProposalRejected, 0, strings.TrimSpace(r.PostForm.Get("note"))); err != nil {
-		return redirectErr("/proposals/"+url.PathEscape(id), err)
-	}
-	return redirect("/", "Предложение отклонено; агент увидит это в gate4ai.proposal_status.")
-}
-
-// lineDiff — построчная разница двух YAML (LCS).
-func lineDiff(a, b string) []diffLine {
-	x, y := strings.Split(a, "\n"), strings.Split(b, "\n")
-	n, m := len(x), len(y)
-	lcs := make([][]int, n+1)
-	for i := range lcs {
-		lcs[i] = make([]int, m+1)
-	}
-	for i := n - 1; i >= 0; i-- {
-		for j := m - 1; j >= 0; j-- {
-			if x[i] == y[j] {
-				lcs[i][j] = lcs[i+1][j+1] + 1
-			} else {
-				lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
-			}
-		}
-	}
-	var out []diffLine
-	i, j := 0, 0
-	for i < n || j < m {
-		switch {
-		case i < n && j < m && x[i] == y[j]:
-			out = append(out, diffLine{" ", x[i]})
-			i, j = i+1, j+1
-		case j < m && (i == n || lcs[i][j+1] >= lcs[i+1][j]):
-			out = append(out, diffLine{"+", y[j]})
-			j++
-		default:
-			out = append(out, diffLine{"-", x[i]})
-			i++
-		}
-	}
-	return out
-}
-
-type diffLine struct{ Op, Text string }
-
 // ---- Журнал ----
 
 func (u *UI) journal(r *http.Request) (string, map[string]any, error) {
@@ -1554,9 +1432,6 @@ func (u *UI) toggleAutostart(w http.ResponseWriter, r *http.Request) map[string]
 func (u *UI) saveGeneral(w http.ResponseWriter, r *http.Request) map[string]any {
 	f := r.PostForm
 	err := u.edit("settings", func(c *config.Config) error {
-		if f.Has("proposals_form") {
-			c.Proposals.Disabled = f.Get("proposals") != "1"
-		}
 		if f.Has("registry") {
 			c.Store.Registry = strings.TrimSpace(f.Get("registry"))
 			c.Store.RegistryKeys = splitItems(f.Get("registry_keys"))
@@ -1602,4 +1477,3 @@ func serviceWorker(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	_, _ = w.Write(b)
 }
-

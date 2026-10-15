@@ -95,6 +95,10 @@ type Pipeline struct {
 	Notifier Notifier
 	Log      *slog.Logger
 	Now      func() time.Time
+	// Describe — проверка и описание действия встроенного коннектора хоста до
+	// решения политики (ключ — коннектор): ошибка — invalid_arguments, текст —
+	// «что именно будет сделано» в запросе подтверждения вместо списка аргументов.
+	Describe map[string]func(agent string, args map[string]any) (string, error)
 
 	mu      sync.RWMutex
 	engine  *policy.Engine
@@ -155,6 +159,12 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 	if err != nil {
 		res.Status, res.Code, res.Message = StatusError, CodeInvalidArgs, err.Error()
 		return res
+	}
+	if f := p.Describe[conn]; f != nil {
+		if _, err := f(c.Agent, args); err != nil {
+			res.Status, res.Code, res.Message = StatusError, CodeInvalidArgs, err.Error()
+			return res
+		}
 	}
 	// 2. Обогащение.
 	prov := p.provenance(args)

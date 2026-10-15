@@ -5,7 +5,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -15,22 +14,20 @@ import (
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
-	"github.com/gate4ai/gate4ai/internal/state"
 )
 
-// SelfConnector — внутренний коннектор самонастройки: агент *предлагает*
-// изменение любой части политики, утверждает его владелец в локальном Web UI
-// (спецификация, «Безопасность самого шлюза»). Сам коннектор конфигурацию не меняет.
+// SelfConnector — внутренний коннектор самонастройки: вместо внешнего сервиса
+// его действия меняют политику самого gate4ai. Это обычные действия под обычной
+// политикой (спецификация, «Безопасность самого шлюза»): change_policy — класс
+// write, по умолчанию с подтверждением владельца в любом канале; правила могут
+// его разрешить или запретить. Секреты и учётки через него не задаются.
 const SelfConnector = "gate4ai"
-
-// defaultMaxOpen — открытых предложений на агента по умолчанию.
-const defaultMaxOpen = 5
 
 type selfConnector struct{ d *Daemon }
 
 const changeSchema = `{ type: object, properties: {
   op: { type: string, enum: [add_rule, remove_rule, add_list_items, remove_list_items, add_connector, connector_settings, install_connector],
-        description: "add_rule / remove_rule — a rule of a profile; add_list_items / remove_list_items — a policy list; add_connector — give a profile an installed connector; connector_settings — merge connector settings (no secrets); install_connector — install from the store" },
+        description: "add_rule / remove_rule — a rule of a profile; add_list_items / remove_list_items — a policy list; add_connector — give a profile an installed connector; connector_settings — merge connector settings (no secrets); install_connector — install from the store and give the profile access" },
   profile: { type: string, description: "profile to change (add_rule, remove_rule, add_connector, install_connector); empty — your own profile" },
   rule_id: { type: string, description: "rule id (remove_rule; optional for add_rule)" },
   action: { type: string, description: "add_rule: action name or glob, e.g. files.append or email.*" },
@@ -45,102 +42,139 @@ const changeSchema = `{ type: object, properties: {
 
 func (selfConnector) Manifest() manifest.Manifest {
 	return manifest.Manifest{Connector: SelfConnector, Version: "1", Runtime: manifest.RuntimeBuiltin,
-		Description: "Settings of gate4.ai itself: propose a change to the policy; the owner reviews and approves it",
+		Description: "Settings of gate4.ai itself, under the same policy as any other action",
 		Actions: []manifest.Action{
-			{Name: "propose_change", Class: "read",
-				Description: "Propose a change to gate4.ai policy (rules of any profile, lists, connector settings, installing connectors). Nothing changes until the owner approves it in the Web UI on their computer. Secrets cannot be proposed. Explain why in reason.",
+			{Name: "change_policy", Class: "write",
+				Description: "Change gate4.ai policy: rules of any profile, lists, connector settings, installing connectors. Like any write action it usually needs the owner's approval. Secrets cannot be set. Explain why in reason.",
 				InputSchema: manifest.MustSchema(`{ type: object, properties: {
 				  summary: { type: string, description: "one line: what the change does" },
 				  reason: { type: string, description: "why the user needs it" },
 				  changes: { type: array, minItems: 1, maxItems: 20, items: ` + changeSchema + ` } },
 				  required: [summary, changes] }`),
-				Example: `gate4ai gate4ai propose_change --summary "Let me append to notes" --changes '[{"op":"add_rule","action":"files.append","when":"glob(path, \"~/notes/**\")","effect":"allow"}]'`},
-			{Name: "proposal_status", Class: "read", Description: "Status of your proposal: open, applied or rejected (with the owner's note)",
-				InputSchema: manifest.MustSchema(`{ type: object, properties: { id: { type: string } }, required: [id] }`)},
+				Example: `gate4ai gate4ai change_policy --summary "Let me append to notes" --changes '[{"op":"add_rule","action":"files.append","when":"glob(path, \"~/notes/**\")","effect":"allow"}]'`},
 			{Name: "policy_summary", Class: "read", Description: "Your profile (connectors, rules, limits — what you may do without asking, what needs approval, what is denied), the other profiles and the lists",
 				InputSchema: manifest.MustSchema(`{ type: object, properties: {} }`)},
 		}}
 }
 
-func (s selfConnector) Execute(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
-	d := s.d
-	agent := pipeline.AgentFrom(ctx)
-	cfg := d.Config.Current()
-	if agent == "" {
-		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "unknown agent")
-	}
-	if cfg.Proposals.Disabled {
-		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "the owner turned off proposals from agents (Web UI → Settings)")
-	}
-	switch r.Action {
-	case "propose_change":
-		return s.propose(agent, r.Args)
-	case "proposal_status":
-		id, _ := r.Args["id"].(string)
-		p, err := d.State.GetProposal(id)
-		if err != nil || p.Agent != agent {
-			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "proposal %q not found", id)
-		}
-		return abi.ExecResult{Structured: map[string]any{"id": p.ID, "status": p.Status, "note": p.Note, "version": p.Version}}, nil
-	case "policy_summary":
-		return abi.ExecResult{Structured: PolicySummary(cfg, agent)}, nil
-	}
-	return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "unknown action %s", r.Action)
-}
-
-func (s selfConnector) propose(agent string, args map[string]any) (abi.ExecResult, error) {
-	d := s.d
+// changesOf — правки из аргументов change_policy.
+func changesOf(args map[string]any) ([]config.Change, error) {
 	raw, _ := json.Marshal(args["changes"])
 	var changes []config.Change
 	if err := json.Unmarshal(raw, &changes); err != nil || len(changes) == 0 {
-		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "changes must be a non-empty array")
+		return nil, fmt.Errorf("changes must be a non-empty array")
 	}
 	for i, ch := range changes {
 		if err := config.CheckChange(ch); err != nil {
-			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "changes[%d]: %v", i, err)
+			return nil, fmt.Errorf("changes[%d]: %v", i, err)
 		}
 	}
-	// Предпросмотр: правки должны давать корректную конфигурацию (кроме установки
-	// коннектора, которой ещё нет в каталоге).
-	prof := d.Config.Current().Agents[agent].Profile
-	_, _, err := d.Config.Preview(func(c *config.Config) error {
-		for _, ch := range changes {
-			if ch.Op == config.OpInstallConnector {
+	return changes, nil
+}
+
+// applyChanges применяет правки; skipMissing — пропустить установку ещё не
+// установленных коннекторов (предпросмотр до установки).
+func (d *Daemon) applyChanges(c *config.Config, agent string, changes []config.Change, skipMissing bool) error {
+	prof := c.Agents[agent].Profile
+	for _, ch := range changes {
+		if ch.Op == config.OpInstallConnector && skipMissing {
+			if _, ok := d.Registry.Get(ch.Connector); !ok {
 				continue
 			}
-			if err := c.ApplyChange(prof, ch); err != nil {
-				return err
+		}
+		if err := c.ApplyChange(prof, ch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// describeSelf — проверка change_policy до решения политики и текст для
+// запроса подтверждения: правки человеческим языком и возможности
+// устанавливаемых коннекторов.
+func (d *Daemon) describeSelf(agent string, args map[string]any) (string, error) {
+	if _, ok := args["changes"]; !ok {
+		return "", nil // policy_summary
+	}
+	changes, err := changesOf(args)
+	if err != nil {
+		return "", err
+	}
+	if _, _, err := d.Config.Preview(func(c *config.Config) error { return d.applyChanges(c, agent, changes, true) }); err != nil {
+		return "", fmt.Errorf("the change would not produce a valid policy: %v", err)
+	}
+	var b strings.Builder
+	if s, _ := args["summary"].(string); s != "" {
+		fmt.Fprintf(&b, "%s\n", s)
+	}
+	if s, _ := args["reason"].(string); s != "" {
+		fmt.Fprintf(&b, "Why: %s\n", s)
+	}
+	b.WriteString("Changes to the gate4.ai policy:\n")
+	for _, ch := range changes {
+		fmt.Fprintf(&b, "  • %s\n", ch.Describe())
+		if ch.Op != config.OpInstallConnector {
+			continue
+		}
+		if _, ok := d.Registry.Get(ch.Connector); ok {
+			continue
+		}
+		if ix := d.StoreOptions().CachedIndex(); ix != nil {
+			if e, rel, err := ix.Resolve(ch.Connector, ""); err == nil {
+				fmt.Fprintf(&b, "    %s %s by %s, capabilities: %s\n", ch.Connector, rel.Version, e.Publisher, strings.Join(rel.Capabilities, "; "))
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "the change would not produce a valid policy: %v", err)
 	}
-	limit := d.Config.Current().Proposals.MaxOpen
-	if limit == 0 {
-		limit = defaultMaxOpen
+	return b.String(), nil
+}
+
+func (s selfConnector) Execute(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
+	d := s.d
+	agent := pipeline.AgentFrom(ctx)
+	if agent == "" {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "unknown agent")
 	}
-	if open, _ := d.State.ListProposals(state.ProposalOpen, agent, limit+1); len(open) >= limit {
-		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "you already have %d open proposals; wait until the owner reviews them", len(open))
+	switch r.Action {
+	case "policy_summary":
+		return abi.ExecResult{Structured: PolicySummary(d.Config.Current(), agent)}, nil
+	case "change_policy":
+		changes, err := changesOf(r.Args)
+		if err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
+		}
+		// Установка коннектора: решение по действию покрывает согласие на его
+		// возможности (они перечислены в запросе подтверждения).
+		for _, ch := range changes {
+			if ch.Op != config.OpInstallConnector {
+				continue
+			}
+			if _, ok := d.Registry.Get(ch.Connector); ok {
+				continue
+			}
+			plan, err := d.PrepareConnector(ctx, ch.Connector)
+			if err != nil {
+				return abi.ExecResult{}, fmt.Errorf("install %s: %w", ch.Connector, err)
+			}
+			if _, _, _, err := d.InstallConnector(ctx, ch.Connector, plan.Capabilities); err != nil {
+				return abi.ExecResult{}, fmt.Errorf("install %s: %w", ch.Connector, err)
+			}
+		}
+		summary, _ := r.Args["summary"].(string)
+		v, err := d.Config.Edit(auth.OwnerVia(SelfConnector), fmt.Sprintf("%s.change_policy by %s: %s", SelfConnector, agent, summary),
+			func(c *config.Config) error { return d.applyChanges(c, agent, changes, false) })
+		if err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
+		}
+		return abi.ExecResult{Structured: map[string]any{"status": "applied", "config_version": v.N}}, nil
 	}
-	summary, _ := args["summary"].(string)
-	reason, _ := args["reason"].(string)
-	cj, _ := json.Marshal(changes)
-	p := &state.Proposal{Agent: agent, Summary: strings.TrimSpace(summary), Reason: strings.TrimSpace(reason), Changes: cj}
-	if err := d.State.AddProposal(p); err != nil {
-		return abi.ExecResult{}, err
-	}
-	d.notifiers.Proposed(p)
-	return abi.ExecResult{Structured: map[string]any{"id": p.ID, "status": "pending_owner",
-		"message": "The owner will review the proposal in the gate4.ai Web UI on their computer. Check it with gate4ai.proposal_status."}}, nil
+	return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "unknown action %s", r.Action)
 }
 
 func (selfConnector) Verify(_ context.Context, r abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{}, abi.Errorf(abi.CodeBadRequest, "action %s has no verification", r.Action)
 }
 
-// PolicySummary — профиль агента: коннекторы, правила, лимиты, списки.
+// PolicySummary — профиль агента (коннекторы, правила, лимиты), остальные профили и списки.
 func PolicySummary(cfg *config.Config, agent string) map[string]any {
 	a, ok := cfg.Agents[agent]
 	if !ok {
@@ -167,51 +201,4 @@ func PolicySummary(cfg *config.Config, agent string) map[string]any {
 	}
 	return map[string]any{"agent": agent, "profile": a.Profile, "connectors": p.Connectors, "rules": rules, "limits": limits,
 		"lists": lists, "other_profiles": others, "defaults": "no rule matched: read → allow; write / external / money → ask; deny beats ask beats allow"}
-}
-
-// ApplyProposal применяет предложение (только владелец): правки профиля агента —
-// одной новой версией. install — установить коннектор (из магазина, с согласием,
-// которое владелец дал на экране предложения); nil — установка не нужна.
-func (d *Daemon) ApplyProposal(ctx context.Context, id string, install func(name string) error) (config.Version, error) {
-	p, err := d.State.GetProposal(id)
-	if err != nil {
-		return config.Version{}, err
-	}
-	if p.Status != state.ProposalOpen {
-		return config.Version{}, fmt.Errorf("proposal is already %s", p.Status)
-	}
-	var changes []config.Change
-	if err := json.Unmarshal(p.Changes, &changes); err != nil {
-		return config.Version{}, err
-	}
-	a, ok := d.Config.Current().Agents[p.Agent]
-	if !ok {
-		return config.Version{}, fmt.Errorf("agent %q is no longer in the configuration", p.Agent)
-	}
-	for _, ch := range changes {
-		if ch.Op == config.OpInstallConnector {
-			if _, loaded := d.Registry.Get(ch.Connector); loaded {
-				continue
-			}
-			if install == nil {
-				return config.Version{}, errors.New("the proposal installs a connector: confirm its capabilities")
-			}
-			if err := install(ch.Connector); err != nil {
-				return config.Version{}, fmt.Errorf("install %s: %w", ch.Connector, err)
-			}
-		}
-	}
-	v, err := d.Config.Edit(auth.OwnerVia("webui"), fmt.Sprintf("agent proposal %s from %s: %s", p.ID, p.Agent, p.Summary), func(c *config.Config) error {
-		for _, ch := range changes {
-			if err := c.ApplyChange(a.Profile, ch); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return config.Version{}, err
-	}
-	_ = d.State.DecideProposal(id, state.ProposalApplied, v.N, "")
-	return v, nil
 }

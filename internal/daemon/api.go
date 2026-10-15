@@ -49,12 +49,8 @@ func (d *Daemon) Tools(p auth.Principal) []Tool {
 		}
 	}
 	out := []Tool{}
-	selfConfig := !d.Config.Current().Proposals.Disabled
 	for _, m := range d.Registry.Manifests() {
 		if policy.Implicit[m.Connector] || (filter && !prof.HasConnector(m.Connector) && !policy.Everyone[m.Connector]) {
-			continue
-		}
-		if m.Connector == SelfConnector && !selfConfig {
 			continue
 		}
 		for _, a := range m.Actions {

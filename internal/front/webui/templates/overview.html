@@ -17,11 +17,6 @@
 {{if not $s.Done}}<a class="btn small" href="{{$.Base}}{{$s.Link}}">{{$s.Button}}</a>{{end}}</li>{{end}}
 </ol></div>
 {{end}}
-{{with $d.Proposals}}
-<h2>Предложения агентов</h2>
-{{range .}}<div class="card row between"><div><b>{{.Agent}}</b> предлагает: {{.Summary}}<div class="muted">{{if .Reason}}{{.Reason}} · {{end}}{{ago .Created}}</div></div>
-<a class="btn primary" href="{{$.Base}}/proposals/{{.ID}}">Просмотреть</a></div>{{end}}
-{{end}}
 {{end}}
 <h2>Ждут решения</h2>
 <div data-live-pending="{{len $d.Pending}}">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/")}}</div>

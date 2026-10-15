@@ -91,11 +91,6 @@ func (d *Desktop) show(title, body string) error {
 	return err
 }
 
-// Proposed — агент предложил изменение настроек.
-func (d *Desktop) Proposed(p *state.Proposal) {
-	_ = d.show("gate4.ai: агент предлагает изменение", p.Agent+": "+p.Summary+"\nПросмотрите и примените в Web UI: Обзор → Предложения агентов")
-}
-
 // Test показывает пробное уведомление.
 func (d *Desktop) Test() error {
 	return d.show("gate4.ai: проверка уведомлений", "Так будут приходить запросы подтверждения.")

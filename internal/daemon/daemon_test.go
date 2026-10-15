@@ -131,12 +131,12 @@ func TestDaemonSockets(t *testing.T) {
 	var tools []Tool
 	agent.do(t, "GET", "/v1/tools", nil, &tools)
 	// Коннектор самонастройки gate4ai виден любому агенту (только предложения).
-	if len(tools) != 5 || tools[0].Connector != SelfConnector || tools[3].Connector != "notes" {
+	if len(tools) != 4 || tools[0].Connector != SelfConnector || tools[2].Connector != "notes" {
 		t.Fatalf("%+v", tools)
 	}
 	var all []Tool
 	owner.do(t, "GET", "/v1/tools", nil, &all)
-	if len(all) != 6 {
+	if len(all) != 5 {
 		t.Fatal("owner sees all", len(all))
 	}
 

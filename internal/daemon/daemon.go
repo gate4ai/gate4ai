@@ -148,6 +148,7 @@ func New(opt Options) (*Daemon, error) {
 	}
 	d.Pipeline = pipeline.New(d.Registry, d.State, d.Journal, d.Vault, d.notifiers, eng)
 	d.Pipeline.Log = opt.Log
+	d.Pipeline.Describe = map[string]func(string, map[string]any) (string, error){SelfConnector: d.describeSelf}
 	if opt.Now != nil {
 		d.Pipeline.Now = opt.Now
 		d.State.Now = opt.Now
@@ -339,19 +340,4 @@ func (m *MultiNotifier) Resolved(a *state.Approval) {
 }
 func (m *MultiNotifier) Denied(agent, action, reason string) {
 	m.each(func(n pipeline.Notifier) { n.Denied(agent, action, reason) })
-}
-
-// ProposalNotifier — канал, который сообщает владельцу о предложении агента
-// (только сообщает: применяется предложение в локальном Web UI).
-type ProposalNotifier interface {
-	Proposed(p *state.Proposal)
-}
-
-// Proposed рассылает «агент предложил изменение» в каналы, которые это умеют.
-func (m *MultiNotifier) Proposed(p *state.Proposal) {
-	m.each(func(n pipeline.Notifier) {
-		if pn, ok := n.(ProposalNotifier); ok {
-			pn.Proposed(p)
-		}
-	})
 }

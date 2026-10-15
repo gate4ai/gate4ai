@@ -10,10 +10,10 @@ import (
 	"strings"
 )
 
-// Change — одна правка из предложения агента (gate4ai.propose_change). Агент
-// может предложить правку любого профиля (Profile; пусто — свой профиль);
-// секреты и учётки не предлагаются; утверждает предложение владелец в
-// локальном Web UI (спецификация, «Безопасность самого шлюза»).
+// Change — одна правка политики из действия агента gate4ai.change_policy.
+// Действие проходит политику как любое другое (класс write: по умолчанию —
+// подтверждение владельца в любом канале); правка может касаться любого
+// профиля (Profile; пусто — профиль агента); секреты и учётки не задаются.
 type Change struct {
 	Op           string   `json:"op"`
 	Profile      string   `json:"profile,omitempty"`
@@ -28,7 +28,7 @@ type Change struct {
 	SettingsJSON string   `json:"settings_json,omitempty"`
 }
 
-// Операции предложений.
+// Операции правок.
 const (
 	OpAddRule          = "add_rule"           // добавить / заменить правило профиля
 	OpRemoveRule       = "remove_rule"        // удалить правило профиля
@@ -39,13 +39,13 @@ const (
 	OpInstallConnector = "install_connector"  // установить коннектор из магазина (согласие — у владельца)
 )
 
-// ProposalOps — допустимые операции.
-var ProposalOps = []string{OpAddRule, OpRemoveRule, OpAddListItems, OpRemoveListItems, OpAddConnector, OpConnectorSetting, OpInstallConnector}
+// ChangeOps — допустимые операции.
+var ChangeOps = []string{OpAddRule, OpRemoveRule, OpAddListItems, OpRemoveListItems, OpAddConnector, OpConnectorSetting, OpInstallConnector}
 
-// CheckChange проверяет правку до сохранения предложения: форму и запрет секретов.
+// CheckChange проверяет правку до решения политики: форму и запрет секретов.
 func CheckChange(ch Change) error {
-	if !slices.Contains(ProposalOps, ch.Op) {
-		return fmt.Errorf("unknown op %q (one of %s)", ch.Op, strings.Join(ProposalOps, ", "))
+	if !slices.Contains(ChangeOps, ch.Op) {
+		return fmt.Errorf("unknown op %q (one of %s)", ch.Op, strings.Join(ChangeOps, ", "))
 	}
 	if ch.Profile != "" && !idRe.MatchString(ch.Profile) {
 		return fmt.Errorf("%s: invalid profile %q", ch.Op, ch.Profile)
@@ -83,7 +83,7 @@ func CheckChange(ch Change) error {
 		}
 		for _, it := range ch.Items {
 			if strings.HasPrefix(strings.TrimSpace(it), "@") {
-				return fmt.Errorf("%s: vault aliases (@…) cannot be proposed by agents", ch.Op)
+				return fmt.Errorf("%s: vault aliases (@…) cannot be set by agents", ch.Op)
 			}
 		}
 	case OpAddConnector, OpInstallConnector:
@@ -97,7 +97,7 @@ func CheckChange(ch Change) error {
 			return errors.New("connector_settings: settings_json must be a non-empty JSON object")
 		}
 		if hasAlias(m) {
-			return errors.New("connector_settings: secrets and vault aliases (@…) cannot be proposed by agents; the owner sets them in the Web UI")
+			return errors.New("connector_settings: secrets and vault aliases (@…) cannot be set by agents; the owner sets them in the Web UI")
 		}
 	}
 	return nil

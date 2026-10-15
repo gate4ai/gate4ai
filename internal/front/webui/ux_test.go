@@ -16,7 +16,6 @@ import (
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
-	"github.com/gate4ai/gate4ai/internal/state"
 )
 
 type fakeAutostart struct{ on bool }
@@ -170,37 +169,34 @@ func TestFirstRunPaths(t *testing.T) {
 		t.Fatal("autostart")
 	}
 	post("/settings/approvals", url.Values{"timeout": {"2h"}, "back": {"/settings"}})
-	post("/settings/general", url.Values{"proposals_form": {"1"}})
-	c := d.Config.Current()
-	if c.Approvals.Timeout.D().Hours() != 2 || !c.Proposals.Disabled {
-		t.Fatalf("%+v %+v", c.Approvals, c.Proposals)
+	if c := d.Config.Current(); c.Approvals.Timeout.D().Hours() != 2 {
+		t.Fatalf("%+v", c.Approvals)
 	}
 	if p := get("/settings?link=1"); !strings.Contains(p, "Нет публичного адреса") {
 		t.Fatal("remote link without public address")
 	}
 }
 
-func TestProposalApply(t *testing.T) {
+// Самонастройка — обычный запрос подтверждения: решается на странице, как любой другой.
+func TestChangePolicyApproval(t *testing.T) {
 	u, d, _, base := setup(t)
 	_, _, post, get := loginAs(t, u, base)
-	res := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "gate4ai.propose_change", Args: map[string]any{
+	res := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "gate4ai.change_policy", Args: map[string]any{
 		"summary": "append without asking", "changes": []any{map[string]any{"op": "add_rule", "action": "notes.append", "effect": "allow"}}}})
-	if res.Status != "ok" {
+	if res.Status != pipeline.StatusPending {
 		t.Fatalf("%+v", res)
 	}
-	props, _ := d.State.ListProposals(state.ProposalOpen, "", 10)
-	if len(props) != 1 {
-		t.Fatal(props)
-	}
-	if p := get("/"); !strings.Contains(p, "append without asking") {
-		t.Fatal("overview must show the proposal")
-	}
-	p := get("/proposals/" + props[0].ID)
-	if !strings.Contains(p, "Правило: разрешать notes.append") || !strings.Contains(p, `class="add"`) {
+	if p := get("/approvals"); !strings.Contains(p, "Правило: разрешать notes.append") {
 		t.Fatal(p)
 	}
-	post("/proposals/"+props[0].ID+"/apply", url.Values{})
+	post("/approvals/"+res.ID, url.Values{"decision": {"approve"}})
 	if r := d.Config.Current().Profiles["p"].Rules; len(r) != 1 || r[0].Effect != config.EffectAllow {
+		t.Fatalf("%+v", r)
+	}
+	// Шаблон запрещает самонастройку правилом.
+	post("/policy/template", url.Values{"profile": {"p"}, "template": {"no-self-config"}})
+	if r := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "gate4ai.change_policy", Args: map[string]any{
+		"summary": "x", "changes": []any{map[string]any{"op": "remove_rule", "rule_id": "no-self-config"}}}}); r.Status != pipeline.StatusDenied {
 		t.Fatalf("%+v", r)
 	}
 }

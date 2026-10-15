@@ -39,14 +39,6 @@ type Config struct {
 	Egress     Egress                    `yaml:"egress,omitempty" json:"egress"`
 	Browser    Browser                   `yaml:"browser,omitempty" json:"browser"`
 	Store      ConnectorStore            `yaml:"store,omitempty" json:"store"`
-	Proposals  Proposals                 `yaml:"proposals,omitempty" json:"proposals"`
-}
-
-// Proposals — предложения изменений от агентов (gate4ai.propose_change):
-// агент только предлагает, применяет владелец в локальном Web UI.
-type Proposals struct {
-	Disabled bool `yaml:"disabled,omitempty" json:"disabled,omitempty"` // агенты не могут предлагать изменения
-	MaxOpen  int  `yaml:"max_open,omitempty" json:"max_open,omitempty"` // открытых предложений на агента (0 — 5)
 }
 
 // ConnectorStore — магазин коннекторов: индекс registry и ключи, которым владелец доверяет.

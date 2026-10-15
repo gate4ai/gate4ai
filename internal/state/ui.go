@@ -3,26 +3,17 @@
 package state
 
 import (
-	"crypto/rand"
-	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"time"
 )
 
-// Данные для Web UI: последнее обращение агентов, предложения изменений от
-// агентов, статистика каналов подтверждений, подписки браузерного push.
+// Данные для Web UI: последнее обращение агентов, статистика каналов подтверждений, подписки браузерного push.
 
 const uiSchema = `
 CREATE TABLE IF NOT EXISTS agent_seen(
   agent TEXT PRIMARY KEY, ts INTEGER NOT NULL, via TEXT NOT NULL DEFAULT '', calls INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS token_seen(hash TEXT PRIMARY KEY, ts INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS proposals(
-  id TEXT PRIMARY KEY, created INTEGER NOT NULL, agent TEXT NOT NULL, status TEXT NOT NULL,
-  summary TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', changes TEXT NOT NULL,
-  decided_at INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT '');
-CREATE INDEX IF NOT EXISTS proposals_status ON proposals(status);
 CREATE TABLE IF NOT EXISTS channel_stats(
   channel TEXT PRIMARY KEY, sent INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0,
   last_ok INTEGER NOT NULL DEFAULT 0, last_err_ts INTEGER NOT NULL DEFAULT 0, last_err TEXT NOT NULL DEFAULT '');
@@ -83,98 +74,6 @@ func (s *Store) LastSeen() (map[string]AgentSeen, error) {
 		out[a] = v
 	}
 	return out, rows.Err()
-}
-
-// ---- Предложения изменений от агентов ----
-
-// Статусы предложения.
-const (
-	ProposalOpen     = "open"
-	ProposalApplied  = "applied"
-	ProposalRejected = "rejected"
-)
-
-// Proposal — предложение изменения конфигурации от агента.
-type Proposal struct {
-	ID        string          `json:"id"`
-	Created   time.Time       `json:"created"`
-	Agent     string          `json:"agent"`
-	Status    string          `json:"status"`
-	Summary   string          `json:"summary"`
-	Reason    string          `json:"reason,omitempty"`
-	Changes   json.RawMessage `json:"changes"`
-	DecidedAt time.Time       `json:"decided_at,omitempty"`
-	Version   int             `json:"version,omitempty"` // версия конфигурации после применения
-	Note      string          `json:"note,omitempty"`    // комментарий владельца или ошибка
-}
-
-// AddProposal сохраняет новое предложение.
-func (s *Store) AddProposal(p *Proposal) error {
-	b := make([]byte, 6)
-	_, _ = rand.Read(b)
-	p.ID, p.Created, p.Status = "p_"+hex.EncodeToString(b), s.Now(), ProposalOpen
-	_, err := s.db.Exec(`INSERT INTO proposals(id,created,agent,status,summary,reason,changes) VALUES(?,?,?,?,?,?,?)`,
-		p.ID, p.Created.UnixNano(), p.Agent, p.Status, p.Summary, p.Reason, string(p.Changes))
-	return err
-}
-
-// ErrNoProposal — предложения нет.
-var ErrNoProposal = errors.New("proposal not found")
-
-func scanProposal(row interface{ Scan(...any) error }) (*Proposal, error) {
-	var p Proposal
-	var c, d int64
-	var ch string
-	if err := row.Scan(&p.ID, &c, &p.Agent, &p.Status, &p.Summary, &p.Reason, &ch, &d, &p.Version, &p.Note); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNoProposal
-		}
-		return nil, err
-	}
-	p.Created, p.Changes = time.Unix(0, c), json.RawMessage(ch)
-	if d != 0 {
-		p.DecidedAt = time.Unix(0, d)
-	}
-	return &p, nil
-}
-
-const proposalCols = `id,created,agent,status,summary,reason,changes,decided_at,version,note`
-
-// GetProposal возвращает предложение.
-func (s *Store) GetProposal(id string) (*Proposal, error) {
-	return scanProposal(s.db.QueryRow(`SELECT `+proposalCols+` FROM proposals WHERE id=?`, id))
-}
-
-// ListProposals — предложения (status "" — все; agent "" — всех агентов), новые первыми.
-func (s *Store) ListProposals(status, agent string, limit int) ([]*Proposal, error) {
-	rows, err := s.db.Query(`SELECT `+proposalCols+` FROM proposals WHERE (?='' OR status=?) AND (?='' OR agent=?) ORDER BY created DESC LIMIT ?`,
-		status, status, agent, agent, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*Proposal
-	for rows.Next() {
-		p, err := scanProposal(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
-}
-
-// DecideProposal закрывает открытое предложение.
-func (s *Store) DecideProposal(id, status string, version int, note string) error {
-	res, err := s.db.Exec(`UPDATE proposals SET status=?, decided_at=?, version=?, note=? WHERE id=? AND status=?`,
-		status, s.Now().UnixNano(), version, note, id, ProposalOpen)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNoProposal
-	}
-	return nil
 }
 
 // ---- Статистика каналов подтверждений ----

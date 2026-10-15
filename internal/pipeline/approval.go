@@ -25,6 +25,11 @@ func (p *Pipeline) requestApproval(agent, action string, act manifest.Action, ar
 	a := &state.Approval{ID: state.NewApprovalID(), Created: now, Expires: now.Add(timeout), Agent: agent, Action: action,
 		Class: act.Class, Status: state.Pending, Decision: dec, Args: args, Provenance: prov}
 	a.Preview = Preview(agent, action, p.maskArgs(act, args), dec)
+	if f := p.Describe[strings.SplitN(action, ".", 2)[0]]; f != nil {
+		if text, err := f(agent, args); err == nil && text != "" {
+			a.Preview = previewText(agent, action, text, dec)
+		}
+	}
 	canon, _ := audit.Canonicalize(map[string]any{"id": a.ID, "agent": agent, "action": action, "args": p.maskArgs(act, args)})
 	a.PreviewHash = audit.HashBytes(canon)
 	if err := p.State.PutApproval(a); err != nil {
@@ -75,6 +80,15 @@ func Preview(agent, action string, args map[string]any, dec policy.Decision) str
 	}
 	fmt.Fprintf(&b, "Why approval is needed: %s", why)
 	return b.String()
+}
+
+// previewText — превью с описанием действия вместо списка аргументов.
+func previewText(agent, action, text string, dec policy.Decision) string {
+	why := dec.Reason
+	if len(dec.RuleIDs) > 0 {
+		why += " [" + strings.Join(dec.RuleIDs, ", ") + "]"
+	}
+	return fmt.Sprintf("%s wants to run %s\n%s\nWhy approval is needed: %s", agent, action, strings.TrimRight(text, "\n"), why)
 }
 
 // wait ждёт решения до d; если решения нет — pending с id.

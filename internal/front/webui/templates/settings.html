@@ -39,11 +39,8 @@
 <label class="inline">Ждать решения <input name="timeout" value="{{$d.Timeout}}" size="6"></label><span class="help">затем — отказ</span><button>Сохранить</button></form>
 <p><a href="{{.Base}}/approvals#channels">Каналы уведомлений →</a></p></div>
 
-<div class="card"><h3>Агенты могут предлагать изменения</h3>
-<form method="post" action="{{.Base}}/settings/general"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="proposals_form" value="1">
-<label class="inline"><input type="checkbox" name="proposals" value="1" {{if not $d.Config.Proposals.Disabled}}checked{{end}}> разрешить агентам вызывать <code>gate4ai.propose_change</code></label>
-<p class="help">Агент (например, Claude Code) может подготовить правило или настройку коннектора по вашей просьбе. Ничего не меняется, пока вы не примете предложение здесь, на этом компьютере; секреты агент предложить не может.</p>
-<button>Сохранить</button></form></div>
+<div class="card"><h3>Агенты меняют настройки gate4.ai</h3>
+<p>Агент может сам изменить политику — правило, список, настройку или установку коннектора — действием <code>gate4ai.change_policy</code>. Это обычное действие под обычными правилами: по умолчанию оно требует вашего подтверждения в любом канале (в запросе — что именно изменится), правилом его можно разрешить или запретить (шаблон «Агентам нельзя менять настройки»). Секреты так задать нельзя. Каждое изменение — версия политики с откатом.</p></div>
 
 <div class="card" id="store"><h3>Магазин коннекторов</h3>
 <form method="post" action="{{.Base}}/settings/general"><input type="hidden" name="csrf" value="{{.CSRF}}">

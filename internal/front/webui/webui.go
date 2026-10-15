@@ -82,7 +82,7 @@ var tpl = template.Must(template.New("").Funcs(funcs).ParseFS(tplFS, "templates/
 
 var titles = map[string]string{"overview": "Обзор", "approvals": "Подтверждения", "telegram": "Telegram", "agents": "Агенты", "agent": "Агент",
 	"agent_new": "Новый агент", "connectors": "Коннекторы", "connector": "Коннектор", "policy": "Правила", "rule": "Правило", "templates": "Шаблоны",
-	"policy_yaml": "YAML", "proposal": "Предложение агента", "journal": "Журнал", "receipt": "Квитанция", "vault": "Секреты", "settings": "Настройки",
+	"policy_yaml": "YAML", "journal": "Журнал", "receipt": "Квитанция", "vault": "Секреты", "settings": "Настройки",
 	"remote_only": "Только на компьютере"}
 
 func or(a, b string) string {
@@ -329,7 +329,6 @@ func (u *UI) handler(m mount) http.Handler {
 	localPage("/policy/rule", u.rulePage)
 	localPage("/policy/templates", u.templatesPage)
 	localPage("/policy/yaml", u.yamlPage)
-	localPage("/proposals/{id}", u.proposalPage)
 	localPage("/vault", u.vaultPage)
 	localPage("/settings", u.settingsPage)
 	localPage("/approvals/telegram", u.telegramPage)
@@ -357,8 +356,6 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/policy/profile", u.createProfile)
 	change("/policy/profile/connectors", u.saveProfileConnectors)
 	change("/policy/lists", u.saveList)
-	change("/proposals/{id}/apply", u.applyProposal)
-	change("/proposals/{id}/reject", u.rejectProposal)
 	change("/vault", u.setSecret)
 	change("/vault/delete", u.deleteSecret)
 	change("/channels/{name}/toggle", u.toggleChannel)
@@ -458,18 +455,13 @@ type view struct {
 	Title, Nav, CSRF string
 	Flash, Error     string
 	Data             map[string]any
-	// Счётчики в меню.
-	Pending, Proposals int
+	// Счётчик в меню.
+	Pending int
 }
 
 func (u *UI) counts(v *view) {
 	if p, err := u.D.State.ListApprovals(state.Pending, 100); err == nil {
 		v.Pending = len(p)
-	}
-	if !v.Remote {
-		if p, err := u.D.State.ListProposals(state.ProposalOpen, "", 100); err == nil {
-			v.Proposals = len(p)
-		}
 	}
 }
 
