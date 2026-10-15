@@ -19,8 +19,8 @@ import (
 )
 
 // SelfConnector — внутренний коннектор самонастройки: агент *предлагает*
-// изменение настроек своего профиля, применяет его владелец в локальном Web UI
-// (docs/ui-plan.md, 4.7). Сам коннектор конфигурацию не меняет.
+// изменение любой части политики, утверждает его владелец в локальном Web UI
+// (спецификация, «Безопасность самого шлюза»). Сам коннектор конфигурацию не меняет.
 const SelfConnector = "gate4ai"
 
 // defaultMaxOpen — открытых предложений на агента по умолчанию.
@@ -30,7 +30,8 @@ type selfConnector struct{ d *Daemon }
 
 const changeSchema = `{ type: object, properties: {
   op: { type: string, enum: [add_rule, remove_rule, add_list_items, remove_list_items, add_connector, connector_settings, install_connector],
-        description: "add_rule / remove_rule — rule of your own profile; add_list_items / remove_list_items — a policy list; add_connector — give your profile an installed connector; connector_settings — merge connector settings (no secrets); install_connector — install from the store" },
+        description: "add_rule / remove_rule — a rule of a profile; add_list_items / remove_list_items — a policy list; add_connector — give a profile an installed connector; connector_settings — merge connector settings (no secrets); install_connector — install from the store" },
+  profile: { type: string, description: "profile to change (add_rule, remove_rule, add_connector, install_connector); empty — your own profile" },
   rule_id: { type: string, description: "rule id (remove_rule; optional for add_rule)" },
   action: { type: string, description: "add_rule: action name or glob, e.g. files.append or email.*" },
   when: { type: string, description: "add_rule: CEL condition over the action arguments, e.g. glob(path, \"~/notes/**\")" },
@@ -44,10 +45,10 @@ const changeSchema = `{ type: object, properties: {
 
 func (selfConnector) Manifest() manifest.Manifest {
 	return manifest.Manifest{Connector: SelfConnector, Version: "1", Runtime: manifest.RuntimeBuiltin,
-		Description: "Settings of gate4.ai itself: propose a change to your own permissions; the owner reviews and applies it",
+		Description: "Settings of gate4.ai itself: propose a change to the policy; the owner reviews and approves it",
 		Actions: []manifest.Action{
 			{Name: "propose_change", Class: "read",
-				Description: "Propose a change to gate4.ai settings for your profile (rules, lists, connectors). Nothing changes until the owner applies it in the Web UI on their computer. Explain why in reason.",
+				Description: "Propose a change to gate4.ai policy (rules of any profile, lists, connector settings, installing connectors). Nothing changes until the owner approves it in the Web UI on their computer. Secrets cannot be proposed. Explain why in reason.",
 				InputSchema: manifest.MustSchema(`{ type: object, properties: {
 				  summary: { type: string, description: "one line: what the change does" },
 				  reason: { type: string, description: "why the user needs it" },
@@ -56,7 +57,7 @@ func (selfConnector) Manifest() manifest.Manifest {
 				Example: `gate4ai gate4ai propose_change --summary "Let me append to notes" --changes '[{"op":"add_rule","action":"files.append","when":"glob(path, \"~/notes/**\")","effect":"allow"}]'`},
 			{Name: "proposal_status", Class: "read", Description: "Status of your proposal: open, applied or rejected (with the owner's note)",
 				InputSchema: manifest.MustSchema(`{ type: object, properties: { id: { type: string } }, required: [id] }`)},
-			{Name: "policy_summary", Class: "read", Description: "Your profile: available connectors, rules and lists — what you may do without asking, what needs approval, what is denied",
+			{Name: "policy_summary", Class: "read", Description: "Your profile (connectors, rules, limits — what you may do without asking, what needs approval, what is denied), the other profiles and the lists",
 				InputSchema: manifest.MustSchema(`{ type: object, properties: {} }`)},
 		}}
 }
@@ -158,8 +159,14 @@ func PolicySummary(cfg *config.Config, agent string) map[string]any {
 	for n, it := range cfg.Lists {
 		lists[n] = len(it)
 	}
+	others := map[string][]string{}
+	for n, op := range cfg.Profiles {
+		if n != a.Profile {
+			others[n] = op.Connectors
+		}
+	}
 	return map[string]any{"agent": agent, "profile": a.Profile, "connectors": p.Connectors, "rules": rules, "limits": limits,
-		"lists": lists, "defaults": "no rule matched: read → allow; write / external / money → ask; deny beats ask beats allow"}
+		"lists": lists, "other_profiles": others, "defaults": "no rule matched: read → allow; write / external / money → ask; deny beats ask beats allow"}
 }
 
 // ApplyProposal применяет предложение (только владелец): правки профиля агента —

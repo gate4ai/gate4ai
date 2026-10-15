@@ -11,10 +11,12 @@ import (
 )
 
 // Change — одна правка из предложения агента (gate4ai.propose_change). Агент
-// предлагает правки только своего профиля; секреты и учётки не предлагаются;
-// применяет предложение владелец в локальном Web UI.
+// может предложить правку любого профиля (Profile; пусто — свой профиль);
+// секреты и учётки не предлагаются; утверждает предложение владелец в
+// локальном Web UI (спецификация, «Безопасность самого шлюза»).
 type Change struct {
 	Op           string   `json:"op"`
+	Profile      string   `json:"profile,omitempty"`
 	RuleID       string   `json:"rule_id,omitempty"`
 	Action       string   `json:"action,omitempty"`
 	When         string   `json:"when,omitempty"`
@@ -28,11 +30,11 @@ type Change struct {
 
 // Операции предложений.
 const (
-	OpAddRule          = "add_rule"           // добавить / заменить правило своего профиля
-	OpRemoveRule       = "remove_rule"        // удалить правило своего профиля
+	OpAddRule          = "add_rule"           // добавить / заменить правило профиля
+	OpRemoveRule       = "remove_rule"        // удалить правило профиля
 	OpAddListItems     = "add_list_items"     // дополнить список
 	OpRemoveListItems  = "remove_list_items"  // убрать из списка
-	OpAddConnector     = "add_connector"      // дать своему профилю установленный коннектор
+	OpAddConnector     = "add_connector"      // дать профилю установленный коннектор
 	OpConnectorSetting = "connector_settings" // объединить настройки коннектора
 	OpInstallConnector = "install_connector"  // установить коннектор из магазина (согласие — у владельца)
 )
@@ -44,6 +46,9 @@ var ProposalOps = []string{OpAddRule, OpRemoveRule, OpAddListItems, OpRemoveList
 func CheckChange(ch Change) error {
 	if !slices.Contains(ProposalOps, ch.Op) {
 		return fmt.Errorf("unknown op %q (one of %s)", ch.Op, strings.Join(ProposalOps, ", "))
+	}
+	if ch.Profile != "" && !idRe.MatchString(ch.Profile) {
+		return fmt.Errorf("%s: invalid profile %q", ch.Op, ch.Profile)
 	}
 	need := func(name, v string) error {
 		if strings.TrimSpace(v) == "" {
@@ -119,12 +124,15 @@ func hasAlias(v any) bool {
 	return false
 }
 
-// ApplyChange применяет правку к профилю profile (профиль агента-автора).
-// install_connector здесь не исполняется — его ставит владелец через магазин,
-// а в профиль коннектор добавляет следом.
+// ApplyChange применяет правку к профилю ch.Profile, а без него — к profile
+// (профиль агента-автора). install_connector здесь не исполняется — его ставит
+// владелец через магазин, а в профиль коннектор добавляет следом.
 func (c *Config) ApplyChange(profile string, ch Change) error {
 	if err := CheckChange(ch); err != nil {
 		return err
+	}
+	if ch.Profile != "" {
+		profile = ch.Profile
 	}
 	switch ch.Op {
 	case OpAddRule:
@@ -169,6 +177,14 @@ func (c *Config) ApplyChange(profile string, ch Change) error {
 
 // Describe — правка человеческим языком.
 func (ch Change) Describe() string {
+	d := ch.describe()
+	if ch.Profile != "" && ch.Op != OpAddListItems && ch.Op != OpRemoveListItems && ch.Op != OpConnectorSetting {
+		d += " (профиль " + ch.Profile + ")"
+	}
+	return d
+}
+
+func (ch Change) describe() string {
 	switch ch.Op {
 	case OpAddRule:
 		eff := map[string]string{EffectAllow: "разрешать", EffectAsk: "спрашивать", EffectDeny: "запрещать"}[ch.Effect]

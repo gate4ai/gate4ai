@@ -67,6 +67,18 @@ func TestSelfConfigProposal(t *testing.T) {
 	if r := d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "gate4ai.proposal_status", Args: map[string]any{"id": "p_nope"}}); r.Status == "ok" {
 		t.Fatal("unknown proposal")
 	}
+	// Правка чужого профиля тоже предлагается (утверждает владелец).
+	r2 := call("gate4ai.propose_change", map[string]any{"summary": "other", "changes": []any{
+		map[string]any{"op": "add_rule", "profile": "other", "action": "notes.read", "effect": "deny"}}})
+	if r2.Status != "ok" {
+		t.Fatalf("%+v", r2)
+	}
+	if _, err := d.ApplyProposal(ctx, r2.Result.(map[string]any)["id"].(string), nil); err != nil {
+		t.Fatal(err)
+	}
+	if r := d.Config.Current().Profiles["other"].Rules; len(r) != 1 || r[0].Effect != "deny" {
+		t.Fatalf("%+v", r)
+	}
 	v, err := d.ApplyProposal(ctx, id, nil)
 	if err != nil {
 		t.Fatal(err)

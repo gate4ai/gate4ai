@@ -3,9 +3,9 @@
 {{with $d.P}}
 <div class="row between"><h2>Предложение от {{.Agent}}</h2><a href="{{$.Base}}/">← Обзор</a></div>
 <div class="card"><p><b>{{.Summary}}</b></p>{{if .Reason}}<p>Зачем: {{.Reason}}</p>{{end}}
-<p class="muted">{{ts .Created}} · профиль <a href="{{$.Base}}/policy?profile={{$d.Profile}}">{{$d.Profile}}</a> · статус: {{.Status}}{{if .Note}} — {{.Note}}{{end}}{{if .Version}} · версия {{.Version}}{{end}}</p>
+<p class="muted">{{ts .Created}} · профиль агента <a href="{{$.Base}}/policy?profile={{$d.Profile}}">{{$d.Profile}}</a> (правки без указанного профиля — к нему) · статус: {{.Status}}{{if .Note}} — {{.Note}}{{end}}{{if .Version}} · версия {{.Version}}{{end}}</p>
 <h3>Что изменится</h3><ul>{{range $d.Lines}}<li>{{.}}</li>{{end}}</ul>
-<p class="help">Агент только предлагает: пока вы не нажмёте «Применить», ничего не меняется. Применить можно только здесь, на этом компьютере.</p>
+<p class="help">Агент только предлагает: пока вы не нажмёте «Применить», ничего не меняется. Утвердить можно только здесь, на этом компьютере; секреты агент предложить не может.</p>
 </div>
 {{range $d.Installs}}<div class="card"><h3>Установка коннектора {{.Name}}</h3>
 {{with .Plan}}<p>Доверие: {{.Trust}}{{if .Publisher}}, издатель {{.Publisher}}{{end}}. Возможности:</p><ul>{{range .Capabilities}}<li>{{capRu .}}</li>{{else}}<li>нет</li>{{end}}</ul>
