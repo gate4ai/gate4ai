@@ -7,6 +7,7 @@
 package agentsetup
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -201,8 +202,7 @@ func (e Env) Snippet(id, bin, token string) (path, text string) {
 	if c.Format == FormatTOML {
 		return e.ConfigPath(id), tomlBlock(bin, token)
 	}
-	b, _ := json.MarshalIndent(map[string]any{serversKey(c.Format): map[string]any{ServerName: entry(c.Format, bin, token)}}, "", "  ")
-	return e.ConfigPath(id), string(b)
+	return e.ConfigPath(id), strings.TrimSpace(string(marshal(map[string]any{serversKey(c.Format): map[string]any{ServerName: entry(c.Format, bin, token)}})))
 }
 
 // Result — что сделано с файлом клиента.
@@ -244,10 +244,7 @@ func (e Env) Connect(id, bin, token, skillMD string) (Result, error) {
 		}
 		servers[ServerName] = entry(c.Format, bin, token)
 		m[key] = servers
-		if out, err = json.MarshalIndent(m, "", "  "); err != nil {
-			return res, err
-		}
-		out = append(out, '\n')
+		out = marshal(m)
 	}
 	if res.Backup, err = backup(p, old); err != nil {
 		return res, err
@@ -289,8 +286,7 @@ func (e Env) Disconnect(id string) (Result, error) {
 		if servers, _ := m[serversKey(c.Format)].(map[string]any); servers != nil {
 			delete(servers, ServerName)
 		}
-		out, _ = json.MarshalIndent(m, "", "  ")
-		out = append(out, '\n')
+		out = marshal(m)
 	}
 	if res.Backup, err = backup(p, old); err != nil {
 		return res, err
@@ -307,6 +303,16 @@ func (e Env) skillDir() string {
 		return filepath.Join(d, "skills", ServerName)
 	}
 	return filepath.Join(e.Home, ".claude", "skills", ServerName)
+}
+
+// marshal — JSON с отступами без HTML-экранирования (< > & как есть).
+func marshal(v any) []byte {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(v)
+	return b.Bytes()
 }
 
 // backup сохраняет прежнее содержимое рядом (<файл>.gate4ai.bak).

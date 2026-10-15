@@ -2,7 +2,7 @@
 
 Исследование от 2026-10-15. Разобран Web UI на `http://127.0.0.1:7431/` (свежий daemon `gate4ai 0.3.0`, конфигурация версии 1) и его код: `internal/front/webui/webui.go`, `internal/front/webui/templates/*.html`, API владельца `internal/daemon/api.go`, `internal/daemon/connectors.go`, `internal/approval/*`, `internal/relayclient/attach.go`, `internal/state/*`, `internal/connectors/store/*`. Сверено со [specification.md](specification.md), [architecture.md](architecture.md), [connector-architecture.md](connector-architecture.md), [secret-architecture.md](secret-architecture.md), [cli-ux.md](cli-ux.md).
 
-Статус пунктов — в этапе 25 [PLAN.md](../PLAN.md). Разделы 1–3 описывают состояние до доработки, раздел 4 — план, раздел 5 — противоречия с документацией.
+Статус пунктов — в этапе 25 [PLAN.md](../PLAN.md). Разделы 1–3 описывают состояние до доработки, раздел 4 — план, раздел 5 — противоречия с документацией, раздел 6 — что сделано и как проверено.
 
 ## 1. Что есть сейчас
 
@@ -277,3 +277,14 @@
 | D8 | 4.4 коннекторы | connector-architecture.md: согласие на возможности, повторное согласие при изменении | Соблюдено: экран установки = согласие на показанный список; при обновлении с новыми возможностями — снова экран согласия. Поля настроек выводятся из `${setting:…}` манифеста; отдельной схемы настроек в манифесте нет — **предложение** (не правка документа сейчас): добавить в sdk-go `settings` (JSON Schema) в манифест, пока — подсказки для официальных коннекторов в ядре. |
 | D9 | 4.8 relay | specification.md: адрес `<device-id>.relay.gate4.ai`, hosted или self-hosted | Совместимо: адрес relay — настройка с умолчанием `https://relay.gate4.ai`. |
 | D10 | 4.8 автозапуск | cli-ux.md, `gate4ai service` | Совместимо: тот же механизм, код переносится в общий пакет. |
+
+## 6. Что сделано (2026-10-15)
+
+Весь план раздела 4 реализован в этапе 25 [PLAN.md](../PLAN.md). Проверено тестами (`internal/front/webui`: `ux_test.go`, `rules_test.go`; `internal/front/agentsetup`; `internal/approval/webpush_test.go`; `internal/daemon/selfconfig_test.go`; `internal/config/edit_test.go`) и вживую в Chrome на собранном бинарнике с отдельным каталогом данных: чек-лист обзора, установка коннектора `files` из настоящего registry в один клик, мастер агента, автоподключение Claude Code (файл `~/.claude.json` и skill), обращение агента через `gate4ai mcp` с записанным токеном — «последнее обращение: только что через MCP (stdio)».
+
+Найдено и исправлено попутно: Web UI отдавал `Referrer-Policy: no-referrer`, из-за чего Chrome отправлял формы с `Origin: null`, и проверка Origin отклоняла **любое** действие в браузере («bad origin») — теперь `same-origin` (тест `TestReferrerPolicyKeepsOrigin`).
+
+Отличия от плана:
+- П12 «приостановить агента» не сделано отдельной кнопкой: есть «Отозвать все токены» и «Удалить агента» с подтверждением, отключение клиента убирает его из конфигурации и отзывает его токен.
+- Экспорт журнала кнопкой не сделан — на странице журнала показана команда `gate4ai export` (архив нужно подписать и сохранить локально, это удобнее из CLI).
+- Вживую не проверены: Web Push на настоящем push-сервисе (Chrome/FCM, Firefox, Safari) — проверено фейковым push-сервисом с расшифровкой по RFC 8291; мастер Telegram на настоящем боте; автоподключение Claude Desktop, Cursor, VS Code, Codex и Gemini на реальных установках (пути и форматы — по их документации, покрыты тестами). Записано в «Нужно от человека».

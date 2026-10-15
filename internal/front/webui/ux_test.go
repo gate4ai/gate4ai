@@ -273,3 +273,16 @@ type nopCloser struct{ *strings.Reader }
 func (nopCloser) Close() error { return nil }
 
 func ioNop(s string) nopCloser { return nopCloser{strings.NewReader(s)} }
+
+// При no-referrer браузеры отправляют формы с Origin: null — проверка Origin
+// отклонила бы каждое действие.
+func TestReferrerPolicyKeepsOrigin(t *testing.T) {
+	_, _, _, base := setup(t)
+	r, err := http.Get(base + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := r.Header.Get("Referrer-Policy"); p == "no-referrer" || p == "" {
+		t.Fatal(p)
+	}
+}

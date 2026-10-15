@@ -15,11 +15,16 @@
 | Коннекторы (WASM-модули, AGPL-3.0 + исключение): почта, файлы, браузер | `connectors/mail`, `connectors/files`, `connectors/browser` (`github.com/gate4ai/gate4ai-*`) |
 | daemon, API на сокетах владельца и агентов | `internal/daemon`, `internal/platform/ipc` |
 | Публичный адрес устройства: один обработчик для relay и прямого HTTPS (`--public`), разделение по путям — `/mcp` и OAuth, `/v1/{whoami,tools,call,status}` (удалённый CLI), `/ui/` (удалённый Web UI), `/telegram` (вебхук); у каждого пути своя аутентификация, API владельца нет | `internal/daemon` (`PublicHandler`, `AddPublic`, `ServePublic`), `cmd/gate4ai/setup.go`, тест изоляции `cmd/gate4ai/public_test.go` |
-| CLI, skill | `internal/front/cli`, `internal/front/skill`; ошибки для человека и агента (`hint`, `detail`) — `errors.go`; `gate4ai daemon start/stop/status` — `daemonctl.go`; автозапуск `gate4ai service` (systemd --user / XDG autostart, launchd, HKCU Run) — `service*.go`; UX путей пользователя — [cli-ux.md](cli-ux.md) |
+| CLI, skill | `internal/front/cli`, `internal/front/skill`; ошибки для человека и агента (`hint`, `detail`) — `errors.go`; `gate4ai daemon start/stop/status` — `daemonctl.go`; автозапуск `gate4ai service` — `service.go` поверх `internal/platform/autostart`; UX путей пользователя — [cli-ux.md](cli-ux.md) |
 | MCP Front (stdio, Streamable HTTP), OAuth 2.1 | `internal/front/mcp`, `internal/front/mcpcli`, `internal/front/oauth` |
 | Relay — сервер (туннель, passthrough, DNS/ACME, свидетель), отдельный модуль | `relay/` (`github.com/gate4ai/relay`), `relay/cmd/gate4ai-relay` |
 | Relay — клиент устройства | `internal/relayclient` |
-| Web UI | `internal/front/webui` |
+| Web UI: обзор с чек-листом, агенты (последнее обращение, автоподключение), магазин коннекторов, конструктор правил и шаблоны, каналы подтверждений, предложения агентов, настройки — [ui-plan.md](ui-plan.md) | `internal/front/webui` (`pages.go`, `rules.go` — блоки условий → CEL и шаблоны, `connsettings.go` — поля настроек из `${setting:…}`) |
+| Автоподключение клиентов MCP (Claude Code, Claude Desktop, Cursor, VS Code, Codex CLI, Gemini CLI) | `internal/front/agentsetup` |
+| Структурные правки конфигурации, предложения агентов (модель правок) | `internal/config/edit.go`, `internal/config/proposal.go` |
+| Самонастройка: встроенный коннектор `gate4ai` (`propose_change`, `proposal_status`, `policy_summary`), применение владельцем | `internal/daemon/selfconfig.go` |
+| Каналы подтверждений для Web UI: состояние, статистика, мастер Telegram; браузерный push (Web Push, VAPID, RFC 8291) | `internal/approval/channels.go`, `internal/approval/webpush.go` |
+| Автозапуск (systemd --user / XDG, LaunchAgent, HKCU Run) — общий для `gate4ai service` и Web UI | `internal/platform/autostart` |
 | Трей (бинарник `gate4ai-tray`) | `cmd/gate4ai-tray` (меню, fyne.io/systray), `internal/front/tray` (состояние, решения, уведомления) |
 | Магазин: пакеты .g4c, индекс registry, установка с согласием, отзыв | `internal/connectors/store`, `registry/` |
 | Изоляция: Egress Proxy, `gate4ai run`, `doctor` | `internal/hostsvc/egress`, `internal/sandbox` |

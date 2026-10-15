@@ -30,8 +30,8 @@ import (
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
-	"github.com/gate4ai/gate4ai/internal/relayclient"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
+	"github.com/gate4ai/gate4ai/internal/relayclient"
 	"github.com/gate4ai/gate4ai/internal/state"
 )
 
@@ -64,8 +64,9 @@ var funcs = template.FuncMap{
 		return false
 	},
 	"capRu": humanCapability,
-	"inc":  func(i int) int { return i + 1 },
-	"list": func(s ...string) []string { return s },
+	"title": func(nav string) string { return or(titles[nav], nav) },
+	"inc":   func(i int) int { return i + 1 },
+	"list":  func(s ...string) []string { return s },
 	"dict": func(kv ...any) map[string]any {
 		m := map[string]any{}
 		for i := 0; i+1 < len(kv); i += 2 {
@@ -78,6 +79,11 @@ var funcs = template.FuncMap{
 }
 
 var tpl = template.Must(template.New("").Funcs(funcs).ParseFS(tplFS, "templates/*.html"))
+
+var titles = map[string]string{"overview": "Обзор", "approvals": "Подтверждения", "telegram": "Telegram", "agents": "Агенты", "agent": "Агент",
+	"agent_new": "Новый агент", "connectors": "Коннекторы", "connector": "Коннектор", "policy": "Правила", "rule": "Правило", "templates": "Шаблоны",
+	"policy_yaml": "YAML", "proposal": "Предложение агента", "journal": "Журнал", "receipt": "Квитанция", "vault": "Секреты", "settings": "Настройки",
+	"remote_only": "Только на компьютере"}
 
 func or(a, b string) string {
 	if a != "" {
@@ -408,7 +414,9 @@ func (u *UI) guard(m mount, h http.Handler) http.Handler {
 		}
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'")
-		w.Header().Set("Referrer-Policy", "no-referrer")
+		// same-origin, а не no-referrer: при no-referrer браузер шлёт в формах Origin: null,
+		// и проверка Origin отклоняет любое действие.
+		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
 		h.ServeHTTP(w, r)

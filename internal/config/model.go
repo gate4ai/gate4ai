@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -204,7 +205,14 @@ func FormatDuration(d time.Duration) string {
 	if d > 0 && d%day == 0 {
 		return fmt.Sprintf("%dd", d/day)
 	}
-	return d.String()
+	s := d.String() // 30m0s → 30m, 2h0m0s → 2h
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
 
 // Defaults заполняет значения по умолчанию из спецификации (docs/specification.md).
