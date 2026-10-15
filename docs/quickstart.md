@@ -1,4 +1,4 @@
-# gate4.ai — запуск прототипа
+# gate4.ai — сборка и запуск
 
 Спецификация продукта — [specification.md](specification.md), краткая инструкция — [README.md](../README.md), план и принятые допущения — [PLAN.md](../PLAN.md).
 
