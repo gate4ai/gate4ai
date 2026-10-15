@@ -11,11 +11,15 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // Listen создаёт unix-сокет с правами 0600 в каталоге 0700 и проверкой
 // собеседника (SO_PEERCRED / getpeereid): принимаются только процессы того же пользователя.
 func Listen(path string) (net.Listener, error) {
+	if err := CheckPath(path); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -26,7 +30,7 @@ func Listen(path string) (net.Listener, error) {
 		// Живой daemon? Тогда не отбираем у него сокет.
 		if c, err := net.Dial("unix", path); err == nil {
 			c.Close()
-			return nil, fmt.Errorf("ipc: %s is in use by another daemon", path)
+			return nil, fmt.Errorf("%w: %s", ErrInUse, path)
 		}
 		_ = os.Remove(path)
 	}
@@ -67,4 +71,12 @@ func rawFD(c net.Conn, f func(fd uintptr)) error {
 		return err
 	}
 	return rc.Control(f)
+}
+
+// MaxPath — предел длины пути сокета (sun_path без завершающего нуля).
+func MaxPath() int {
+	if runtime.GOOS == "linux" {
+		return 107
+	}
+	return 103
 }

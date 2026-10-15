@@ -20,7 +20,7 @@ Windows (PowerShell):
 irm https://gate4.ai/install.ps1 | iex
 ```
 
-Установщик определяет ОС и архитектуру, скачивает последний релиз, сверяет контрольные суммы и кладёт `gate4ai` и `gate4ai-tray` (значок в трее: статус, «Разрешить / Отклонить», открытие Web UI) в каталог из `PATH`. Проверка: `gate4ai --version`.
+Установщик определяет ОС и архитектуру, скачивает последний релиз, сверяет контрольные суммы и кладёт `gate4ai` и `gate4ai-tray` (значок в трее: статус, «Разрешить / Отклонить», открытие Web UI) в каталог из `PATH`. Проверка: `gate4ai --version`. С `GATE4AI_START=1` (`curl -fsSL https://gate4.ai/install.sh | GATE4AI_START=1 sh`) установщик сразу включает автозапуск daemon (шаг 1).
 
 Вручную — архивы со страницы [Releases](https://github.com/gate4ai/gate4ai/releases) (контрольные суммы подписаны [cosign](https://github.com/sigstore/cosign)) или из исходников: `go install github.com/gate4ai/gate4ai/cmd/gate4ai@latest` (Go 1.27+).
 
@@ -29,12 +29,15 @@ irm https://gate4.ai/install.ps1 | iex
 ### 1. Daemon
 
 ```sh
-gate4ai daemon
+gate4ai service install    # daemon сейчас и при каждом входе в систему, трей — в автозапуск
+gate4ai ui                 # Web UI в браузере
 ```
 
-Daemon держит политики, секреты, журнал и коннекторы. Данные лежат в `~/.local/state/gate4ai` (Linux), `~/Library/Application Support/gate4ai` (macOS), `%LOCALAPPDATA%\gate4ai` (Windows); ключи — в системном keychain. На сервере без keychain: `gate4ai daemon --keystore file`.
+Daemon держит политики, секреты, журнал и коннекторы. Автозапуск: systemd --user (Linux; без systemd — автозапуск рабочего стола), LaunchAgent (macOS), ключ `Run` в реестре пользователя (Windows); убрать — `gate4ai service uninstall`, проверить — `gate4ai service status`.
 
-Остальные команды выполняйте в другом терминале.
+Без автозапуска: `gate4ai daemon start` — в фоне до выхода из системы (`gate4ai daemon stop` — остановить), `gate4ai daemon` — в этом терминале (остальные команды — в другом). `gate4ai ui`, запущенный в терминале, сам поднимает daemon в фоне, если он не работает; `gate4ai status` — работает ли daemon. Журнал фонового daemon — `daemon.log` в каталоге данных.
+
+Данные лежат в `~/.local/state/gate4ai` (Linux), `~/Library/Application Support/gate4ai` (macOS), `%LOCALAPPDATA%\gate4ai` (Windows); ключи — в системном keychain. На сервере без keychain: `gate4ai service install -- --keystore file` (или `gate4ai daemon --keystore file`); чтобы служба работала без входа в систему — `loginctl enable-linger $USER`.
 
 ### 2. Политика и магазин коннекторов
 
@@ -63,29 +66,21 @@ connectors:
     roots: ["~/Documents/notes"]
 ```
 
-Правила ссылаются на действия коннекторов, поэтому сначала включите магазин, затем поставьте коннекторы, затем примените политику целиком:
+Правила ссылаются на действия коннекторов, поэтому сначала поставьте коннекторы, затем примените политику целиком. Магазин коннекторов в начальной конфигурации нового daemon уже подключён:
 
 ```sh
-# 1) только магазин: временная политика без правил
-cat > store.yaml <<'YAML'
-store:
-  registry: https://raw.githubusercontent.com/gate4ai/registry/main/index.json
-  registry_keys: ["ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="]
-profiles:
-  assistant: {}
-YAML
-gate4ai policy set store.yaml -m "магазин"
-
-# 2) коннекторы: при установке показываются их возможности и спрашивается согласие
+# 1) коннекторы: при установке показываются их возможности и спрашивается согласие
 gate4ai connectors install files
 gate4ai connectors install email
 gate4ai connectors install browser
 gate4ai connectors list
 
-# 3) рабочая политика
+# 2) рабочая политика
 gate4ai policy set config.yaml -m "первая политика"
 gate4ai doctor
 ```
+
+Если политика уже была задана без раздела `store`, сначала добавьте в неё `store` из примера выше (`gate4ai policy set`), затем ставьте коннекторы.
 
 Пароли и токены в конфигурацию не пишутся: там только алиасы вида `"@mail.work"`, а значения кладутся в хранилище (из stdin, в историю shell не попадают):
 
@@ -107,7 +102,7 @@ gate4ai files read --path ~/Documents/notes/todo.md
 gate4ai skill > SKILL.md               # инструкция для агента
 ```
 
-Коды выхода: `0` ok, `2` запрещено политикой, `3` ждёт подтверждения, `4` проверка не прошла, `5` неверные аргументы, `6` daemon недоступен.
+Коды выхода: `0` ok, `1` прочие ошибки (в том числе неверный или отозванный токен), `2` запрещено политикой, `3` ждёт подтверждения, `4` проверка не прошла, `5` неверные аргументы или неизвестная команда, `6` daemon недоступен. Ошибка — JSON в stdout: `code`, `message`, а также `hint` (что сделать) и `detail` (подробности), если они есть; человеку в терминале подсказка дублируется в stderr.
 
 **MCP по stdio** (Claude Code, Claude Desktop и др.):
 
@@ -134,7 +129,7 @@ gate4ai agents connect my-agent        # одноразовый код подк�
 ### 4. Подтверждения и журнал
 
 ```sh
-gate4ai approvals list                 # запросы, которые ждут вашего решения
+gate4ai approvals list --table         # запросы, которые ждут вашего решения (без --table — JSON)
 gate4ai approvals approve <id>         # или кнопки в трее, Telegram, Web UI
 gate4ai ui                             # Web UI в браузере
 gate4ai log                            # журнал действий

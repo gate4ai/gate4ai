@@ -38,6 +38,7 @@ type Tray struct {
 
 	mu   sync.Mutex
 	seen map[string]bool
+	err  error // ошибка последнего Fetch
 }
 
 // New — трей поверх клиента владельца (без токена агента).
@@ -46,10 +47,31 @@ func New(c *cli.Client) *Tray { return &Tray{C: c, seen: map[string]bool{}} }
 // Fetch запрашивает состояние; nil — daemon недоступен.
 func (t *Tray) Fetch(ctx context.Context) *State {
 	var st State
-	if err := t.C.Do(ctx, "GET", "/v1/tray/state", nil, &st); err != nil || !st.OK {
+	err := t.C.Do(ctx, "GET", "/v1/tray/state", nil, &st)
+	t.mu.Lock()
+	t.err = err
+	t.mu.Unlock()
+	if err != nil || !st.OK {
 		return nil
 	}
 	return &st
+}
+
+// CanStart — daemon не запущен, и его можно запустить из трея.
+func (t *Tray) CanStart() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return cli.NotRunning(t.err)
+}
+
+// Problem — почему daemon недоступен и что делать (для меню и уведомлений).
+func Problem(err error) (title, body string) {
+	p := cli.Explain(err, false)
+	body = p.Message
+	if p.Hint != "" {
+		body += ".\n" + strings.ToUpper(p.Hint[:1]) + p.Hint[1:]
+	}
+	return p.Message, body
 }
 
 // Fresh возвращает запросы, о которых трей ещё не уведомлял.
@@ -86,15 +108,15 @@ func (t *Tray) LoginURL(ctx context.Context) (string, error) {
 // StatusLine — первая строка меню.
 func StatusLine(st *State) string {
 	if st == nil {
-		return "gate4.ai: daemon недоступен"
+		return T("not_running")
 	}
-	return fmt.Sprintf("gate4.ai работает · квитанций: %d", st.Receipts)
+	return fmt.Sprintf(T("running"), st.Receipts)
 }
 
 // Tooltip — подсказка значка.
 func Tooltip(st *State) string {
 	if st != nil && len(st.Pending) > 0 {
-		return fmt.Sprintf("gate4.ai: %d ждут решения", len(st.Pending))
+		return fmt.Sprintf(T("waiting"), len(st.Pending))
 	}
 	return "gate4.ai"
 }

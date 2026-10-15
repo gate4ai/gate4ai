@@ -25,7 +25,7 @@ make connectors      # bin/connectors/{mail,files,browser}.g4c — пакеты 
 ## 1. Daemon и коннекторы
 
 ```sh
-gate4ai daemon &                 # первый запуск: пустая политика, агентов нет
+gate4ai daemon start             # в фоне; первый запуск: агентов нет, магазин подключён (автозапуск: gate4ai service install)
 gate4ai connectors install bin/connectors/mail.g4c --dev
 gate4ai connectors install bin/connectors/files.g4c --dev
 gate4ai connectors install bin/connectors/browser.g4c --dev

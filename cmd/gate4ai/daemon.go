@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -11,26 +12,40 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/daemon"
+	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/platform/paths"
 	"github.com/gate4ai/gate4ai/internal/platform/version"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 )
 
-// emptyConfig — первая версия конфигурации, если не передан --config.
-const emptyConfig = "# gate4ai: no agents yet. Install connectors, then: gate4ai policy set config.yaml\nprofiles:\n  default: { connectors: [] }\n"
+// emptyConfig — первая версия конфигурации, если не передан --config: агентов
+// нет, официальный магазин коннекторов подключён (ставить коннекторы можно сразу).
+const emptyConfig = `# gate4ai: no agents yet. Install connectors (gate4ai connectors install files),
+# then write your policy (see the README) and apply it: gate4ai policy set config.yaml
+store:
+  registry: https://raw.githubusercontent.com/gate4ai/registry/main/index.json
+  registry_keys: ["ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="]
+profiles:
+  default: { connectors: [] }
+`
 
 // runDaemon — `gate4ai daemon`: политики, подтверждения, секреты, журнал.
-func runDaemon(args []string) int {
-	if err := daemonMain(args); err != nil {
+func runDaemon(args []string, tty bool) int {
+	if err := daemonMain(args, tty); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		fmt.Fprintln(os.Stderr, "gate4ai daemon:", err)
 		return 1
 	}
 	return 0
 }
 
-func daemonMain(args []string) error {
+// daemonMain; tty — stderr — терминал: человеку печатается, что делать дальше.
+func daemonMain(args []string, tty bool) error {
 	flag := flag.NewFlagSet("gate4ai daemon", flag.ContinueOnError)
 	home := flag.String("home", paths.Home(), "data directory")
 	cfgFile := flag.String("config", "", "initial configuration (YAML) if the config store is empty (default: empty policy, no agents)")
@@ -52,6 +67,16 @@ func daemonMain(args []string) error {
 	if *showVersion {
 		fmt.Println("gate4ai", version.Version)
 		return nil
+	}
+	// Второй экземпляр и слишком длинный путь сокета — сразу, до Web UI и relay:
+	// иначе первой падала бы занятость порта Web UI.
+	for _, p := range []string{*ownerSock, *agentSock} {
+		if err := ipc.CheckPath(p); err != nil {
+			return err
+		}
+	}
+	if ipc.Alive(*ownerSock) {
+		return fmt.Errorf("already running (socket %s): open the Web UI with gate4ai ui, stop it with gate4ai daemon stop", *ownerSock)
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	ks, err := openKeys(*keystore, *home, log)
@@ -77,7 +102,23 @@ func daemonMain(args []string) error {
 	if err := setup(ctx, d, log); err != nil {
 		return err
 	}
+	if tty {
+		go banner(ctx, *ownerSock)
+	}
 	return d.Serve(ctx, *ownerSock, *agentSock)
+}
+
+// banner — подсказка человеку, когда daemon начал слушать сокет.
+func banner(ctx context.Context, sock string) {
+	for i := 0; i < 100 && ctx.Err() == nil; i++ {
+		if ipc.Alive(sock) {
+			fmt.Fprint(os.Stderr, "\ngate4ai daemon is running in this terminal: keep it open (Ctrl+C stops it).\n"+
+				"Open the Web UI from another terminal: gate4ai ui\n"+
+				"Run it in the background instead: gate4ai daemon start; at every login: gate4ai service install\n\n")
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func openKeys(kind, home string, log *slog.Logger) (keys.Store, error) {

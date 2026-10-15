@@ -37,3 +37,6 @@ func Listen(path string) (net.Listener, error) {
 func Dial(ctx context.Context, path string) (net.Conn, error) {
 	return winio.DialPipeContext(ctx, path)
 }
+
+// MaxPath — у named pipe предела длины пути, как у unix-сокета, нет.
+func MaxPath() int { return 0 }

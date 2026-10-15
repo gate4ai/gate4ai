@@ -177,9 +177,23 @@
 - [x] Коннекторы v4: `files` (изображения — image, прочие двоичные — resource, обрезанный двоичный — ошибка), `browser` (скриншот — image агенту и доказательство), `mail`; манифест с `args` — понятная ошибка «ABI v1, пересоберите»
 - [x] connector-architecture.md (раздел «Близость к MCP»), README sdk-go, architecture.md
 
+## Этап 24. UX CLI: пути пользователя (по [docs/cli-ux.md](docs/cli-ux.md), 2026-10-15)
+
+- [x] Ошибка «daemon недоступен» для человека и агента: причина (нет сокета, старый сокет, слишком длинный путь, чужой сокет, устройство офлайн), поля `hint` и `detail` в JSON, подсказка в stderr терминала; код ошибки не дублируется в `message`; подсказка для `unauthorized`
+- [x] `gate4ai ui` в терминале запускает daemon в фоне (`--start` / `--no-start`), срок ссылки, подсказка без графического сеанса (ssh -L, `--remote`)
+- [x] `gate4ai daemon start | stop | status` (остановка — `POST /v1/shutdown` владельца), `gate4ai status` без id, журнал фонового daemon `<home>/daemon.log`
+- [x] `gate4ai service install | uninstall | status`: systemd --user (без systemd — XDG autostart), LaunchAgent, HKCU Run; трей — в автозапуск входа
+- [x] Второй daemon: «already running» до Web UI; длина пути сокета проверяется до запуска; CLI и трей ищут сокет по запасным путям (с XDG_RUNTIME_DIR и без)
+- [x] Опечатки: подсказка ближайшей команды, коннектора и действия, в том числе без daemon; `--help` у команд — код 0 и строки справки; полный usage
+- [x] Пустые состояния (`tools`, `log`, `agents`, `connectors list`, `approvals`) и отказ от согласия при установке коннектора — подсказки в stderr; `approvals list --table`
+- [x] Официальный магазин коннекторов в начальной конфигурации daemon
+- [x] Трей: пункт «Запустить daemon», понятные уведомления об ошибках, язык по локали (ru / en); подсказка `doctor`
+- [x] Установщики: «Next steps» — `gate4ai service install` и `gate4ai ui`; `GATE4AI_START=1` включает автозапуск; README, quickstart, www/REQUIREMENTS.md
+
 ## Допущения
 
 <!-- Что решено без человека и почему: одна строка на решение. -->
+- **UX CLI (этап 24, 2026-10-15):** stdout остаётся JSON (спецификация, «Машиночитаемый вывод»); поля `hint` и `detail` только добавлены, подсказки человеку — в stderr и только при терминале, пустые состояния — в stderr всегда. Табличный вывод `approvals list` — только флагом `--table`: текст по умолчанию в терминале расходится со спецификацией, правка не согласована. `gate4ai ui` запускает daemon сам, только если stdin и stderr — терминал и нет `--print`; скрипты получают прежнюю ошибку с кодом 6. Daemon в фоне — отдельная сессия (setsid; на Windows DETACHED_PROCESS), вывод — `<home>/daemon.log`. Автозапуск: systemd user unit с `Restart=on-failure` и `StartLimitBurst` (второй экземпляр не крутится по кругу), `service install` сначала останавливает daemon, запущенный руками; на Windows ключ Run вызывает `gate4ai daemon start` (окно консоли мелькает при входе); трей в автозапуск добавляется, но сразу не запускается (может быть уже запущен). Установщик daemon по-прежнему не запускает без `GATE4AI_START=1` (вопрос Y/n из UX-ONBOARDING не сделан: в `curl | sh` stdin занят скриптом). Магазин в начальной конфигурации — ключ registry из README. Трей: русский при русской локали (`GATE4AI_LANG`, `LC_ALL`, `LC_MESSAGES`, `LANGUAGE`, `LANG`), иначе английский, как CLI. Остановка daemon — `POST /v1/shutdown` только владельцу по сокету.
 - **ABI v2 (этап 23, 2026-10-15):** коннектор не MCP-сервер, из MCP взяты только формы данных. Порядок полей схемы — порядок объявления (флаги CLI, skill). Необязательный вложенный объект без значения — пустой объект без заполнения полей (иначе обязательные поля внутри него не дали бы его опустить). `output_schema` необязательна; без неё `structured` любой формы. В MCP `outputSchema` объявляется только при `output_schema` коннектора и описывает весь ответ gate4ai (результат — `result`), потому что агенту нужны статус и `verified` рядом с результатом. Изображения в блоках Vault не маскирует; скриншот страницы отдаёт агенту то же, что `browser.read` текстом (запрет при секрете на странице — этап 12). `format: path` в MCP не экспортируется (нестандартный).
 - **Спецификация перенесена в [docs/specification.md](docs/specification.md) (решение человека 2026-10-14):** README.md теперь инструкция для пользователя (установка, первый запуск). Упоминания «README» в записях этого плана, сделанных до 2026-10-14, означают спецификацию — теперь docs/specification.md.
 - **Имена бинарников:** один бинарник ядра `gate4ai` (`gate4ai daemon` — бывший `gate4aid`, `gate4ai mcp`, CLI) и `gate4ai-relay` (relay). По решению человека 2026-10-13, см. repo-structure.md; README соответствует. Плата: в песочницу агента попадает полный бинарник, без ключей и конфигурации он ничего не может.
@@ -250,7 +264,8 @@
 
 <!-- Что требует людей, учётных записей или денег: что именно и где заглушка. -->
 - **Изоляция вживую:** установить sandbox-runtime (`srt`) и проверить сгенерированные настройки на macOS/Linux; для `--container` на Linux закрыть прямой выход контейнера в интернет (внутренняя docker-сеть или правила iptables), чтобы единственным выходом остался Egress Proxy; проверить `docker sandbox run` на Docker Desktop.
-- **Трей:** проверить меню и уведомления `gate4ai-tray` вживую на трёх ОС (здесь только сборка Linux/Windows и тест контракта; под macOS с cgo не собирался — нет clang); подпись бинарников (Apple Developer ID, Authenticode); автозапуск при входе.
+- **Трей:** проверить меню и уведомления `gate4ai-tray` вживую на трёх ОС (здесь только сборка Linux/Windows и тест контракта; под macOS с cgo не собирался — нет clang); подпись бинарников (Apple Developer ID, Authenticode).
+- **Автозапуск вживую:** `gate4ai service install` проверен тестом с фейковым systemctl (Linux); на настоящем systemd --user, launchd (macOS) и ключе Run (Windows) не прогонялся. Проверить, что keychain доступен службе (иначе daemon перейдёт на файловое хранилище ключей).
 - **Relay в продакшене:** домен (`relay.gate4.ai`), делегирование зоны (NS) на сервер relay, сервер с портами 443 и 53, сертификат для самого домена relay (`--cert/--key`), запуск `gate4ai-relay --domain relay.gate4.ai --dns :53 --ipv4 <IP>`. Выпуск сертификата устройства у Let's Encrypt (certmagic) вживую не прогонялся — в тестах самоподписанные сертификаты и фейковый DNS-клиент.
 - **Почта на реальном ящике:** пароль приложения (Gmail/Яндекс/…) → `gate4ai vault set mail.work`, настройки `connectors.email`. В тестах — фейковые IMAP/SMTP (`connectors/mail/mailtest`).
 - **Браузер вживую:** установленный Chrome; один раз войти на нужные сайты в выделенном профиле; для `extract` — модель и ключ (`connectors.browser.model`, `model_key: "@llm.key"`). Адаптер Stagehand собран, но против живого Chrome не прогонялся — в тестах фейковый CDP и заглушка движка.
@@ -260,6 +275,7 @@
 - **Ключи магазина:** ключ registry (подпись `index.json`) и ключ издателя gate4ai (подпись пакетов официальных коннекторов) — сгенерировать (`gate4ai connectors keygen`), хранить вне репозиториев (секреты CI), публичный ключ registry прописать по умолчанию в `store.registry_keys`/документации; адрес индекса (например, raw.githubusercontent.com/gate4ai/registry/main/index.json или свой домен).
 
 ## Журнал
+- 2026-10-15 — этап 24 — UX CLI по docs/cli-ux.md: понятная ошибка «daemon не запущен», `gate4ai ui` поднимает daemon, `daemon start/stop/status`, `service install`, опечатки и `--help`, пустые состояния, магазин по умолчанию, трей (запуск daemon, язык), установщики
 - 2026-10-15 — выпуск ABI v2 — sdk-go v0.3.0, коннекторы files/browser/email v4, registry только с версиями 4 (PR #1 влит), gate4ai v0.2.0; проверка money другим коннектором убрана из документов и манифеста, отложенная проверка отложена
 - 2026-10-15 — этап 23 — ABI v2: `input_schema`/`output_schema` (подмножество JSON Schema), результат `content[]` + `structured` как в MCP, статусы `verified`/`not_confirmed`/`verify_after`; MCP Front отдаёт блоки коннектора и `outputSchema`; коннекторы files/browser/mail v4; отложенная проверка по расписанию отложена
 

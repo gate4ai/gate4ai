@@ -140,7 +140,15 @@ func (e *Env) run(ctx context.Context, args []string) int {
 func (e *Env) doctor(ctx context.Context) int {
 	checks := sandbox.Doctor(sandbox.RealDoctorEnv(func() error {
 		var h map[string]any
-		return NewSocketClientFrom(e).Do(ctx, "GET", "/v1/health", nil, &h)
+		err := NewSocketClientFrom(e).Do(ctx, "GET", "/v1/health", nil, &h)
+		if err != nil {
+			p := Explain(err, false)
+			if p.Detail != "" {
+				return errors.New(p.Message + " (" + p.Detail + ")")
+			}
+			return errors.New(p.Message)
+		}
+		return nil
 	}))
 	e.printJSON(checks)
 	for _, c := range checks {

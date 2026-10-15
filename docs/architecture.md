@@ -15,7 +15,7 @@
 | Коннекторы (WASM-модули, AGPL-3.0 + исключение): почта, файлы, браузер | `connectors/mail`, `connectors/files`, `connectors/browser` (`github.com/gate4ai/gate4ai-*`) |
 | daemon, API на сокетах владельца и агентов | `internal/daemon`, `internal/platform/ipc` |
 | Публичный адрес устройства: один обработчик для relay и прямого HTTPS (`--public`), разделение по путям — `/mcp` и OAuth, `/v1/{whoami,tools,call,status}` (удалённый CLI), `/ui/` (удалённый Web UI), `/telegram` (вебхук); у каждого пути своя аутентификация, API владельца нет | `internal/daemon` (`PublicHandler`, `AddPublic`, `ServePublic`), `cmd/gate4ai/setup.go`, тест изоляции `cmd/gate4ai/public_test.go` |
-| CLI, skill | `internal/front/cli`, `internal/front/skill` |
+| CLI, skill | `internal/front/cli`, `internal/front/skill`; ошибки для человека и агента (`hint`, `detail`) — `errors.go`; `gate4ai daemon start/stop/status` — `daemonctl.go`; автозапуск `gate4ai service` (systemd --user / XDG autostart, launchd, HKCU Run) — `service*.go`; UX путей пользователя — [cli-ux.md](cli-ux.md) |
 | MCP Front (stdio, Streamable HTTP), OAuth 2.1 | `internal/front/mcp`, `internal/front/mcpcli`, `internal/front/oauth` |
 | Relay — сервер (туннель, passthrough, DNS/ACME, свидетель), отдельный модуль | `relay/` (`github.com/gate4ai/relay`), `relay/cmd/gate4ai-relay` |
 | Relay — клиент устройства | `internal/relayclient` |

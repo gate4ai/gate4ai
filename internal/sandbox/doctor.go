@@ -70,7 +70,7 @@ func Doctor(e DoctorEnv) []Check {
 
 	if e.Daemon != nil {
 		if err := e.Daemon(); err != nil {
-			add("daemon", "fail", "gate4ai daemon is not reachable: "+err.Error(), "start gate4ai daemon (or the tray app)")
+			add("daemon", "fail", err.Error(), "start it: gate4ai daemon start (in the background) or gate4ai service install (also at every login)")
 		} else {
 			add("daemon", "ok", "daemon reachable", "")
 		}

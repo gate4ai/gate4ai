@@ -10,16 +10,18 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/front/skill"
+	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/platform/paths"
 	"github.com/gate4ai/gate4ai/internal/platform/version"
 	"github.com/gate4ai/sdk-go/manifest"
@@ -32,33 +34,35 @@ type Env struct {
 	Getenv         func(string) string
 	// Connect возвращает клиента: с токеном агента — к сокету агентов, без — к сокету владельца.
 	Connect func(token string) *Client
-	// Extra — дополнительные команды (mcp, run, doctor, ui), регистрируются в cmd/gate4ai.
+	// Extra — дополнительные команды (mcp), регистрируются в cmd/gate4ai.
 	Extra map[string]func(ctx context.Context, e *Env, args []string) int
+	// Interactive — stdin и stderr — терминал: команду ввёл человек (можно
+	// спрашивать и запускать daemon в фоне). StderrTTY — подсказки для человека в stderr.
+	Interactive, StderrTTY bool
+	// StartBinary — бинарник gate4ai для запуска daemon в фоне ("" — этот же).
+	StartBinary string
 }
 
 // DefaultEnv — реальное окружение процесса.
 func DefaultEnv() *Env {
+	errTTY := IsTerminal(os.Stderr)
 	return &Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
+		Interactive: errTTY && IsTerminal(os.Stdin), StderrTTY: errTTY,
 		Connect: func(token string) *Client {
 			if token != "" {
 				// Удалённый агент: daemon на другом компьютере, доступ по HTTPS.
 				if base := os.Getenv("GATE4AI_URL"); base != "" {
 					c, err := NewRemoteClient(base, token, os.Getenv("GATE4AI_CA_FILE"))
 					if err != nil {
-						return &Client{HTTP: &http.Client{Transport: failing{err}}, Token: token}
+						return &Client{Token: token, Err: err}
 					}
 					return c
 				}
-				return NewSocketClient(paths.AgentSocket(), token)
+				return NewSocketClient(paths.FindAgentSocket(), token)
 			}
-			return NewSocketClient(paths.OwnerSocket(), "")
+			return NewSocketClient(paths.FindOwnerSocket(), "")
 		}, Extra: map[string]func(context.Context, *Env, []string) int{}}
 }
-
-// failing — транспорт, который возвращает ошибку настройки (неверный GATE4AI_URL).
-type failing struct{ err error }
-
-func (f failing) RoundTrip(*http.Request) (*http.Response, error) { return nil, f.err }
 
 // Client — клиент к daemon с токеном из GATE4AI_TOKEN.
 func (e *Env) Client() *Client { return e.Connect(e.Getenv("GATE4AI_TOKEN")) }
@@ -70,63 +74,63 @@ func (e *Env) printJSON(v any) {
 	_ = enc.Encode(v)
 }
 
-// fail печатает ошибку JSON-ом и возвращает код выхода.
-func (e *Env) fail(err error) int {
-	code := ExitError
-	c := "error"
-	var ae *APIError
-	switch {
-	case errors.Is(err, ErrUnavailable):
-		code, c = ExitUnavailable, "unavailable"
-	case errors.As(err, &ae):
-		c = ae.Code
-		if ae.Status == 400 || ae.Status == 404 {
-			code = ExitUsage
-		}
-	}
-	e.printJSON(map[string]any{"status": "error", "code": c, "message": err.Error()})
-	return code
-}
-
 const usage = `gate4ai — actions for AI agents under your policies
 
+Start here (on the computer you protect):
+  gate4ai service install                 run the daemon now and at every login (or: gate4ai daemon start)
+  gate4ai ui [--print] [--remote] [--start|--no-start]   open the web UI (one-time link, 2 minutes; starts the daemon at a terminal)
+  gate4ai status                          is the daemon running
+
 Agent commands (token in GATE4AI_TOKEN; daemon on another computer: GATE4AI_URL=https://<device address>):
-  gate4ai tools [--json]                 actions available to this agent
-  gate4ai <connector> <action> [--arg v] run an action (see --help on the action)
-  gate4ai status <id> [--wait 10m]       result of an action pending approval
-  gate4ai skill                          print SKILL.md for this agent
-  gate4ai mcp                            MCP server on stdio
+  gate4ai tools [--json] [--as agent]     actions available to this agent (--as: owner, another agent's catalog)
+  gate4ai <connector> <action> [--arg v] [--wait 10m] [--json '{...}'] [--as agent]   run an action (--help on the action)
+  gate4ai status <id> [--wait 10m]        result of an action pending approval
+  gate4ai skill                           print SKILL.md for this agent
+  gate4ai mcp                             MCP server on stdio
 
 Daemon:
-  gate4ai daemon [--config file.yaml] [--home dir] [--keystore auto|keychain|file] [--ui addr]
+  gate4ai daemon [flags]                  run in this terminal (flags: gate4ai daemon --help)
+  gate4ai daemon start [flags] | stop | status
+  gate4ai service install [--no-tray] [-- daemon flags] | uninstall | status   autostart at login
 
 Owner commands (local socket):
-  gate4ai log [--agent a] [--action x] [--effect deny] [--since 24h] [--limit 50]
-  gate4ai show <#hash|id>                one receipt
+  gate4ai log [--agent a] [--action x] [--effect allow|ask|deny] [--since 24h] [--limit 50] [--json]
+  gate4ai show <#hash|id>                 one receipt
   gate4ai export -o file.tar.gz [--passphrase-env VAR]
   gate4ai verify file.tar.gz [--pubkey hex] [--passphrase-env VAR]   (offline)
   gate4ai journal verify
   gate4ai agents list | token <agent> [--label l] | connect <agent> | revoke <agent>
   gate4ai policy show | set <file> [-m comment] | versions | rollback <n> | test --agent a --action x [--args json] [--file draft.yaml]
-  gate4ai approvals [list] | approve <id> | reject <id>
+  gate4ai approvals [list] [--table] | approve <id> | reject <id>
   gate4ai vault list | set <alias> (value from stdin) | rm <alias>
-  gate4ai relay register --url https://relay.gate4.ai | status
+  gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
   gate4ai connectors list | install <file.g4c | name[@version]> [--dev] [--yes] | update <name> [--yes] | remove <name> | refresh
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c] | verify <dir> <file.g4c> | keygen [-o key]   (publisher / registry review, offline)
   gate4ai registry check <index.json> [--key ed25519:…] [--fetch] | sign <index.json> --key file | add <index.json> <pack.json> --publisher name …   (registry)
-  gate4ai ui [--print] [--remote]        open the web UI (one-time login link; --remote: link for the public address)
-  gate4ai run <agent> [--workspace dir] [--container|--microvm] [--dry-run] [-- cmd]   isolated agent
-  gate4ai doctor                         look for ways around gate4ai
-  gate4ai egress                         network connections of sandboxed agents
+  gate4ai run <agent> [--workspace dir] [--container|--microvm] [--image img] [--engine docker|podman] [--dry-run] [-- cmd]   isolated agent
+  gate4ai doctor                          look for ways around gate4ai
+  gate4ai egress                          network connections of sandboxed agents
+
+Exit codes: 0 ok, 1 error, 2 denied by policy, 3 pending approval, 4 verification failed, 5 usage, 6 daemon unavailable.
 `
+
+// commands — встроенные команды (остальное первое слово — имя коннектора).
+var commands = []string{"help", "version", "tools", "status", "skill", "mcp", "daemon", "service", "log", "show", "export",
+	"verify", "journal", "agents", "policy", "approvals", "vault", "relay", "connectors", "registry", "ui", "run", "doctor", "egress"}
 
 // Run — точка входа CLI.
 func Run(ctx context.Context, e *Env, args []string) int {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		if len(args) > 1 && isCommand(args[1]) {
+			return e.commandHelp(args[1])
+		}
 		fmt.Fprint(e.Stdout, usage)
 		return ExitOK
 	}
 	cmd, rest := args[0], args[1:]
+	if isCommand(cmd) && wantsHelp(cmd, rest) {
+		return e.commandHelp(cmd)
+	}
 	if f, ok := e.Extra[cmd]; ok {
 		return f(ctx, e, rest)
 	}
@@ -134,9 +138,20 @@ func Run(ctx context.Context, e *Env, args []string) int {
 	case "version", "--version":
 		fmt.Fprintln(e.Stdout, "gate4ai", version.Version)
 		return ExitOK
+	case "daemon":
+		if len(rest) > 0 {
+			return DaemonCtl(ctx, e, rest[0], rest[1:])
+		}
+		fmt.Fprint(e.Stderr, DaemonUsage)
+		return ExitUsage
+	case "service":
+		return e.service(ctx, rest)
 	case "tools":
 		return e.tools(ctx, rest)
 	case "status":
+		if len(rest) == 0 {
+			return e.daemonStatus(ctx)
+		}
 		return e.status(ctx, rest)
 	case "skill":
 		return e.skill(ctx)
@@ -181,6 +196,94 @@ func Run(ctx context.Context, e *Env, args []string) int {
 	return e.action(ctx, cmd, rest)
 }
 
+func isCommand(s string) bool {
+	for _, c := range commands {
+		if c == s {
+			return true
+		}
+	}
+	return false
+}
+
+// wantsHelp — среди аргументов встроенной команды есть --help / -h (до `--`:
+// после него — команда агента в `gate4ai run`).
+func wantsHelp(cmd string, rest []string) bool {
+	for _, a := range rest {
+		if a == "--" {
+			return false
+		}
+		if a == "--help" || a == "-h" || a == "-help" {
+			return true
+		}
+	}
+	return false
+}
+
+// commandHelp печатает строки общей справки об одной команде.
+func (e *Env) commandHelp(cmd string) int {
+	if cmd == "daemon" {
+		fmt.Fprint(e.Stdout, DaemonUsage)
+		return ExitOK
+	}
+	if cmd == "service" {
+		fmt.Fprintln(e.Stdout, serviceUsage)
+		return ExitOK
+	}
+	var lines []string
+	for _, l := range strings.Split(usage, "\n") {
+		t := strings.TrimSpace(l)
+		if t == "gate4ai "+cmd || strings.HasPrefix(t, "gate4ai "+cmd+" ") {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) == 0 {
+		fmt.Fprint(e.Stdout, usage)
+		return ExitOK
+	}
+	fmt.Fprintln(e.Stdout, "usage:")
+	fmt.Fprintln(e.Stdout, strings.Join(lines, "\n"))
+	return ExitOK
+}
+
+// suggest — ближайшая встроенная команда или коннектор для опечатки ("" — нет похожих).
+func suggest(word string, names []string) string {
+	best, bestD := "", 3
+	if len(word) <= 4 {
+		bestD = 2 // у коротких слов расстояние 2 — почти любое слово
+	}
+	for _, n := range names {
+		if d := distance(word, n); d < bestD && d < len(n) {
+			best, bestD = n, d
+		}
+	}
+	return best
+}
+
+// distance — расстояние Дамерау–Левенштейна (перестановка соседних букв — одна правка).
+func distance(a, b string) int {
+	d := make([][]int, len(a)+1)
+	for i := range d {
+		d[i] = make([]int, len(b)+1)
+		d[i][0] = i
+	}
+	for j := range d[0] {
+		d[0][j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			d[i][j] = min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+cost)
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				d[i][j] = min(d[i][j], d[i-2][j-2]+1)
+			}
+		}
+	}
+	return d[len(a)][len(b)]
+}
+
 // Tools запрашивает каталог.
 func (e *Env) Tools(ctx context.Context, as string) ([]skill.Tool, error) {
 	var tools []skill.Tool
@@ -203,6 +306,13 @@ func (e *Env) tools(ctx context.Context, args []string) int {
 	tools, err := e.Tools(ctx, *as)
 	if err != nil {
 		return e.fail(err)
+	}
+	if len(tools) == 0 {
+		if e.Getenv("GATE4AI_TOKEN") != "" {
+			fmt.Fprintln(e.Stderr, "gate4ai: no actions are allowed for this agent; the owner allows them in the agent's profile (gate4ai policy set)")
+		} else {
+			fmt.Fprintln(e.Stderr, "gate4ai: no actions yet: install connectors (gate4ai connectors install files) and allow them in a profile (gate4ai policy set config.yaml)")
+		}
 	}
 	if *asJSON {
 		e.printJSON(tools)
@@ -233,16 +343,33 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 	}
 	tools, err := e.Tools(ctx, "")
 	if err != nil {
+		if errors.Is(err, ErrUnavailable) {
+			// Опечатку во встроенной команде видно и без daemon.
+			if s := suggest(conn, commands); s != "" {
+				e.problem(Problem{Code: "unknown_command", Message: fmt.Sprintf("unknown command %q", conn), Hint: "did you mean gate4ai " + s + "?"})
+				return ExitUsage
+			}
+			p := Explain(err, e.Getenv("GATE4AI_TOKEN") != "")
+			p.Detail = fmt.Sprintf("%q is not a built-in command, and connector names come from the daemon; %s", conn, p.Detail)
+			e.problem(p)
+			return ExitUnavailable
+		}
 		return e.fail(err)
 	}
 	var mine []skill.Tool
+	names := append([]string{}, commands...)
 	for _, t := range tools {
 		if t.Connector == conn {
 			mine = append(mine, t)
 		}
+		names = append(names, t.Connector)
 	}
 	if len(mine) == 0 {
-		e.printJSON(map[string]any{"status": "error", "code": "unknown_action", "message": fmt.Sprintf("unknown command or connector %q; run `gate4ai tools`", conn)})
+		p := Problem{Code: "unknown_action", Message: fmt.Sprintf("unknown command or connector %q", conn), Hint: "see gate4ai --help and gate4ai tools"}
+		if s := suggest(conn, names); s != "" {
+			p.Hint = "did you mean gate4ai " + s + "?"
+		}
+		e.problem(p)
 		return ExitUsage
 	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -259,7 +386,15 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 		}
 	}
 	if tool == nil {
-		e.printJSON(map[string]any{"status": "error", "code": "unknown_action", "message": fmt.Sprintf("unknown action %s.%s", conn, args[0])})
+		var acts []string
+		for _, t := range mine {
+			acts = append(acts, t.Action)
+		}
+		p := Problem{Code: "unknown_action", Message: fmt.Sprintf("unknown action %s.%s", conn, args[0]), Hint: "actions: " + strings.Join(acts, ", ")}
+		if s := suggest(args[0], acts); s != "" {
+			p.Hint = "did you mean gate4ai " + conn + " " + s + "?"
+		}
+		e.problem(p)
 		return ExitUsage
 	}
 	vals, opts, err := parseArgs(*tool, args[1:])
@@ -506,6 +641,13 @@ func (e *Env) log(ctx context.Context, args []string) int {
 	if err := e.Client().Do(ctx, "GET", q, nil, &es); err != nil {
 		return e.fail(err)
 	}
+	if len(es) == 0 {
+		if *agent+*action+*effect+*since == "" {
+			fmt.Fprintln(e.Stderr, "gate4ai: the journal is empty: no agent actions yet")
+		} else {
+			fmt.Fprintln(e.Stderr, "gate4ai: no journal entries match the filters")
+		}
+	}
 	if *asJSON {
 		e.printJSON(es)
 		return ExitOK
@@ -618,7 +760,14 @@ func (e *Env) agents(ctx context.Context, args []string) int {
 	var err error
 	switch sub {
 	case "list":
-		err = c.Do(ctx, "GET", "/v1/agents", nil, &res)
+		var l struct {
+			Agents []any `json:"agents"`
+		}
+		if err = c.Do(ctx, "GET", "/v1/agents", nil, &res); err == nil {
+			if b, _ := json.Marshal(res); json.Unmarshal(b, &l) == nil && len(l.Agents) == 0 {
+				fmt.Fprintln(e.Stderr, "gate4ai: no agents yet: add them under agents: in the policy (gate4ai policy show, then gate4ai policy set config.yaml)")
+			}
+		}
 	case "token":
 		fs := flag.NewFlagSet("token", flag.ContinueOnError)
 		label := fs.String("label", "", "")
@@ -641,7 +790,7 @@ func (e *Env) agents(ctx context.Context, args []string) int {
 		}
 		err = c.Do(ctx, "POST", "/v1/agents/"+args[0]+"/revoke", nil, &res)
 	default:
-		fmt.Fprintln(e.Stderr, "usage: gate4ai agents list | token <agent> | revoke <agent>")
+		fmt.Fprintln(e.Stderr, "usage: gate4ai agents list | token <agent> [--label l] | connect <agent> | revoke <agent>")
 		return ExitUsage
 	}
 	if err != nil {
@@ -741,17 +890,41 @@ func (e *Env) policy(ctx context.Context, args []string) int {
 
 func (e *Env) approvals(ctx context.Context, args []string) int {
 	sub := "list"
-	if len(args) > 0 {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		sub, args = args[0], args[1:]
 	}
 	c := e.Client()
 	switch sub {
 	case "list":
+		table := false
+		for _, a := range args {
+			if a != "--table" && a != "-table" {
+				fmt.Fprintln(e.Stderr, "usage: gate4ai approvals [list] [--table] | approve <id> | reject <id>")
+				return ExitUsage
+			}
+			table = true
+		}
 		var res []map[string]any
 		if err := c.Do(ctx, "GET", "/v1/approvals?status=pending", nil, &res); err != nil {
 			return e.fail(err)
 		}
-		e.printJSON(res)
+		if len(res) == 0 {
+			fmt.Fprintln(e.Stderr, "gate4ai: no approvals are waiting")
+		}
+		if !table {
+			e.printJSON(res)
+			return ExitOK
+		}
+		for _, a := range res {
+			fmt.Fprintf(e.Stdout, "%-12v %-14v %-22v %v\n", a["id"], a["agent"], a["action"], a["preview"])
+			d, _ := a["decision"].(map[string]any)
+			if r, _ := d["reason"].(string); r != "" {
+				fmt.Fprintf(e.Stdout, "%-12s why: %s\n", "", r)
+			}
+		}
+		if len(res) > 0 {
+			fmt.Fprintln(e.Stdout, "\nDecide: gate4ai approvals approve <id> | reject <id>")
+		}
 		return ExitOK
 	case "approve", "reject":
 		if len(args) != 1 {
@@ -801,6 +974,7 @@ func (e *Env) vault(ctx context.Context, args []string) int {
 		return ExitOK
 	case "rm":
 		if len(args) != 1 {
+			fmt.Fprintln(e.Stderr, "usage: gate4ai vault rm <alias>")
 			return ExitUsage
 		}
 		if err := c.Do(ctx, "DELETE", "/v1/vault/"+args[0], nil, nil); err != nil {
@@ -859,24 +1033,66 @@ var OpenURL = func(u string) error {
 }
 
 func (e *Env) ui(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
+	fs := flag.NewFlagSet("gate4ai ui", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	printOnly := fs.Bool("print", false, "only print the login link")
 	remote := fs.Bool("remote", false, "link for the public address (relay or --public), to open on another device")
+	start := fs.Bool("start", false, "start the daemon in the background if it is not running (default when you are at a terminal)")
+	noStart := fs.Bool("no-start", false, "never start the daemon")
 	if fs.Parse(args) != nil {
 		return ExitUsage
 	}
 	var res struct {
 		URL string `json:"url"`
 	}
-	if err := e.Client().Do(ctx, "POST", "/v1/ui/session", map[string]bool{"remote": *remote}, &res); err != nil {
+	c := e.Client()
+	session := func() error {
+		return c.Do(ctx, "POST", "/v1/ui/session", map[string]bool{"remote": *remote}, &res)
+	}
+	err := session()
+	if NotRunning(err) && e.Getenv("GATE4AI_TOKEN") == "" && !*noStart && (*start || e.Interactive && !*printOnly) {
+		if err := e.startDaemon(ctx, nil); err != nil {
+			return e.fail(err)
+		}
+		err = session()
+	}
+	if err != nil {
 		return e.fail(err)
 	}
 	if !*printOnly && !*remote {
-		if err := OpenURL(res.URL); err != nil {
-			fmt.Fprintln(e.Stderr, "could not open a browser:", err)
+		if headless() {
+			fmt.Fprintln(e.Stderr, "gate4ai: no graphical session here, so no browser was opened. Open the link in a browser on this computer, or forward the port: "+sshHint(res.URL)+"; from another device: gate4ai ui --remote (needs relay or --public)")
+		} else if err := OpenURL(res.URL); err != nil {
+			fmt.Fprintln(e.Stderr, "gate4ai: could not open a browser ("+err.Error()+"): open the link yourself")
 		}
 	}
+	e.say("One-time login link, valid for 2 minutes:")
 	fmt.Fprintln(e.Stdout, res.URL)
 	return ExitOK
+}
+
+// NotRunning — daemon не запущен (нет сокета или остался старый): его можно запустить.
+func NotRunning(err error) bool {
+	var ue *UnavailableError
+	if !errors.As(err, &ue) || ue.Remote {
+		return false
+	}
+	if max := ipc.MaxPath(); max > 0 && len(ue.Addr) > max {
+		return false
+	}
+	return errors.Is(ue.Err, os.ErrNotExist) || errors.Is(ue.Err, syscall.ECONNREFUSED)
+}
+
+// headless — Linux без графического сеанса (ssh, сервер): браузер не откроется.
+func headless() bool {
+	return runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == ""
+}
+
+// sshHint — проброс порта Web UI с этого компьютера.
+func sshHint(link string) string {
+	port := "7431"
+	if u, err := url.Parse(link); err == nil && u.Port() != "" {
+		port = u.Port()
+	}
+	return "ssh -L " + port + ":127.0.0.1:" + port + " <this computer>, then open the link"
 }

@@ -62,11 +62,19 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 	c := e.Client()
 	switch sub {
 	case "list":
-		var res any
-		if err := c.Do(ctx, "GET", "/v1/connectors", nil, &res); err != nil {
+		var res struct {
+			Connectors []any `json:"connectors"`
+		}
+		var raw json.RawMessage
+		if err := c.Do(ctx, "GET", "/v1/connectors", nil, &raw); err != nil {
 			return e.fail(err)
 		}
-		e.printJSON(res)
+		if json.Unmarshal(raw, &res) == nil && len(res.Connectors) == 0 {
+			fmt.Fprintln(e.Stderr, "gate4ai: no connectors installed: gate4ai connectors install files (from the store) or gate4ai connectors install <file.g4c>")
+		}
+		var out any
+		_ = json.Unmarshal(raw, &out)
+		e.printJSON(out)
 		return ExitOK
 	case "install", "update":
 		pos, fl := splitFlags(rest, nil)
@@ -93,8 +101,13 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 				Plan store.Plan `json:"plan"`
 			}
 			_ = json.Unmarshal(ae.Body, &r)
-			if !e.consent(r.Plan, *yes) {
-				e.printJSON(map[string]any{"status": "cancelled", "plan": r.Plan})
+			if ok, answered := e.consent(r.Plan, *yes); !ok {
+				msg := "not installed: you did not consent (answer y, or pass --yes)"
+				if !answered && !e.Interactive {
+					msg = "not installed: consent is needed and this is not an interactive terminal; pass --yes to consent to the capabilities above"
+				}
+				fmt.Fprintln(e.Stderr, "gate4ai: "+msg)
+				e.printJSON(map[string]any{"status": "cancelled", "message": msg, "plan": r.Plan})
 				return ExitDenied
 			}
 			body["consent"] = r.Plan.Capabilities
@@ -153,7 +166,8 @@ func (e *Env) keygen(rest []string) int {
 }
 
 // consent показывает возможности и спрашивает согласие владельца.
-func (e *Env) consent(p store.Plan, yes bool) bool {
+// answered — владелец что-то ответил (иначе — пустой ввод или нет терминала).
+func (e *Env) consent(p store.Plan, yes bool) (ok, answered bool) {
 	fmt.Fprintf(e.Stderr, "Connector %s %s (trust: %s", p.Connector, p.Version, p.Trust)
 	if p.Publisher != "" {
 		fmt.Fprintf(e.Stderr, ", publisher: %s", p.Publisher)
@@ -177,11 +191,12 @@ func (e *Env) consent(p store.Plan, yes bool) bool {
 		fmt.Fprintln(e.Stderr, "WARNING:", w)
 	}
 	if yes {
-		return true
+		return true, true
 	}
 	fmt.Fprint(e.Stderr, "Install? [y/N] ")
 	line, _ := bufio.NewReader(e.Stdin).ReadString('\n')
-	return strings.EqualFold(strings.TrimSpace(line), "y") || strings.EqualFold(strings.TrimSpace(line), "yes")
+	a := strings.TrimSpace(line)
+	return strings.EqualFold(a, "y") || strings.EqualFold(a, "yes"), a != ""
 }
 
 // pack собирает пакет коннектора из каталога исходников (Go) или готового модуля.

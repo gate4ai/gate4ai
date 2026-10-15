@@ -8,6 +8,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 )
 
 // Home — каталог данных (конфигурация, журнал, состояние). GATE4AI_HOME переопределяет.
@@ -74,3 +75,46 @@ func userName() string {
 	n := filepath.Base(filepath.ToSlash(u.Username))
 	return n
 }
+
+// FindOwnerSocket — сокет владельца, который есть на диске: CLI и трей могут
+// быть запущены без XDG_RUNTIME_DIR (cron, su, часть ssh-сессий), а daemon —
+// с ним, или наоборот. Если сокета нет ни в одном месте — OwnerSocket().
+func FindOwnerSocket() string {
+	return find(os.Getenv("GATE4AI_SOCKET"), OwnerSocket(), "gate4ai.sock")
+}
+
+// FindAgentSocket — то же для сокета агентов.
+func FindAgentSocket() string {
+	return find(os.Getenv("GATE4AI_AGENT_SOCKET"), AgentSocket(), "agent.sock")
+}
+
+func find(explicit, primary, name string) string {
+	if explicit != "" || runtime.GOOS == "windows" || os.Getenv("GATE4AI_HOME") != "" {
+		return primary
+	}
+	if _, err := os.Stat(primary); err == nil {
+		return primary
+	}
+	for _, dir := range runDirCandidates() {
+		p := filepath.Join(dir, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return primary
+}
+
+// runDirCandidates — все места, где daemon этого пользователя мог создать сокеты.
+func runDirCandidates() []string {
+	var out []string
+	if runtime.GOOS == "linux" {
+		if x := os.Getenv("XDG_RUNTIME_DIR"); x != "" {
+			out = append(out, filepath.Join(x, "gate4ai"))
+		}
+		out = append(out, filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "gate4ai"))
+	}
+	return append(out, filepath.Join(Home(), "run"))
+}
+
+// DaemonLog — журнал daemon, запущенного в фоне (`gate4ai daemon start`, автозапуск).
+func DaemonLog() string { return filepath.Join(Home(), "daemon.log") }

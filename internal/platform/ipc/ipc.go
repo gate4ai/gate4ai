@@ -8,6 +8,7 @@ package ipc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -29,6 +30,29 @@ func PeerFrom(ctx context.Context) (Peer, bool) {
 
 // ErrPeerRejected — собеседник не прошёл проверку.
 var ErrPeerRejected = errors.New("ipc: peer rejected")
+
+// ErrInUse — сокет занят работающим daemon.
+var ErrInUse = errors.New("gate4ai daemon is already running on this socket")
+
+// CheckPath — путь сокета помещается в sun_path (у named pipe предела нет).
+func CheckPath(path string) error {
+	if max := MaxPath(); max > 0 && len(path) > max {
+		return fmt.Errorf("socket path %s is too long (%d bytes, the limit is %d): set GATE4AI_SOCKET / GATE4AI_AGENT_SOCKET or a shorter GATE4AI_HOME", path, len(path), max)
+	}
+	return nil
+}
+
+// Alive — на сокете / pipe отвечает работающий daemon.
+func Alive(path string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	c, err := Dial(ctx, path)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
 
 // peerConn — соединение с проверенным собеседником.
 type peerConn struct {

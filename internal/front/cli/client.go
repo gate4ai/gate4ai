@@ -14,12 +14,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
+	"github.com/gate4ai/gate4ai/internal/platform/paths"
 )
 
 // Коды выхода.
@@ -38,6 +41,10 @@ type Client struct {
 	HTTP  *http.Client
 	Token string
 	Base  string // "" — сокет; иначе https://<устройство> (удалённый агент)
+	// Addr — путь сокета / pipe для сообщений об ошибке (у трея меняется между подключениями).
+	Addr func() string
+	// Err — ошибка настройки клиента (неверный GATE4AI_URL): возвращается из Do.
+	Err error
 }
 
 // ErrUnavailable — daemon недоступен («устройство офлайн»).
@@ -55,6 +62,9 @@ func (e *APIError) Error() string { return e.Code + ": " + e.Message }
 
 // Do выполняет запрос; out — для JSON-ответа, raw — для бинарного.
 func (c *Client) Do(ctx context.Context, method, path string, body, out any) error {
+	if c.Err != nil {
+		return c.Err
+	}
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -77,7 +87,21 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		ue := &UnavailableError{Remote: c.Base != "", Err: err}
+		var ne *net.OpError
+		if errors.As(err, &ne) {
+			ue.Err = ne.Err // без «Post "http://gate4ai/…": dial unix …»
+		}
+		switch {
+		case ue.Remote:
+			ue.Addr = c.Base
+		case c.Addr != nil:
+			ue.Addr = c.Addr()
+		}
+		return ue
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
@@ -132,5 +156,17 @@ func NewRemoteClient(base, token, caFile string) (*Client, error) {
 func NewSocketClient(path, token string) *Client {
 	h := ipc.HTTPClient(path)
 	h.Timeout = 0
-	return &Client{HTTP: h, Token: token}
+	return &Client{HTTP: h, Token: token, Addr: func() string { return path }}
+}
+
+// NewOwnerClient — клиент к сокету владельца, путь которого ищется при каждом
+// подключении (paths.FindOwnerSocket): трей живёт дольше daemon.
+func NewOwnerClient() *Client {
+	h := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return ipc.Dial(ctx, paths.FindOwnerSocket())
+		},
+		MaxIdleConns: 2, IdleConnTimeout: 30 * time.Second,
+	}}
+	return &Client{HTTP: h, Addr: paths.FindOwnerSocket}
 }

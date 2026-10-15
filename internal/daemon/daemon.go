@@ -70,6 +70,8 @@ type Daemon struct {
 	ConnectorsDir string
 
 	mu        sync.Mutex
+	stop      chan struct{} // закрывается RequestStop
+	stopOnce  sync.Once
 	notifiers *MultiNotifier
 	servers   []*http.Server
 	extra     []func(*http.ServeMux) // доп. маршруты владельца (MCP HTTP, Web UI)
@@ -209,10 +211,24 @@ func (d *Daemon) Serve(ctx context.Context, ownerSock, agentSock string) error {
 	d.Log.Info("gate4ai daemon listening", "owner", ownerSock, "agent", agentSock)
 	select {
 	case <-ctx.Done():
+	case <-d.stopCh():
+		d.Log.Info("stop requested by the owner")
 	case err = <-errc:
 	}
 	d.Shutdown()
 	return err
+}
+
+// RequestStop просит Serve завершиться (POST /v1/shutdown).
+func (d *Daemon) RequestStop() { d.stopOnce.Do(func() { close(d.stopCh()) }) }
+
+func (d *Daemon) stopCh() chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.stop == nil {
+		d.stop = make(chan struct{})
+	}
+	return d.stop
 }
 
 // ServeListener обслуживает API на слушателе: owner — сокет владельца.

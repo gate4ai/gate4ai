@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -184,8 +185,13 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 	}
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		_, n := d.Config.CurrentRaw()
-		writeJSON(w, 200, map[string]any{"ok": true, "config_version": n, "connectors": len(d.Registry.Manifests())})
+		writeJSON(w, 200, map[string]any{"ok": true, "config_version": n, "connectors": len(d.Registry.Manifests()), "pid": os.Getpid()})
 	})
+	// Остановка по просьбе владельца (`gate4ai daemon stop`): Serve завершается штатно.
+	mux.HandleFunc("POST /v1/shutdown", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		writeJSON(w, 200, map[string]any{"ok": true})
+		d.RequestStop()
+	}))
 	d.agentRoutes(mux, anyp)
 
 	// ---- Только владелец ----

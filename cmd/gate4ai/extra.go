@@ -11,7 +11,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/front/mcpcli"
 )
 
-// register подключает команды mcp, run, doctor, ui.
+// register подключает команду mcp (MCP-сервер живёт вне пакета cli).
 func register(env *cli.Env) {
 	env.Extra["mcp"] = func(ctx context.Context, e *cli.Env, args []string) int {
 		if e.Getenv("GATE4AI_TOKEN") == "" {
