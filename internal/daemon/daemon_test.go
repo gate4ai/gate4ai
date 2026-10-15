@@ -42,7 +42,7 @@ func (n *notes) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, er
 type other struct{}
 
 func (other) Manifest() manifest.Manifest {
-	return manifest.Manifest{Connector: "bank", Actions: []manifest.Action{{Name: "pay", Class: "money", Verify: "statement.find_payment"}}}
+	return manifest.Manifest{Connector: "bank", Actions: []manifest.Action{{Name: "pay", Class: "money", Verify: "payment_status"}}}
 }
 func (other) Execute(context.Context, abi.ExecRequest) (abi.ExecResult, error) {
 	return abi.ExecResult{}, nil

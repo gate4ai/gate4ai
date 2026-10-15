@@ -12,7 +12,7 @@ require (
 	github.com/caddyserver/certmagic v0.25.6
 	github.com/coder/websocket v1.8.15
 	github.com/gate4ai/relay v0.1.0
-	github.com/gate4ai/sdk-go v0.1.0
+	github.com/gate4ai/sdk-go v0.3.0
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gowebpki/jcs v1.0.2
 	github.com/hashicorp/yamux v0.1.2
@@ -35,10 +35,6 @@ require (
 	github.com/caddyserver/zerossl v0.1.6 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/emersion/go-imap v1.2.1 // indirect
-	github.com/emersion/go-message v0.18.2 // indirect
-	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
-	github.com/emersion/go-smtp v0.25.0 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
