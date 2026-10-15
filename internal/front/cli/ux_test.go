@@ -211,3 +211,49 @@ func TestSuggest(t *testing.T) {
 		}
 	}
 }
+
+// Человек в терминале (stdout — терминал) получает таблицы и текстовые ошибки;
+// --json, GATE4AI_OUTPUT=json и не-терминал — JSON.
+func TestHumanOutput(t *testing.T) {
+	h := start(t)
+	runAs := func(stdoutTTY bool, output string, args ...string) (int, string, string) {
+		out, errb := &bytes.Buffer{}, &bytes.Buffer{}
+		e := &Env{Stdin: strings.NewReader(""), Stdout: out, Stderr: errb, StdoutTTY: stdoutTTY, StderrTTY: stdoutTTY,
+			Getenv: func(k string) string {
+				if k == "GATE4AI_OUTPUT" {
+					return output
+				}
+				return ""
+			},
+			Connect: func(string) *Client { return NewSocketClient(h.owner, "") }}
+		code := Run(context.Background(), e, args)
+		return code, out.String(), errb.String()
+	}
+	_, out, _ := runAs(true, "", "agents")
+	if !strings.HasPrefix(out, "AGENT") || !strings.Contains(out, "claude-ai") || strings.Contains(out, "{") {
+		t.Fatalf("table: %s", out)
+	}
+	for _, c := range []struct {
+		tty    bool
+		output string
+		args   []string
+	}{{false, "", []string{"agents"}}, {true, "", []string{"agents", "--json"}}, {true, "json", []string{"agents", "list"}}} {
+		_, out, _ := runAs(c.tty, c.output, c.args...)
+		jsonOf(t, out)
+	}
+	if _, out, _ := runAs(false, "table", "policy", "versions"); !strings.HasPrefix(out, "VERSION") {
+		t.Fatal(out)
+	}
+	if _, out, _ := runAs(true, "", "status"); !strings.Contains(out, "gate4ai daemon is running") || !strings.Contains(out, "pending approvals:") {
+		t.Fatal(out)
+	}
+	// Ошибка: человеку — текст без JSON, скрипту — JSON; коды выхода те же.
+	code, out, errs := runAs(true, "", "agents", "token", "nobody")
+	if code != ExitUsage || out != "" || !strings.Contains(errs, `gate4ai: agent "nobody" is not in the configuration`) {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	code, out, _ = runAs(false, "", "agents", "token", "nobody")
+	if code != ExitUsage || jsonOf(t, out)["code"] != "not_found" {
+		t.Fatal(out)
+	}
+}

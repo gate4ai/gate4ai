@@ -39,6 +39,11 @@ type Env struct {
 	// Interactive — stdin и stderr — терминал: команду ввёл человек (можно
 	// спрашивать и запускать daemon в фоне). StderrTTY — подсказки для человека в stderr.
 	Interactive, StderrTTY bool
+	// StdoutTTY — stdout — терминал: списки таблицей, ошибки текстом (output.go);
+	// ForceJSON — --json у табличной команды.
+	StdoutTTY, ForceJSON bool
+	// ForceTable — таблица и вне терминала (--table у approvals list).
+	ForceTable bool
 	// StartBinary — бинарник gate4ai для запуска daemon в фоне ("" — этот же).
 	StartBinary string
 }
@@ -47,7 +52,7 @@ type Env struct {
 func DefaultEnv() *Env {
 	errTTY := IsTerminal(os.Stderr)
 	return &Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
-		Interactive: errTTY && IsTerminal(os.Stdin), StderrTTY: errTTY,
+		Interactive: errTTY && IsTerminal(os.Stdin), StderrTTY: errTTY, StdoutTTY: IsTerminal(os.Stdout),
 		Connect: func(token string) *Client {
 			if token != "" {
 				// Удалённый агент: daemon на другом компьютере, доступ по HTTPS.
@@ -101,7 +106,7 @@ Owner commands (local socket):
   gate4ai journal verify
   gate4ai agents list | token <agent> [--label l] | connect <agent> | revoke <agent>
   gate4ai policy show | set <file> [-m comment] | versions | rollback <n> | test --agent a --action x [--args json] [--file draft.yaml]
-  gate4ai approvals [list] [--table] | approve <id> | reject <id>
+  gate4ai approvals [list] [--table|--json] | approve <id> | reject <id>
   gate4ai vault list | set <alias> (value from stdin) | rm <alias>
   gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
   gate4ai connectors list | install <file.g4c | name[@version]> [--dev] [--yes] | update <name> [--yes] | remove <name> | refresh
@@ -111,6 +116,8 @@ Owner commands (local socket):
   gate4ai doctor                          look for ways around gate4ai
   gate4ai egress                          network connections of sandboxed agents
 
+Output: JSON. At a terminal (stdout is a terminal) lists and status are tables and errors are text;
+  --json or GATE4AI_OUTPUT=json gives JSON there too, GATE4AI_OUTPUT=table gives tables anywhere.
 Exit codes: 0 ok, 1 error, 2 denied by policy, 3 pending approval, 4 verification failed, 5 usage, 6 daemon unavailable.
 `
 
@@ -133,6 +140,12 @@ func Run(ctx context.Context, e *Env, args []string) int {
 	}
 	if f, ok := e.Extra[cmd]; ok {
 		return f(ctx, e, rest)
+	}
+	if tableCommands[cmd] {
+		var j bool
+		if rest, j = stripJSONFlag(rest); j {
+			e.ForceJSON = true
+		}
 	}
 	switch cmd {
 	case "version", "--version":
@@ -761,13 +774,16 @@ func (e *Env) agents(ctx context.Context, args []string) int {
 	switch sub {
 	case "list":
 		var l struct {
-			Agents []any `json:"agents"`
+			Agents map[string]any `json:"agents"`
 		}
-		if err = c.Do(ctx, "GET", "/v1/agents", nil, &res); err == nil {
-			if b, _ := json.Marshal(res); json.Unmarshal(b, &l) == nil && len(l.Agents) == 0 {
-				fmt.Fprintln(e.Stderr, "gate4ai: no agents yet: add them under agents: in the policy (gate4ai policy show, then gate4ai policy set config.yaml)")
-			}
+		if err := c.Do(ctx, "GET", "/v1/agents", nil, &res); err != nil {
+			return e.fail(err)
 		}
+		if b, _ := json.Marshal(res); json.Unmarshal(b, &l) == nil && len(l.Agents) == 0 {
+			fmt.Fprintln(e.Stderr, "gate4ai: no agents yet: add them under agents: in the policy (gate4ai policy show, then gate4ai policy set config.yaml)")
+		}
+		e.out(res, agentsTable(res))
+		return ExitOK
 	case "token":
 		fs := flag.NewFlagSet("token", flag.ContinueOnError)
 		label := fs.String("label", "", "")
@@ -840,7 +856,7 @@ func (e *Env) policy(ctx context.Context, args []string) int {
 		if err := c.Do(ctx, "GET", "/v1/policy/versions", nil, &res); err != nil {
 			return e.fail(err)
 		}
-		e.printJSON(res)
+		e.out(res, versionsTable(res))
 		return ExitOK
 	case "rollback":
 		n, err := strconv.Atoi(strings.Join(args, ""))
@@ -911,20 +927,8 @@ func (e *Env) approvals(ctx context.Context, args []string) int {
 		if len(res) == 0 {
 			fmt.Fprintln(e.Stderr, "gate4ai: no approvals are waiting")
 		}
-		if !table {
-			e.printJSON(res)
-			return ExitOK
-		}
-		for _, a := range res {
-			fmt.Fprintf(e.Stdout, "%-12v %-14v %-22v %v\n", a["id"], a["agent"], a["action"], a["preview"])
-			d, _ := a["decision"].(map[string]any)
-			if r, _ := d["reason"].(string); r != "" {
-				fmt.Fprintf(e.Stdout, "%-12s why: %s\n", "", r)
-			}
-		}
-		if len(res) > 0 {
-			fmt.Fprintln(e.Stdout, "\nDecide: gate4ai approvals approve <id> | reject <id>")
-		}
+		e.ForceTable = e.ForceTable || table
+		e.out(res, approvalsTable(res))
 		return ExitOK
 	case "approve", "reject":
 		if len(args) != 1 {
@@ -955,7 +959,14 @@ func (e *Env) vault(ctx context.Context, args []string) int {
 			return e.fail(err)
 		}
 		sort.Strings(res)
-		e.printJSON(res)
+		if len(res) == 0 {
+			fmt.Fprintln(e.Stderr, "gate4ai: the vault is empty: echo -n SECRET | gate4ai vault set <alias>")
+		}
+		e.out(res, func(w io.Writer) {
+			for _, a := range res {
+				fmt.Fprintln(w, "@"+strings.TrimPrefix(a, "@"))
+			}
+		})
 		return ExitOK
 	case "set":
 		if len(args) != 1 {
@@ -995,9 +1006,12 @@ func (e *Env) relay(ctx context.Context, args []string) int {
 	var res any
 	switch sub {
 	case "status":
-		if err := e.Client().Do(ctx, "GET", "/v1/relay/status", nil, &res); err != nil {
+		var st map[string]any
+		if err := e.Client().Do(ctx, "GET", "/v1/relay/status", nil, &st); err != nil {
 			return e.fail(err)
 		}
+		e.out(st, kvTable(st))
+		return ExitOK
 	case "register":
 		fs := flag.NewFlagSet("register", flag.ContinueOnError)
 		fs.SetOutput(e.Stderr)

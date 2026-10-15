@@ -219,17 +219,17 @@ Start it in another terminal: gate4ai daemon   — or run it at login: gate4ai s
 | P2 | Официальный магазин в начальной конфигурации | S2 | совместимо | `emptyConfig`, README |
 | P2 | Подсказка для `unauthorized`; код в README; отказ от согласия при установке коннектора | A2, S3 | совместимо | `Explain`, `consent` |
 | P2 | Сокет по запасным путям (с `XDG_RUNTIME_DIR` и без) | F2 | совместимо | `paths.FindOwnerSocket` |
-| P3 | Табличный вывод `approvals list` | D1 | ⚠ текст по умолчанию в терминале расходится с «JSON по умолчанию» | только флагом `--table`; по умолчанию — нужно согласие на правку спецификации |
+| P3 | Таблицы для человека: списки и состояние владельца, ошибки текстом | D1 | спецификация обновлена с согласия человека (2026-10-15) | если stdout — терминал (`IsTerminal`: ioctl TCGETS / TIOCGETA, GetConsoleMode); `--json`, `GATE4AI_OUTPUT=json\|table`; `output.go` |
 | P3 | Язык трея | D4 | вне спецификации | русский при русской локали, иначе английский (как CLI); `GATE4AI_LANG` |
 
 Не сделано: вопрос «включить автозапуск? (Y/n)» в установщике (в `curl | sh` stdin занят скриптом; вместо него `GATE4AI_START=1`), трей сразу после `service install` не запускается (может быть уже запущен руками). Вживую на macOS и Windows автозапуск не проверялся (PLAN, «Нужно от человека»).
 
 ## 10. Путь из запроса теперь
 
-Скрипт или агент (не терминал) — та же ошибка с кодом 6, но с причиной и подсказкой:
+Скрипт или агент (stdout — pipe или файл) — та же ошибка с кодом 6, но с причиной и подсказкой:
 
 ```
-$ gate4ai ui --no-start
+$ gate4ai ui --no-start | cat
 {
   "code": "unavailable",
   "detail": "no socket at /run/user/1000/gate4ai/gate4ai.sock",
@@ -237,12 +237,18 @@ $ gate4ai ui --no-start
   "message": "gate4ai daemon is not running",
   "status": "error"
 }
-
-gate4ai daemon is not running.
-Start it: gate4ai daemon start (in the background) or gate4ai service install (also at every login); gate4ai daemon runs it in this terminal.
 ```
 
-Человек в терминале — daemon поднимается сам:
+Человек в терминале с `--no-start` — только текст:
+
+```
+$ gate4ai ui --no-start
+gate4ai daemon is not running.
+Start it: gate4ai daemon start (in the background) or gate4ai service install (also at every login); gate4ai daemon runs it in this terminal.
+(no socket at /run/user/1000/gate4ai/gate4ai.sock)
+```
+
+Человек в терминале без флагов — daemon поднимается сам:
 
 ```
 $ gate4ai ui
@@ -253,3 +259,13 @@ http://127.0.0.1:7431/login?t=…
 ```
 
 Упавший daemon (`connection refused` на старом сокете) — «it stopped or crashed, the socket is left over» и путь к журналу; слишком длинный путь сокета — «the daemon socket path is too long» с длиной и пределом; повторный `gate4ai daemon` — `already running (socket …)`.
+
+### Как CLI отличает человека от скрипта
+
+По тому, куда подключены потоки (`IsTerminal`: `ioctl TCGETS` на Linux, `TIOCGETA` на macOS, `GetConsoleMode` на Windows; `/dev/null` терминалом не считается):
+
+- **формат вывода** — по stdout: терминал — таблицы и текстовые ошибки; pipe или файл (`| jq`, `$(…)`, агенты, cron, CI) — JSON;
+- **подсказки** в stderr — только если stderr — терминал;
+- **запуск daemon из `gate4ai ui`** — только если stdin и stderr — терминал и нет `--print`.
+
+Псевдотерминал (`ssh -t`, `script`, `expect`, CI с pty) выглядит как человек — для него `--json` или `GATE4AI_OUTPUT=json` и `gate4ai ui --no-start`.

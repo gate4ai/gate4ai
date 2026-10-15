@@ -62,14 +62,15 @@ func (e *Env) service(ctx context.Context, args []string) int {
 		for _, n := range notes {
 			e.say(n)
 		}
-		e.printJSON(map[string]any{"status": "ok", "removed": files, "notes": notes})
+		e.out(map[string]any{"status": "ok", "removed": files, "notes": notes}, nil)
+		e.say("gate4ai autostart removed")
 		return ExitOK
 	case "status":
 		res := serviceState(home)
 		res["status"] = "ok"
 		_, herr := e.health(ctx)
 		res["running"] = herr == nil
-		e.printJSON(res)
+		e.out(res, kvTable(res))
 		return ExitOK
 	}
 	fmt.Fprintln(e.Stderr, serviceUsage)
@@ -138,7 +139,7 @@ func (e *Env) serviceInstall(ctx context.Context, home string, args []string) in
 		e.say(n)
 	}
 	e.say("gate4ai daemon is running and starts at every login. Open the Web UI: gate4ai ui")
-	e.printJSON(map[string]any{"status": "ok", "installed": res.Files, "running": true, "log": spec.Log, "notes": notes})
+	e.out(map[string]any{"status": "ok", "installed": res.Files, "running": true, "log": spec.Log, "notes": notes}, nil)
 	return ExitOK
 }
 
@@ -160,7 +161,7 @@ func (e *Env) waitStarted(ctx context.Context, logPath string) error {
 // quiet — то же окружение без сообщений человеку и JSON-вывода.
 func (e *Env) quiet() *Env {
 	q := *e
-	q.Stdout, q.StderrTTY = discard{}, false
+	q.Stdout, q.StderrTTY, q.ForceJSON = discard{}, false, true
 	return &q
 }
 

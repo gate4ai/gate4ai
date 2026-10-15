@@ -124,8 +124,24 @@ func (e *Env) fail(err error) int {
 	return code
 }
 
-// problem печатает Problem: JSON в stdout, человеку — в stderr.
+// problem печатает Problem: JSON в stdout и подсказку в stderr терминала; если
+// stdout — терминал (human), только текст в stderr.
 func (e *Env) problem(p Problem) {
+	if e.human() {
+		// Человеку в терминале — только текст: что случилось, что делать, подробности.
+		msg := p.Message
+		if !strings.HasPrefix(msg, "gate4ai ") {
+			msg = "gate4ai: " + msg
+		}
+		fmt.Fprintln(e.Stderr, sentence(msg))
+		if p.Hint != "" {
+			fmt.Fprintln(e.Stderr, sentence(upperFirst(p.Hint)))
+		}
+		if p.Detail != "" {
+			fmt.Fprintln(e.Stderr, "("+p.Detail+")")
+		}
+		return
+	}
 	out := map[string]any{"status": "error", "code": p.Code, "message": p.Message}
 	if p.Hint != "" {
 		out["hint"] = p.Hint
@@ -139,9 +155,9 @@ func (e *Env) problem(p Problem) {
 		if !strings.HasPrefix(msg, "gate4ai ") {
 			msg = "gate4ai: " + msg
 		}
-		fmt.Fprintf(e.Stderr, "\n%s.\n", msg)
+		fmt.Fprintf(e.Stderr, "\n%s\n", sentence(msg))
 		if p.Hint != "" {
-			fmt.Fprintln(e.Stderr, upperFirst(p.Hint)+".")
+			fmt.Fprintln(e.Stderr, sentence(upperFirst(p.Hint)))
 		}
 	}
 }
@@ -151,4 +167,12 @@ func upperFirst(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// sentence — точка в конце, если её нет (и нет ? или !).
+func sentence(s string) string {
+	if strings.HasSuffix(s, ".") || strings.HasSuffix(s, "?") || strings.HasSuffix(s, "!") {
+		return s
+	}
+	return s + "."
 }

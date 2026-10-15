@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,6 +64,12 @@ var StartDaemon = func(bin string, args []string, logPath string) (exited <-chan
 
 // DaemonCtl — `gate4ai daemon start | stop | status`.
 func DaemonCtl(ctx context.Context, e *Env, sub string, args []string) int {
+	if sub != "start" { // флаги start уходят daemon как есть
+		var j bool
+		if args, j = stripJSONFlag(args); j {
+			e.ForceJSON = true
+		}
+	}
 	switch sub {
 	case "start":
 		return e.daemonStart(ctx, args)
@@ -84,14 +91,14 @@ func (e *Env) health(ctx context.Context) (map[string]any, error) {
 
 func (e *Env) daemonStart(ctx context.Context, args []string) int {
 	if _, err := e.health(ctx); err == nil {
-		e.printJSON(map[string]any{"status": "ok", "running": true, "started": false})
+		e.out(map[string]any{"status": "ok", "running": true, "started": false}, nil)
 		e.say("gate4ai daemon is already running. Open the Web UI: gate4ai ui")
 		return ExitOK
 	}
 	if err := e.startDaemon(ctx, args); err != nil {
 		return e.fail(err)
 	}
-	e.printJSON(map[string]any{"status": "ok", "running": true, "started": true, "log": paths.DaemonLog()})
+	e.out(map[string]any{"status": "ok", "running": true, "started": true, "log": paths.DaemonLog()}, nil)
 	return ExitOK
 }
 
@@ -172,7 +179,7 @@ func (e *Env) daemonStop(ctx context.Context) int {
 	c := e.Connect("")
 	if err := c.Do(ctx, "POST", "/v1/shutdown", nil, nil); err != nil {
 		if errors.Is(err, ErrUnavailable) {
-			e.printJSON(map[string]any{"status": "ok", "running": false})
+			e.out(map[string]any{"status": "ok", "running": false}, nil)
 			e.say("gate4ai daemon is not running.")
 			return ExitOK
 		}
@@ -180,7 +187,7 @@ func (e *Env) daemonStop(ctx context.Context) int {
 	}
 	for i := 0; i < 100; i++ {
 		if _, err := e.health(ctx); errors.Is(err, ErrUnavailable) {
-			e.printJSON(map[string]any{"status": "ok", "running": false, "stopped": true})
+			e.out(map[string]any{"status": "ok", "running": false, "stopped": true}, nil)
 			e.say("gate4ai daemon stopped. If it runs at login (gate4ai service install), it starts again at the next login.")
 			return ExitOK
 		}
@@ -215,7 +222,10 @@ func (e *Env) daemonStatus(ctx context.Context) int {
 			res["relay"] = relay
 		}
 	}
-	e.printJSON(res)
+	e.out(res, func(w io.Writer) {
+		fmt.Fprintf(w, "gate4ai daemon is running\n")
+		kvTable(res, "running")(w)
+	})
 	return ExitOK
 }
 

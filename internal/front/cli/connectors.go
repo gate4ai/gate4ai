@@ -74,7 +74,7 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 		}
 		var out any
 		_ = json.Unmarshal(raw, &out)
-		e.printJSON(out)
+		e.out(out, connectorsTable(out))
 		return ExitOK
 	case "install", "update":
 		pos, fl := splitFlags(rest, nil)
