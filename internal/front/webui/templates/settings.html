@@ -1,0 +1,64 @@
+{{template "head" .}}
+{{$d := .Data}}
+<h2>Настройки</h2>
+
+<div class="card" id="relay"><h3>Relay — доступ из интернета</h3>
+<p>Relay даёт этому компьютеру публичный адрес <code>&lt;id&gt;.relay.gate4.ai</code> без открытых портов: через него к gate4.ai обращаются облачные агенты (Claude.ai, ChatGPT), а вы — с телефона. Трафик шифруется до этого компьютера: relay видит только шифротекст.</p>
+{{if $d.Relay.Configured}}
+<p>Состояние: {{if $d.Relay.Online}}<b class="ok">онлайн</b>{{else}}<b class="warn">нет связи — переподключается</b>{{end}}</p>
+<p>Relay: <code>{{$d.Relay.URL}}</code><br>Адрес устройства: <code>https://{{$d.Relay.Host}}</code><br>MCP для облачных агентов: <code id="mcp">{{$d.Relay.MCPURL}}</code> <button class="small" data-copy="#mcp">Копировать</button></p>
+{{else if $d.PublicURL}}<p>Daemon запущен со своим адресом (<code>--public</code>): <code>{{$d.PublicURL}}</code>. Relay не нужен.</p>
+{{else}}<p class="muted">Не включён.</p>{{end}}
+<form method="post" action="{{.Base}}/settings/relay" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label class="inline">Адрес relay <input name="url" value="{{or $d.Relay.URL $d.RelayDefault}}" size="34"></label>
+<button class="{{if not $d.Relay.Configured}}primary{{end}}">{{if $d.Relay.Configured}}Зарегистрировать заново{{else}}Подключить устройство{{end}}</button></form>
+<p class="help">По умолчанию — relay gate4.ai (<code>{{$d.RelayDefault}}</code>). Свой relay: тот же бинарник <code>gate4ai-relay</code> на вашем сервере — укажите его адрес. Без relay: <code>gate4ai daemon --public …</code>.</p>
+</div>
+
+<div class="card" id="remote"><h3>Вход с телефона</h3>
+<p>Подтверждения и журнал с телефона или другого компьютера — на адресе устройства, под <code>/ui/</code>. Правила, агенты и секреты оттуда не меняются.</p>
+{{with $d.RemoteLink}}<div class="row" style="align-items:flex-start">{{with $d.RemoteQR}}<img src="{{.}}" alt="QR-код ссылки входа" width="180" height="180" style="image-rendering:pixelated;background:#fff;padding:6px;border-radius:6px">{{end}}
+<div><p>Отсканируйте QR-код телефоном или откройте ссылку. Она одноразовая и действует 2 минуты.</p><pre class="box" id="rlink">{{.}}</pre><button class="small" data-copy="#rlink">Копировать</button>
+<p class="help">На телефоне откройте «Подтверждения» и нажмите «Включить в этом браузере» — запросы будут приходить push-уведомлением.</p></div></div>
+{{else}}{{with $d.RemoteLinkError}}<p class="warn">Нет публичного адреса: включите relay выше.</p>{{end}}
+<form method="post" action="{{.Base}}/settings/remote-link"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Показать ссылку и QR-код</button></form>{{end}}
+</div>
+
+<div class="card" id="autostart"><h3>Автозапуск</h3>
+{{with $d.Autostart}}
+<p>{{if .installed}}<b class="ok">Включён</b>: gate4.ai запускается при входе в систему{{with .systemd}} (systemd: {{.}}){{end}}.{{else}}<b>Выключен</b>: после перезагрузки gate4.ai не запустится сам, и агенты получат «устройство офлайн».{{end}}</p>
+<form method="post" action="{{$.Base}}/settings/autostart"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="on" value="{{if .installed}}0{{else}}1{{end}}">
+<button class="{{if not .installed}}primary{{end}}">{{if .installed}}Выключить автозапуск{{else}}Включить автозапуск{{end}}</button></form>
+{{with .files}}<p class="help">{{join . ", "}}</p>{{end}}
+{{end}}
+<p class="help">То же в терминале: <code>gate4ai service install</code> / <code>uninstall</code>. Трей тоже запускается при входе, если лежит рядом с gate4ai.</p>
+</div>
+
+<div class="card"><h3>Подтверждения</h3>
+<form method="post" action="{{.Base}}/settings/approvals" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="/settings">
+<label class="inline">Ждать решения <input name="timeout" value="{{$d.Timeout}}" size="6"></label><span class="help">затем — отказ</span><button>Сохранить</button></form>
+<p><a href="{{.Base}}/approvals#channels">Каналы уведомлений →</a></p></div>
+
+<div class="card"><h3>Агенты могут предлагать изменения</h3>
+<form method="post" action="{{.Base}}/settings/general"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="proposals_form" value="1">
+<label class="inline"><input type="checkbox" name="proposals" value="1" {{if not $d.Config.Proposals.Disabled}}checked{{end}}> разрешить агентам вызывать <code>gate4ai.propose_change</code></label>
+<p class="help">Агент (например, Claude Code) может подготовить правило или настройку коннектора по вашей просьбе. Ничего не меняется, пока вы не примете предложение здесь, на этом компьютере; секреты агент предложить не может.</p>
+<button>Сохранить</button></form></div>
+
+<div class="card" id="store"><h3>Магазин коннекторов</h3>
+<form method="post" action="{{.Base}}/settings/general"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>Адрес каталога (index.json)</label><input name="registry" value="{{$d.Config.Store.Registry}}" size="70">
+<label>Ключи подписи каталога</label><textarea name="registry_keys" rows="2" class="code">{{join $d.Config.Store.RegistryKeys "\n"}}</textarea>
+<button>Сохранить</button></form></div>
+
+<div class="card"><h3>Хранение журнала</h3>
+<form method="post" action="{{.Base}}/settings/general" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label class="inline">Квитанции <input name="ret_receipts" value="{{index $d.Retention "receipts"}}" size="6"></label>
+<label class="inline">Отказы <input name="ret_denied" value="{{index $d.Retention "denied"}}" size="6"></label>
+<label class="inline">Доказательства <input name="ret_evidence_other" value="{{index $d.Retention "evidence_other"}}" size="6"></label>
+<label class="inline">Доказательства (деньги) <input name="ret_evidence_money" value="{{index $d.Retention "evidence_money"}}" size="6"></label>
+<button>Сохранить</button></form><p class="help">0s — бессрочно; 90d, 1y, 3y.</p></div>
+
+<div class="card"><h3>О программе</h3>
+<p>gate4ai {{$d.Version}} · данные: <code>{{$d.Home}}</code> · журнал daemon: <code>{{$d.Log}}</code></p></div>
+{{template "foot"}}

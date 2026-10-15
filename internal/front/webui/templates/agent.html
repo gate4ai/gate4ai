@@ -1,0 +1,85 @@
+{{template "head" .}}
+{{$d := .Data}}{{$row := $d.Row}}
+<div class="row between"><h2>{{$d.Name}}</h2><a href="{{.Base}}/agents">← Все агенты</a></div>
+<div class="status">
+<span>Последнее обращение: {{if $row.Seen.TS.IsZero}}<b class="warn">ещё не обращался</b>{{else}}<b>{{ago $row.Seen.TS}}</b> ({{ts $row.Seen.TS}}) через {{viaRu $row.Seen.Via}}{{end}}</span>
+<span>Профиль: <a href="{{.Base}}/policy?profile={{$d.Agent.Profile}}">{{$d.Agent.Profile}}</a></span>
+<span>Коннекторы: {{if $d.Profile.Connectors}}{{join $d.Profile.Connectors ", "}}{{else}}<a class="warn" href="{{.Base}}/policy?profile={{$d.Agent.Profile}}">нет — дайте доступ</a>{{end}}</span>
+</div>
+
+{{if $d.NewToken}}<div class="card"><b>Токен агента — показывается один раз.</b>
+<pre class="box" id="newtok">{{$d.NewToken}}</pre><button class="small" data-copy="#newtok">Копировать</button>
+{{if $d.NewSnippet}}<p>Вставьте в <code>{{$d.NewSnippetPath}}</code>:</p><pre class="box" id="newsnip">{{$d.NewSnippet}}</pre><button class="small" data-copy="#newsnip">Копировать</button>{{end}}
+<p class="help">Агент с shell: <code>export GATE4AI_TOKEN=…</code>, затем <code>gate4ai tools</code>. С другого компьютера — ещё <code>GATE4AI_URL={{if $d.PublicURL}}{{$d.PublicURL}}{{else}}https://&lt;адрес устройства&gt;{{end}}</code>.</p></div>{{end}}
+{{if $d.ConnectCode}}<div class="card"><b>Код подключения:</b> <code style="font-size:1.5rem" id="ccode">{{$d.ConnectCode}}</code> <button class="small" data-copy="#ccode">Копировать</button>
+<p class="muted">Введите его на странице авторизации gate4.ai, когда Claude.ai / ChatGPT откроет её. Код одноразовый, действует до {{ts $d.ConnectExpires}}.</p></div>{{end}}
+
+<h3>Подключение</h3>
+<div class="tabs">{{range $d.Clients}}<a href="{{$.Base}}/agents/{{$d.Name}}?client={{.ID}}" class="{{if eq .ID $d.Client}}on{{end}}">{{.Title}}{{if .Connected}} ✓{{end}}</a>{{end}}
+<a href="{{$.Base}}/agents/{{$d.Name}}?client=cloud" class="{{if eq "cloud" $d.Client}}on{{end}}">Claude.ai / ChatGPT</a>
+<a href="{{$.Base}}/agents/{{$d.Name}}?client=cli" class="{{if or (eq "cli" $d.Client) (eq "" $d.Client)}}on{{end}}">CLI / скрипт</a></div>
+
+{{with $d.ClientInfo}}{{$c := .}}
+{{range $d.Clients}}{{if eq .ID $c.ID}}
+<div class="card">
+<h3>{{.Title}}: автоматически</h3>
+<p>gate4.ai выдаст агенту токен и добавит сервер <code>gate4ai</code> (<code>{{$d.Bin}} mcp</code>) в <code>{{.Path}}</code>; прежняя версия файла сохранится рядом (<code>.gate4ai.bak</code>), остальные настройки не меняются.{{if .Skill}} Заодно ставится skill с инструкцией для агента (<code>~/.claude/skills/gate4ai</code>).{{end}}</p>
+{{if not .Installed}}<p class="warn">{{.Title}} не найден на этом компьютере — файл всё равно будет создан.</p>{{end}}
+<div class="row">
+<form method="post" action="{{$.Base}}/agents/{{$d.Name}}/client"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="client" value="{{.ID}}">
+<button class="primary">{{if .Connected}}Подключить заново (новый токен){{else}}Подключить {{.Title}}{{end}}</button></form>
+{{if .Connected}}<form method="post" action="{{$.Base}}/agents/{{$d.Name}}/client/remove" data-confirm="Убрать gate4ai из {{.Title}} и отозвать его токен?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="client" value="{{.ID}}"><button class="danger">Отключить</button></form>{{end}}
+</div>
+<p class="help">{{.Restart}}</p>
+</div>
+<div class="card"><h3>{{.Title}}: вручную</h3>
+<p>Выдайте токен и вставьте фрагмент в <code>{{$d.SnippetPath}}</code>{{if eq .Format "vscode"}} (или Command Palette → «MCP: Add Server»){{end}}{{if eq .ID "claude-code"}} — или одной командой: <code>claude mcp add --scope user gate4ai -e GATE4AI_TOKEN=&lt;токен&gt; -- {{$d.Bin}} mcp</code>{{end}}:</p>
+<pre class="box">{{$d.Snippet}}</pre>
+<form method="post" action="{{$.Base}}/agents/{{$d.Name}}/token" class="row" style="margin-top:.5rem"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="client" value="{{.ID}}"><input type="hidden" name="label" value="{{.ID}}">
+<button>Выдать токен и показать готовый фрагмент</button></form>
+{{if .Docs}}<p class="help">Документация: <a href="{{.Docs}}" target="_blank" rel="noopener">{{.Docs}}</a></p>{{end}}
+</div>
+{{end}}{{end}}
+{{else}}
+{{if eq $d.Client "cloud"}}
+<div class="card"><h3>Облачный агент: Claude.ai, ChatGPT</h3>
+{{if $d.PublicURL}}
+<ol><li>Адрес MCP этого компьютера: <code id="mcpurl">{{$d.PublicURL}}/mcp</code> <button class="small" data-copy="#mcpurl">Копировать</button></li>
+<li><b>Claude.ai:</b> Settings → Connectors → Add custom connector → вставьте адрес. <b>ChatGPT:</b> Settings → Connectors → Advanced → Developer mode → Create → адрес, аутентификация OAuth.</li>
+<li>Агент откроет страницу авторизации gate4.ai — введите код подключения:</li></ol>
+<form method="post" action="{{.Base}}/agents/{{$d.Name}}/connect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="primary">Получить код подключения</button></form>
+<p class="help">Отключите у агента родные коннекторы Gmail, Drive и т.п. — иначе он сможет обойти правила gate4.ai.</p>
+{{else}}
+<p>Облачному агенту нужен публичный адрес этого компьютера. Его даёт relay — без открытых портов и настройки роутера.</p>
+<a class="btn primary" href="{{.Base}}/settings#relay">Включить relay</a>
+{{end}}</div>
+{{else}}
+<div class="card"><h3>CLI, скрипты, OpenClaw, Hermes</h3>
+<ol><li>Выдайте токен:
+<form method="post" action="{{.Base}}/agents/{{$d.Name}}/token" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input name="label" placeholder="метка (необязательно)" size="20"><button class="primary">Выдать токен</button></form></li>
+<li>Передайте агенту: <code>export GATE4AI_TOKEN=g4a_…</code></li>
+<li>Инструкция для агента (skill): <code>gate4ai skill &gt; SKILL.md</code>; проверка: <code>gate4ai tools</code></li>
+<li>Агент на другом компьютере: ещё <code>GATE4AI_URL={{if $d.PublicURL}}{{$d.PublicURL}}{{else}}https://&lt;адрес устройства&gt; (нужен relay){{end}}</code></li>
+<li>Изолированный запуск на этом компьютере: <code>gate4ai run {{$d.Name}} --workspace ~/project</code></li></ol></div>
+{{end}}{{end}}
+
+<h3>Права</h3>
+<form method="post" action="{{.Base}}/agents/{{$d.Name}}/profile" class="row card"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label class="inline">Профиль <select name="profile">{{range $d.Profiles}}<option {{if eq . $d.Agent.Profile}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+<button>Сменить</button> <a href="{{.Base}}/policy?profile={{$d.Agent.Profile}}">Правила профиля →</a></form>
+
+<h3>Токены</h3>
+<table><tr><th>ID</th><th>Метка</th><th>Выдан</th><th>Последнее использование</th><th>Статус</th></tr>
+{{range $row.Tokens}}{{if ne .Kind "refresh"}}<tr><td><code>{{.ID}}</code></td><td>{{.Label}}</td><td>{{ts .Created}}</td><td>{{ago .LastUsed}}</td>
+<td>{{if .Revoked}}<span class="deny">отозван</span>{{else}}<span class="allow">активен</span>{{end}}</td></tr>{{end}}{{else}}<tr><td colspan="5" class="muted">Токенов нет</td></tr>{{end}}
+</table>
+<div class="row" style="margin-top:.8rem">
+<form method="post" action="{{.Base}}/agents/{{$d.Name}}/revoke" data-confirm="Отозвать все токены {{$d.Name}}? Агент сразу потеряет доступ."><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger">Отозвать все токены</button></form>
+<form method="post" action="{{.Base}}/agents/{{$d.Name}}/delete" data-confirm="Удалить агента {{$d.Name}}? Его токены будут отозваны, профиль останется."><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger">Удалить агента</button></form>
+</div>
+
+<h3>Недавние действия</h3>
+<table><tr><th>Когда</th><th>Действие</th><th>Решение</th><th>Итог</th></tr>
+{{range $d.Journal}}<tr><td><a href="{{$.Base}}/journal/{{.Hash}}">{{ago .Receipt.TS}}</a></td><td><code>{{.Receipt.Action}}</code></td><td class="{{.Receipt.Decision.Effect}}">{{effectRu .Receipt.Decision.Effect}}</td><td>{{.Receipt.Execution.Status}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">Пусто</td></tr>{{end}}</table>
+{{template "foot"}}

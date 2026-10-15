@@ -74,6 +74,9 @@ func (o Options) cachedIndex() *Index {
 	return ix
 }
 
+// CachedIndex — индекс registry из последней проверенной загрузки (nil — нет).
+func (o Options) CachedIndex() *Index { return o.cachedIndex() }
+
 // RefreshIndex загружает индекс registry, проверяет подпись и кэширует его.
 func (o Options) RefreshIndex(ctx context.Context) (*Index, error) {
 	if !o.indexKeysOK() {

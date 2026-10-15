@@ -1,7 +1,10 @@
 {{template "head" .}}
 <h2>Секреты</h2>
-<p class="muted">Агенты видят только алиасы. Значения хранятся в системном keychain и подставляются внутри коннекторов.</p>
-<table><tr><th>Алиас</th></tr>{{range .Data.Aliases}}<tr><td><code>{{.}}</code></td></tr>{{else}}<tr><td class="muted">Нет секретов</td></tr>{{end}}</table>
+<p class="muted">Пароли и токены хранятся в системном keychain. Агенты и коннекторы видят только алиасы (<code>@mail.work</code>); значение подставляет gate4.ai — и только для адресов, к которым секрет привязан.</p>
+<table><tr><th>Алиас</th><th>Используется</th><th></th></tr>{{range .Data.Aliases}}<tr><td><code>{{.}}</code></td>
+<td>{{if index $.Data.Used .}}<span class="ok">в конфигурации</span>{{else}}<span class="muted">не найден в конфигурации</span>{{end}}</td>
+<td><form method="post" action="{{$.Base}}/vault/delete" data-confirm="Удалить секрет {{.}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="alias" value="{{.}}"><button class="small danger">Удалить</button></form></td></tr>
+{{else}}<tr><td colspan="3" class="muted">Секретов нет. Пароль почты удобнее ввести в настройках коннектора — там он сразу привяжется.</td></tr>{{end}}</table>
 <form method="post" action="{{$.Base}}/vault" class="card row" style="margin-top:1rem" autocomplete="off">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <input name="alias" placeholder="@mail.work" required><input name="value" type="password" placeholder="значение" required>

@@ -1,0 +1,13 @@
+{{template "head" .}}
+{{$d := .Data}}
+<div class="row between"><h2>Готовые шаблоны правил</h2><a href="{{.Base}}/policy?profile={{$d.Profile}}">← Правила</a></div>
+<p class="muted">Шаблон добавляет правила в профиль; посмотреть и изменить их можно потом в таблице правил, откатить — в версиях.</p>
+<div class="grid">
+{{range $d.Templates}}<form method="post" action="{{$.Base}}/policy/template" class="card" style="margin:0"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="template" value="{{.ID}}">
+<h3>{{.Title}}</h3><p>{{.Description}}</p>
+{{if .Missing}}<p class="warn">Нужен коннектор: {{join .Missing ", "}}. <a href="{{$.Base}}/connectors">Поставить</a></p>{{else}}
+{{range .Params}}<label>{{.Label}}</label>{{if .Multiline}}<textarea name="{{.Name}}" rows="2" placeholder="{{.Placeholder}}"></textarea>{{else}}<input name="{{.Name}}" placeholder="{{.Placeholder}}" size="30">{{end}}{{end}}
+<p class="row"><select name="profile">{{range $d.Profiles}}<option {{if eq . $d.Profile}}selected{{end}}>{{.}}</option>{{end}}</select><button class="primary">Применить</button></p>{{end}}
+</form>{{end}}
+</div>
+{{template "foot"}}

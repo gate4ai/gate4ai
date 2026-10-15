@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -49,6 +50,42 @@ func (d *Daemon) reloadConnector(name string, removed bool) error {
 	}
 	d.Pipeline.SetEngine(e)
 	return nil
+}
+
+// InstallConnector ставит коннектор (файл .g4c или имя из registry) с согласием
+// на возможности consent; при ErrConsent возвращает план для показа владельцу.
+func (d *Daemon) InstallConnector(ctx context.Context, source string, consent []string) (store.Info, *store.Plan, string, error) {
+	opts := d.StoreOptions()
+	plan, err := opts.Prepare(ctx, source, false)
+	if err != nil {
+		return store.Info{}, nil, "", err
+	}
+	info, err := opts.Install(plan, consent)
+	if err != nil {
+		return store.Info{}, plan, "", err
+	}
+	warn := ""
+	if err := d.reloadConnector(info.Connector, false); err != nil {
+		warn = err.Error()
+	}
+	d.Log.Info("connector installed", "connector", info.Connector, "version", info.Version, "trust", info.Trust)
+	return info, plan, warn, nil
+}
+
+// PrepareConnector — план установки (возможности, доверие) без установки.
+func (d *Daemon) PrepareConnector(ctx context.Context, source string) (*store.Plan, error) {
+	return d.StoreOptions().Prepare(ctx, source, false)
+}
+
+// RemoveConnector удаляет коннектор; warning — политика ещё ссылается на него.
+func (d *Daemon) RemoveConnector(name string) (warning string, err error) {
+	if err := d.StoreOptions().Remove(name); err != nil {
+		return "", err
+	}
+	if err := d.reloadConnector(name, true); err != nil {
+		return "policy still references this connector: " + err.Error(), nil
+	}
+	return "", nil
 }
 
 type installReq struct {

@@ -1,0 +1,34 @@
+{{template "head" .}}
+{{$d := .Data}}
+<h2>Подтверждения в Telegram</h2>
+<p>Личный бот: gate4.ai присылает запрос с кнопками «Разрешить / Отклонить», бот принимает нажатия только от вас.</p>
+
+<div class="card"><h3>1. Создайте бота</h3>
+<ol><li>Откройте в Telegram <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>.</li>
+<li>Отправьте <code>/newbot</code>, задайте имя и логин бота (заканчивается на <code>bot</code>).</li>
+<li>BotFather пришлёт токен вида <code>123456789:AA…</code> — скопируйте его.</li></ol>
+<form method="post" action="{{.Base}}/channels/telegram" class="row" autocomplete="off"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="token">
+<input name="token" type="password" placeholder="токен бота" size="50" required><button class="primary">Проверить и сохранить</button></form>
+{{if $d.HasToken}}<p class="ok">Токен сохранён в хранилище секретов (<code>@telegram.bot</code>){{if $d.Bot}}, бот <b>@{{$d.Bot}}</b>{{end}}.</p>{{end}}
+</div>
+
+<div class="card"><h3>2. Найдите себя</h3>
+{{if $d.HasToken}}
+<p>Откройте своего бота{{if $d.Bot}} (<a href="https://t.me/{{$d.Bot}}" target="_blank" rel="noopener">t.me/{{$d.Bot}}</a>){{end}} и отправьте ему <code>/start</code>. Затем нажмите:</p>
+<form method="post" action="{{.Base}}/channels/telegram"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="find"><button>Найти, кто написал боту</button></form>
+{{if $d.Searched}}{{if $d.Users}}
+<table style="margin-top:.6rem"><tr><th>Кто</th><th>ID</th><th>Сообщение</th><th></th></tr>
+{{range $d.Users}}<tr><td>{{.Name}}{{if .Username}} <span class="muted">@{{.Username}}</span>{{end}}</td><td><code>{{.ID}}</code></td><td class="muted">{{.Text}}</td>
+<td><form method="post" action="{{$.Base}}/channels/telegram"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="step" value="owner"><input type="hidden" name="owner_id" value="{{.ID}}">
+{{if $d.Public}}<label class="inline"><input type="checkbox" name="webhook" value="1"> вебхук</label>{{end}}<button class="primary small">Это я — включить</button></form></td></tr>{{end}}</table>
+{{else}}<p class="warn">Сообщений боту пока нет. Отправьте боту <code>/start</code> и нажмите кнопку ещё раз.</p>{{end}}{{end}}
+<details><summary>Знаю свой Telegram ID</summary>
+<form method="post" action="{{.Base}}/channels/telegram" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="owner">
+<input name="owner_id" placeholder="123456789" required><button>Включить</button></form><p class="help">Свой ID подскажет, например, бот @userinfobot.</p></details>
+{{else}}<p class="muted">Сначала сохраните токен бота.</p>{{end}}
+</div>
+
+<div class="card"><h3>3. Готово</h3>
+{{with $d.Telegram}}<p>Владелец: <code>{{.OwnerID}}</code>, токен <code>{{.Token}}</code>, режим: {{if .Webhook}}вебхук на публичном адресе{{else}}опрос Telegram (исходящие запросы, без открытых портов){{end}}. Канал {{if $d.On}}<b class="ok">включён</b>{{else}}<b>выключен</b>{{end}}.</p>{{else}}<p class="muted">После шага 2 придёт пробное сообщение.</p>{{end}}
+<a href="{{.Base}}/approvals#channels">← Каналы уведомлений</a></div>
+{{template "foot"}}

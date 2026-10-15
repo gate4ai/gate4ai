@@ -1,19 +1,19 @@
 {{template "head" .}}
-{{if .Data.NewToken}}<div class="card"><b>Токен агента {{.Data.NewTokenAgent}}</b> — показывается один раз. Передайте агенту как <code>GATE4AI_TOKEN</code>:<pre>{{.Data.NewToken}}</pre></div>{{end}}
-{{if .Data.ConnectCode}}<div class="card"><b>Код подключения для {{.Data.ConnectAgent}}</b>: <code style="font-size:1.4rem">{{.Data.ConnectCode}}</code>
-<p class="muted">Добавьте адрес устройства <code>…/mcp</code> как custom connector в Claude.ai / ChatGPT и введите этот код на странице авторизации. Код одноразовый, действует до {{ts .Data.ConnectExpires}}.</p></div>{{end}}
-<h2>Агенты</h2>
-<table><tr><th>Агент</th><th>Профиль</th><th></th></tr>
-{{range $name, $a := .Data.Agents}}<tr><td><b>{{$name}}</b><div class="muted">{{$a.Description}}</div></td><td>{{$a.Profile}}</td>
-<td><div class="row">
-<form method="post" action="{{$.Base}}/agents/{{$name}}/token"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input name="label" placeholder="метка" size="10"> <button>Выдать токен</button></form>
-<form method="post" action="{{$.Base}}/agents/{{$name}}/connect"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Подключить (remote MCP)</button></form>
-<form method="post" action="{{$.Base}}/agents/{{$name}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">Отозвать все токены</button></form>
-</div></td></tr>{{end}}
-</table>
-<p class="muted">Новый агент добавляется в разделе «Политики» (agents:).</p>
-<h2>Токены</h2>
-<table><tr><th>ID</th><th>Агент</th><th>Тип</th><th>Метка</th><th>Выдан</th><th>Статус</th></tr>
-{{range .Data.Tokens}}<tr><td><code>{{.ID}}</code></td><td>{{.Agent}}</td><td>{{.Kind}}</td><td>{{.Label}}</td><td>{{ts .Created}}</td><td>{{if .Revoked}}<span class="deny">отозван</span>{{else}}<span class="allow">активен</span>{{end}}</td></tr>{{end}}
-</table>
+<div class="row between"><h2>Агенты</h2><a class="btn primary" href="{{.Base}}/agents/new">+ Добавить агента</a></div>
+<p class="muted">Агент — программа (Claude Code, Cursor, Claude.ai…), которая обращается к gate4.ai со своим токеном. Что ему можно — задаёт его профиль в «Правилах».</p>
+{{range .Data.Rows}}
+<div class="card">
+<div class="row between"><div><a href="{{$.Base}}/agents/{{.Name}}"><b style="font-size:1.1rem">{{.Name}}</b></a> <span class="muted">профиль <a href="{{$.Base}}/policy?profile={{.Agent.Profile}}">{{.Agent.Profile}}</a></span>
+{{if .Agent.Description}}<div class="muted">{{.Agent.Description}}</div>{{end}}</div>
+<a class="btn" href="{{$.Base}}/agents/{{.Name}}">Подключение и токены</a></div>
+<div class="status" style="margin:.6rem 0 0">
+<span>Последнее обращение: {{if .Seen.TS.IsZero}}<b class="warn">ещё не обращался</b>{{else}}<b>{{ago .Seen.TS}}</b> <span class="muted">через {{viaRu .Seen.Via}}</span>{{end}}</span>
+<span>Активных токенов: {{.Active}}</span>
+{{if .Clients}}<span>Подключён: {{join .Clients ", "}}</span>{{end}}
+<span>Коннекторы: {{if .Profile.Connectors}}{{join .Profile.Connectors ", "}}{{else}}<span class="warn">нет — агент ничего не видит</span>{{end}}</span>
+</div></div>
+{{else}}
+<div class="card"><p>Агентов пока нет. Добавьте первого: выберите программу, которой хотите дать доступ, — gate4.ai подключит её сам или покажет, что вставить в её настройки.</p>
+<a class="btn primary" href="{{.Base}}/agents/new">Добавить агента</a></div>
+{{end}}
 {{template "foot"}}

@@ -1,5 +1,19 @@
 {{template "head" .}}
-<h2>Квитанция <code>{{short .Data.Entry.Hash}}</code></h2>
-<p class="muted">sha256 {{.Data.Entry.Hash}}{{if .Data.Entry.Redacted}} · содержимое удалено по сроку хранения{{end}}</p>
-<div class="card"><pre>{{json .Data.Entry.Receipt}}</pre></div>
+{{$e := .Data.Entry}}
+<div class="row between"><h2>Квитанция <code>#{{short $e.Hash}}</code></h2><a href="{{.Base}}/journal">← Журнал</a></div>
+{{with $e.Receipt}}
+<div class="card">
+<table>
+<tr><th>Когда</th><td>{{ts .TS}}</td></tr>
+<tr><th>Агент</th><td>{{if $.Remote}}{{.Agent}}{{else}}<a href="{{$.Base}}/agents/{{.Agent}}">{{.Agent}}</a>{{end}}</td></tr>
+<tr><th>Действие</th><td><code>{{.Action}}</code> <span class="badge">{{classRu .Class}}</span></td></tr>
+<tr><th>Решение</th><td class="{{.Decision.Effect}}"><b>{{effectRu .Decision.Effect}}</b> — {{.Decision.Reason}}{{if .Decision.RuleIDs}} <span class="muted">({{join .Decision.RuleIDs ", "}})</span>{{end}}</td></tr>
+{{with .Approval}}<tr><th>Подтверждение</th><td>{{.Who}} через {{.Channel}}, {{ts .At}}</td></tr>{{end}}
+<tr><th>Исполнение</th><td>{{.Execution.Status}}{{with .Execution.Error}} — <span class="bad">{{.}}</span>{{end}}</td></tr>
+<tr><th>Проверка</th><td>{{.Verification.Status}}{{with .Verification.Method}} ({{.}}){{end}}</td></tr>
+</table>
+{{if not $.Remote}}<p class="row" style="margin-top:.6rem"><a class="btn" href="{{$.Base}}/policy/rule?receipt={{$e.Hash}}&effect={{if eq .Decision.Effect "deny"}}allow{{else}}allow{{end}}">Создать правило на основе этого…</a></p>{{end}}
+</div>{{end}}
+<p class="muted">sha256 {{$e.Hash}}{{if $e.Redacted}} · содержимое удалено по сроку хранения{{end}}</p>
+<details><summary>Квитанция целиком (JSON)</summary><pre class="box">{{json $e.Receipt}}</pre></details>
 {{template "foot"}}

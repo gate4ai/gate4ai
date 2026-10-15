@@ -262,6 +262,16 @@ func (s *Store) RevokeAgent(agent string) (int, error) {
 	return int(n), nil
 }
 
+// RevokeLabel отзывает токены агента с меткой label; возвращает число отозванных.
+func (s *Store) RevokeLabel(agent, label string) (int, error) {
+	res, err := s.db.Exec(`UPDATE tokens SET revoked=1 WHERE agent=? AND label=? AND revoked=0`, agent, label)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // RevokeToken отзывает один токен.
 func (s *Store) RevokeToken(tok string) error {
 	_, err := s.db.Exec(`UPDATE tokens SET revoked=1 WHERE hash=?`, HashToken(tok))

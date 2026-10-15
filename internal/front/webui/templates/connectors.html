@@ -1,0 +1,37 @@
+{{template "head" .}}
+{{$d := .Data}}
+{{with $d.Plan}}
+<div class="card" style="border-color:var(--accent)">
+<h3>Установить {{.Connector}} {{.Version}}?</h3>
+<p>Издатель: <b>{{or .Publisher "—"}}</b> · доверие: {{if eq .Trust "verified"}}<span class="badge ok">проверен gate4.ai</span>{{else if eq .Trust "publisher"}}<span class="badge ok">проверенный издатель</span>{{else if eq .Trust "community"}}<span class="badge warn">сообщество — только чтение</span>{{else}}<span class="badge">{{.Trust}}</span>{{end}}{{if .Repo}} · <a href="{{.Repo}}" target="_blank" rel="noopener">исходный код</a>{{end}}</p>
+<p>Коннектор получит только эти возможности — gate4.ai не даст ему большего:</p>
+<ul>{{range .Capabilities}}<li>{{capRu .}} <span class="muted"><code>{{.}}</code></span></li>{{else}}<li>никаких: только вычисления</li>{{end}}</ul>
+<p>Действия: {{range .Classes}}<span class="badge">{{classRu .}}</span> {{end}} — каждое проходит ваши правила; без правил чтение разрешено, остальное спрашивается.</p>
+{{range .Warnings}}<p class="warn">{{.}}</p>{{end}}
+<form method="post" action="{{$.Base}}/connectors/install"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="source" value="{{.Connector}}">
+{{range .Capabilities}}<input type="hidden" name="consent" value="{{.}}">{{end}}
+{{if $d.Profiles}}<label>Сразу дать доступ профилям</label>{{range $d.Profiles}}<label class="inline"><input type="checkbox" name="profiles" value="{{.}}" checked> {{.}}</label>{{end}}{{end}}
+<p class="row"><button class="primary">Согласен, установить</button> <a href="{{$.Base}}/connectors">Отмена</a></p></form>
+</div>{{end}}
+
+<div class="row between"><h2>Коннекторы</h2>
+<form method="post" action="{{.Base}}/connectors/refresh"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">Обновить каталог</button></form></div>
+<p class="muted">Коннектор — модуль, через который агент работает с почтой, файлами или сайтами. Он видит только то, что вы разрешили, и не знает ваших паролей.</p>
+{{if $d.IndexError}}<div class="note">Каталог магазина недоступен: {{$d.IndexError}}. {{if not $d.Registry}}<a href="{{.Base}}/settings#store">Настроить магазин</a>.{{end}} Коннектор из файла: <code>gate4ai connectors install файл.g4c</code>.</div>{{end}}
+<div class="grid">
+{{range $d.Items}}
+<div class="card" style="margin:0">
+<div class="row between"><b style="font-size:1.1rem">{{.Name}}</b>
+{{if .Installed}}{{if .Revoked}}<span class="badge bad">версия отозвана</span>{{else if .Loaded}}<span class="badge ok">установлен {{.Installed}}</span>{{else}}<span class="badge warn">не загружен</span>{{end}}{{else}}<span class="badge">{{.Version}}</span>{{end}}</div>
+<p>{{.Description}}</p>
+<p class="help">{{or .Publisher "—"}}{{if eq .Trust "verified"}} · проверен gate4.ai{{else if .Trust}} · {{.Trust}}{{end}}{{if .License}} · {{.License}}{{end}}</p>
+{{if .Profiles}}<p class="help">Доступ: {{join .Profiles ", "}}</p>{{end}}
+<div class="row">
+{{if .Installed}}<a class="btn primary" href="{{$.Base}}/connectors/{{.Name}}">Настроить</a>
+{{if .Update}}<a class="btn" href="{{$.Base}}/connectors?install={{.Name}}">Обновить до {{.Version}}</a>{{end}}
+{{else}}<a class="btn primary" href="{{$.Base}}/connectors?install={{.Name}}">Установить</a>{{end}}
+{{if .Repo}}<a class="btn small" href="{{.Repo}}" target="_blank" rel="noopener">Исходник</a>{{end}}
+</div></div>
+{{else}}<p class="muted">Каталог пуст.</p>{{end}}
+</div>
+{{template "foot"}}

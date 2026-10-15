@@ -42,11 +42,12 @@ func setup(ctx context.Context, d *daemon.Daemon, log *slog.Logger) error {
 	if _, err := servePublic(d, public, log); err != nil {
 		return err
 	}
-	relayclient.Attach(ctx, d)
+	relayStatus := relayclient.Attach(ctx, d)
 	u := webui.New(d)
+	u.Relay = relayStatus
 	d.AddRoutes(u.OwnerRoutes)
 	d.AddPublic("/ui/", u.RemoteHandler())
-	approval.Attach(ctx, d, approval.NewDesktop(), telegramAPI)
+	u.Channels = approval.Attach(ctx, d, approval.NewDesktop(), telegramAPI)
 	if _, err := sandbox.Attach(ctx, d, paths.RunDir(), egressAddr); err != nil {
 		return err
 	}

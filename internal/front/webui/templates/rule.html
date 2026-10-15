@@ -1,0 +1,39 @@
+{{template "head" .}}
+{{$d := .Data}}{{$f := $d.F}}
+<div class="row between"><h2>{{if $f.ID}}Правило {{$f.ID}}{{else}}Новое правило{{end}}</h2><a href="{{.Base}}/policy?profile={{$f.Profile}}">← Правила</a></div>
+{{if $d.Note}}<div class="note">{{$d.Note}}</div>{{end}}
+<form method="get" action="{{.Base}}/policy/rule" class="card row"><input type="hidden" name="id" value="{{$f.ID}}"><input type="hidden" name="effect" value="{{$f.Effect}}">
+<label class="inline">Профиль <select name="profile">{{range $d.Profiles}}<option {{if eq . $f.Profile}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label class="inline">1. Действие <select name="action" data-autosubmit><option value="">— выберите —</option>
+{{range $d.Tools}}<option value="{{.Name}}" {{if eq .Name $f.Action}}selected{{end}}>{{.Name}} ({{classRu .Class}})</option>{{end}}
+{{if and $f.Action (not $d.Tool)}}<option selected>{{$f.Action}}</option>{{end}}</select></label><noscript><button class="small">Дальше</button></noscript></form>
+
+{{if $f.Action}}
+<form method="post" action="{{.Base}}/policy/rule" class="card"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="profile" value="{{$f.Profile}}"><input type="hidden" name="action" value="{{$f.Action}}"><input type="hidden" name="id" value="{{$f.ID}}">
+{{with $d.Tool}}<p class="muted"><code>{{.Name}}</code> — {{.Description}}</p>{{end}}
+<label>2. Решение</label>
+<label class="inline"><input type="radio" name="effect" value="allow" {{if eq $f.Effect "allow"}}checked{{end}}> <span class="allow">разрешать без вопроса</span></label>
+<label class="inline"><input type="radio" name="effect" value="ask" {{if eq $f.Effect "ask"}}checked{{end}}> <span class="ask">спрашивать меня</span></label>
+<label class="inline"><input type="radio" name="effect" value="deny" {{if eq $f.Effect "deny"}}checked{{end}}> <span class="deny">запрещать</span></label>
+
+<label>3. Когда <span class="muted">(все условия вместе; пусто — всегда)</span></label>
+{{range $i, $c := $f.Conds}}
+<div class="cond">
+<label class="inline"><input type="checkbox" name="cond_not_{{$i}}" value="1" {{if $c.Not}}checked{{end}}> не</label>
+<select name="cond_arg"><option value="">аргумент…</option>{{range $d.Args}}<option value="{{.Name}}" {{if eq .Name $c.Arg}}selected{{end}}>{{.Name}}{{if .Array}} (список){{end}}{{if .Format}} · {{.Format}}{{end}}</option>{{end}}</select>
+<select name="cond_kind"><option value="">—</option>{{range $d.Kinds}}<option value="{{.ID}}" {{if eq .ID $c.Kind}}selected{{end}}>{{.Title}}</option>{{end}}</select>
+<input name="cond_value" value="{{$c.Value}}" placeholder="значение / папка / сайты / имя списка" size="34">
+<input name="list_items_{{$i}}" placeholder="для нового списка: элементы через запятую" size="30">
+</div>{{end}}
+<button class="small" data-add-cond>+ условие</button>
+{{if $d.Lists}}<p class="help">Списки: {{range $n, $_ := $d.Lists}}<code>{{$n}}</code> {{end}}</p>{{end}}
+<details {{if $f.When}}open{{end}}><summary>Своё условие на CEL (для технических пользователей)</summary>
+<input name="when" value="{{$f.When}}" size="80" placeholder='glob(path, "~/notes/**") && !text.contains("password")'>
+<p class="help">Переменные — аргументы действия, <code>lists.*</code>, <code>provenance</code>, <code>counters</code>, <code>now</code>, <code>hour</code>; функции <code>glob()</code>, <code>domain_matches()</code>, <code>email_domain()</code>. Объединяется с блоками через «и».</p></details>
+
+<label>4. Причина <span class="muted">(видят агент и вы в запросе подтверждения)</span></label>
+<input name="reason" value="{{$f.Reason}}" size="60" placeholder="например: только папка заметок">
+<p class="row"><button class="primary">Сохранить правило</button><a href="{{.Base}}/policy?profile={{$f.Profile}}">Отмена</a></p>
+</form>{{end}}
+{{template "foot"}}

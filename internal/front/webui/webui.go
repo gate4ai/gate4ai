@@ -22,20 +22,24 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/gate4ai/gate4ai/internal/approval"
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/daemon"
+	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
+	"github.com/gate4ai/gate4ai/internal/relayclient"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
-	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/internal/state"
 )
 
 //go:embed templates/*.html
 var tplFS embed.FS
+
+//go:embed static
+var staticFS embed.FS
 
 var funcs = template.FuncMap{
 	"short": audit.Short,
@@ -44,16 +48,79 @@ var funcs = template.FuncMap{
 		b, _ := json.MarshalIndent(v, "", "  ")
 		return string(b)
 	},
-	"join": strings.Join,
+	"join":     strings.Join,
+	"ago":      ago,
+	"effectRu": func(e string) string { return or(effectRu[e], e) },
+	"classRu":  func(c string) string { return or(classRu[c], c) },
+	"viaRu":    func(v string) string { return or(viaRu[v], v) },
+	"describe": func(w string) string { s, _ := DescribeWhen(w); return s },
+	"isCode":   func(w string) bool { _, ok := DescribeWhen(w); return !ok },
+	"has": func(list []string, s string) bool {
+		for _, x := range list {
+			if x == s {
+				return true
+			}
+		}
+		return false
+	},
+	"capRu": humanCapability,
+	"inc":  func(i int) int { return i + 1 },
+	"list": func(s ...string) []string { return s },
+	"dict": func(kv ...any) map[string]any {
+		m := map[string]any{}
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[kv[i].(string)] = kv[i+1]
+		}
+		return m
+	},
+	"lines": func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
+	"first": func(s string) string { return strings.SplitN(s, "\n", 2)[0] },
 }
 
 var tpl = template.Must(template.New("").Funcs(funcs).ParseFS(tplFS, "templates/*.html"))
+
+func or(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// ago — «3 мин назад».
+func ago(t time.Time) string {
+	if t.IsZero() {
+		return "никогда"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "только что"
+	case d < time.Hour:
+		return fmt.Sprintf("%d мин назад", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%d ч назад", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%d дн назад", int(d.Hours()/24))
+	}
+	return t.Local().Format("2006-01-02")
+}
 
 // UI — Web UI.
 type UI struct {
 	D    *daemon.Daemon
 	Addr string // 127.0.0.1:port после Listen
 	Now  func() time.Time
+
+	// Channels — каналы подтверждений (nil — не подключены, например в тестах).
+	Channels *approval.Channels
+	// Relay — состояние relay (nil — relay не подключён).
+	Relay func() relayclient.Status
+	// Clients — окружение пользователя для автоподключения агентов.
+	Clients agentsetup.Env
+	// Bin — бинарник gate4ai для конфигурации клиентов ("" — os.Executable).
+	Bin string
+	// Autostart — включение автозапуска (подменяется в тестах).
+	Autostart Autostart
 
 	mu       sync.Mutex
 	logins   map[string]login // одноразовые токены входа
@@ -89,7 +156,8 @@ func (m mount) cookie() string {
 
 // New создаёт Web UI.
 func New(d *daemon.Daemon) *UI {
-	return &UI{D: d, Now: time.Now, logins: map[string]login{}, sessions: map[string]session{}}
+	return &UI{D: d, Now: time.Now, logins: map[string]login{}, sessions: map[string]session{},
+		Clients: agentsetup.Default(), Autostart: systemAutostart{}}
 }
 
 func random() string {
@@ -206,30 +274,95 @@ func (u *UI) RemoteHandler() http.Handler { return u.handler(remote) }
 func (u *UI) handler(m mount) http.Handler {
 	mux := http.NewServeMux()
 	b := m.base
+	get := func(path string, f func(r *http.Request) (string, map[string]any, error)) {
+		mux.HandleFunc("GET "+b+path, u.page(m, f))
+	}
+	post := func(path string, f func(w http.ResponseWriter, r *http.Request) map[string]any) {
+		mux.HandleFunc("POST "+b+path, u.post(m, f))
+	}
+	// Изменения конфигурации, агентов, секретов и коннекторов — только локально.
+	change := func(path string, f func(w http.ResponseWriter, r *http.Request) map[string]any) {
+		post(path, localOnly(m, f))
+	}
 	mux.HandleFunc("GET "+b+"/login", u.login(m))
-	mux.HandleFunc("GET "+b+"/{$}", u.page(m, u.approvals))
-	mux.HandleFunc("GET "+b+"/agents", u.page(m, u.agents))
-	mux.HandleFunc("GET "+b+"/journal", u.page(m, u.journal))
-	mux.HandleFunc("GET "+b+"/journal/{hash}", u.page(m, u.receipt))
-	mux.HandleFunc("GET "+b+"/policy", u.page(m, u.policyPage))
-	mux.HandleFunc("GET "+b+"/vault", u.page(m, u.vaultPage))
-	mux.HandleFunc("POST "+b+"/approvals/{id}", u.post(m, u.decide(m)))
-	mux.HandleFunc("POST "+b+"/policy/simulate", u.post(m, u.simulate))
-	// Изменения политик, агентов и секретов — только локально.
-	mux.HandleFunc("POST "+b+"/agents/{name}/token", u.post(m, localOnly(m, u.token)))
-	mux.HandleFunc("POST "+b+"/agents/{name}/connect", u.post(m, localOnly(m, u.connect)))
-	mux.HandleFunc("POST "+b+"/agents/{name}/revoke", u.post(m, localOnly(m, u.revoke)))
-	mux.HandleFunc("POST "+b+"/policy", u.post(m, localOnly(m, u.savePolicy)))
-	mux.HandleFunc("POST "+b+"/policy/rollback", u.post(m, localOnly(m, u.rollback)))
-	mux.HandleFunc("POST "+b+"/vault", u.post(m, localOnly(m, u.setSecret)))
-	mux.HandleFunc("POST "+b+"/logout", u.post(m, func(w http.ResponseWriter, r *http.Request) map[string]any {
+	mux.Handle("GET "+b+"/static/", http.StripPrefix(b, http.FileServerFS(staticFS)))
+	mux.HandleFunc("GET "+b+"/sw.js", serviceWorker)
+
+	// Удалённо: обзор, подтверждения, журнал (и подписка на push).
+	get("/{$}", u.overview(m))
+	get("/approvals", u.approvalsPage(m))
+	get("/journal", u.journal)
+	get("/journal/{hash}", u.receipt)
+	post("/approvals/{id}", u.decide(m))
+	post("/push/subscribe", u.pushSubscribe(m))
+	post("/logout", func(w http.ResponseWriter, r *http.Request) map[string]any {
 		c, _ := r.Cookie(m.cookie())
 		u.mu.Lock()
 		delete(u.sessions, c.Value)
 		u.mu.Unlock()
 		http.SetCookie(w, &http.Cookie{Name: m.cookie(), Value: "", Path: b + "/", MaxAge: -1, Secure: m.remote})
 		return map[string]any{"redirect": "/login"}
-	}))
+	})
+
+	// Только на этом компьютере: страницы настройки показываются, изменения — нет.
+	localPage := func(path string, f func(r *http.Request) (string, map[string]any, error)) {
+		if m.remote {
+			get(path, func(*http.Request) (string, map[string]any, error) {
+				return "remote_only", nil, nil
+			})
+			return
+		}
+		get(path, f)
+	}
+	localPage("/agents", u.agents)
+	localPage("/agents/new", u.agentNew)
+	localPage("/agents/{name}", u.agentPage)
+	localPage("/connectors", u.connectorsPage)
+	localPage("/connectors/{name}", u.connectorPage)
+	localPage("/policy", u.policyPage)
+	localPage("/policy/rule", u.rulePage)
+	localPage("/policy/templates", u.templatesPage)
+	localPage("/policy/yaml", u.yamlPage)
+	localPage("/proposals/{id}", u.proposalPage)
+	localPage("/vault", u.vaultPage)
+	localPage("/settings", u.settingsPage)
+	localPage("/approvals/telegram", u.telegramPage)
+
+	change("/agents", u.createAgent)
+	change("/agents/{name}/token", u.token)
+	change("/agents/{name}/connect", u.connect)
+	change("/agents/{name}/revoke", u.revoke)
+	change("/agents/{name}/delete", u.deleteAgent)
+	change("/agents/{name}/profile", u.setAgentProfile)
+	change("/agents/{name}/client", u.connectClient)
+	change("/agents/{name}/client/remove", u.disconnectClient)
+	change("/connectors/install", u.installConnector)
+	change("/connectors/refresh", u.refreshIndex)
+	change("/connectors/{name}/settings", u.saveConnectorSettings)
+	change("/connectors/{name}/profiles", u.saveConnectorProfiles)
+	change("/connectors/{name}/remove", u.removeConnector)
+	change("/policy", u.savePolicy)
+	change("/policy/rollback", u.rollback)
+	change("/policy/simulate", u.simulate)
+	change("/policy/rule", u.saveRule)
+	change("/policy/rule/delete", u.deleteRule)
+	change("/policy/rule/move", u.moveRule)
+	change("/policy/template", u.applyTemplate)
+	change("/policy/profile", u.createProfile)
+	change("/policy/profile/connectors", u.saveProfileConnectors)
+	change("/policy/lists", u.saveList)
+	change("/proposals/{id}/apply", u.applyProposal)
+	change("/proposals/{id}/reject", u.rejectProposal)
+	change("/vault", u.setSecret)
+	change("/vault/delete", u.deleteSecret)
+	change("/channels/{name}/toggle", u.toggleChannel)
+	change("/channels/{name}/test", u.testChannel)
+	change("/channels/telegram", u.telegramStep)
+	change("/settings/approvals", u.saveApprovalSettings)
+	change("/settings/relay", u.registerRelay)
+	change("/settings/autostart", u.toggleAutostart)
+	change("/settings/general", u.saveGeneral)
+	change("/settings/remote-link", u.remoteLink)
 	return u.guard(m, mux)
 }
 
@@ -241,7 +374,7 @@ func localOnly(m mount, f func(w http.ResponseWriter, r *http.Request) map[strin
 		return f
 	}
 	return func(w http.ResponseWriter, r *http.Request) map[string]any {
-		return map[string]any{"status": http.StatusForbidden, "page": "approvals", "error": errLocalOnly + ": this change is allowed only on this computer"}
+		return map[string]any{"status": http.StatusForbidden, "page": "remote_only", "error": errLocalOnly + ": this change is allowed only on this computer"}
 	}
 }
 
@@ -274,7 +407,7 @@ func (u *UI) guard(m mount, h http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
@@ -317,6 +450,19 @@ type view struct {
 	Title, Nav, CSRF string
 	Flash, Error     string
 	Data             map[string]any
+	// Счётчики в меню.
+	Pending, Proposals int
+}
+
+func (u *UI) counts(v *view) {
+	if p, err := u.D.State.ListApprovals(state.Pending, 100); err == nil {
+		v.Pending = len(p)
+	}
+	if !v.Remote {
+		if p, err := u.D.State.ListProposals(state.ProposalOpen, "", 100); err == nil {
+			v.Proposals = len(p)
+		}
+	}
 }
 
 func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, error)) http.HandlerFunc {
@@ -331,6 +477,10 @@ func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, erro
 		if err != nil {
 			v.Error = err.Error()
 		}
+		if e := r.URL.Query().Get("error"); e != "" && v.Error == "" {
+			v.Error = e
+		}
+		u.counts(&v)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := tpl.ExecuteTemplate(w, name+".html", v); err != nil {
 			http.Error(w, err.Error(), 500)
@@ -351,17 +501,25 @@ func (u *UI) post(m mount, f func(w http.ResponseWriter, r *http.Request) map[st
 			return
 		}
 		_ = r.ParseForm()
-		if subtle.ConstantTimeCompare([]byte(r.PostForm.Get("csrf")), []byte(s.csrf)) != 1 {
+		tok := r.PostForm.Get("csrf")
+		if h := r.Header.Get("X-CSRF-Token"); h != "" {
+			tok = h
+		}
+		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.csrf)) != 1 {
 			http.Error(w, "bad csrf token", 403)
 			return
 		}
 		res := f(w, r)
+		if res == nil { // ответ уже записан (JSON для app.js)
+			return
+		}
 		if red, ok := res["redirect"].(string); ok {
 			http.Redirect(w, r, m.base+red, http.StatusSeeOther)
 			return
 		}
 		name, _ := res["page"].(string)
 		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: res}
+		u.counts(&v)
 		if e, ok := res["error"].(string); ok {
 			v.Error = e
 		}
@@ -379,170 +537,5 @@ func (u *UI) post(m mount, f func(w http.ResponseWriter, r *http.Request) map[st
 }
 
 var owner = auth.OwnerVia("webui")
-
-func (u *UI) approvals(r *http.Request) (string, map[string]any, error) {
-	pend, err := u.D.State.ListApprovals(state.Pending, 50)
-	recent, _ := u.D.State.ListApprovals("", 20)
-	return "approvals", map[string]any{"Pending": pend, "Recent": recent}, err
-}
-
-// decide — решение по запросу; канал в квитанции различает локальный и удалённый вход.
-func (u *UI) decide(m mount) func(w http.ResponseWriter, r *http.Request) map[string]any {
-	channel := "webui"
-	if m.remote {
-		channel = "webui-remote"
-	}
-	return func(w http.ResponseWriter, r *http.Request) map[string]any {
-		res, err := u.D.Pipeline.Decide(r.Context(), r.PathValue("id"), r.PostForm.Get("decision") == "approve", channel, "owner")
-		if err != nil {
-			return map[string]any{"redirect": "/?flash=" + urlq(err.Error())}
-		}
-		return map[string]any{"redirect": "/?flash=" + urlq(res.Status+" "+res.Receipt)}
-	}
-}
-
-func (u *UI) agents(r *http.Request) (string, map[string]any, error) {
-	toks, err := u.D.State.Tokens()
-	return "agents", map[string]any{"Agents": u.D.Config.Current().Agents, "Tokens": toks}, err
-}
-
-func (u *UI) agentsWith(extra map[string]any) map[string]any {
-	_, d, _ := u.agents(nil)
-	for k, v := range extra {
-		d[k] = v
-	}
-	d["page"] = "agents"
-	return d
-}
-
-func (u *UI) token(w http.ResponseWriter, r *http.Request) map[string]any {
-	name := r.PathValue("name")
-	if _, ok := u.D.Config.Current().Agents[name]; !ok {
-		return u.agentsWith(map[string]any{"error": "unknown agent " + name})
-	}
-	tok, err := u.D.State.IssueToken(name, r.PostForm.Get("label"), "agent")
-	if err != nil {
-		return u.agentsWith(map[string]any{"error": err.Error()})
-	}
-	return u.agentsWith(map[string]any{"NewToken": tok, "NewTokenAgent": name})
-}
-
-func (u *UI) connect(w http.ResponseWriter, r *http.Request) map[string]any {
-	code, exp, err := u.D.EnableOAuth(nil).NewConnectCode(r.PathValue("name"))
-	if err != nil {
-		return u.agentsWith(map[string]any{"error": err.Error()})
-	}
-	return u.agentsWith(map[string]any{"ConnectCode": code, "ConnectAgent": r.PathValue("name"), "ConnectExpires": exp})
-}
-
-func (u *UI) revoke(w http.ResponseWriter, r *http.Request) map[string]any {
-	n, err := u.D.State.RevokeAgent(r.PathValue("name"))
-	if err != nil {
-		return u.agentsWith(map[string]any{"error": err.Error()})
-	}
-	return map[string]any{"redirect": "/agents?flash=" + urlq(fmt.Sprintf("revoked %d token(s) of %s", n, r.PathValue("name")))}
-}
-
-func (u *UI) journal(r *http.Request) (string, map[string]any, error) {
-	q := r.URL.Query()
-	es, err := u.D.Journal.List(audit.Filter{Agent: q.Get("agent"), Action: q.Get("action"), Effect: q.Get("effect"), Limit: 200, Desc: true})
-	verr := u.D.Journal.VerifyChain()
-	chain := "ok"
-	if verr != nil {
-		chain = verr.Error()
-	}
-	return "journal", map[string]any{"Entries": es, "Q": q, "Chain": chain}, err
-}
-
-func (u *UI) receipt(r *http.Request) (string, map[string]any, error) {
-	e, err := u.D.Journal.Find(r.PathValue("hash"))
-	return "receipt", map[string]any{"Entry": e}, err
-}
-
-func (u *UI) policyData(yaml string) map[string]any {
-	raw, n := u.D.Config.CurrentRaw()
-	if yaml == "" {
-		yaml = string(raw)
-	}
-	vs, _ := u.D.Config.Versions()
-	var actions []string
-	for _, t := range u.D.Tools(owner) {
-		actions = append(actions, t.Name)
-	}
-	return map[string]any{"YAML": yaml, "Version": n, "Versions": vs, "Agents": u.D.Config.Current().Agents, "Actions": actions, "page": "policy"}
-}
-
-func (u *UI) policyPage(r *http.Request) (string, map[string]any, error) {
-	return "policy", u.policyData(""), nil
-}
-
-func (u *UI) savePolicy(w http.ResponseWriter, r *http.Request) map[string]any {
-	y := r.PostForm.Get("yaml")
-	v, err := u.D.Config.Put(owner, []byte(y), r.PostForm.Get("comment"))
-	if err != nil {
-		d := u.policyData(y)
-		d["error"] = err.Error()
-		return d
-	}
-	return map[string]any{"redirect": "/policy?flash=" + urlq("saved version "+strconv.Itoa(v.N))}
-}
-
-func (u *UI) rollback(w http.ResponseWriter, r *http.Request) map[string]any {
-	n, _ := strconv.Atoi(r.PostForm.Get("version"))
-	v, err := u.D.Config.Rollback(owner, n)
-	if err != nil {
-		d := u.policyData("")
-		d["error"] = err.Error()
-		return d
-	}
-	return map[string]any{"redirect": "/policy?flash=" + urlq(fmt.Sprintf("rolled back to %d (new version %d)", n, v.N))}
-}
-
-// simulate — «что будет, если агент попробует…».
-func (u *UI) simulate(w http.ResponseWriter, r *http.Request) map[string]any {
-	d := u.policyData(r.PostForm.Get("yaml"))
-	agent, action := r.PostForm.Get("agent"), r.PostForm.Get("action")
-	var args map[string]any
-	if err := json.Unmarshal([]byte(r.PostForm.Get("args")), &args); err != nil {
-		d["error"] = "arguments must be a JSON object: " + err.Error()
-		return d
-	}
-	eng := u.D.Pipeline.Engine()
-	if y := r.PostForm.Get("yaml"); y != "" {
-		cfg, err := u.D.Config.Validate([]byte(y))
-		if err == nil {
-			eng, err = policy.New(cfg, policy.Catalog(u.D.Registry.Catalog()))
-		}
-		if err != nil {
-			d["error"] = err.Error()
-			return d
-		}
-	}
-	_, act, ok := u.D.Registry.Lookup(action)
-	if !ok {
-		d["error"] = "unknown action " + action
-		return d
-	}
-	nargs, err := act.Normalize(args)
-	if err != nil {
-		d["error"] = err.Error()
-		return d
-	}
-	dec := eng.Decide(policy.Request{Agent: agent, Action: action, Class: act.Class, Args: nargs, Now: u.Now()}, u.D.State.Counters())
-	d["Sim"] = dec
-	d["SimAgent"], d["SimAction"], d["SimArgs"] = agent, action, r.PostForm.Get("args")
-	return d
-}
-
-func (u *UI) vaultPage(r *http.Request) (string, map[string]any, error) {
-	return "vault", map[string]any{"Aliases": u.D.Vault.Aliases()}, nil
-}
-
-func (u *UI) setSecret(w http.ResponseWriter, r *http.Request) map[string]any {
-	if err := u.D.Vault.Set(r.PostForm.Get("alias"), r.PostForm.Get("value")); err != nil {
-		return map[string]any{"page": "vault", "Aliases": u.D.Vault.Aliases(), "error": err.Error()}
-	}
-	return map[string]any{"redirect": "/vault?flash=" + urlq("saved "+r.PostForm.Get("alias"))}
-}
 
 func urlq(s string) string { return template.URLQueryEscaper(s) }

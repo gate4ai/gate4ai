@@ -1,23 +1,67 @@
 {{template "head" .}}
-<h2>Политика <span class="muted">версия {{.Data.Version}}</span></h2>
-<form method="post" action="{{$.Base}}/policy" class="card">
-<input type="hidden" name="csrf" value="{{.CSRF}}">
-<textarea name="yaml" rows="28" spellcheck="false">{{.Data.YAML}}</textarea>
-<div class="row" style="margin-top:.5rem"><input name="comment" placeholder="комментарий к версии" size="40"><button class="primary">Сохранить новую версию</button></div>
-</form>
-<h3>Симулятор: что будет, если агент попробует…</h3>
-<form method="post" action="{{$.Base}}/policy/simulate" class="card">
-<input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="yaml" value="">
-<div class="row">
-<select name="agent">{{range $n, $a := .Data.Agents}}<option {{if eq $n ($.Data.SimAgent)}}selected{{end}}>{{$n}}</option>{{end}}</select>
-<select name="action">{{range .Data.Actions}}<option {{if eq . ($.Data.SimAction)}}selected{{end}}>{{.}}</option>{{end}}</select>
-<input name="args" size="50" value='{{if .Data.SimArgs}}{{.Data.SimArgs}}{{else}}{}{{end}}' placeholder='{"to":["x@example.com"],"subject":"…"}'>
-<button>Проверить</button></div>
-{{with .Data.Sim}}<p>Решение: <b class="{{.Effect}}">{{.Effect}}</b> — {{.Reason}}{{if .RuleIDs}} <span class="muted">[{{join .RuleIDs ", "}}]</span>{{end}}{{if .Obligations}} · обязательства: {{join .Obligations ", "}}{{end}}</p>{{end}}
-</form>
+{{$d := .Data}}{{$p := $d.P}}
+<div class="row between"><h2>Правила</h2>
+<div class="row"><a class="btn" href="{{.Base}}/policy/templates?profile={{$d.Profile}}">Готовые шаблоны</a><a class="btn" href="{{.Base}}/policy/yaml">YAML</a></div></div>
+<p class="muted">Агенту назначен <b>профиль</b>: к каким коннекторам у него доступ и какие правила действуют. Если правило не сработало: чтение — разрешено, изменение и отправка — спрашивать. Запрет важнее вопроса, вопрос важнее разрешения.</p>
+<div class="tabs">{{range $d.Profiles}}<a href="{{$.Base}}/policy?profile={{.}}" class="{{if eq . $d.Profile}}on{{end}}">{{.}}</a>{{end}}
+<details style="margin:0 0 0 auto"><summary class="btn small">+ профиль</summary><form method="post" action="{{.Base}}/policy/profile" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input name="name" placeholder="имя" required size="12"><button class="small">Создать</button></form></details></div>
+
+{{if $d.Profile}}
+<p>Агенты с этим профилем: {{range $d.Agents}}<a href="{{$.Base}}/agents/{{.}}">{{.}}</a> {{else}}<span class="muted">нет</span>{{end}}</p>
+
+<div class="card"><h3>Доступ к коннекторам</h3>
+<form method="post" action="{{.Base}}/policy/profile/connectors" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}">
+{{range $d.Connectors}}<label class="inline"><input type="checkbox" name="connectors" value="{{.}}" {{if has $p.Connectors .}}checked{{end}}> {{.}}</label>{{else}}<span class="muted">Коннекторов нет — <a href="{{$.Base}}/connectors">поставьте</a>.</span>{{end}}
+{{if $d.Connectors}}<button class="small">Сохранить</button>{{end}}</form></div>
+
+<div class="row between"><h3>Правила профиля</h3><a class="btn primary" href="{{.Base}}/policy/rule?profile={{$d.Profile}}">+ Правило</a></div>
+<table><tr><th>Действие</th><th>Решение</th><th>Условие</th><th>Причина</th><th></th></tr>
+{{range $p.Rules}}<tr id="rule-{{.ID}}"><td><code>{{.Action}}</code><div class="help">{{.ID}}</div></td>
+<td class="{{.Effect}}"><b>{{effectRu .Effect}}</b></td>
+<td>{{if isCode .When}}<code>{{.When}}</code>{{else}}{{describe .When}}{{end}}</td><td>{{.Reason}}</td>
+<td><div class="row">
+<a class="btn small" href="{{$.Base}}/policy/rule?profile={{$d.Profile}}&id={{.ID}}">Изменить</a>
+<form method="post" action="{{$.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="-1"><button class="small" title="выше">↑</button></form>
+<form method="post" action="{{$.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="1"><button class="small" title="ниже">↓</button></form>
+<form method="post" action="{{$.Base}}/policy/rule/delete" class="inline" data-confirm="Удалить правило {{.ID}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><button class="small danger">Удалить</button></form>
+</div></td></tr>
+{{else}}<tr><td colspan="5" class="muted">Правил нет — действуют значения по умолчанию. Начните с <a href="{{$.Base}}/policy/templates?profile={{$d.Profile}}">шаблона</a>.</td></tr>{{end}}
+{{range $p.Limits}}<tr><td><code>{{.Action}}</code><div class="help">{{.ID}}</div></td><td class="deny"><b>лимит</b></td>
+<td>{{if .PerDay}}не больше {{.PerDay}} в сутки{{end}}{{if .AmountPerDay}} сумма не больше {{.AmountPerDay}} в сутки{{end}}</td><td>{{.Reason}}</td>
+<td><form method="post" action="{{$.Base}}/policy/rule/delete" class="inline" data-confirm="Удалить лимит {{.ID}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><button class="small danger">Удалить</button></form></td></tr>{{end}}
+</table>
+
+{{if $d.Acts}}<details><summary>Все действия профиля и что с ними будет без правил</summary>
+<table><tr><th>Действие</th><th>Класс</th><th>Без правил</th><th>Правила</th></tr>
+{{range $d.Acts}}<tr><td><code>{{.Tool.Name}}</code><div class="help">{{.Tool.Description}}</div></td><td>{{classRu .Tool.Class}}</td><td class="{{.Default}}">{{effectRu .Default}}</td>
+<td>{{range .Rules}}<a href="#rule-{{.}}">{{.}}</a> {{else}}<a class="small" href="{{$.Base}}/policy/rule?profile={{$d.Profile}}&action={{.Tool.Name}}">добавить</a>{{end}}</td></tr>{{end}}
+</table></details>{{end}}
+{{end}}
+
+<h3 id="lists">Списки</h3>
+<p class="help">Доверенные адресаты, получатели платежей и т.п. В условиях — «из списка».</p>
+{{range $name, $items := $d.Lists}}
+<form method="post" action="{{$.Base}}/policy/lists" class="card"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="back" value="/policy?profile={{$d.Profile}}">
+<b>{{$name}}</b><textarea name="items" rows="3">{{join $items "\n"}}</textarea><div class="row"><button class="small">Сохранить</button><span class="help">пустой список удаляется</span></div></form>{{end}}
+<form method="post" action="{{.Base}}/policy/lists" class="card"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="/policy?profile={{$d.Profile}}">
+<b>Новый список</b> <input name="name" placeholder="contacts_trusted" required><textarea name="items" rows="2" placeholder="по одному на строку"></textarea><button class="small">Создать</button></form>
+
+<h3 id="sim">Проверка: что будет, если агент попробует…</h3>
+<div class="card">
+<form method="get" action="{{.Base}}/policy" class="row"><input type="hidden" name="profile" value="{{$d.Profile}}">
+<label class="inline">Действие <select name="sim" data-autosubmit>{{range $d.Tools}}<option {{if eq .Name $d.SimAction}}selected{{end}}>{{.Name}}</option>{{end}}</select></label><noscript><button class="small">Выбрать</button></noscript></form>
+{{with $d.SimTool}}
+<form method="post" action="{{$.Base}}/policy/simulate#sim"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="{{.Name}}"><input type="hidden" name="profile" value="{{$d.Profile}}">
+<label class="inline">Агент <select name="agent">{{range $n, $a := $d.AllAgents}}<option {{if eq $n (or $d.SimAgent "")}}selected{{end}}>{{$n}}</option>{{end}}</select></label>
+{{range .Schema.Properties}}<label>{{.Name}}{{if .Schema.Description}} <span class="muted">— {{.Schema.Description}}</span>{{end}}</label>
+<input name="arg.{{.Name}}" size="50" value="{{if $d.SimArgs}}{{index $d.SimArgs (print "arg." .Name)}}{{end}}" placeholder="{{if eq .Schema.Type "array"}}через запятую{{else}}{{.Schema.Type}}{{end}}">{{end}}
+<p><button>Проверить</button></p></form>{{end}}
+{{with $d.Sim}}<p class="note">Решение: <b class="{{.Effect}}">{{effectRu .Effect}}</b> — {{.Reason}}{{if .RuleIDs}} <span class="muted">[{{join .RuleIDs ", "}}]</span>{{end}}{{if .Obligations}} · обязательства: {{join .Obligations ", "}}{{end}}</p>{{end}}
+</div>
+
 <h3>Версии</h3>
-<table><tr><th>№</th><th>Когда</th><th>Кто</th><th>Комментарий</th><th></th></tr>
-{{range .Data.Versions}}<tr><td>{{.N}}</td><td>{{ts .At}}</td><td>{{.Author}}</td><td>{{.Comment}}</td>
-<td>{{if ne .N $.Data.Version}}<form method="post" action="{{$.Base}}/policy/rollback"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.N}}"><button>Откатить к этой</button></form>{{else}}<span class="muted">текущая</span>{{end}}</td></tr>{{end}}
+<table><tr><th>№</th><th>Когда</th><th>Кто</th><th>Что</th><th></th></tr>
+{{range $d.Versions}}<tr><td>{{.N}}</td><td>{{ts .At}}</td><td>{{.Author}}</td><td>{{.Comment}}</td>
+<td>{{if ne .N $d.Version}}<form method="post" action="{{$.Base}}/policy/rollback" data-confirm="Вернуть версию {{.N}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.N}}"><input type="hidden" name="back" value="/policy?profile={{$d.Profile}}"><button class="small">Вернуть</button></form>{{else}}<span class="muted">текущая</span>{{end}}</td></tr>{{end}}
 </table>
 {{template "foot"}}

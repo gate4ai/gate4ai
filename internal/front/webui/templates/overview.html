@@ -1,0 +1,43 @@
+{{template "head" .}}
+{{$d := .Data}}
+{{if not .Remote}}
+<div class="status">
+  <span>Daemon: <b class="ok">работает</b></span>
+  <span>Relay: {{if $d.Relay.Online}}<b class="ok">онлайн</b>{{else if $d.Relay.Configured}}<b class="warn">нет связи</b>{{else if $d.PublicURL}}<b class="ok">свой адрес</b>{{else}}<a href="{{.Base}}/settings#relay" class="muted">не включён</a>{{end}}</span>
+  {{range $d.Channels}}{{if and .On (ne .Name "webui")}}<span>{{.Title}}: {{if eq .State "ok"}}<b class="ok">работает</b>{{else}}<b class="bad" title="{{.Detail}}">ошибка</b>{{end}}</span>{{end}}{{end}}
+  <span>Политика: версия {{$d.ConfigVersion}}</span>
+  <span>Журнал: {{if $d.Chain}}<b class="ok">цел</b>{{else}}<b class="bad">нарушен</b>{{end}}</span>
+</div>
+{{if $d.StepsLeft}}
+<div class="card">
+<h3>Начало работы <span class="muted">— осталось шагов: {{$d.StepsLeft}}</span></h3>
+<ol class="steps">
+{{range $i, $s := $d.Steps}}<li class="{{if $s.Done}}done{{end}}"><span class="mark">{{if $s.Done}}✓{{else}}{{inc $i}}{{end}}</span>
+<div style="flex:1"><b>{{$s.Title}}</b><div class="muted">{{$s.Text}}</div></div>
+{{if not $s.Done}}<a class="btn small" href="{{$.Base}}{{$s.Link}}">{{$s.Button}}</a>{{end}}</li>{{end}}
+</ol></div>
+{{end}}
+{{with $d.Proposals}}
+<h2>Предложения агентов</h2>
+{{range .}}<div class="card row between"><div><b>{{.Agent}}</b> предлагает: {{.Summary}}<div class="muted">{{if .Reason}}{{.Reason}} · {{end}}{{ago .Created}}</div></div>
+<a class="btn primary" href="{{$.Base}}/proposals/{{.ID}}">Просмотреть</a></div>{{end}}
+{{end}}
+{{end}}
+<h2>Ждут решения</h2>
+<div data-live-pending="{{len $d.Pending}}">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/")}}</div>
+
+{{if not .Remote}}{{if $d.Agents}}
+<h2>Агенты</h2>
+<table><tr><th>Агент</th><th>Профиль</th><th>Последнее обращение</th></tr>
+{{range $name, $a := $d.Agents}}{{$s := index $d.Seen $name}}<tr><td><a href="{{$.Base}}/agents/{{$name}}">{{$name}}</a></td><td>{{$a.Profile}}</td>
+<td>{{if $s.TS.IsZero}}<span class="warn">ещё не обращался</span>{{else}}{{ago $s.TS}} <span class="muted">· {{viaRu $s.Via}}</span>{{end}}</td></tr>{{end}}
+</table>{{end}}{{end}}
+
+<h2>Последние действия</h2>
+<table><tr><th>Когда</th><th>Агент</th><th>Действие</th><th>Решение</th><th>Итог</th></tr>
+{{range $d.Recent}}<tr><td><a href="{{$.Base}}/journal/{{.Hash}}">{{ago .Receipt.TS}}</a></td><td>{{.Receipt.Agent}}</td><td><code>{{.Receipt.Action}}</code></td>
+<td class="{{.Receipt.Decision.Effect}}">{{effectRu .Receipt.Decision.Effect}}</td><td>{{.Receipt.Execution.Status}}</td></tr>
+{{else}}<tr><td colspan="5" class="muted">Агенты ещё ничего не делали.</td></tr>{{end}}
+</table>
+<p><a href="{{.Base}}/journal">Весь журнал →</a></p>
+{{template "foot"}}

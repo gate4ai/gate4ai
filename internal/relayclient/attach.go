@@ -20,9 +20,23 @@ import (
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 )
 
+// Status — состояние подключения устройства к relay (для Web UI).
+type Status struct {
+	Configured bool   `json:"configured"`
+	Online     bool   `json:"online"`
+	URL        string `json:"url,omitempty"`     // адрес relay
+	DeviceID   string `json:"device_id,omitempty"`
+	Host       string `json:"host,omitempty"`    // <device-id>.<домен relay>
+	MCPURL     string `json:"mcp_url,omitempty"` // https://<host>/mcp
+}
+
+// DefaultURL — relay gate4.ai по умолчанию.
+const DefaultURL = "https://relay.gate4.ai"
+
 // Attach подключает relay к daemon: маршруты владельца (регистрация, статус),
 // туннель устройства и свидетеля журнала; перезапускается при смене конфигурации.
-func Attach(ctx context.Context, d *daemon.Daemon) {
+// Возвращает функцию состояния для Web UI.
+func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 	var mu sync.Mutex
 	var cur *Device
 	var stop context.CancelFunc
@@ -78,6 +92,18 @@ func Attach(ctx context.Context, d *daemon.Daemon) {
 			dev.Run(dctx)
 		}()
 	}
+	status := func() Status {
+		mu.Lock()
+		dev := cur
+		mu.Unlock()
+		c := d.Config.Current().Relay
+		st := Status{Configured: c.DeviceID != "", Online: dev != nil && dev.Online(), URL: c.URL, DeviceID: c.DeviceID}
+		if c.DeviceID != "" {
+			st.Host = deviceHost(c)
+			st.MCPURL = "https://" + st.Host + "/mcp"
+		}
+		return st
+	}
 	d.AddRoutes(func(mux *http.ServeMux) {
 		mux.HandleFunc("POST /v1/relay/register", func(w http.ResponseWriter, r *http.Request) {
 			p := daemon.PrincipalFrom(r.Context())
@@ -102,20 +128,18 @@ func Attach(ctx context.Context, d *daemon.Daemon) {
 			_ = json.NewEncoder(w).Encode(res)
 		})
 		mux.HandleFunc("GET /v1/relay/status", func(w http.ResponseWriter, r *http.Request) {
-			mu.Lock()
-			dev := cur
-			mu.Unlock()
-			c := d.Config.Current().Relay
-			st := map[string]any{"configured": c.DeviceID != "", "online": dev != nil && dev.Online()}
-			if c.DeviceID != "" {
-				st["mcp_url"] = "https://" + deviceHost(c) + "/mcp"
+			st := status()
+			out := map[string]any{"configured": st.Configured, "online": st.Online}
+			if st.MCPURL != "" {
+				out["mcp_url"] = st.MCPURL
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(st)
+			_ = json.NewEncoder(w).Encode(out)
 		})
 	})
 	apply(d.Config.Current())
 	d.Config.Subscribe(apply)
+	return status
 }
 
 func deviceHost(r config.Relay) string {

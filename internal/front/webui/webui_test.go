@@ -160,15 +160,15 @@ func TestWebUI(t *testing.T) {
 		t.Fatal("schema error not shown", p)
 	}
 	r, _ = c.PostForm(base+"/policy", url.Values{"csrf": {csrf}, "yaml": {cfg + "    rules: [{id: r, action: notes.append, effect: allow}]\n"}, "comment": {"allow notes"}})
-	if !strings.Contains(body(t, r), "saved version 2") {
+	if !strings.Contains(body(t, r), "Сохранена версия 2") {
 		t.Fatal("save")
 	}
-	r, _ = c.PostForm(base+"/policy/simulate", url.Values{"csrf": {csrf}, "agent": {"bot"}, "action": {"notes.append"}, "args": {`{"text":"x"}`}})
-	if p := body(t, r); !strings.Contains(p, `class="allow">allow`) {
+	r, _ = c.PostForm(base+"/policy/simulate", url.Values{"csrf": {csrf}, "agent": {"bot"}, "action": {"notes.append"}, "arg.text": {"x"}})
+	if p := body(t, r); !strings.Contains(p, `class="allow">разрешать`) {
 		t.Fatal("simulate", p)
 	}
 	r, _ = c.PostForm(base+"/policy/rollback", url.Values{"csrf": {csrf}, "version": {"1"}})
-	if !strings.Contains(body(t, r), "rolled back to 1") {
+	if !strings.Contains(body(t, r), "Возвращена версия 1") {
 		t.Fatal("rollback")
 	}
 	// Секреты: значение не отображается.

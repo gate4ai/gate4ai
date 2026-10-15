@@ -1,0 +1,32 @@
+{{template "head" .}}
+{{$d := .Data}}
+<h2>Новый агент</h2>
+<h3>1. Какой программе дать доступ?</h3>
+<div class="grid">
+{{range $d.Clients}}<a class="tile {{if eq .ID $d.Client}}on{{end}}" href="{{$.Base}}/agents/new?client={{.ID}}"><b>{{.Title}}</b>
+<span class="muted">{{if .Connected}}уже подключён к gate4.ai{{else if .Installed}}найден на этом компьютере · автоподключение{{else}}автоподключение или инструкция{{end}}</span></a>{{end}}
+<a class="tile {{if eq "cloud" $d.Client}}on{{end}}" href="{{$.Base}}/agents/new?client=cloud"><b>Claude.ai, ChatGPT</b><span class="muted">облачный агент · remote MCP через relay</span></a>
+<a class="tile {{if eq "cli" $d.Client}}on{{end}}" href="{{$.Base}}/agents/new?client=cli"><b>Другой: CLI, скрипт, OpenClaw, Hermes</b><span class="muted">токен и команда gate4ai</span></a>
+</div>
+{{if $d.Client}}
+<form method="post" action="{{.Base}}/agents" class="card" style="margin-top:1rem"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="client" value="{{$d.Client}}">
+<h3>2. Имя и права</h3>
+<label>Имя агента</label><input name="name" value="{{$d.Name}}" required pattern="[a-z0-9][a-z0-9._\-]*"><div class="help">Строчные латинские буквы, цифры, «-». Так агент будет подписан в журнале и подтверждениях.</div>
+<label>Профиль прав</label>
+<select name="profile">
+<option value="_new" selected>Новый профиль для этого агента</option>
+{{range $d.Profiles}}<option value="{{.}}">существующий: {{.}}</option>{{end}}
+</select>
+<fieldset style="border:1px solid var(--line);border-radius:8px;margin-top:.6rem"><legend class="help">для нового профиля</legend>
+<label>К каким коннекторам дать доступ</label>
+{{range $d.Connectors}}<label class="inline"><input type="checkbox" name="connectors" value="{{.}}" checked> {{.}}</label>{{else}}<p class="warn">Коннекторов ещё нет — агент пока ничего не увидит. <a href="{{$.Base}}/connectors">Поставьте коннектор</a> (можно и потом).</p>{{end}}
+<label>Готовый набор правил</label>
+<select name="template"><option value="">без шаблона: чтение — само, остальное — спрашивать</option>
+{{range $d.Templates}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select>
+<div class="help">Параметры шаблона (если нужны):</div>
+<div class="row"><input name="folder" placeholder="папка для «Заметки в папке»: ~/Documents/notes" size="38"><input name="trusted" placeholder="доверенные адресаты для «Безопасной почты»" size="38"></div>
+<div class="row" style="margin-top:.4rem"><input name="sites" placeholder="сайты для «Сайты по списку»" size="38"><input name="n" placeholder="N для «Не больше N в день»" size="20"></div>
+</fieldset>
+<p><button class="primary">Добавить и перейти к подключению</button></p>
+</form>{{end}}
+{{template "foot"}}

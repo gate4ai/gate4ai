@@ -1,0 +1,38 @@
+{{template "head" .}}
+{{$d := .Data}}{{$m := $d.Manifest}}
+<div class="row between"><h2>{{$d.Name}} <span class="muted">{{$m.Version}}</span></h2><a href="{{.Base}}/connectors">← Коннекторы</a></div>
+<p>{{$m.Description}}</p>
+
+<div class="card"><h3>Настройки</h3>
+{{if $d.Fields}}
+<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/settings" autocomplete="off"><input type="hidden" name="csrf" value="{{.CSRF}}">
+{{with $d.Providers}}<label>Почтовый сервис</label><select name="provider"><option value="">другой — укажу серверы сам</option>{{range .}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select>
+<div class="help">Серверы IMAP/SMTP подставятся сами. {{range .}}<br><b>{{.Title}}:</b> {{.Help}}{{end}}</div>{{end}}
+{{range $d.Fields}}
+<label>{{.Label}}{{if ne .Label .Key}} <span class="muted"><code>{{.Key}}</code></span>{{end}}</label>
+{{if eq .Kind "list"}}<textarea name="{{.Key}}" rows="3" placeholder="{{.Placeholder}}">{{.Value}}</textarea>
+{{else if eq .Kind "secret"}}<input type="password" name="{{.Key}}" size="40" placeholder="{{if .HasSecret}}сохранён ({{.Alias}}) — введите, чтобы заменить{{else}}значение{{end}}">
+{{else if eq .Kind "number"}}<input name="{{.Key}}" value="{{.Value}}" placeholder="{{.Placeholder}}" size="8" inputmode="numeric">
+{{else}}<input name="{{.Key}}" value="{{.Value}}" placeholder="{{.Placeholder}}" size="40">{{end}}
+{{if .Help}}<div class="help">{{.Help}}</div>{{end}}
+{{end}}
+<p><button class="primary">Сохранить</button></p></form>
+{{else}}<p class="muted">У коннектора нет настроек.</p>{{end}}
+</div>
+
+<div class="card"><h3>Кому доступен</h3>
+<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/profiles"><input type="hidden" name="csrf" value="{{.CSRF}}">
+{{range $p := $d.Profiles}}{{$prof := index $d.Config.Profiles $p}}<label class="inline"><input type="checkbox" name="profiles" value="{{$p}}" {{if has $prof.Connectors $d.Name}}checked{{end}}> {{$p}}</label>{{else}}<p class="muted">Профилей нет.</p>{{end}}
+<p><button>Сохранить</button> <span class="help">Агенты профиля видят действия коннектора; что разрешено — в «Правилах».</span></p></form></div>
+
+<div class="card"><h3>Действия</h3>
+<table><tr><th>Действие</th><th>Класс</th><th>Без правил</th><th>Описание</th></tr>
+{{range $m.Actions}}<tr><td><code>{{$d.Name}}.{{.Name}}</code></td><td><span class="badge">{{classRu .Class}}</span></td><td>{{if eq .Class "read"}}<span class="allow">разрешено</span>{{else}}<span class="ask">спрашивать</span>{{end}}</td><td>{{.Description}}</td></tr>{{end}}
+</table></div>
+
+{{if not $d.Builtin}}<div class="card"><h3>Возможности и установка</h3>
+<ul>{{range $d.Info.Capabilities}}<li>{{capRu .}} <span class="muted"><code>{{.}}</code></span></li>{{else}}<li class="muted">нет</li>{{end}}</ul>
+<p class="help">Издатель {{or $d.Info.Publisher "—"}} · доверие {{$d.Info.Trust}} · источник {{$d.Info.Source}} · установлен {{ts $d.Info.InstalledAt}}</p>
+<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/remove" data-confirm="Удалить коннектор {{$d.Name}}? Правила с его действиями тоже будут удалены (откат — в версиях политики)."><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger">Удалить коннектор</button></form>
+</div>{{end}}
+{{template "foot"}}
