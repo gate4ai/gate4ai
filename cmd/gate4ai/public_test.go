@@ -36,10 +36,10 @@ type notes struct{}
 
 func (notes) Manifest() manifest.Manifest {
 	return manifest.Manifest{Connector: "notes", Actions: []manifest.Action{
-		{Name: "read", Class: "read", Args: []manifest.Arg{{Name: "text", Type: "string"}}}}}
+		{Name: "read", Class: "read", InputSchema: manifest.MustSchema(`{ type: object, properties: { text: { type: string } } }`)}}}
 }
 func (notes) Execute(context.Context, abi.ExecRequest) (abi.ExecResult, error) {
-	return abi.ExecResult{Result: "ok"}, nil
+	return abi.ExecResult{Structured: "ok"}, nil
 }
 func (notes) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{}, nil

@@ -304,18 +304,45 @@ func ExitForResult(res map[string]any) int {
 
 func (e *Env) actionHelp(t skill.Tool) {
 	fmt.Fprintf(e.Stdout, "gate4ai %s %s — %s\nEffect class: %s\n\nArguments:\n", t.Connector, t.Action, t.Description, t.Class)
-	for _, a := range t.Args {
+	for _, p := range t.Schema.Properties {
 		req := ""
-		if a.Required {
+		if t.Schema.IsRequired(p.Name) {
 			req = " (required)"
 		}
-		typ := a.Type
-		if a.Type == manifest.TStrings {
-			typ = "string, repeatable"
-		}
-		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s\n", a.Name, typ, req, a.Description)
+		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s\n", p.Name, flagType(p.Schema), req, p.Schema.Description)
 	}
 	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
+}
+
+// flagType — тип флага для --help.
+func flagType(s *manifest.Schema) string {
+	switch {
+	case jsonFlag(s):
+		return "JSON " + s.Type
+	case s.Type == manifest.TArray:
+		return s.Items.Type + ", repeatable"
+	}
+	return s.Type
+}
+
+// jsonFlag — значение флага задаётся JSON: объекты и массивы объектов или массивов.
+func jsonFlag(s *manifest.Schema) bool {
+	return s.Type == manifest.TObject || s.Type == manifest.TArray && (s.Items.Type == manifest.TObject || s.Items.Type == manifest.TArray)
+}
+
+// scalar разбирает значение флага скалярного типа.
+func scalar(name, typ, v string) (any, error) {
+	switch typ {
+	case manifest.TNumber, manifest.TInteger:
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return nil, fmt.Errorf("--%s must be a number", name)
+		}
+		return f, nil
+	case manifest.TBoolean:
+		return v == "true" || v == "1" || v == "yes", nil
+	}
+	return v, nil
 }
 
 type callOpts struct {
@@ -328,9 +355,9 @@ type callOpts struct {
 func parseArgs(t skill.Tool, args []string) (map[string]any, callOpts, error) {
 	var o callOpts
 	vals := map[string]any{}
-	types := map[string]string{}
-	for _, a := range t.Args {
-		types[a.Name] = a.Type
+	types := map[string]*manifest.Schema{}
+	for _, p := range t.Schema.Properties {
+		types[p.Name] = p.Schema
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -379,11 +406,11 @@ func parseArgs(t skill.Tool, args []string) (map[string]any, callOpts, error) {
 			}
 			continue
 		}
-		typ, ok := types[name]
+		sch, ok := types[name]
 		if !ok {
 			return nil, o, fmt.Errorf("unknown argument --%s for %s (see --help)", name, t.Name)
 		}
-		if typ == manifest.TBoolean && !hasVal {
+		if sch.Type == manifest.TBoolean && !hasVal {
 			if i+1 < len(args) && (args[i+1] == "true" || args[i+1] == "false") {
 				i++
 				vals[name] = args[i] == "true"
@@ -396,25 +423,31 @@ func parseArgs(t skill.Tool, args []string) (map[string]any, callOpts, error) {
 		if err != nil {
 			return nil, o, err
 		}
-		switch typ {
-		case manifest.TStrings:
+		switch {
+		case jsonFlag(sch):
+			var x any
+			if err := json.Unmarshal([]byte(v), &x); err != nil {
+				return nil, o, fmt.Errorf("--%s must be JSON: %v", name, err)
+			}
+			vals[name] = x
+		case sch.Type == manifest.TArray:
 			l, _ := vals[name].([]any)
 			for _, part := range strings.Split(v, ",") {
 				if p := strings.TrimSpace(part); p != "" {
-					l = append(l, p)
+					x, err := scalar(name, sch.Items.Type, p)
+					if err != nil {
+						return nil, o, err
+					}
+					l = append(l, x)
 				}
 			}
 			vals[name] = l
-		case manifest.TNumber, manifest.TInteger:
-			f, err := strconv.ParseFloat(v, 64)
-			if err != nil {
-				return nil, o, fmt.Errorf("--%s must be a number", name)
-			}
-			vals[name] = f
-		case manifest.TBoolean:
-			vals[name] = v == "true" || v == "1" || v == "yes"
 		default:
-			vals[name] = v
+			x, err := scalar(name, sch.Type, v)
+			if err != nil {
+				return nil, o, err
+			}
+			vals[name] = x
 		}
 	}
 	return vals, o, nil

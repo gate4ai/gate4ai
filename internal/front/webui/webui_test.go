@@ -31,11 +31,11 @@ type notes struct{ n int }
 
 func (x *notes) Manifest() manifest.Manifest {
 	return manifest.Manifest{Connector: "notes", Actions: []manifest.Action{
-		{Name: "append", Class: "write", Args: []manifest.Arg{{Name: "text", Type: "string", Required: true}}}}}
+		{Name: "append", Class: "write", InputSchema: manifest.MustSchema(`{ type: object, properties: { text: { type: string } }, required: [text] }`)}}}
 }
 func (x *notes) Execute(context.Context, abi.ExecRequest) (abi.ExecResult, error) {
 	x.n++
-	return abi.ExecResult{Result: "ok"}, nil
+	return abi.ExecResult{Structured: "ok"}, nil
 }
 func (x *notes) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{}, nil

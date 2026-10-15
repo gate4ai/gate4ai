@@ -14,18 +14,18 @@ type echo struct{}
 
 func (echo) Manifest() manifest.Manifest {
 	return manifest.Manifest{Connector: "echo", Actions: []manifest.Action{
-		{Name: "say", Class: "read", Args: []manifest.Arg{{Name: "text", Type: "string"}}},
+		{Name: "say", Class: "read", InputSchema: manifest.MustSchema(`{ type: object, properties: { text: { type: string } } }`)},
 	}}
 }
 
 func (echo) Execute(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
-	return abi.ExecResult{Result: map[string]any{"text": r.Args["text"], "n": 1}, ResultRef: "ref-1",
+	return abi.ExecResult{Structured: map[string]any{"text": r.Args["text"], "n": 1}, ResultRef: "ref-1",
 		Evidence: []abi.EvidenceItem{{Name: "e.txt", MIME: "text/plain", Data: []byte("evidence")}}}, nil
 }
 
 func (echo) Verify(ctx context.Context, r abi.VerifyRequest) (abi.VerifyResult, error) {
 	if r.ResultRef != "ref-1" {
-		return abi.VerifyResult{Status: abi.Failed, Method: "echo"}, nil
+		return abi.VerifyResult{Status: abi.NotConfirmed, Method: "echo"}, nil
 	}
 	return abi.VerifyResult{Status: abi.Verified, Method: "echo"}, nil
 }
@@ -44,7 +44,7 @@ func TestInProcessAndRegistry(t *testing.T) {
 	ctx := context.Background()
 	res, err := c.Execute(ctx, abi.ExecRequest{Action: "say", Args: map[string]any{"text": "hi"}})
 	// Результат прошёл через JSON, как у WASM-модуля.
-	if err != nil || res.Result.(map[string]any)["text"] != "hi" || res.Result.(map[string]any)["n"] != 1.0 || string(res.Evidence[0].Data) != "evidence" {
+	if err != nil || res.Structured.(map[string]any)["text"] != "hi" || res.Structured.(map[string]any)["n"] != 1.0 || string(res.Evidence[0].Data) != "evidence" {
 		t.Fatal(res, err)
 	}
 	if v, err := c.Verify(ctx, abi.VerifyRequest{Action: "say", ResultRef: res.ResultRef}); err != nil || v.Status != abi.Verified {

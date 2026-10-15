@@ -24,20 +24,16 @@ type mailFake struct{}
 
 func (mailFake) Manifest() manifest.Manifest {
 	return manifest.Manifest{Connector: "email", Actions: []manifest.Action{
-		{Name: "send", Class: "external", Description: "Send an email", Verify: "sent_folder", Args: []manifest.Arg{
-			{Name: "to", Type: "string[]", Required: true, Format: "email"},
-			{Name: "subject", Type: "string", Required: true},
-			{Name: "body", Type: "string"},
-			{Name: "urgent", Type: "boolean"}}},
-		{Name: "read", Class: "read", Description: "Read inbox", Args: []manifest.Arg{{Name: "limit", Type: "integer", Default: 10.0}}},
+		{Name: "send", Class: "external", Description: "Send an email", Verify: "sent_folder", InputSchema: manifest.MustSchema(`{ type: object, properties: { to: { type: array, items: { type: string, format: email } }, subject: { type: string }, body: { type: string }, urgent: { type: boolean } }, required: [to, subject] }`)},
+		{Name: "read", Class: "read", Description: "Read inbox", InputSchema: manifest.MustSchema(`{ type: object, properties: { limit: { type: integer, default: 10 } } }`)},
 	}}
 }
 func (mailFake) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
-	return abi.ExecResult{Result: map[string]any{"echo": r.Args}, ResultRef: "<id@x>"}, nil
+	return abi.ExecResult{Structured: map[string]any{"echo": r.Args}, ResultRef: "<id@x>"}, nil
 }
 func (mailFake) Verify(_ context.Context, r abi.VerifyRequest) (abi.VerifyResult, error) {
 	if strings.Contains(r.Args["subject"].(string), "lost") {
-		return abi.VerifyResult{Status: abi.Failed, Method: "sent_folder", Detail: "not in Sent"}, nil
+		return abi.VerifyResult{Status: abi.NotConfirmed, Method: "sent_folder", Detail: "not in Sent"}, nil
 	}
 	return abi.VerifyResult{Status: abi.Verified, Method: "sent_folder"}, nil
 }

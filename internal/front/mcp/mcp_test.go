@@ -13,7 +13,8 @@ type fakeBackend struct{ calls []string }
 
 func (f *fakeBackend) Tools(context.Context) ([]Tool, error) {
 	return []Tool{{Name: "email.send", Description: "Send", Class: "external", InputSchema: map[string]any{"type": "object"}},
-		{Name: "files.read", Description: "Read", Class: "read", InputSchema: map[string]any{"type": "object"}}}, nil
+		{Name: "files.read", Description: "Read", Class: "read", InputSchema: map[string]any{"type": "object"},
+			OutputSchema: map[string]any{"type": "object", "properties": map[string]any{"size": map[string]any{"type": "integer"}}}}}, nil
 }
 
 func (f *fakeBackend) Call(_ context.Context, action string, args map[string]any) (map[string]any, error) {
@@ -24,7 +25,13 @@ func (f *fakeBackend) Call(_ context.Context, action string, args map[string]any
 	case "@status":
 		return map[string]any{"status": "pending", "id": args["id"]}, nil
 	}
-	return map[string]any{"status": "ok", "result": "text"}, nil
+	return map[string]any{"status": "ok", "result": map[string]any{"size": 3.0}, "provenance": map[string]any{"label": "untrusted_content"},
+		"content": []any{
+			map[string]any{"type": "text", "text": "abc"},
+			map[string]any{"type": "image", "data": "iVBO", "mime_type": "image/png"},
+			map[string]any{"type": "resource", "uri": "file:///x.bin", "mime_type": "application/octet-stream", "data": "AAE="},
+			map[string]any{"type": "resource_link", "uri": "file:///y", "name": "y"},
+		}}, nil
 }
 
 func call(t *testing.T, s *Server, method string, params any) map[string]any {
@@ -73,8 +80,22 @@ func TestMCP(t *testing.T) {
 		t.Fatal(res)
 	}
 	res = call(t, s, "tools/call", map[string]any{"name": "files_read", "arguments": map[string]any{}})["result"].(map[string]any)
-	if res["isError"] != false || res["structuredContent"].(map[string]any)["status"] != "ok" {
+	if res["isError"] != false || res["structuredContent"].(map[string]any)["status"] != "ok" || res["structuredContent"].(map[string]any)["content"] != nil {
 		t.Fatal(res)
+	}
+	// Блоки коннектора — в форме MCP, после ответа gate4ai; недоверенные помечены.
+	blocks := res["content"].([]any)
+	b, _ := json.Marshal(blocks[1:])
+	want := `[{"_meta":{"gate4.ai/untrusted":true},"text":"abc","type":"text"},` +
+		`{"_meta":{"gate4.ai/untrusted":true},"data":"iVBO","mimeType":"image/png","type":"image"},` +
+		`{"_meta":{"gate4.ai/untrusted":true},"resource":{"blob":"AAE=","mimeType":"application/octet-stream","uri":"file:///x.bin"},"type":"resource"},` +
+		`{"_meta":{"gate4.ai/untrusted":true},"name":"y","type":"resource_link","uri":"file:///y"}]`
+	if string(b) != want || !strings.Contains(blocks[0].(map[string]any)["text"].(string), "untrusted_content") {
+		t.Fatal(string(b))
+	}
+	os := list[1].(map[string]any)["outputSchema"].(map[string]any)
+	if os["properties"].(map[string]any)["result"].(map[string]any)["properties"] == nil || list[0].(map[string]any)["outputSchema"] != nil {
+		t.Fatal("outputSchema", list)
 	}
 	res = call(t, s, "tools/call", map[string]any{"name": "gate4ai_status", "arguments": map[string]any{"id": "a_1"}})["result"].(map[string]any)
 	if res["isError"] != false || fb.calls[len(fb.calls)-1] != "@status" {

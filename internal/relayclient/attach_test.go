@@ -31,7 +31,7 @@ func (noop) Manifest() manifest.Manifest {
 	return manifest.Manifest{Connector: "notes", Actions: []manifest.Action{{Name: "read", Class: "read"}}}
 }
 func (noop) Execute(context.Context, abi.ExecRequest) (abi.ExecResult, error) {
-	return abi.ExecResult{Result: "ok"}, nil
+	return abi.ExecResult{Structured: "ok"}, nil
 }
 func (noop) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{}, nil

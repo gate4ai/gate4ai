@@ -14,13 +14,13 @@ import (
 
 // Tool — действие для skill (подмножество каталога daemon).
 type Tool struct {
-	Name        string         `json:"name"`
-	Connector   string         `json:"connector"`
-	Action      string         `json:"action"`
-	Description string         `json:"description"`
-	Class       string         `json:"class"`
-	Args        []manifest.Arg `json:"args"`
-	Example     string         `json:"example,omitempty"`
+	Name        string          `json:"name"`
+	Connector   string          `json:"connector"`
+	Action      string          `json:"action"`
+	Description string          `json:"description"`
+	Class       string          `json:"class"`
+	Schema      manifest.Schema `json:"schema"`
+	Example     string          `json:"example,omitempty"`
 }
 
 // Generate возвращает SKILL.md.
@@ -86,14 +86,22 @@ func Example(t Tool) string {
 		return t.Example
 	}
 	parts := []string{"gate4ai", t.Connector, t.Action}
-	for _, a := range t.Args {
-		if !a.Required {
+	for _, p := range t.Schema.Properties {
+		if !t.Schema.IsRequired(p.Name) {
 			continue
 		}
-		v := "<" + a.Name + ">"
+		a := p.Schema
+		v := "<" + p.Name + ">"
 		switch {
 		case a.Format == "email":
 			v = "name@example.com"
+		case a.Type == manifest.TArray && a.Items.Format == "email":
+			v = "name@example.com"
+		case a.Type == manifest.TObject || a.Type == manifest.TArray && a.Items.Type == manifest.TObject:
+			v = "'{…}'"
+			if a.Type == manifest.TArray {
+				v = "'[{…}]'"
+			}
 		case a.Type == manifest.TNumber || a.Type == manifest.TInteger:
 			v = "100"
 		case a.Format == "url":
@@ -103,7 +111,7 @@ func Example(t Tool) string {
 		default:
 			v = `"…"`
 		}
-		parts = append(parts, "--"+a.Name, v)
+		parts = append(parts, "--"+p.Name, v)
 	}
 	return strings.Join(parts, " ")
 }

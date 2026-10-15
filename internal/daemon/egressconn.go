@@ -18,13 +18,13 @@ type egressConnector struct{}
 func (egressConnector) Manifest() manifest.Manifest {
 	return manifest.Manifest{Connector: "egress", Version: "1", Description: "Network egress of sandboxed agents (internal)", Actions: []manifest.Action{
 		{Name: "connect", Class: "external", Description: "Open a network connection from the sandbox",
-			Args: []manifest.Arg{{Name: "host", Type: manifest.TString, Required: true}, {Name: "port", Type: manifest.TInteger}}}}}
+			InputSchema: manifest.MustSchema(`{ type: object, properties: { host: { type: string }, port: { type: integer } }, required: [host] }`)}}}
 }
 
 func (egressConnector) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
-	return abi.ExecResult{Result: map[string]any{"allowed": r.Args["host"]}}, nil
+	return abi.ExecResult{Structured: map[string]any{"allowed": r.Args["host"]}}, nil
 }
 
-func (egressConnector) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
-	return abi.VerifyResult{Status: abi.Unverified, Method: "none"}, nil
+func (egressConnector) Verify(_ context.Context, r abi.VerifyRequest) (abi.VerifyResult, error) {
+	return abi.VerifyResult{}, abi.Errorf(abi.CodeBadRequest, "action %s has no verification", r.Action)
 }

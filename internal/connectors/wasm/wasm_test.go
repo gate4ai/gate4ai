@@ -98,7 +98,7 @@ func TestCapabilityDeniedForEveryFunction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := res.Result.(map[string]any)
+	got := res.Structured.(map[string]any)
 	if len(got) != 10 {
 		t.Fatal(got)
 	}
@@ -125,7 +125,7 @@ func TestSecretNeverReachesModule(t *testing.T) {
 	if seen != "Bearer s3cr3t-value" {
 		t.Fatal("host did not substitute the secret:", seen)
 	}
-	body := res.Result.(map[string]any)["body"].(string)
+	body := res.Structured.(map[string]any)["body"].(string)
 	if strings.Contains(body, "s3cr3t") || !strings.Contains(body, "[secret]") {
 		t.Fatal("secret reached the module:", body)
 	}
@@ -133,8 +133,8 @@ func TestSecretNeverReachesModule(t *testing.T) {
 		t.Fatal("log:", logs.String())
 	}
 	res, _ = run(t, c, "settings", nil)
-	if res.Result.(map[string]any)["token"] != "@probe" {
-		t.Fatal("module must see only the alias", res.Result)
+	if res.Structured.(map[string]any)["token"] != "@probe" {
+		t.Fatal("module must see only the alias", res.Structured)
 	}
 }
 
@@ -185,7 +185,7 @@ func TestDialAuthenticatedByHost(t *testing.T) {
 	default:
 		t.Fatal("host did not log in")
 	}
-	out := res.Result.(map[string]any)
+	out := res.Structured.(map[string]any)
 	if !strings.HasPrefix(out["greeting"].(string), "* PREAUTH") || out["reply"] != "a1 OK NOOP done\r\n" {
 		t.Fatal("module side:", out)
 	}
@@ -200,7 +200,7 @@ func TestKVEvidenceAndVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := res.Result.(map[string]any)
+	r := res.Structured.(map[string]any)
 	if r["value"] != "1" || r["quota"] != abi.CodeLimit || len(res.Evidence) != 1 || string(res.Evidence[0].Data) != "1" {
 		t.Fatal(res)
 	}
@@ -254,7 +254,7 @@ func TestLazyLoad(t *testing.T) {
 		t.Fatal("package manifest must be available at once")
 	}
 	res, err := l.Execute(context.Background(), abi.ExecRequest{Action: "settings", Settings: map[string]any{"token": "@probe"}})
-	if err != nil || res.Result.(map[string]any)["token"] != "@probe" {
+	if err != nil || res.Structured.(map[string]any)["token"] != "@probe" {
 		t.Fatal(res, err)
 	}
 	bad := man

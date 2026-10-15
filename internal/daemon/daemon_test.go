@@ -26,14 +26,14 @@ type notes struct{ lines []string }
 func (n *notes) Manifest() manifest.Manifest {
 	return manifest.Manifest{Connector: "notes", Actions: []manifest.Action{
 		{Name: "read", Class: "read", Description: "read notes"},
-		{Name: "append", Class: "write", Args: []manifest.Arg{{Name: "text", Type: "string", Required: true}}},
+		{Name: "append", Class: "write", InputSchema: manifest.MustSchema(`{ type: object, properties: { text: { type: string } }, required: [text] }`)},
 	}}
 }
 func (n *notes) Execute(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
 	if r.Action == "append" {
 		n.lines = append(n.lines, r.Args["text"].(string))
 	}
-	return abi.ExecResult{Result: n.lines}, nil
+	return abi.ExecResult{Structured: n.lines}, nil
 }
 func (n *notes) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{Status: abi.Verified}, nil

@@ -26,14 +26,15 @@ import (
 
 // Tool — действие в каталоге агента.
 type Tool struct {
-	Name        string         `json:"name"` // email.send
-	Connector   string         `json:"connector"`
-	Action      string         `json:"action"`
-	Description string         `json:"description"`
-	Class       string         `json:"class"`
-	Args        []manifest.Arg `json:"args"`
-	InputSchema map[string]any `json:"input_schema"`
-	Example     string         `json:"example,omitempty"`
+	Name         string          `json:"name"` // email.send
+	Connector    string          `json:"connector"`
+	Action       string          `json:"action"`
+	Description  string          `json:"description"`
+	Class        string          `json:"class"`
+	Schema       manifest.Schema `json:"schema"`                  // аргументы в форме манифеста (порядок, format) — для CLI и skill
+	InputSchema  map[string]any  `json:"input_schema"`            // аргументы — JSON Schema для MCP
+	OutputSchema map[string]any  `json:"output_schema,omitempty"` // структурированный результат — JSON Schema для MCP
+	Example      string          `json:"example,omitempty"`
 }
 
 // Tools — каталог действий; для агента — только коннекторы его профиля.
@@ -52,8 +53,12 @@ func (d *Daemon) Tools(p auth.Principal) []Tool {
 			continue
 		}
 		for _, a := range m.Actions {
-			out = append(out, Tool{Name: m.Full(a), Connector: m.Connector, Action: a.Name, Description: a.Description,
-				Class: a.Class, Args: a.Args, InputSchema: a.JSONSchema(), Example: a.Example})
+			t := Tool{Name: m.Full(a), Connector: m.Connector, Action: a.Name, Description: a.Description,
+				Class: a.Class, Schema: a.InputSchema, InputSchema: a.JSONSchema(), Example: a.Example}
+			if a.OutputSchema != nil {
+				t.OutputSchema = a.OutputSchema.JSONSchema()
+			}
+			out = append(out, t)
 		}
 	}
 	return out

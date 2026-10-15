@@ -25,10 +25,11 @@ var supported = map[string]bool{"2025-11-25": true, "2025-06-18": true, "2025-03
 
 // Tool — инструмент из каталога daemon.
 type Tool struct {
-	Name        string         `json:"name"` // email.send
-	Description string         `json:"description"`
-	Class       string         `json:"class"`
-	InputSchema map[string]any `json:"input_schema"`
+	Name         string         `json:"name"` // email.send
+	Description  string         `json:"description"`
+	Class        string         `json:"class"`
+	InputSchema  map[string]any `json:"input_schema"`
+	OutputSchema map[string]any `json:"output_schema,omitempty"` // результат коннектора; nil — не объявлен
 }
 
 // Backend — доступ к daemon от имени агента.
@@ -119,13 +120,17 @@ func (s *Server) list(ctx context.Context) (any, error) {
 		n := ToolName(t.Name)
 		names[n] = t.Name
 		ro := t.Class == "read"
-		out = append(out, map[string]any{
+		tool := map[string]any{
 			"name":        n,
 			"title":       t.Name,
 			"description": fmt.Sprintf("%s [effect class: %s; subject to the user's policy]", t.Description, t.Class),
 			"inputSchema": t.InputSchema,
 			"annotations": map[string]any{"readOnlyHint": ro, "destructiveHint": !ro, "openWorldHint": t.Class == "external" || t.Class == "money"},
-		})
+		}
+		if t.OutputSchema != nil {
+			tool["outputSchema"] = envelopeSchema(t.OutputSchema)
+		}
+		out = append(out, tool)
 	}
 	out = append(out, statusTool)
 	s.mu.Lock()
@@ -163,17 +168,78 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (an
 	return toolResult(res, st != "ok" && st != "pending"), nil
 }
 
+// envelopeSchema — outputSchema инструмента: structuredContent — ответ gate4ai
+// (статус, квитанция, проверка, метки), результат коннектора — в поле result.
+func envelopeSchema(result map[string]any) map[string]any {
+	str := map[string]any{"type": "string"}
+	return map[string]any{"type": "object", "required": []string{"status", "action"}, "properties": map[string]any{
+		"status": str, "code": str, "action": str, "id": str, "receipt": str, "result": result,
+		"verified": map[string]any{"type": "boolean"}, "verification": str, "reason": str, "message": str,
+		"rule_ids":   map[string]any{"type": "array", "items": str},
+		"provenance": map[string]any{"type": "object"},
+	}}
+}
+
+// toolResult — CallToolResult: первый блок — ответ gate4ai текстом (статус,
+// проверка, метки недоверенного контента и структурированный результат), за ним
+// блоки содержимого коннектора; structuredContent — ответ gate4ai без блоков.
 func toolResult(res map[string]any, isErr bool) map[string]any {
-	b, _ := json.MarshalIndent(res, "", "  ")
+	blocks, _ := res["content"].([]any)
+	env := map[string]any{}
+	for k, v := range res {
+		if k != "content" {
+			env[k] = v
+		}
+	}
+	b, _ := json.MarshalIndent(env, "", "  ")
 	text := string(b)
 	if msg, _ := res["message"].(string); msg != "" && isErr {
 		text = msg + "\n\n" + text
 	}
+	content := []any{map[string]any{"type": "text", "text": text}}
+	_, untrusted := res["provenance"]
+	for _, x := range blocks {
+		if c, ok := x.(map[string]any); ok {
+			if mc := mcpContent(c); mc != nil {
+				if untrusted {
+					mc["_meta"] = map[string]any{"gate4.ai/untrusted": true}
+				}
+				content = append(content, mc)
+			}
+		}
+	}
 	return map[string]any{
-		"content":           []any{map[string]any{"type": "text", "text": text}},
-		"structuredContent": res,
+		"content":           content,
+		"structuredContent": env,
 		"isError":           isErr,
 	}
+}
+
+// mcpContent — блок содержимого коннектора (abi.Content после JSON: data —
+// base64) в форме MCP.
+func mcpContent(c map[string]any) map[string]any {
+	str := func(k string) string { s, _ := c[k].(string); return s }
+	switch str("type") {
+	case "text":
+		return map[string]any{"type": "text", "text": str("text")}
+	case "image":
+		return map[string]any{"type": "image", "data": str("data"), "mimeType": str("mime_type")}
+	case "resource":
+		r := map[string]any{"uri": str("uri"), "mimeType": str("mime_type")}
+		if d := str("data"); d != "" {
+			r["blob"] = d
+		} else {
+			r["text"] = str("text")
+		}
+		return map[string]any{"type": "resource", "resource": r}
+	case "resource_link":
+		l := map[string]any{"type": "resource_link", "uri": str("uri"), "name": str("name")}
+		if m := str("mime_type"); m != "" {
+			l["mimeType"] = m
+		}
+		return l
+	}
+	return nil
 }
 
 // ServeStdio обслуживает MCP по stdio (построчный JSON-RPC).

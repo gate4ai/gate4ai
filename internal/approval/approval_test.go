@@ -68,12 +68,11 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type mail struct{ sent int }
 
 func (m *mail) Manifest() manifest.Manifest {
-	return manifest.Manifest{Connector: "email", Actions: []manifest.Action{{Name: "send", Class: "external", Args: []manifest.Arg{
-		{Name: "to", Type: "string[]", Required: true, Format: "email"}, {Name: "subject", Type: "string"}, {Name: "body", Type: "string"}}}}}
+	return manifest.Manifest{Connector: "email", Actions: []manifest.Action{{Name: "send", Class: "external", InputSchema: manifest.MustSchema(`{ type: object, properties: { to: { type: array, items: { type: string, format: email } }, subject: { type: string }, body: { type: string } }, required: [to] }`)}}}
 }
 func (m *mail) Execute(context.Context, abi.ExecRequest) (abi.ExecResult, error) {
 	m.sent++
-	return abi.ExecResult{Result: "sent"}, nil
+	return abi.ExecResult{Structured: "sent"}, nil
 }
 func (m *mail) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{}, nil

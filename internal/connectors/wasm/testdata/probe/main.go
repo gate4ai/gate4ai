@@ -57,14 +57,14 @@ func (probe) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 		out["browser_open"] = code(err)
 		_, err = h.BrowserObserve(0)
 		out["browser_observe"] = code(err)
-		return abi.ExecResult{Result: out}, nil
+		return abi.ExecResult{Structured: out}, nil
 	case "http":
 		resp, err := h.HTTP(abi.HTTPRequest{URL: r.Args["url"].(string), Headers: map[string]string{"Authorization": "Bearer {{secret:" + r.Settings["token"].(string) + "}}"}})
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
 		h.Log("info", "got "+string(resp.Body))
-		return abi.ExecResult{Result: map[string]any{"status": resp.Status, "body": string(resp.Body)}}, nil
+		return abi.ExecResult{Structured: map[string]any{"status": resp.Status, "body": string(resp.Body)}}, nil
 	case "imap":
 		// Вход выполняет хост (imap-login): модуль получает PREAUTH и сразу шлёт команду.
 		c, err := h.Dial(abi.DialRequest{Host: "127.0.0.1", Port: int(r.Args["port"].(float64)), TLS: abi.TLSNone, Protocol: abi.ProtoIMAP,
@@ -77,9 +77,9 @@ func (probe) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 		greeting, _ := rd.ReadString('\n')
 		io.WriteString(c, "a1 NOOP\r\n")
 		reply, err := rd.ReadString('\n')
-		return abi.ExecResult{Result: map[string]any{"greeting": greeting, "reply": reply}}, err
+		return abi.ExecResult{Structured: map[string]any{"greeting": greeting, "reply": reply}}, err
 	case "settings":
-		return abi.ExecResult{Result: r.Settings}, nil
+		return abi.ExecResult{Structured: r.Settings}, nil
 	case "kv":
 		if err := h.KVSet("n", []byte("1")); err != nil {
 			return abi.ExecResult{}, err
@@ -87,7 +87,7 @@ func (probe) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 		v, _, err := h.KVGet("n")
 		big := h.KVSet("big", make([]byte, 2<<20))
 		_ = h.Evidence("kv.txt", "text/plain", v)
-		return abi.ExecResult{Result: map[string]any{"value": string(v), "quota": code(big)}}, err
+		return abi.ExecResult{Structured: map[string]any{"value": string(v), "quota": code(big)}}, err
 	case "spin":
 		for {
 		}

@@ -48,7 +48,7 @@ type Approval struct {
 
 // Execution — результат исполнения.
 type Execution struct {
-	Status    string `json:"status"` // ok | error | skipped
+	Status    string `json:"status"` // ok | error | invalid_result | skipped
 	ResultRef string `json:"result_ref,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
@@ -56,7 +56,7 @@ type Execution struct {
 // Verification — проверка результата по независимому каналу.
 type Verification struct {
 	Method       string   `json:"method,omitempty"`
-	Status       string   `json:"status"` // verified | unverified | failed | not_applicable
+	Status       string   `json:"status"` // verified | not_confirmed | pending | unverified | not_applicable
 	EvidenceRefs []string `json:"evidence_refs"`
 }
 

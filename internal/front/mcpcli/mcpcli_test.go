@@ -28,10 +28,10 @@ type files struct{}
 
 func (files) Manifest() manifest.Manifest {
 	return manifest.Manifest{Connector: "files", Actions: []manifest.Action{
-		{Name: "read", Class: "read", Description: "Read a file", Args: []manifest.Arg{{Name: "path", Type: "string", Required: true}}}}}
+		{Name: "read", Class: "read", Description: "Read a file", InputSchema: manifest.MustSchema(`{ type: object, properties: { path: { type: string } }, required: [path] }`)}}}
 }
 func (files) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
-	return abi.ExecResult{Result: map[string]any{"content": "hello from " + r.Args["path"].(string)}}, nil
+	return abi.ExecResult{Structured: map[string]any{"content": "hello from " + r.Args["path"].(string)}}, nil
 }
 func (files) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{}, nil
