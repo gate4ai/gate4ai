@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 )
 
 // InfoFile — запись об установке (согласованные возможности, доверие, дайджест).
@@ -96,6 +98,21 @@ func (o Options) RefreshIndex(ctx context.Context) (*Index, error) {
 	return ix, nil
 }
 
+// SourceDir — префикс источника установки из папки с исходниками (Info.Source):
+// update такого коннектора пересобирает его из той же папки.
+const SourceDir = "dir:"
+
+// SourceFolder — папка исходников, если source — папка с манифестом или "dir:<путь>".
+func SourceFolder(source string) (string, bool) {
+	path := strings.TrimPrefix(source, SourceDir)
+	fi, err := os.Stat(filepath.Join(path, ManifestFile))
+	if err != nil || fi.IsDir() {
+		return "", false
+	}
+	abs, err := filepath.Abs(path)
+	return abs, err == nil
+}
+
 func isFile(source string) bool {
 	if strings.HasSuffix(source, PackageExt) {
 		return true
@@ -104,12 +121,15 @@ func isFile(source string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-// Prepare проверяет пакет из файла (.g4c) или из registry (имя[@версия]).
+// Prepare проверяет пакет из файла (.g4c), из папки с исходниками (сборка,
+// только с dev) или из registry (имя[@версия]).
 // dev — разрешить пакет владельца без доверенной подписи (доверие local).
 func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, error) {
 	var p *Plan
 	var err error
-	if isFile(source) {
+	if dir, ok := SourceFolder(source); ok {
+		p, err = o.prepareDir(ctx, dir, dev)
+	} else if isFile(source) {
 		p, err = o.prepareFile(ctx, source, dev)
 	} else {
 		p, err = o.prepareRegistry(ctx, source)
@@ -176,6 +196,39 @@ func (o Options) prepareFile(ctx context.Context, source string, dev bool) (*Pla
 		}
 	}
 	return p, nil
+}
+
+// prepareDir собирает неподписанный пакет из исходников (Go) — своя сборка владельца.
+func (o Options) prepareDir(ctx context.Context, dir string, dev bool) (*Plan, error) {
+	if !dev {
+		return nil, errors.New("installing from a source folder is your own build: use --dev")
+	}
+	man, err := os.ReadFile(filepath.Join(dir, ManifestFile))
+	if err != nil {
+		return nil, err
+	}
+	tmp, err := os.MkdirTemp("", "g4abuild")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	out := filepath.Join(tmp, ModuleFile)
+	if err := wasm.BuildGo(ctx, dir, out); err != nil {
+		return nil, err
+	}
+	wb, err := os.ReadFile(out)
+	if err != nil {
+		return nil, err
+	}
+	b, err := Pack(man, wb, nil)
+	if err != nil {
+		return nil, err
+	}
+	pkg, err := Open(b)
+	if err != nil {
+		return nil, err
+	}
+	return &Plan{Source: SourceDir + dir, pkg: pkg, Trust: TrustLocal}, nil
 }
 
 // trustOf — доверие к пакету по ключам издателя из индекса.

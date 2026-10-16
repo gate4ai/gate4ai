@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
@@ -21,7 +22,9 @@ import (
 const connectorsUsage = `usage:
   gate4ai connectors list
   gate4ai connectors install <file.g4c | name[@version]> [--dev] [--yes]
-  gate4ai connectors update <name> [--yes]
+  gate4ai connectors install <source folder> [--yes] [--watch]   build from Go sources (your own build, like --dev)
+  gate4ai connectors update <name> [--yes] [--watch]           a connector from a folder is rebuilt from it;
+                                                                --watch: rebuild on every change of the sources
   gate4ai connectors remove <name>
   gate4ai connectors refresh                       fetch the registry index (revocations)
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c]
@@ -82,42 +85,45 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 		fs.SetOutput(e.Stderr)
 		dev := fs.Bool("dev", false, "install a package not signed by a trusted key (your own build)")
 		yes := fs.Bool("yes", false, "consent to the listed capabilities without asking")
+		watch := fs.Bool("watch", false, "keep running and rebuild the connector from its source folder on every change")
 		if fs.Parse(fl) != nil || len(pos) != 1 {
 			fmt.Fprintln(e.Stderr, connectorsUsage)
 			return ExitUsage
 		}
 		path, body := "/v1/connectors/install", map[string]any{"source": pos[0], "dev": *dev}
+		folder := ""
 		if sub == "update" {
 			path, body = "/v1/connectors/update", map[string]any{"name": pos[0]}
+			if dir, err := e.installedFolder(ctx, pos[0]); err != nil {
+				return e.fail(err)
+			} else if dir != "" {
+				folder = dir
+			}
+		} else if dir, ok := store.SourceFolder(pos[0]); ok {
+			folder = dir
 		} else if fi, err := os.Stat(pos[0]); err == nil && !fi.IsDir() {
 			abs, _ := filepath.Abs(pos[0])
 			body["source"] = abs
+		} else if err == nil {
+			return e.fail(fmt.Errorf("%s: no %s in this folder", pos[0], store.ManifestFile))
+		}
+		if *watch && folder == "" {
+			return e.fail(errors.New("--watch needs a connector from a source folder: gate4ai connectors install <folder> --watch"))
 		}
 		var res any
-		err := c.Do(ctx, "POST", path, body, &res)
-		var ae *APIError
-		if errors.As(err, &ae) && ae.Code == "consent_required" {
-			var r struct {
-				Plan store.Plan `json:"plan"`
-			}
-			_ = json.Unmarshal(ae.Body, &r)
-			if ok, answered := e.consent(r.Plan, *yes); !ok {
-				msg := "not installed: you did not consent (answer y, or pass --yes)"
-				if !answered && !e.Interactive {
-					msg = "not installed: consent is needed and this is not an interactive terminal; pass --yes to consent to the capabilities above"
-				}
-				fmt.Fprintln(e.Stderr, "gate4ai: "+msg)
-				e.printJSON(map[string]any{"status": "cancelled", "message": msg, "plan": r.Plan})
-				return ExitDenied
-			}
-			body["consent"] = r.Plan.Capabilities
-			err = c.Do(ctx, "POST", path, body, &res)
+		code := ExitOK
+		if folder != "" {
+			res, code = e.installFolder(ctx, folder, *yes)
+		} else {
+			res, code = e.installCall(ctx, path, body, *yes)
 		}
-		if err != nil {
-			return e.fail(err)
+		if code == ExitOK {
+			e.printJSON(res)
 		}
-		e.printJSON(res)
-		return ExitOK
+		if code != ExitOK || !*watch {
+			return code
+		}
+		return e.watchConnector(ctx, folder, *yes)
 	case "remove":
 		if len(rest) != 1 {
 			fmt.Fprintln(e.Stderr, connectorsUsage)
@@ -139,6 +145,140 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 	}
 	fmt.Fprintln(e.Stderr, connectorsUsage)
 	return ExitUsage
+}
+
+// installCall — install / update у daemon; если нужно согласие на возможности,
+// показывает их владельцу и повторяет запрос.
+func (e *Env) installCall(ctx context.Context, path string, body map[string]any, yes bool) (any, int) {
+	c := e.Client()
+	var res any
+	err := c.Do(ctx, "POST", path, body, &res)
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Code == "consent_required" {
+		var r struct {
+			Plan store.Plan `json:"plan"`
+		}
+		_ = json.Unmarshal(ae.Body, &r)
+		if ok, answered := e.consent(r.Plan, yes); !ok {
+			msg := "not installed: you did not consent (answer y, or pass --yes)"
+			if !answered && !e.Interactive {
+				msg = "not installed: consent is needed and this is not an interactive terminal; pass --yes to consent to the capabilities above"
+			}
+			fmt.Fprintln(e.Stderr, "gate4ai: "+msg)
+			e.printJSON(map[string]any{"status": "cancelled", "message": msg, "plan": r.Plan})
+			return nil, ExitDenied
+		}
+		body["consent"] = r.Plan.Capabilities
+		err = c.Do(ctx, "POST", path, body, &res)
+	}
+	if err != nil {
+		return nil, e.fail(err)
+	}
+	return res, ExitOK
+}
+
+// installedFolder — папка исходников установленного коннектора ("" — он не из папки).
+func (e *Env) installedFolder(ctx context.Context, name string) (string, error) {
+	var res struct {
+		Connectors []struct {
+			Connector string `json:"connector"`
+			Source    string `json:"source"`
+		} `json:"connectors"`
+	}
+	if err := e.Client().Do(ctx, "GET", "/v1/connectors", nil, &res); err != nil {
+		return "", err
+	}
+	for _, c := range res.Connectors {
+		if c.Connector == name && strings.HasPrefix(c.Source, store.SourceDir) {
+			return strings.TrimPrefix(c.Source, store.SourceDir), nil
+		}
+	}
+	return "", nil
+}
+
+// installFolder собирает коннектор из папки исходников в окружении владельца
+// (его Go, go.work, GOFLAGS) и ставит пакет как свою сборку; источником
+// установки daemon записывает папку.
+func (e *Env) installFolder(ctx context.Context, folder string, yes bool) (any, int) {
+	man, err := os.ReadFile(filepath.Join(folder, store.ManifestFile))
+	if err != nil {
+		return nil, e.fail(err)
+	}
+	wb, _, err := buildModule(ctx, folder)
+	if err != nil {
+		return nil, e.fail(err)
+	}
+	pkg, err := packWith(man, wb, "")
+	if err != nil {
+		return nil, e.fail(err)
+	}
+	tmp, err := os.CreateTemp("", "g4adev-*"+store.PackageExt)
+	if err != nil {
+		return nil, e.fail(err)
+	}
+	defer os.Remove(tmp.Name())
+	_, err = tmp.Write(pkg)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return nil, e.fail(err)
+	}
+	return e.installCall(ctx, "/v1/connectors/install",
+		map[string]any{"source": tmp.Name(), "dev": true, "origin": store.SourceDir + folder}, yes)
+}
+
+// WatchInterval — как часто --watch проверяет исходники.
+var WatchInterval = time.Second
+
+// watchConnector пересобирает коннектор из папки исходников при каждом их
+// изменении (update у daemon), пока команду не прервут.
+func (e *Env) watchConnector(ctx context.Context, folder string, yes bool) int {
+	fmt.Fprintf(e.Stderr, "gate4ai: watching %s; the connector is rebuilt on every change (Ctrl+C to stop)\n", folder)
+	last := sourcesStamp(folder)
+	for {
+		select {
+		case <-ctx.Done():
+			return ExitOK
+		case <-time.After(WatchInterval):
+		}
+		cur := sourcesStamp(folder)
+		if cur == last {
+			continue
+		}
+		last = cur
+		fmt.Fprintln(e.Stderr, "gate4ai: sources changed, rebuilding")
+		// ошибка сборки печатается, наблюдение продолжается
+		if r, code := e.installFolder(ctx, folder, yes); code == ExitOK {
+			e.printJSON(r)
+		}
+	}
+}
+
+// sourcesStamp — отпечаток исходников коннектора: пути, размеры и время
+// изменения .go, go.mod, go.sum и манифеста (скрытые папки и vendor не смотрим).
+func sourcesStamp(dir string) string {
+	var b strings.Builder
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		n := d.Name()
+		if d.IsDir() {
+			if p != dir && (strings.HasPrefix(n, ".") || n == "vendor" || n == "testdata") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(n, ".go") && n != "go.mod" && n != "go.sum" && n != store.ManifestFile {
+			return nil
+		}
+		if fi, err := d.Info(); err == nil {
+			fmt.Fprintf(&b, "%s %d %d\n", p, fi.Size(), fi.ModTime().UnixNano())
+		}
+		return nil
+	})
+	return b.String()
 }
 
 func (e *Env) keygen(rest []string) int {

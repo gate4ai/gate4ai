@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/policy"
@@ -92,6 +93,9 @@ type installReq struct {
 	Source  string   `json:"source"`
 	Dev     bool     `json:"dev"`
 	Consent []string `json:"consent"`
+	// Origin — "dir:<папка>": пакет source собран CLI из этой папки исходников;
+	// записывается источником установки, update пересобирает из неё.
+	Origin string `json:"origin,omitempty"`
 }
 
 // connectorRoutes — API владельца для магазина коннекторов.
@@ -119,14 +123,21 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 		}
 		writeJSON(w, 200, map[string]any{"connectors": out})
 	}))
-	install := func(w http.ResponseWriter, r *http.Request, source string, dev bool, consent []string, update bool) {
+	install := func(w http.ResponseWriter, r *http.Request, source string, dev bool, consent []string, update bool, origin string) {
 		opts := d.StoreOptions()
 		plan, err := opts.Prepare(r.Context(), source, dev)
 		if err != nil {
 			writeErr(w, 400, "store", err.Error())
 			return
 		}
-		if update && plan.Installed == plan.Version {
+		if origin != "" {
+			if !dev || !strings.HasPrefix(origin, store.SourceDir) || plan.Trust != store.TrustLocal {
+				writeErr(w, 400, "bad_request", "origin is only for your own build from a source folder (dir:<path>, --dev)")
+				return
+			}
+			plan.Source = origin
+		}
+		if update && plan.Installed == plan.Version && !strings.HasPrefix(plan.Source, store.SourceDir) {
 			writeJSON(w, 200, map[string]any{"status": "up_to_date", "plan": plan})
 			return
 		}
@@ -153,7 +164,7 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			writeErr(w, 400, "bad_request", "source is required")
 			return
 		}
-		install(w, r, req.Source, req.Dev, req.Consent, false)
+		install(w, r, req.Source, req.Dev, req.Consent, false, req.Origin)
 	}))
 	mux.HandleFunc("POST /v1/connectors/update", owner(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -164,7 +175,12 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			writeErr(w, 400, "bad_request", "name is required")
 			return
 		}
-		install(w, r, req.Name, false, req.Consent, true)
+		// Коннектор из папки с исходниками пересобирается из неё же (своя сборка).
+		if info, err := d.StoreOptions().Info(req.Name); err == nil && strings.HasPrefix(info.Source, store.SourceDir) {
+			install(w, r, info.Source, true, req.Consent, true, "")
+			return
+		}
+		install(w, r, req.Name, false, req.Consent, true, "")
 	}))
 	mux.HandleFunc("POST /v1/connectors/remove", owner(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

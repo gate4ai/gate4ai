@@ -174,3 +174,27 @@ func mustReadB(t *testing.T, p string) []byte {
 }
 
 func mustRead(t *testing.T, p string) string { return string(mustReadB(t, p)) }
+
+// --watch реагирует только на исходники коннектора: .go, go.mod, go.sum, манифест;
+// скрытые папки, vendor, testdata и прочие файлы не считаются.
+func TestSourcesStamp(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o644)
+	base := sourcesStamp(dir)
+	for _, f := range []string{".git/index", "README.md", "connector.wasm"} {
+		os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644)
+		if sourcesStamp(dir) != base {
+			t.Fatal("not a source file changed the stamp:", f)
+		}
+	}
+	for _, f := range []string{"sub/x.go", "manifest.yaml", "go.sum"} {
+		os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644)
+		if s := sourcesStamp(dir); s == base {
+			t.Fatal("source change not seen:", f)
+		} else {
+			base = s
+		}
+	}
+}

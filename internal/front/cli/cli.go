@@ -109,7 +109,7 @@ Owner commands (local socket):
   gate4ai approvals [list] [--table|--json] | approve <id> | reject <id>
   gate4ai vault list | set <alias> (value from stdin) | rm <alias>
   gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
-  gate4ai connectors list | install <file.g4c | name[@version]> [--dev] [--yes] | update <name> [--yes] | remove <name> | refresh
+  gate4ai connectors list | install <file.g4c | name[@version] | source folder> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | refresh
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c] | verify <dir> <file.g4c> | keygen [-o key]   (publisher / registry review, offline)
   gate4ai registry check <index.json> [--key ed25519:…] [--fetch] | sign <index.json> --key file | add <index.json> <pack.json> --publisher name …   (registry)
   gate4ai run <agent> [--workspace dir] [--container|--microvm] [--image img] [--engine docker|podman] [--dry-run] [-- cmd]   isolated agent

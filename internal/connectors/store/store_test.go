@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -280,5 +281,48 @@ func TestLoadIntegrityAndCommunityReadOnly(t *testing.T) {
 	os.Remove(filepath.Join(r.o.Dir, "bank", InfoFile))
 	if loaded := r.o.LoadAll(context.Background(), e, slog.New(slog.NewTextHandler(io.Discard, nil))); len(loaded) != 0 {
 		t.Fatal("connector without install.json loaded")
+	}
+}
+
+// Папка с исходниками: daemon собирает коннектор сам (своя сборка, только с
+// dev), источник — "dir:<путь>"; повторная подготовка пересобирает изменённый
+// код, а возможности без изменений не требуют нового согласия.
+func TestInstallFromSourceFolder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds WASM")
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "bank-src")
+	os.MkdirAll(src, 0o755)
+	os.WriteFile(filepath.Join(src, "go.mod"), []byte("module example.com/bank\n\ngo "+strings.TrimPrefix(runtime.Version(), "go")+"\n"), 0o644)
+	os.WriteFile(filepath.Join(src, ManifestFile), manifestYAML("1", "api.bank.example", false), 0o644)
+	body := func(s string) {
+		os.WriteFile(filepath.Join(src, "main.go"), []byte("package main\n\nfunc main() { println(\""+s+"\") }\n"), 0o644)
+	}
+	body("v1")
+	o := Options{Dir: filepath.Join(dir, "connectors")}
+	ctx := context.Background()
+	if _, ok := SourceFolder(dir); ok {
+		t.Fatal("a folder without manifest.yaml is not a source folder")
+	}
+	if _, err := o.Prepare(ctx, src, false); err == nil || !strings.Contains(err.Error(), "--dev") {
+		t.Fatal("source folder without --dev:", err)
+	}
+	p, err := o.Prepare(ctx, src, true)
+	if err != nil || p.Trust != TrustLocal || p.Source != SourceDir+src || p.Connector != "bank" {
+		t.Fatal(p, err)
+	}
+	info, err := o.Install(p, p.Capabilities)
+	if err != nil || info.Source != SourceDir+src {
+		t.Fatal(info, err)
+	}
+	body("v2")
+	p2, err := o.Prepare(ctx, info.Source, true)
+	if err != nil || p2.NeedsConsent || p2.pkg.Sig.Digest == p.pkg.Sig.Digest {
+		t.Fatal("rebuild of changed sources:", p2, err)
+	}
+	os.WriteFile(filepath.Join(src, "main.go"), []byte("package main\n\nfunc main() { syntax error }\n"), 0o644)
+	if _, err := o.Prepare(ctx, info.Source, true); err == nil || !strings.Contains(err.Error(), "go build") {
+		t.Fatal("build error must be reported:", err)
 	}
 }
