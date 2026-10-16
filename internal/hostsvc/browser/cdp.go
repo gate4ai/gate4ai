@@ -213,6 +213,33 @@ func (c *CDP) eval(ctx context.Context, expr string, out any) error {
 	return json.Unmarshal(r.Result.Value, out)
 }
 
+// Eval — Runtime.evaluate по значению.
+func (c *CDP) Eval(ctx context.Context, expr string, out any) error { return c.eval(ctx, expr, out) }
+
+// InsertText — Input.insertText в элемент в фокусе.
+func (c *CDP) InsertText(ctx context.Context, text string) error {
+	return c.call(ctx, c.session, "Input.insertText", map[string]any{"text": text}, nil)
+}
+
+// cdpKeys — коды клавиш для Input.dispatchKeyEvent.
+var cdpKeys = map[string]int{"Enter": 13, "Tab": 9, "Escape": 27, "Backspace": 8, "ArrowUp": 38, "ArrowDown": 40}
+
+// Key — нажатие клавиши (keyDown + keyUp).
+func (c *CDP) Key(ctx context.Context, key string) error {
+	code, ok := cdpKeys[key]
+	if !ok {
+		return fmt.Errorf("key %q is not supported", key)
+	}
+	down := map[string]any{"type": "rawKeyDown", "key": key, "code": key, "windowsVirtualKeyCode": code}
+	if key == "Enter" {
+		down["type"], down["text"] = "keyDown", "\r"
+	}
+	if err := c.call(ctx, c.session, "Input.dispatchKeyEvent", down, nil); err != nil {
+		return err
+	}
+	return c.call(ctx, c.session, "Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": key, "windowsVirtualKeyCode": code}, nil)
+}
+
 func (c *CDP) URL(ctx context.Context) (string, error) {
 	var s string
 	err := c.eval(ctx, "location.href", &s)

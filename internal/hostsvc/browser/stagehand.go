@@ -15,7 +15,8 @@ import (
 // Модель указывает пользователь (provider/model + ключ из Vault); обращения к
 // Browserbase не включаются: API-ключ Browserbase не передаётся, SelfHeal выключен,
 // телеметрия не задана. Act с естественным языком не используется — в нём нет точки
-// перехвата политикой; изменения на страницах в MVP не делаются.
+// перехвата политикой; изменения на страницах — только browser_act по селектору
+// (Executor.Act).
 type Stagehand struct {
 	browser *stagehand.Browser
 	client  *stagehand.Stagehand
@@ -75,6 +76,22 @@ func (s *Stagehand) Text(ctx context.Context) (string, error) {
 	var t string
 	err = json.Unmarshal(raw, &t)
 	return t, err
+}
+
+func (s *Stagehand) Eval(ctx context.Context, expr string, out any) error {
+	raw, err := s.page.Evaluate(ctx, expr)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, out)
+}
+
+func (s *Stagehand) InsertText(ctx context.Context, text string) error {
+	return s.page.Type(ctx, text, nil)
+}
+
+func (s *Stagehand) Key(ctx context.Context, key string) error {
+	return s.page.KeyPress(ctx, key, nil)
 }
 
 func (s *Stagehand) Screenshot(ctx context.Context, selector string) ([]byte, error) {

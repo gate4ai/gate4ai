@@ -191,6 +191,7 @@ native:
 | `files` | `fs_*` |
 | `mail` | `conn_open` со слотом, аутентификация — auth-модули `gate4ai/auth-imap` / `gate4ai/auth-smtp`, разбор писем — в коннекторе |
 | `browser` | тонкий модуль поверх `browser_*`; сам браузерный воркер — служба хоста |
+| `tbank` | `browser_open` / `browser_act` / `browser_observe` по сценариям кабинета tbank-online.com: СБП по телефону, перевод по номеру карты, оплата счёта по УИН и реквизитам (`class: money`, проверка по ленте операций) |
 | сервисы (ЖКХ, банк) | `browser_*` (вход — `browser_login`) + `http_request` со слотом; подпись банка — auth-модуль |
 
 ## runtime: native (позже)
@@ -218,7 +219,9 @@ native:
 
 ## Текущее состояние и переход
 
-Сделано (этапы 16–19, 23 в PLAN.md): SDK `sdk-go` с манифестом и ABI v2 (формы данных MCP), WASM-хост на wazero, коннекторы `files`, `mail`, `browser` — WASM-модули, браузерный воркер — служба хоста, секреты в `Settings` не передаются, магазин с подписанными пакетами.
+Сделано (этапы 16–19, 23, 26 в PLAN.md): SDK `sdk-go` с манифестом и ABI v2 (формы данных MCP), WASM-хост на wazero, коннекторы `files`, `mail`, `browser`, `tbank` — WASM-модули, браузерный воркер — служба хоста, секреты в `Settings` не передаются, магазин с подписанными пакетами. `browser_act` — методы `click` / `fill` / `press` / `wait` по CSS-селектору и видимому тексту элемента (`text`, `value`, `timeout_ms`); после действия итоговый адрес снова проверяется по `capabilities.browser.domains`.
+
+Расходится с этим документом в браузере: проверка, что селектор `browser_act` взят из `observe`, и режим «секрет на странице» не делаются — вместе с `browser_fill_secret` / `browser_login` (этап 12). До них в банк человек входит сам в выделенном профиле Chrome.
 
 Расходится с целевой моделью секретов ([secret-architecture.md](secret-architecture.md)):
 - `http_request` подставляет плейсхолдеры `{{secret:@alias}}` по `capabilities.secrets[].bind` → заменяется на `auth: {slot}` и `credentials`;

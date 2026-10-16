@@ -63,6 +63,7 @@ done
 | `sdk-go/`, `relay/`, `registry/`, `.github/` | одноимённые `gate4ai/*` |
 | — | `gate4ai/tray` удалён 2026-10-14: трей теперь `cmd/gate4ai-tray` в `gate4ai/gate4ai` |
 | `connectors/mail/`, `connectors/files/`, `connectors/browser/` | `gate4ai/gate4ai-mail`, `gate4ai-files`, `gate4ai-browser` |
+| `connectors/tbank/` | `gate4ai/gate4ai-tbank` — ещё не создан (2026-10-16) |
 | `www/` | `gate4ai/www` — сайт gate4.ai (Rust), **приватный**, создан 2026-10-14; деплой на сервер relay из CI |
 | `e2e/` | `gate4ai/e2e` — сквозные тесты (AGPL-3.0-only), создан 2026-10-14, ещё не опубликован |
 | `connectors/auth/` | будущие auth-модули |

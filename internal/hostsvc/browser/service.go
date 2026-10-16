@@ -171,6 +171,10 @@ func (ss *session) ScreenshotElement(ctx context.Context, selector string) ([]by
 	return ss.x.Screenshot(ctx, selector)
 }
 
+func (ss *session) Act(ctx context.Context, r abi.BrowserRequest) (abi.BrowserActResponse, error) {
+	return ss.x.Act(ctx, r)
+}
+
 func (ss *session) Release() {
 	if ss.done {
 		return

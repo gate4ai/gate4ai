@@ -203,7 +203,10 @@ func (s *stubEngine) Screenshot(context.Context, string) ([]byte, error) { retur
 func (s *stubEngine) Extract(_ context.Context, ins string) (any, error) {
 	return "stub answer for: " + ins, nil // заглушка LLM
 }
-func (s *stubEngine) Close() error { return nil }
+func (s *stubEngine) Close() error                             { return nil }
+func (s *stubEngine) Eval(context.Context, string, any) error  { return nil }
+func (s *stubEngine) InsertText(context.Context, string) error { return nil }
+func (s *stubEngine) Key(context.Context, string) error        { return nil }
 
 func TestExecutorPacingAndExtractStub(t *testing.T) {
 	var steps []string
@@ -234,7 +237,10 @@ func TestModelKeyFromVault(t *testing.T) {
 			}
 			return "sk-test", nil
 		},
-		NewEngine: func(_ context.Context, _ Settings, _, key string) (Engine, error) { got = key; return &stubEngine{}, nil }}
+		NewEngine: func(_ context.Context, _ Settings, _, key string) (Engine, error) {
+			got = key
+			return &stubEngine{}, nil
+		}}
 	s, err := svc.Acquire(context.Background())
 	if err != nil || got != "sk-test" {
 		t.Fatal(got, err)

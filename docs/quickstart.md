@@ -8,7 +8,7 @@
 
 ```sh
 make bin             # bin/gate4ai, bin/gate4ai-relay
-make connectors      # bin/connectors/{mail,files,browser}.g4c — пакеты официальных коннекторов
+make connectors      # bin/connectors/{mail,files,browser,tbank}.g4c — пакеты официальных коннекторов
 ./scripts/ci.sh      # по всем модулям workspace: build / vet / test + кросс-сборка darwin и windows
 ```
 
