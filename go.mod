@@ -12,7 +12,7 @@ require (
 	github.com/caddyserver/certmagic v0.25.6
 	github.com/coder/websocket v1.8.15
 	github.com/gate4ai/relay v0.1.0
-	github.com/gate4ai/sdk-go v0.3.0
+	github.com/gate4ai/sdk-go v0.4.0
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gowebpki/jcs v1.0.2
 	github.com/hashicorp/yamux v0.1.2
@@ -24,6 +24,7 @@ require (
 	golang.org/x/sys v0.49.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.60.1
+	rsc.io/qr v0.2.0
 )
 
 require (
@@ -62,5 +63,4 @@ require (
 	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	rsc.io/qr v0.2.0 // indirect
 )
