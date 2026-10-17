@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package config — модель конфигурации gate4.ai (агенты, профили, правила, списки,
 // лимиты, подтверждения), загрузка из YAML с проверкой схемы и Config Store с версиями.

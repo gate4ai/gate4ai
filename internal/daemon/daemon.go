@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package daemon — ядро gate4ai (`gate4ai daemon`): Config Store, коннекторы, Policy Engine,
 // Action Pipeline, журнал, State Store, Vault и локальные API по сокетам.

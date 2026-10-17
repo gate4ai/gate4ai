@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package connectors — коннекторы на стороне хоста: реестр манифестов и вызовы
 // execute/verify. Коннекторы из магазина — WASM-модули (пакет wasm), их

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package cli — CLI gate4ai: тонкий клиент к daemon. Команды действий
 // генерируются из манифестов (каталог daemon), вывод — JSON, коды выхода

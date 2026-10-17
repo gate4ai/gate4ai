@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package browser — браузерный воркер, служба хоста для функций browser_*:
 // выделенный профиль настоящего Chrome по CDP, движок Stagehand Go SDK v4

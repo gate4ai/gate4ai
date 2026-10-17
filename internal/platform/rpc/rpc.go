@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package rpc — JSON-RPC 2.0 построчно (одно сообщение — одна строка) поверх
 // любого потока: stdio дочерних процессов-коннекторов.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Команда gate4ai — единственный бинарник ядра gate4.ai: daemon (`gate4ai daemon`),
 // MCP-сервер для агентов (`gate4ai mcp`) и CLI для агентов, скриптов и людей.

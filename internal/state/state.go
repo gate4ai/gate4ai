@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package state — State Store на SQLite: счётчики лимитов, очередь
 // подтверждений, метки происхождения (taint), токены агентов.

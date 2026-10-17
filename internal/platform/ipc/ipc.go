@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package ipc — локальный канал трея и CLI к daemon: unix-сокет (macOS, Linux)
 // или named pipe (Windows) за общим интерфейсом; доступ только текущему

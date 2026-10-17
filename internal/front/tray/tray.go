@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package tray — логика трея gate4.ai без GUI: состояние daemon, новые запросы
 // подтверждения, решения и вход в Web UI. Трей ходит в тот же сокет владельца

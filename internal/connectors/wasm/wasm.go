@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package wasm — среда исполнения коннекторов runtime: wasm. Модуль работает
 // в wazero внутри daemon: у него нет файлов, сети, процессов и окружения

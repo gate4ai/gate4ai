@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package sandbox — изоляция локальных агентов: `gate4ai run` в процессной
 // песочнице Anthropic sandbox-runtime (srt), в контейнере Docker/Podman или в

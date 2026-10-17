@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package paths — расположение данных и сокетов gate4.ai на каждой ОС.
 package paths

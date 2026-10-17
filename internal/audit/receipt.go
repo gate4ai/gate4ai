@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package audit — журнал действий: квитанции (JSON, RFC 8785), цепочка хэшей,
 // SQLite-индекс с AEAD-шифрованием полей, доказательства (sha256 + age),

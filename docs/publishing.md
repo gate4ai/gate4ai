@@ -11,14 +11,14 @@
 
 | Каталог монорепозитория | Репозиторий | Лицензия |
 |---|---|---|
-| (корень без выделенных каталогов) | `gate4ai/gate4ai` | FSL-1.1-ALv2 |
+| (корень без выделенных каталогов) | `gate4ai/gate4ai` | AGPL-3.0-only + исключение для коннекторов (`LICENSE-EXCEPTION`) |
 | `sdk-go/` | `gate4ai/sdk-go` | Apache-2.0 |
-| `connectors/mail/`, `files/`, `browser/` | `gate4ai/gate4ai-mail`, `gate4ai-files`, `gate4ai-browser` | AGPL-3.0-only + исключение для хоста |
-| `relay/` | `gate4ai/relay` | FSL-1.1-ALv2 |
+| `connectors/mail/`, `files/`, `browser/` | `gate4ai/gate4ai-mail`, `gate4ai-files`, `gate4ai-browser` | AGPL-3.0-only |
+| `relay/` | `gate4ai/relay` | AGPL-3.0-only |
 | `registry/` | `gate4ai/registry` | CC0 |
 | `github-org/` | `gate4ai/.github` | — |
 
-В истории ядра LICENSE во всех коммитах заменён на FSL-1.1-ALv2 (ранние коммиты были под AGPL, но не публиковались).
+Лицензии сменены 2026-10-17: ядро и relay — с FSL-1.1-ALv2 на AGPL-3.0-only, у коннекторов снято исключение для хоста (хост теперь сам под AGPL). Уже опубликованные версии остаются под прежними лицензиями. `split.sh` записывает в историю ядра текущий LICENSE.
 
 ## 2. Создать репозитории и отправить
 
@@ -46,7 +46,7 @@ done
 
 ## 4. Настройки организации
 
-- **CLA Assistant** для `gate4ai`, `relay` (текст CLA — от юриста); **DCO** (GitHub App) для `sdk-go`, коннекторов, `registry`, `e2e`.
+- **CLA Assistant** для AGPL-репозиториев: `gate4ai`, `relay`, коннекторов, `e2e` (текст CLA — от юриста; сохраняет право выпускать версии под другой лицензией); **DCO** (GitHub App) для `sdk-go`, `registry`.
 - **Branch protection** на `main`: обязательный CI, ревью.
 - **Секреты:** `GATE4AI_PUBLISHER_KEY` (организация, для коннекторов) — приватный ключ издателя (`gate4ai connectors keygen`); ключ registry — вне GitHub, подпись индекса — вручную (`gate4ai registry sign`); `REGISTRY_PUBLIC_KEY` — переменная `registry` для CI.
 - **Релизы:** тег `v*` в `gate4ai` и `relay` — GoReleaser со сборкой под три ОС и подписью cosign (keyless); в коннекторах — пакет `.g4c`, подписанный ключом издателя, затем pull request в `registry`.

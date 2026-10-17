@@ -38,7 +38,7 @@ jobs:
             d="gate4ai-tray_${GITHUB_REF_NAME#v}_darwin_${arch}"
             mkdir "$d"
             CGO_ENABLED=1 GOARCH=$arch go build -trimpath -ldflags "-s -w" -o "$d/gate4ai-tray" ./cmd/gate4ai-tray
-            cp LICENSE NOTICE "$d/"
+            cp LICENSE LICENSE-EXCEPTION NOTICE "$d/"
             tar czf "$d.tar.gz" "$d"
             shasum -a 256 "$d.tar.gz" >> tray-darwin-checksums.txt
           done

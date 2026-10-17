@@ -7,9 +7,7 @@
 #   scripts/split.sh --verify [OUT] — только проверка уже разделённых репозиториев
 #
 # Компоненты — git subtree split по каталогу. Ядро — копия истории без
-# выделенных каталогов и go.work, и с LICENSE = FSL-1.1-ALv2 во всех коммитах:
-# ранние коммиты были под AGPL, но не публиковались, и в публичной истории ядра
-# их лицензия — та же FSL.
+# выделенных каталогов и go.work, и с текущим LICENSE во всех коммитах.
 #
 # Проверка: каждый Go-репозиторий собирается и тестируется отдельно, видя
 # только свои зависимости из gate4ai/* (до публикации модулей — через
@@ -96,12 +94,6 @@ verify() {
   for d in relay sdk-go connectors registry github-org; do
     if [ -e "$OUT/gate4ai/$d" ]; then echo "core still has $d" >&2; exit 1; fi
   done
-  if grep -rl "SPDX-License-Identifier: AGPL" "$OUT/gate4ai" --include='*.go' >/dev/null; then
-    echo "core contains AGPL sources" >&2; exit 1
-  fi
-  if git -C "$OUT/gate4ai" log --all --format=%H | while read -r c; do git -C "$OUT/gate4ai" show "$c:LICENSE" 2>/dev/null | head -1; done | grep -q "GNU AFFERO"; then
-    echo "core history still has the AGPL LICENSE" >&2; exit 1
-  fi
   check sdk-go
   check relay
   check gate4ai-mail sdk-go

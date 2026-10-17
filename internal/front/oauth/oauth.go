@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package oauth — встроенный OAuth 2.1 authorization server для remote MCP:
 // динамическая регистрация клиентов (RFC 7591), authorization code + PKCE S256,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package mcp — MCP-сервер gate4.ai: каталог инструментов по профилю агента,
 // вызовы через Action Pipeline. Инструментов изменения политик нет вообще.

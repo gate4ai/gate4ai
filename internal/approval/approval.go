@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: FSL-1.1-ALv2
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package approval — каналы Approval Service: уведомления на компьютере и личный
 // Telegram-бот пользователя. Решение принимается только нажатием в привязанном
