@@ -53,10 +53,8 @@ func (probe) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 		out["fs_list"] = code(err)
 		_, err = h.FSStat("/etc/passwd")
 		out["fs_stat"] = code(err)
-		_, err = h.BrowserOpen("https://example.com/")
-		out["browser_open"] = code(err)
-		_, err = h.BrowserObserve(0)
-		out["browser_observe"] = code(err)
+		_, err = h.ServiceCall("browser", "open", map[string]any{"url": "https://example.com/"}, nil)
+		out["service_call"] = code(err)
 		return abi.ExecResult{Structured: out}, nil
 	case "http":
 		resp, err := h.HTTP(abi.HTTPRequest{URL: r.Args["url"].(string), Headers: map[string]string{"Authorization": "Bearer {{secret:" + r.Settings["token"].(string) + "}}"}})

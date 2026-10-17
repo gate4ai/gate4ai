@@ -54,6 +54,9 @@ func (d *Daemon) Tools(p auth.Principal) []Tool {
 			continue
 		}
 		for _, a := range m.Actions {
+			if a.ServiceOnly {
+				continue // только для других коннекторов (service_call)
+			}
 			t := Tool{Name: m.Full(a), Connector: m.Connector, Action: a.Name, Description: a.Description,
 				Class: a.Class, Schema: a.InputSchema, InputSchema: a.JSONSchema(), Example: a.Example}
 			if a.OutputSchema != nil {

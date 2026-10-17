@@ -112,6 +112,7 @@ Owner commands (local socket):
   gate4ai connectors list | install <file.g4c | name[@version] | source folder> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | refresh
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c] | verify <dir> <file.g4c> | keygen [-o key]   (publisher / registry review, offline)
   gate4ai registry check <index.json> [--key ed25519:…] [--fetch] | sign <index.json> --key file | add <index.json> <pack.json> --publisher name …   (registry)
+  gate4ai contract gen <manifest.yaml> [-o client.go] [--package name] | diff <old manifest> <new manifest>   (calls between connectors)
   gate4ai run <agent> [--workspace dir] [--container|--microvm] [--image img] [--engine docker|podman] [--dry-run] [-- cmd]   isolated agent
   gate4ai doctor                          look for ways around gate4ai
   gate4ai egress                          network connections of sandboxed agents
@@ -192,6 +193,8 @@ func Run(ctx context.Context, e *Env, args []string) int {
 		return e.connectors(ctx, rest)
 	case "registry":
 		return e.registry(ctx, rest)
+	case "contract":
+		return e.contract(rest)
 	case "ui":
 		return e.ui(ctx, rest)
 	case "run":

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gate4ai/sdk-go/manifest"
+
 	"github.com/gate4ai/gate4ai/internal/connectors/builtin/files"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/policy"
@@ -18,7 +20,26 @@ import (
 func (d *Daemon) StoreOptions() store.Options {
 	s := d.Config.Current().Store
 	return store.Options{Dir: d.ConnectorsDir, Registry: s.Registry, RegistryKeys: s.RegistryKeys, TrustedKeys: s.TrustedKeys,
-		Builtin: BuiltinConnectors}
+		Builtin: BuiltinConnectors, Log: d.Log}
+}
+
+// stopNative останавливает процесс нативного коннектора до замены или удаления
+// его файлов (на Windows файл запущенной программы не заменить); коннектор
+// загружается заново в reloadConnector.
+func (d *Daemon) stopNative(name string) {
+	if c, ok := d.Registry.Get(name); ok && c.Manifest().Runtime == manifest.RuntimeNative {
+		_ = c.Close()
+	}
+}
+
+// restartNative — установка не удалась: прежняя версия остановленного
+// нативного коннектора загружается заново.
+func (d *Daemon) restartNative(name string) {
+	if c, ok := d.Registry.Get(name); ok && c.Manifest().Runtime == manifest.RuntimeNative {
+		if err := d.reloadConnector(name, false); err != nil {
+			d.Log.Warn("connector not reloaded", "connector", name, "err", err)
+		}
+	}
 }
 
 // BuiltinConnectors — коннекторы ядра: из магазина не ставятся.
@@ -90,8 +111,12 @@ func (d *Daemon) InstallConnector(ctx context.Context, source string, consent []
 	}
 	d.installMu.Lock()
 	defer d.installMu.Unlock()
+	if plan.ConsentOK(consent) {
+		d.stopNative(plan.Connector)
+	}
 	info, err := opts.Install(plan, consent)
 	if err != nil {
+		d.restartNative(plan.Connector)
 		return store.Info{}, plan, "", err
 	}
 	warn := ""
@@ -109,6 +134,7 @@ func (d *Daemon) PrepareConnector(ctx context.Context, source string) (*store.Pl
 
 // RemoveConnector удаляет коннектор; warning — политика ещё ссылается на него.
 func (d *Daemon) RemoveConnector(name string) (warning string, err error) {
+	d.stopNative(name)
 	if err := d.StoreOptions().Remove(name); err != nil {
 		return "", err
 	}
@@ -155,9 +181,13 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 				"source": "built in", "loaded": true, "capabilities": m.Capabilities.Summary()})
 		}
 		for _, it := range list {
-			_, loaded := d.Registry.Get(it.Name)
-			out = append(out, map[string]any{"connector": it.Name, "version": it.Manifest.Version, "trust": it.Info.Trust,
-				"publisher": it.Info.Publisher, "source": it.Info.Source, "loaded": loaded, "capabilities": it.Info.Capabilities})
+			c, loaded := d.Registry.Get(it.Name)
+			row := map[string]any{"connector": it.Name, "version": it.Manifest.Version, "trust": it.Info.Trust,
+				"publisher": it.Info.Publisher, "source": it.Info.Source, "loaded": loaded, "capabilities": it.Info.Capabilities}
+			if s, ok := c.(interface{ State() string }); ok {
+				row["runtime"], row["state"] = it.Manifest.Runtime, s.State()
+			}
+			out = append(out, row)
 		}
 		writeJSON(w, 200, map[string]any{"connectors": out})
 	}))
@@ -181,7 +211,13 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 		}
 		d.installMu.Lock()
 		defer d.installMu.Unlock()
+		if plan.ConsentOK(consent) {
+			d.stopNative(plan.Connector)
+		}
 		info, err := opts.Install(plan, consent)
+		if err != nil {
+			d.restartNative(plan.Connector)
+		}
 		if errors.Is(err, store.ErrConsent) {
 			writeJSON(w, 409, map[string]any{"error": map[string]string{"code": "consent_required",
 				"message": "review the capabilities and confirm"}, "plan": plan})

@@ -197,6 +197,12 @@ func fetch(ctx context.Context, src string) ([]byte, error) {
 	return os.ReadFile(src)
 }
 
+// Fetch читает путь или http(s)-URL (пакет, список платформ).
+func Fetch(ctx context.Context, src string) ([]byte, error) { return fetch(ctx, src) }
+
+// ResolveRef — ссылка ref относительно base (адреса индекса или списка платформ).
+func ResolveRef(base, ref string) string { return resolveRef(base, ref) }
+
 // resolveRef — ссылка относительно индекса.
 func resolveRef(base, ref string) string {
 	if strings.Contains(ref, "://") || filepath.IsAbs(ref) {

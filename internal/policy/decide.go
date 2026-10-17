@@ -28,7 +28,7 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 	if !ok {
 		return Decision{Effect: config.EffectDeny, RuleIDs: []string{"profile-missing"}, Reason: fmt.Sprintf("profile %q not found", agent.Profile)}
 	}
-	if !prof.cfg.HasConnector(req.Connector()) && !Implicit[req.Connector()] && !Everyone[req.Connector()] {
+	if !req.Nested && !prof.cfg.HasConnector(req.Connector()) && !Implicit[req.Connector()] && !Everyone[req.Connector()] {
 		return Decision{Effect: config.EffectDeny, RuleIDs: []string{"connector-not-in-profile"},
 			Reason: fmt.Sprintf("connector %q is not available for profile %q", req.Connector(), agent.Profile)}
 	}
@@ -106,6 +106,10 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 		}
 		sort.Strings(d.Obligations)
 		return d
+	}
+	if req.Nested {
+		return Decision{Effect: config.EffectAllow, Default: true, Errors: errs, RuleIDs: []string{},
+			Reason: "nested call: no rule matched; covered by the decision on the calling action"}
 	}
 	eff := DefaultEffect(req.Class)
 	return Decision{Effect: eff, Default: true, Errors: errs, RuleIDs: []string{},

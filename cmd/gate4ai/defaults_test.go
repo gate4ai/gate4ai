@@ -31,7 +31,7 @@ import (
 // files встроен в ядро, browser ставится из магазина.
 var defaultActions = map[string][]string{
 	"files":   {"read", "list", "append", "write"},
-	"browser": {"read", "screenshot", "extract"},
+	"browser": {"read", "screenshot", "extract"}, // + действия только для коннекторов (service_only)
 }
 
 var defaultManifests = map[string]string{
@@ -47,16 +47,20 @@ actions:
   - { name: append, class: write }
   - { name: write, class: write }
 `,
+	// Нативный пакет: в магазине — список платформ, ставится пакет этой платформы.
 	"browser": `connector: browser
-version: "4"
-runtime: wasm
+version: "6"
+runtime: native
+platforms: [` + store.HostPlatform() + `]
+contract: 1
+services: [open]
 capabilities:
-  browser:
-    domains: ["${setting:allowed_domains}"]
+  reveal: ["${setting:model_key}"]
 actions:
   - { name: read, class: read }
   - { name: screenshot, class: read }
   - { name: extract, class: read }
+  - { name: open, class: read, service_only: true }
 `,
 	// Не по умолчанию: ставит владелец.
 	"bank": `connector: bank
@@ -91,7 +95,9 @@ func TestDefaultActionsMatchManifests(t *testing.T) {
 		}
 		var got []string
 		for _, a := range m.Actions {
-			got = append(got, a.Name)
+			if !a.ServiceOnly {
+				got = append(got, a.Name)
+			}
 		}
 		if !slices.Equal(got, want) {
 			t.Fatalf("%s actions %v, want %v: update defaultActions", name, got, want)
@@ -109,16 +115,32 @@ func localRegistry(t *testing.T, dir string) (index, regPub string) {
 		Connectors: map[string]store.Entry{}}
 	os.MkdirAll(filepath.Join(dir, "packages"), 0o755)
 	for name, m := range defaultManifests {
-		b, err := store.Pack([]byte(m), []byte("\x00asm\x01\x00\x00\x00"), k)
+		mf, _ := manifest.Parse([]byte(m))
+		var b []byte
+		var err error
+		if mf.Runtime == manifest.RuntimeNative {
+			b, err = store.PackNative([]byte(m), []byte("fake native binary"), store.HostPlatform(), k)
+		} else {
+			b, err = store.Pack([]byte(m), []byte("\x00asm\x01\x00\x00\x00"), k)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
 		p, _ := store.Open(b)
 		file := name + "-" + p.Manifest.Version + ".g4c"
 		os.WriteFile(filepath.Join(dir, "packages", file), b, 0o644)
+		rel := store.Release{Version: p.Manifest.Version, URL: "packages/" + file, SHA256: store.SHA256(b),
+			Digest: p.Sig.Digest, Capabilities: p.Manifest.Capabilities.Summary()}
+		if p.Native() {
+			set := store.PlatformSet{Connector: name, Version: p.Manifest.Version,
+				Platforms: map[string]store.Artifact{store.HostPlatform(): {URL: file, SHA256: store.SHA256(b), Digest: p.Sig.Digest}}}
+			sb, _ := json.Marshal(set)
+			setFile := name + "-" + p.Manifest.Version + store.SetExt
+			os.WriteFile(filepath.Join(dir, "packages", setFile), sb, 0o644)
+			rel.URL, rel.SHA256, rel.Digest = "packages/"+setFile, store.SHA256(sb), store.SetDigest(set)
+		}
 		ix.Connectors[name] = store.Entry{Publisher: "gate4ai", Repo: "https://github.com/gate4ai/gate4ai-" + name, License: "AGPL-3.0-only",
-			Versions: []store.Release{{Version: p.Manifest.Version, URL: "packages/" + file, SHA256: store.SHA256(b),
-				Digest: p.Sig.Digest, Capabilities: p.Manifest.Capabilities.Summary()}}}
+			Versions: []store.Release{rel}}
 	}
 	raw, _ := json.Marshal(ix)
 	sig, err := store.SignIndex(raw, regPriv)
@@ -203,6 +225,9 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 		}
 		var got []string
 		for _, a := range cli.Manifest().Actions {
+			if a.ServiceOnly {
+				continue // не для агентов: правила ask на них нет
+			}
 			got = append(got, a.Name)
 			action := conn + "." + a.Name
 			dec := d.Pipeline.Engine().Decide(policy.Request{Agent: "bot", Action: action, Class: a.Class}, nil)

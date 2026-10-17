@@ -116,6 +116,19 @@ func (r *Registry) Remove(name string) {
 	}
 }
 
+// Each вызывает f для каждого коннектора (вне блокировки реестра).
+func (r *Registry) Each(f func(Client)) {
+	r.mu.RLock()
+	list := make([]Client, 0, len(r.m))
+	for _, c := range r.m {
+		list = append(list, c)
+	}
+	r.mu.RUnlock()
+	for _, c := range list {
+		f(c)
+	}
+}
+
 // Get возвращает коннектор.
 func (r *Registry) Get(name string) (Client, bool) {
 	r.mu.RLock()

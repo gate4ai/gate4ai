@@ -11,9 +11,10 @@
 | Approval Service: desktop, Telegram | `internal/approval` |
 | Манифест, ABI v2, функции хоста, проверка возможностей, PDK и тестовый хост коннекторов | `sdk-go/` (`github.com/gate4ai/sdk-go`, Apache-2.0) |
 | Реестр коннекторов, WASM-хост (wazero), установленные коннекторы | `internal/connectors`, `internal/connectors/wasm`, `internal/connectors/store` |
-| Браузерный воркер (Chrome, CDP, Stagehand, Executor) — служба хоста | `internal/hostsvc/browser` |
+| Нативные коннекторы (`runtime: native`): процесс под надзором daemon, JSON-RPC по stdio, функции хоста с проверкой возможностей, `reveal`, перезапуск; сборка под платформу | `internal/connectors/native`, протокол — `sdk-go/native` |
+| Вызовы между коннекторами (`service_call`): маршрутизация через Action Pipeline (политика агента корневого действия, квитанция с `parent`, глубина, циклы), `end_call` | `internal/pipeline/nested.go`, `internal/daemon/services.go`; контракты — `sdk-go/contract`, CLI `gate4ai contract gen|diff` — `internal/front/cli/contract.go` |
 | Встроенные коннекторы на PDK (`runtime: builtin`, тот же код и те же функции хоста, что у WASM): файлы | `internal/connectors/builtin/files`, адаптер — `internal/connectors/wasm/builtin.go` (`Engine.Builtin`) |
-| Коннекторы (WASM-модули, AGPL-3.0): почта, браузер | `connectors/mail`, `connectors/browser` (`github.com/gate4ai/gate4ai-*`) |
+| Коннекторы (AGPL-3.0): почта (WASM), браузер — нативный пакет (воркер: Chrome, CDP, Stagehand, Executor — `worker/`) | `connectors/mail`, `connectors/browser` (`github.com/gate4ai/gate4ai-mail`, `gate4ai-browser`) |
 | daemon, API на сокетах владельца и агентов | `internal/daemon`, `internal/platform/ipc` |
 | Публичный адрес устройства: один обработчик для relay и прямого HTTPS (`--public`), разделение по путям — `/mcp` и OAuth, `/v1/{whoami,tools,call,status}` (удалённый CLI), `/ui/` (удалённый Web UI), `/telegram` (вебхук); у каждого пути своя аутентификация, API владельца нет | `internal/daemon` (`PublicHandler`, `AddPublic`, `ServePublic`), `cmd/gate4ai/setup.go`, тест изоляции `cmd/gate4ai/public_test.go` |
 | CLI, skill | `internal/front/cli`, `internal/front/skill`; ошибки для человека и агента (`hint`, `detail`) — `errors.go`; `gate4ai daemon start/stop/status` — `daemonctl.go`; автозапуск `gate4ai service` — `service.go` поверх `internal/platform/autostart`; UX путей пользователя — [cli-ux.md](cli-ux.md) |

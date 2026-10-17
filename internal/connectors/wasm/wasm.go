@@ -34,14 +34,30 @@ import (
 type Services struct {
 	Secrets hostfuncs.Secrets
 	// KV — хранилище коннектора по имени (nil — хранилища нет).
-	KV      func(connector string) hostfuncs.KV
-	Browser hostfuncs.Browser
-	Log     *slog.Logger
+	KV func(connector string) hostfuncs.KV
+	// Router — вызовы других коннекторов (service_call); nil — не поддерживаются.
+	Router Router
+	Log    *slog.Logger
 	// Home — домашний каталог пользователя для "~" в путях.
 	Home string
 	// Dial и RootCAs — сеть (подменяются в тестах).
 	Dial    func(ctx context.Context, network, addr string) (net.Conn, error)
 	RootCAs *x509.CertPool
+}
+
+// Router проводит вызов service_call коннектора caller через политики хоста.
+type Router interface {
+	ServiceCall(ctx context.Context, caller string, rule manifest.ServiceRule, r abi.ServiceCallRequest) (abi.ExecResult, error)
+}
+
+// callerRouter — Router для одного вызывающего коннектора (hostfuncs.ServiceRouter).
+type callerRouter struct {
+	caller string
+	r      Router
+}
+
+func (c callerRouter) ServiceCall(ctx context.Context, rule manifest.ServiceRule, r abi.ServiceCallRequest) (abi.ExecResult, error) {
+	return c.r.ServiceCall(ctx, c.caller, rule, r)
 }
 
 // Engine — общая для коннекторов часть: кэш компиляции и службы хоста.
@@ -247,11 +263,12 @@ func (c *Connector) trap(ctx context.Context, err error, stderr *limitedBuffer) 
 }
 
 func (c *Connector) dispatcher(ctx context.Context, settings map[string]any) (*hostfuncs.Dispatcher, error) {
-	return c.e.dispatcher(ctx, c.man, c.limits, settings)
+	return c.e.Dispatcher(ctx, c.man, c.limits, settings)
 }
 
-// dispatcher — функции хоста для одного вызова коннектора m.
-func (e *Engine) dispatcher(ctx context.Context, m manifest.Manifest, lim manifest.Limits, settings map[string]any) (*hostfuncs.Dispatcher, error) {
+// Dispatcher — функции хоста для одного вызова коннектора m (WASM, встроенного
+// или нативного): возможности манифеста с настройками экземпляра и службы хоста.
+func (e *Engine) Dispatcher(ctx context.Context, m manifest.Manifest, lim manifest.Limits, settings map[string]any) (*hostfuncs.Dispatcher, error) {
 	chk, err := capability.New(m, settings, e.svc.Home)
 	if err != nil {
 		return nil, err
@@ -262,7 +279,11 @@ func (e *Engine) dispatcher(ctx context.Context, m manifest.Manifest, lim manife
 	}
 	name := m.Connector
 	log := e.svc.Log
-	return &hostfuncs.Dispatcher{Ctx: ctx, Check: chk, Secrets: e.svc.Secrets, KV: kv, Browser: e.svc.Browser,
+	var router hostfuncs.ServiceRouter
+	if e.svc.Router != nil {
+		router = callerRouter{caller: name, r: e.svc.Router}
+	}
+	return &hostfuncs.Dispatcher{Ctx: ctx, Check: chk, Secrets: e.svc.Secrets, KV: kv, Services: router,
 		Dial: e.svc.Dial, RootCAs: e.svc.RootCAs, Timeout: time.Duration(lim.TimeoutS) * time.Second,
 		Log: func(level, msg string) {
 			lv := map[string]slog.Level{"debug": slog.LevelDebug, "warn": slog.LevelWarn, "error": slog.LevelError}[level]

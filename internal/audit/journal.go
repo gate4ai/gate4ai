@@ -140,6 +140,9 @@ func (j *Journal) SetWitness(w Witness) {
 	j.mu.Unlock()
 }
 
+// NewID — идентификатор квитанции (его можно задать до записи: вложенные вызовы ссылаются на него).
+func NewID() string { return newID() }
+
 func newID() string {
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)

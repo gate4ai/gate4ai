@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/gate4ai/gate4ai/internal/connectors/store"
 )
 
 // Офлайн-команды издателя и registry: ключ, пакет, подпись индекса.
@@ -99,6 +101,62 @@ func TestPackVerifyReproducible(t *testing.T) {
 	write(b, "changed")
 	if code, _, out := run("connectors", "verify", b, pkg); code == 0 || !strings.Contains(out, "connector.wasm differs") {
 		t.Fatal("changed sources accepted:", out)
+	}
+}
+
+// Нативный пакет: pack собирает под каждую платформу и список платформ;
+// verify пересобирает каждую; одна платформа с -o file.g4c — только этот пакет.
+func TestPackVerifyNative(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) (int, map[string]any, string) {
+		out, errb := &bytes.Buffer{}, &bytes.Buffer{}
+		env := &Env{Stdout: out, Stderr: errb, Getenv: func(string) string { return "" }}
+		code := Run(context.Background(), env, args)
+		var m map[string]any
+		_ = json.Unmarshal(out.Bytes(), &m)
+		return code, m, out.String() + errb.String()
+	}
+	write := func(src, body string) {
+		os.MkdirAll(src, 0o755)
+		os.WriteFile(filepath.Join(src, "go.mod"), []byte("module example.com/nat\n\ngo "+strings.TrimPrefix(runtime.Version(), "go")+"\n"), 0o644)
+		os.WriteFile(filepath.Join(src, "manifest.yaml"), []byte("connector: nat\nversion: \"1\"\nruntime: native\nplatforms: [linux/amd64, windows/amd64]\nactions: [ { name: say, class: read } ]\n"), 0o644)
+		os.WriteFile(filepath.Join(src, "main.go"), []byte("package main\n\nfunc main() { println(\""+body+"\") }\n"), 0o644)
+	}
+	a, b := filepath.Join(dir, "publisher", "nat"), filepath.Join(dir, "reviewer", "src")
+	write(a, "hi")
+	write(b, "hi")
+	out := filepath.Join(dir, "rel", "nat-1"+store.SetExt)
+	os.MkdirAll(filepath.Dir(out), 0o755)
+	code, p, msg := run("connectors", "pack", a, "-o", out)
+	if code != 0 || p["package"] != "nat-1"+store.SetExt || len(p["platforms"].(map[string]any)) != 2 {
+		t.Fatal(code, msg)
+	}
+	for _, f := range []string{"nat-1-linux-amd64.g4c", "nat-1-windows-amd64.g4c"} {
+		if _, err := os.Stat(filepath.Join(dir, "rel", f)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, v, msg := run("connectors", "verify", b, out)
+	if code != 0 || v["reproducible"] != true || v["digest"] != p["digest"] || v["platforms"] != 2.0 {
+		t.Fatal("same sources must rebuild every platform:", msg)
+	}
+	write(b, "changed")
+	if code, _, msg := run("connectors", "verify", b, out); code == 0 || !strings.Contains(msg, "differs") {
+		t.Fatal("changed sources accepted:", msg)
+	}
+	one := filepath.Join(dir, "one.g4c")
+	if code, p, msg := run("connectors", "pack", a, "-o", one, "--platform", "linux/amd64"); code != 0 || p["platform"] != "linux/amd64" {
+		t.Fatal(code, msg)
+	}
+	pkg, err := os.ReadFile(one)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pp, err := store.Open(pkg); err != nil || !pp.Native() || pp.Sig.Platform != "linux/amd64" {
+		t.Fatal(pp, err)
 	}
 }
 

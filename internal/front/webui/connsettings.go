@@ -41,6 +41,14 @@ var settingHints = map[string]map[string]fieldHint{
 	},
 	"browser": {
 		"allowed_domains": {"Разрешённые сайты", fieldList, "Браузер открывает только эти сайты; *.example.com — все поддомены.", "*.example.com"},
+		"mode":            {"Режим списка сайтов", fieldText, "allowlist — только разрешённые сайты (по умолчанию), blocklist — все, кроме запрещённых.", "allowlist"},
+		"blocked":         {"Запрещённые сайты", fieldList, "Для режима blocklist. Адреса этого компьютера и локальной сети закрыты всегда.", "*.example.org"},
+		"model":           {"Модель для extract", fieldText, "Провайдер и модель, например openai/gpt-5.4-mini.", "openai/gpt-5.4-mini"},
+		"model_key":       {"Ключ модели", fieldSecret, "Хранится в Vault; передаётся только браузерному пакету (reveal).", ""},
+		"profile_dir":     {"Профиль Chrome", fieldText, "Выделенный профиль; по умолчанию ~/.gate4ai-chrome.", "~/.gate4ai-chrome"},
+		"chrome_path":     {"Путь к Chrome", fieldText, "Пусто — найти установленный Chrome.", ""},
+		"cdp_url":         {"Адрес CDP", fieldText, "Уже запущенный Chrome; пусто — пакет запускает его сам.", ""},
+		"engine":          {"Движок", fieldText, "stagehand (по умолчанию) или cdp.", "stagehand"},
 	},
 	"email": {
 		"address":       {"Адрес почты", fieldText, "", "me@example.com"},
@@ -87,10 +95,31 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 			add(b, fieldText)
 		}
 	}
-	if c.Browser != nil {
-		for _, d := range c.Browser.Domains {
-			add(d, fieldList)
+	// Параметры вызовов других коннекторов: шаблон в списке — список, иначе текст.
+	var params func(v any, inList bool)
+	params = func(v any, inList bool) {
+		switch t := v.(type) {
+		case string:
+			if inList {
+				add(t, fieldList)
+			} else {
+				add(t, fieldText)
+			}
+		case map[string]any:
+			for _, x := range t {
+				params(x, false)
+			}
+		case []any:
+			for _, x := range t {
+				params(x, true)
+			}
 		}
+	}
+	for _, sc := range c.Services {
+		params(sc.Params, false)
+	}
+	for _, r := range c.Reveal {
+		add(r, fieldSecret)
 	}
 	for _, f := range c.Files {
 		add(f, fieldList)
@@ -149,7 +178,8 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 }
 
 var hintOrder = map[string][]string{
-	"email": {"address", "imap.host", "imap.port", "imap.username", "imap.password", "smtp.host", "smtp.port", "smtp.password"},
+	"browser": {"allowed_domains", "mode", "blocked", "model", "model_key", "profile_dir", "chrome_path", "cdp_url", "engine"},
+	"email":   {"address", "imap.host", "imap.port", "imap.username", "imap.password", "smtp.host", "smtp.port", "smtp.password"},
 }
 
 // getPath — значение по ключу с точками (imap.host → settings["imap"]["host"]).

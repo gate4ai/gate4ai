@@ -73,5 +73,6 @@ done
 ## 6. Выпуск версии коннектора
 
 1. `version` в `manifest.yaml` +1, коммит, тег `v<version>` (`version: "3"` → `v3`). CI собирает модуль воспроизводимо (Go из `go.mod`, без сведений о git), подписывает пакет ключом издателя и создаёт релиз с `<connector>-<version>.g4c` и `pack.json`. Выпущенную версию не перевыпускать: новая сборка — новая версия.
+   Нативный пакет (`runtime: native`, сейчас `browser`): `gate4ai connectors pack` собирает бинарник под каждую платформу из `manifest.platforms` (`CGO_ENABLED=0 -trimpath`), по `.g4c` на платформу, и список `<connector>-<version>.platforms.json`; в релизе — все `.g4c`, список и `pack.json`, в индексе registry запись ссылается на список (так индекс читают и прежние версии ядра). У поставщика действий для других коннекторов (`services`) CI сверяет манифест с прошлым тегом: `gate4ai contract diff` — несовместимое изменение без нового `contract` не выпускается.
 2. В ветке `registry`: `gate4ai registry add index.json pack.json --publisher gate4ai`, затем `gate4ai registry sign index.json --key ../.secrets/keys/registry.key`; pull request. CI скачивает и сверяет каждый пакет, а новые версии пересобирает из тега и сравнивает с релизом.
 3. После ревью — слияние. Сторонние издатели проходят тот же путь без подписи индекса: [CONTRIBUTING.md registry](https://github.com/gate4ai/registry/blob/main/CONTRIBUTING.md).

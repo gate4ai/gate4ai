@@ -23,6 +23,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
+	"github.com/gate4ai/gate4ai/internal/connectors"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
@@ -636,7 +637,8 @@ type storeItem struct {
 	Capabilities                                                []string
 	Installed                                                   string // установленная версия
 	Loaded, Update, Revoked                                     bool
-	Builtin                                                     bool // часть ядра, из магазина не ставится
+	Builtin                                                     bool   // часть ядра, из магазина не ставится
+	State                                                       string // нативный пакет: stopped | running | disabled
 	Profiles                                                    []string
 }
 
@@ -687,7 +689,11 @@ func (u *UI) storeItems(ctx context.Context, refresh bool) ([]storeItem, string)
 			}
 			if in, ok := inst[name]; ok {
 				it.Installed = in.Manifest.Version
-				_, it.Loaded = u.D.Registry.Get(name)
+				var c connectors.Client
+				c, it.Loaded = u.D.Registry.Get(name)
+				if st, ok := c.(interface{ State() string }); ok {
+					it.State = st.State()
+				}
 				it.Update = it.Version != "" && it.Version != it.Installed
 				it.Revoked, _ = ix.IsRevoked(name, it.Installed)
 			}

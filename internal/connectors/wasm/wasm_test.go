@@ -99,7 +99,7 @@ func TestCapabilityDeniedForEveryFunction(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := res.Structured.(map[string]any)
-	if len(got) != 10 {
+	if len(got) != 9 {
 		t.Fatal(got)
 	}
 	for fn, code := range got {

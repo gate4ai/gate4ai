@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package native
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/sdk-go/manifest"
+	sdknative "github.com/gate4ai/sdk-go/native"
+
+	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
+)
+
+const testManifest = `connector: echo
+version: "1"
+runtime: native
+platforms: [linux/amd64]
+capabilities:
+  files: ["${setting:root}/**"]
+  reveal: ["@model.key"]
+limits: { timeout_s: 2 }
+actions:
+  - { name: read, class: read, input_schema: { type: object, properties: { path: { type: string } } } }
+  - { name: crash, class: read }
+  - { name: slow, class: read }
+`
+
+// echo — нативный коннектор теста: тот же бинарник теста, запущенный с GATE4AI_TEST_ECHO=1.
+type echo struct{}
+
+func (echo) Execute(_ context.Context, h *abi.Host, r abi.ExecRequest) (abi.ExecResult, error) {
+	switch r.Action {
+	case "crash":
+		os.Exit(3)
+	case "slow":
+		time.Sleep(5 * time.Second)
+	}
+	p, _ := r.Args["path"].(string)
+	f, err := h.FSRead(p, 100)
+	if err != nil {
+		return abi.ExecResult{}, err
+	}
+	h.Evidence("e.txt", "text/plain", []byte("ev"))
+	return abi.ExecResult{Structured: map[string]any{"data": string(f.Data), "key": r.Revealed["@model.key"]}}, nil
+}
+
+func (echo) Verify(context.Context, *abi.Host, abi.VerifyRequest) (abi.VerifyResult, error) {
+	return abi.VerifyResult{Status: abi.Verified}, nil
+}
+
+func TestMain(m *testing.M) {
+	if os.Getenv("GATE4AI_TEST_ECHO") == "1" {
+		sdknative.Serve([]byte(testManifest), echo{})
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+type vault map[string]string
+
+func (v vault) Value(a string) (string, error) { return v[a], nil }
+
+func setup(t *testing.T) (*Process, string) {
+	t.Helper()
+	t.Setenv("GATE4AI_TEST_ECHO", "1")
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, "notes"), 0o755)
+	os.WriteFile(filepath.Join(home, "notes", "a.md"), []byte("hello"), 0o644)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	e, err := wasm.NewEngine("", wasm.Services{Home: home, Secrets: vault{"@model.key": "sk-1"}, Log: log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { e.Close() })
+	m, err := manifest.Parse([]byte(testManifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := New(os.Args[0], m, e, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { p.Close() })
+	return p, home
+}
+
+func TestExecuteWithHostChecks(t *testing.T) {
+	p, _ := setup(t)
+	if p.State() != StateStopped {
+		t.Fatal(p.State())
+	}
+	set := map[string]any{"root": "~/notes"}
+	res, err := p.Execute(context.Background(), abi.ExecRequest{Action: "read", Args: map[string]any{"path": "~/notes/a.md"}, Settings: set})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := res.Structured.(map[string]any)
+	if st["data"] != "hello" || st["key"] != "sk-1" || len(res.Evidence) != 1 {
+		t.Fatal(res)
+	}
+	_, err = p.Execute(context.Background(), abi.ExecRequest{Action: "read", Args: map[string]any{"path": "/etc/passwd"}, Settings: set})
+	if err == nil || !strings.Contains(err.Error(), abi.CodeCapabilityDenied) {
+		t.Fatal("outside capabilities:", err)
+	}
+	if v, err := p.Verify(context.Background(), abi.VerifyRequest{Action: "read", Settings: set}); err != nil || v.Status != abi.Verified {
+		t.Fatal(v, err)
+	}
+	_, err = p.Execute(context.Background(), abi.ExecRequest{Action: "slow", Settings: set})
+	if err == nil || !strings.Contains(err.Error(), "time limit") {
+		t.Fatal("timeout:", err)
+	}
+	p.EndCall("root") // процесс жив — уведомление уходит без ошибок
+}
+
+func TestCrashRestartAndDisable(t *testing.T) {
+	p, _ := setup(t)
+	set := map[string]any{"root": "~/notes"}
+	read := func() error {
+		_, err := p.Execute(context.Background(), abi.ExecRequest{Action: "read", Args: map[string]any{"path": "~/notes/a.md"}, Settings: set})
+		return err
+	}
+	if _, err := p.Execute(context.Background(), abi.ExecRequest{Action: "crash", Settings: set}); err == nil || !strings.Contains(err.Error(), "crashed") {
+		t.Fatal("crash:", err)
+	}
+	// Следующий вызов запускает процесс заново.
+	if err := read(); err != nil {
+		t.Fatal("restart:", err)
+	}
+	if p.State() != StateRunning {
+		t.Fatal(p.State())
+	}
+	for i := 0; i < MaxCrashes; i++ {
+		p.Execute(context.Background(), abi.ExecRequest{Action: "crash", Settings: set})
+		time.Sleep(50 * time.Millisecond) // процесс завершился и падение учтено
+	}
+	if err := read(); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatal("crash loop must disable the connector:", err)
+	}
+	if p.State() != StateDisabled {
+		t.Fatal(p.State())
+	}
+}
+
+func TestBadBinaryAndManifest(t *testing.T) {
+	p, _ := setup(t)
+	p.bin = filepath.Join(t.TempDir(), "missing")
+	if _, err := p.Execute(context.Background(), abi.ExecRequest{Action: "read", Settings: map[string]any{"root": "~"}}); err == nil {
+		t.Fatal("missing binary")
+	}
+	q, _ := setup(t)
+	q.man.Version = "2" // пакет говорит одно, процесс — другое
+	if _, err := q.Execute(context.Background(), abi.ExecRequest{Action: "read", Settings: map[string]any{"root": "~"}}); err == nil || !strings.Contains(err.Error(), "another manifest") {
+		t.Fatal("manifest mismatch:", err)
+	}
+}

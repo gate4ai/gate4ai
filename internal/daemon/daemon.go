@@ -24,7 +24,6 @@ import (
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 	"github.com/gate4ai/gate4ai/internal/front/oauth"
-	"github.com/gate4ai/gate4ai/internal/hostsvc/browser"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/policy"
@@ -46,8 +45,6 @@ type Options struct {
 	DefaultConnectors []string
 	// Connectors — дополнительные коннекторы в том же процессе (тесты).
 	Connectors []connectors.Client
-	// Browser — браузерный воркер (nil — по разделу browser конфигурации).
-	Browser hostfuncs.Browser
 	// UserHome — каталог для "~" в путях коннекторов ("" — домашний каталог).
 	UserHome string
 	// WasmDial и WasmRootCAs — сеть коннекторов (тесты).
@@ -81,7 +78,6 @@ type Daemon struct {
 	servers   []*http.Server
 	extra     []func(*http.ServeMux) // доп. маршруты владельца (MCP HTTP, Web UI)
 	oauth     *oauth.Server
-	browser   *browser.Service
 
 	// Публичный адрес устройства (relay, прямой HTTPS): маршруты по путям, адрес.
 	public     []publicRoute
@@ -167,6 +163,7 @@ func New(opt Options) (*Daemon, error) {
 	d.Pipeline = pipeline.New(d.Registry, d.State, d.Journal, d.Vault, d.notifiers, eng)
 	d.Pipeline.Log = opt.Log
 	d.Pipeline.Describe = map[string]func(string, map[string]any) (string, error){SelfConnector: d.describeSelf}
+	d.Pipeline.EndCall = d.endCall
 	if opt.Now != nil {
 		d.Pipeline.Now = opt.Now
 		d.State.Now = opt.Now
@@ -180,6 +177,8 @@ func New(opt Options) (*Daemon, error) {
 		d.Pipeline.SetEngine(e)
 		d.Log.Info("policy updated")
 	})
+	d.migrateBrowserSection()
+	d.updateWasmBrowser()
 	return d, nil
 }
 
@@ -285,9 +284,6 @@ func (d *Daemon) Shutdown() {
 func (d *Daemon) Close() {
 	d.Shutdown()
 	d.Registry.Close()
-	if d.browser != nil {
-		_ = d.browser.Close()
-	}
 	if d.Wasm != nil {
 		_ = d.Wasm.Close()
 	}
@@ -306,23 +302,11 @@ func (d *Daemon) startWasm(opt Options) error {
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	br := opt.Browser
-	if br == nil {
-		d.browser = browser.New(func() browser.Settings {
-			if d.Config == nil {
-				return browser.Settings{}
-			}
-			b := d.Config.Current().Browser
-			return browser.Settings{Engine: b.Engine, CDPURL: b.CDPURL, ChromePath: b.ChromePath, ProfileDir: b.ProfileDir,
-				Model: b.Model, ModelKey: b.ModelKey, MaxTextChars: b.MaxTextChars}
-		}, d.Vault.Get)
-		br = d.browser
-	}
 	kv := wasm.KVDir(filepath.Join(d.ConnectorsDir, "data"))
 	e, err := wasm.NewEngine(filepath.Join(opt.Home, "cache", "wasm"), wasm.Services{
 		Secrets: vaultSecrets{d.Vault},
 		KV:      func(name string) hostfuncs.KV { return kv(name) },
-		Browser: br, Log: d.Log, Home: home, Dial: opt.WasmDial, RootCAs: opt.WasmRootCAs})
+		Router:  d, Log: d.Log, Home: home, Dial: opt.WasmDial, RootCAs: opt.WasmRootCAs})
 	if err != nil {
 		return err
 	}

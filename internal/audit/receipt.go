@@ -16,10 +16,12 @@ import (
 
 // Receipt — квитанция на одно действие.
 type Receipt struct {
-	Seq          int64          `json:"seq"`
-	ID           string         `json:"id"`
-	TS           time.Time      `json:"ts"`
-	Agent        string         `json:"agent"`
+	Seq   int64     `json:"seq"`
+	ID    string    `json:"id"`
+	TS    time.Time `json:"ts"`
+	Agent string    `json:"agent"`
+	// Parent — квитанция действия, которое вызвало это через service_call.
+	Parent       string         `json:"parent,omitempty"`
 	Action       string         `json:"action"`
 	Class        string         `json:"class,omitempty"`
 	Args         map[string]any `json:"args"` // после маскирования

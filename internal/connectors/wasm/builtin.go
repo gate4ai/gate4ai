@@ -39,7 +39,7 @@ func (b *Builtin) run(ctx context.Context, op string, settings map[string]any, r
 	lim := b.man.Limits.WithDefaults()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(lim.TimeoutS)*time.Second)
 	defer cancel()
-	d, err := b.e.dispatcher(ctx, b.man, lim, settings)
+	d, err := b.e.Dispatcher(ctx, b.man, lim, settings)
 	if err != nil {
 		return nil, err
 	}

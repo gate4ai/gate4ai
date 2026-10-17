@@ -55,6 +55,11 @@ type Request struct {
 	Args       map[string]any
 	Provenance map[string][]string // аргумент → метки происхождения
 	Now        time.Time
+	// Nested — вызов коннектором через service_call: доступ дан согласием на
+	// capabilities.services вызывающего (профиль агента его не перечисляет), а
+	// без сработавшего правила действие разрешено — его покрывает решение по
+	// родительскому действию. Явные правила deny / ask на действие действуют.
+	Nested bool
 }
 
 // Connector — имя коннектора из действия.

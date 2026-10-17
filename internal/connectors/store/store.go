@@ -2,9 +2,10 @@
 
 // Package store — магазин коннекторов: пакет (.g4c) с подписью издателя,
 // индекс registry с подписью, установка с согласием владельца на возможности,
-// отзыв версий и загрузка установленных коннекторов в WASM-хост. Каталог
-// установленного коннектора: <home>/connectors/<имя>/{manifest.yaml,
-// connector.wasm, install.json}.
+// отзыв версий и загрузка установленных коннекторов: WASM — в WASM-хост,
+// нативные — процессом под надзором (пакет native). Каталог установленного
+// коннектора: <home>/connectors/<имя>/{manifest.yaml, connector.wasm или
+// connector[.exe], install.json}.
 package store
 
 import (
@@ -22,6 +23,7 @@ import (
 	"github.com/gate4ai/sdk-go/manifest"
 
 	"github.com/gate4ai/gate4ai/internal/connectors"
+	"github.com/gate4ai/gate4ai/internal/connectors/native"
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 )
 
@@ -39,8 +41,13 @@ type Installed struct {
 	Info     Info
 }
 
-// Module — путь к WASM-модулю.
-func (i Installed) Module() string { return filepath.Join(i.Dir, ModuleFile) }
+// Module — путь к WASM-модулю или бинарнику нативного коннектора.
+func (i Installed) Module() string {
+	if i.Manifest.Runtime == manifest.RuntimeNative {
+		return filepath.Join(i.Dir, BinaryName(HostPlatform()))
+	}
+	return filepath.Join(i.Dir, ModuleFile)
+}
 
 // List — установленные коннекторы (каталоги с манифестом и модулем).
 func List(dir string) ([]Installed, error) {
@@ -139,7 +146,20 @@ func (o Options) load(it Installed, ix *Index, e *wasm.Engine) (connectors.Clien
 	if err != nil {
 		return nil, err
 	}
-	var c connectors.Client = e.LoadLazy(bin, it.Manifest)
+	var c connectors.Client
+	if it.Manifest.Runtime == manifest.RuntimeNative {
+		log := o.Log
+		if log == nil {
+			log = slog.Default()
+		}
+		p, err := native.New(it.Module(), it.Manifest, e, log)
+		if err != nil {
+			return nil, err
+		}
+		c = p
+	} else {
+		c = e.LoadLazy(bin, it.Manifest)
+	}
 	if it.Info.Trust == TrustCommunity {
 		c = readOnly(c)
 	}
@@ -150,8 +170,11 @@ func (o Options) check(it Installed, ix *Index) ([]byte, error) {
 	if it.Info.Connector != it.Name {
 		return nil, errors.New("not installed with `gate4ai connectors install` (no install.json)")
 	}
-	if it.Manifest.Runtime != manifest.RuntimeWasm {
-		return nil, fmt.Errorf("only runtime wasm is supported, got %q", it.Manifest.Runtime)
+	if it.Manifest.Runtime != manifest.RuntimeWasm && it.Manifest.Runtime != manifest.RuntimeNative {
+		return nil, fmt.Errorf("runtime %q is not supported", it.Manifest.Runtime)
+	}
+	if it.Manifest.Runtime == manifest.RuntimeNative && it.Info.Trust != TrustVerified && it.Info.Trust != TrustLocal {
+		return nil, ErrNativeThirdParty
 	}
 	mb, err := os.ReadFile(filepath.Join(it.Dir, ManifestFile))
 	if err != nil {
@@ -161,7 +184,11 @@ func (o Options) check(it Installed, ix *Index) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if Digest(mb, bin) != it.Info.Digest {
+	digest := Digest(mb, bin)
+	if it.Manifest.Runtime == manifest.RuntimeNative {
+		digest = DigestNative(mb, HostPlatform(), bin)
+	}
+	if digest != it.Info.Digest {
 		return nil, errors.New("files changed after installation (digest mismatch)")
 	}
 	if !equalStrings(it.Manifest.Capabilities.Summary(), nonNil(it.Info.Capabilities)) {

@@ -184,7 +184,7 @@ platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64]
 | `conn_open_plain(host, port, tls)` | соединение без учётки | `capabilities.network` |
 | `conn_write_secret(conn, field, prompt)` | ввести пароль в интерактивный запрос (`sudo`) через auth-модуль — только если последний вывод совпал с `prompt` | слот соединения |
 | `fs_read` / `fs_write` / `fs_append` / `fs_list` / `fs_stat` | работа с файлами | `capabilities.files` + политика пользователя |
-| `service_call(target, action, input)` | действие другого коннектора: вход и выход сверяются со схемами поставщика, вызов проходит Action Pipeline (политика по классу действия поставщика, подтверждение, квитанция с `parent`); глубина вложенности — до 4, циклы запрещены, срок — остаток срока вызывающего | `capabilities.services` (поставщик, мажор контракта, действия); `params` передаются поставщику |
+| `service_call(target, action, input)` | действие другого коннектора: вход и выход сверяются со схемами поставщика, мажор контракта — с `capabilities.services`; вызов проходит Action Pipeline с политикой агента корневого действия: явное правило `deny` на действие поставщика отклоняет вызов, без правила вызов разрешён (его покрывает решение по вызывающему действию), правило `ask` во вложенном вызове не поддерживается (ставится на вызывающее действие); квитанция — с `parent`; глубина вложенности — до 4, циклы запрещены, срок — остаток срока вызывающего | `capabilities.services` (поставщик, мажор контракта, действия); `params` передаются поставщику (`ExecRequest.caller`) |
 | `secret_info(slot)` / `secret_commit` / `secret_discard` | метаданные учётки слота (тип, публичные поля, версия), фиксация или отмена черновой версии (сгенерированный пароль) | только свои слоты |
 | `kv_get` / `kv_set` / `kv_delete` | собственное хранилище коннектора | `capabilities.storage.quota_mb` |
 | `evidence_add(name, mime, data)` | доказательство в журнал | маскирование по `sensitive` |
@@ -242,9 +242,9 @@ SDK: `sdk-go/native` — `native.Serve(connector)` для тех же `connector
 
 ## Текущее состояние и переход
 
-Сделано (этапы 16–19, 23, 26 в PLAN.md): SDK `sdk-go` с манифестом и ABI v2 (формы данных MCP), WASM-хост на wazero, коннекторы `files`, `mail`, `browser`, `tbank` — WASM-модули, браузерный воркер — служба хоста, секреты в `Settings` не передаются, магазин с подписанными пакетами. `browser_act` — методы `click` / `fill` / `press` / `wait` по CSS-селектору и видимому тексту элемента (`text`, `value`, `timeout_ms`); после действия итоговый адрес снова проверяется по `capabilities.browser.domains`.
+Сделано (этапы 16–19, 23, 26–28 в PLAN.md): SDK `sdk-go` с манифестом и ABI v2 (формы данных MCP), WASM-хост на wazero, встроенный коннектор `files` (на PDK, `Engine.Builtin`), нативные пакеты (`internal/connectors/native`: процесс под надзором, JSON-RPC по stdio, `reveal`, перезапуск и отключение после частых падений; магазин — `.g4c` под платформу и список `.platforms.json`), `service_call` и контракты (`sdk-go/contract`, `gate4ai contract gen|diff`), коннекторы `mail`, `tbank` — WASM-модули, `browser` — нативный пакет, секреты в `Settings` не передаются, магазин с подписанными пакетами. `browser.act` — методы `click` / `fill` / `press` / `wait` по CSS-селектору и видимому тексту элемента (`text`, `value`, `timeout_ms`); после действия итоговый адрес снова проверяется по сайтам вызывающего.
 
-Расходится с этим документом в браузере: проверка, что селектор `browser_act` взят из `observe`, и режим «секрет на странице» не делаются — вместе с `browser_fill_secret` / `browser_login` (этап 12). До них в банк человек входит сам в выделенном профиле Chrome.
+Расходится с этим документом в браузере: проверка, что селектор `browser.act` взят из `observe`, и режим «секрет на странице» не делаются — вместе с `fill_secret` / `login` (этап 12). До них в банк человек входит сам в выделенном профиле Chrome.
 
 Расходится с целевой моделью секретов ([secret-architecture.md](secret-architecture.md)):
 - `http_request` подставляет плейсхолдеры `{{secret:@alias}}` по `capabilities.secrets[].bind` → заменяется на `auth: {slot}` и `credentials`;

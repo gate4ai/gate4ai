@@ -233,38 +233,41 @@
 - [x] Встроенный коннектор `files` (`runtime: builtin`, как `gate4ai` в `internal/daemon/selfconfig.go`): действия `read` / `list` / `append` / `write` из `connectors/files` поверх той же файловой песочницы, что у `fs_*` (корни, `RealPath`, доказательства, `verify: read_back`); настройки по-прежнему `connectors.files` (`roots`, `max_bytes`), форма в Web UI; `fs_*` остаются в ABI для WASM-коннекторов
 - [x] Политики по умолчанию: `emptyConfig` — `connectors.files.roots: ["~"]`, профиль `default` с `files` и явным правилом `ask` на каждое действие (видно в `policy`, Web UI, `policy_summary`)
 - [x] Переход установок: установленный из магазина `files` при старте daemon удаляется как пакет, настройки и правила сохраняются (имена действий те же), запись в журнал; `defaultConnectors` = `["browser"]`
-- [ ] registry: запись `files` выведена (новых версий нет), репозиторий `gate4ai-files` — в архив; publishing.md
+- [x] registry: запись `files` не обновляется (прежние ядра ставят её; ядро v0.6 её не показывает и не ставит); publishing.md; архив `gate4ai-files` — в пункте выпуска
 - [x] Тесты: свежая установка (правила видны, действия ask), переход с пакета, корни, `verify`
 
 **28c. Нативный пакет: формат и магазин**
-- [ ] Манифест (sdk-go): `runtime: native`, `platforms`, `contract` (мажор контракта служб), `services` (действия для `service_call`), `expose` (действия как инструменты агента); проверка манифеста
-- [ ] `pack.json` с артефактами по платформам (`os`, `arch`, `url`, `sha256`), подпись издателя на весь `pack.json`; установка скачивает только свою платформу, сверяет подпись и хеш
-- [ ] Шаблон CI пакета: GoReleaser под платформы gate4ai, `CGO_ENABLED=0 -trimpath`, релиз с артефактами и `pack.json`
-- [ ] CI registry: проверка каждого артефакта, воспроизводимая пересборка из тега под каждую платформу
-- [ ] Доверие: нативный пакет ставится только от проверенного издателя (`TrustVerified`, `gate4ai`), иначе отказ с текстом «нативные пакеты сторонних издателей пока не принимаются — свяжитесь с нами, мы благосклонны»; тот же текст — в CONTRIBUTING.md registry и connector-architecture.md; на экране согласия — «работает без песочницы, с правами пользователя»
+- [x] Манифест (sdk-go): `runtime: native`, `platforms`, `contract`, `services`, `service_only` (действие только для других коннекторов, агенту не показывается), `capabilities.services`, `capabilities.reveal` (только native); проверка манифеста
+- [x] Пакет `.g4c` под платформу (`connector`/`connector.exe`, платформа в `package.json` и в дайджесте) и список `<connector>-<version>.platforms.json`; запись индекса ссылается на список прежними полями; установка скачивает только свою платформу, сверяет sha256, дайджест и подпись издателя
+- [x] Сборка: `gate4ai connectors pack` под каждую платформу из `manifest.platforms` (`CGO_ENABLED=0 -trimpath -buildvcs=false`, Go из `go.mod`), `verify` пересобирает каждую платформу списка; CI `gate4ai-browser` выпускает все `.g4c`, список и `pack.json`
+- [ ] CI registry: новые версии с `.platforms.json` пересобираются по каждой платформе (`gate4ai connectors verify src <url>`) — в pull request с browser 6
+- [x] Доверие: нативный пакет — только `TrustVerified` или своя сборка владельца (`--dev`), иначе отказ «native packages are accepted only from gate4.ai for now … contact us … we are open to it»; предупреждение на экране согласия; текст для издателей — connector-architecture.md, README sdk-go
+- [ ] Тот же текст — в CONTRIBUTING.md registry (в pull request с browser 6)
 
 **28d. Надзор за нативными службами**
-- [ ] `internal/connectors/native`: дочерний процесс на экземпляр, JSON-RPC по stdio (`initialize` — версия протокола, контракт, манифест; `execute`; `shutdown`), перезапуск с растущей паузой, статус в `connectors`, Web UI, `doctor`, лог процесса — в лог daemon без секретов
-- [ ] Обновление и удаление без перезапуска daemon; несовместимый протокол или контракт — ошибка установки
-- [ ] `sdk-go/native`: `native.Serve(handler)` и сообщения протокола (ничего от конкретных служб)
-- [ ] Тесты на фейковом нативном бинарнике: падение и перезапуск, таймаут, обновление, несовместимый контракт
+- [x] `internal/connectors/native`: процесс на коннектор при первом вызове, JSON-RPC 2.0 по stdio (`initialize` — протокол и манифест, `execute`, `verify`, `end_call`, `shutdown`; процесс → хост `host` — функции хоста с проверкой возможностей), `reveal`, stderr — в лог daemon, таймаут вызова
+- [x] Падение — перезапуск при следующем вызове, больше 5 падений за минуту — коннектор отключён до обновления или перезапуска daemon
+- [x] Обновление и удаление без перезапуска daemon: процесс останавливается до замены файлов (Windows), при неудаче прежняя версия загружается снова; несовместимый протокол или манифест — ошибка
+- [x] `sdk-go/native`: `native.Serve`, `ServeIO`, `Peer` (вызовы в обе стороны), `CallEnder`
+- [x] Тесты на настоящем процессе (тестовый бинарник): функции хоста и `capability_denied`, `reveal`, таймаут, падение и перезапуск, отключение, чужой манифест, отсутствующий бинарник
+- [x] Состояние процесса (`stopped` / `running` / `disabled`) в `GET /v1/connectors` и в Web UI
 
 **28e. `service_call`, контракты, генерация**
-- [ ] ABI: `service_call(target, action, input)`; манифест потребителя — `capabilities.services: [{target, contract, actions}]` (для браузера — с `sites`)
-- [ ] Вложенный вызов — через Pipeline: политика и подтверждение по классу вызываемого действия, `parent_call_id` в квитанции, лимит глубины, запрет циклов, общий таймаут; секреты и настройки вызываемого остаются при нём; вход и выход сверяются с JSON Schema
-- [ ] `gate4ai contract gen <manifest> --lang go` — клиент и серверный `Handler`; `gate4ai contract diff old new` — несовместимое изменение без повышения `contract` — ошибка (CI пакетов и registry)
+- [x] ABI: `service_call(target, action, args)`; `ExecRequest.Caller` (коннектор, корневой вызов, `params`) и `Revealed`; `hostfuncs.ServiceRouter` вместо `Browser`
+- [x] Вложенный вызов — `Pipeline.ExecuteNested`: поставщик, `IsService`, мажор контракта, нормализация по схеме поставщика, политика агента корневого действия (`policy.Request.Nested`: `deny` отклоняет, без правила разрешено, `ask` не поддерживается), квитанция с `parent`, глубина до 4, запрет циклов, код ошибки поставщика доходит до вызывающего, `end_call` по концу корневого действия
+- [x] `sdk-go/contract`: `Diff` / `Check` (вход: сужение ломает, выход: исчезновение и смена типа ломают), `Gen` — Go-клиент; CLI `gate4ai contract gen|diff`; CI `gate4ai-browser` сверяет манифест с прошлым тегом
 
 **28f. Браузер — нативный пакет**
-- [ ] `internal/hostsvc/browser` → `connectors/browser` (бинарник): воркер, Executor, `Sites`; действия агента `read` / `screenshot` / `extract` (`expose`), действия службы `open` / `observe` / `act` / `extract` / `screenshot`; страница — одна на корневой вызов, освобождается по `end_call`
-- [ ] Контракт `browser` для потребителей: копия манифеста в `contracts/browser.yaml` потребителя, клиент — `gate4ai contract gen`
-- [ ] Ядро: `internal/hostsvc/browser` удалён; прослойка `browser_*` → нативная служба до перехода `tbank`
+- [x] `internal/hostsvc/browser` → `connectors/browser/worker`; коннектор: действия агента `read` / `screenshot` / `extract` (сайты из настроек), действия для коннекторов `open` / `observe` / `act` / `page_extract` / `page_screenshot` (`service_only`, сайты — `params` вызывающего, страница — одна на корневое действие, освобождается по `end_call` или через 2 минуты простоя)
+- [x] Контракт `browser` для потребителей: копия манифеста в `contracts/browser.yaml`, клиент — `gate4ai contract gen`
+- [x] Ядро: `internal/hostsvc/browser` удалён (прослойка `browser_*` не понадобилась: WASM-браузер daemon заменяет нативным из магазина, `tbank` переведён в той же серии); раздел `browser` конфигурации переносится в `connectors.browser`; подсказки настроек в Web UI
 
 **28g. Потребители и уборка**
-- [ ] `tbank`: `browser_*` → `service_call` через сгенерированный клиент `browser`, тесты на фейковом клиенте
-- [ ] sdk-go: убрать `browser_*`, `Browser`, `BrowserSession`, `domain.Sites` из ядра SDK (минорная версия с записью о несовместимости); ядро — без прослойки
-- [ ] e2e: встроенный `files`, установка нативного `browser` (фейковый Chrome по CDP), `service_call` из WASM в нативную службу
-- [ ] Документы: specification.md (после подтверждения), connector-architecture.md, architecture.md, publishing.md, quickstart.md, README.md, сайт
-- [ ] Порядок выпуска: sdk-go (`native`, `service_call`) → ядро (надзор, `files`, прослойка) → `gate4ai-browser` v5 native + registry → `tbank` → sdk-go без `browser_*` → ядро без прослойки → релиз ядра
+- [x] `tbank` (версия 2): `service_call` через сгенерированный `browserclient`, тесты на фейке поставщика
+- [x] sdk-go v0.6.0: `browser_*`, `Browser`, `BrowserSession`, `capabilities.browser` убраны (`domain.Sites` остаётся общим списком сайтов)
+- [x] e2e: встроенный `files`, нативный `browser` из исходников, `service_call` WASM → нативный (`testdata/pagereader`, headless Chrome), `tbank` через нативный браузер
+- [x] Документы: specification.md 0.6, connector-architecture.md 0.4, architecture.md, secret-architecture.md, publishing.md, quickstart.md, README.md; README sdk-go, gate4ai-browser, tbank
+- [ ] Выпуск: sdk-go v0.6.0 → ядро → gate4ai-browser → e2e (CI зелёный) → gate4ai-browser v6 (native) + registry → релиз ядра v0.6.0 → локальная установка; `gate4ai-files` — в архив
 
 ## Допущения
 
@@ -345,7 +348,7 @@
 
 - **Коннектор из папки (этап 27):** собирает CLI, а не daemon: у daemon своё окружение (запущен службой, без `go.work` и `GOFLAGS` разработчика), а сборка коннектора часто зависит от локального workspace (например, коннектор на невыпущенной версии sdk-go). Сборка в daemon из `dir:` — только запасной путь для обновления без CLI. Установка из папки всегда «своя сборка» (как `--dev`): пакет без подписи, предупреждение и согласие на возможности — как у `.g4c --dev`.
 
-- **Этап 28 (2026-10-17):** (1) страница браузера для `service_call` — одна на корневой вызов и освобождается по `end_call`, без явного `session_id`: потребителю не нужно управлять сессией, утечек нет; (2) внешней проверки итогового адреса в daemon нет — смысл `params` знает только поставщик, а нативный пакет и так доверенный; (3) Go-клиент поставщика генерирует потребитель из копии манифеста поставщика (`contracts/<имя>.yaml`): теги коннекторов (`v4`) — не semver, отдельный Go-модуль клиента пришлось бы версионировать отдельно; (4) настройки браузерной службы переезжают из раздела `browser` в `connectors.browser`, ключ модели — через `reveal`; daemon один раз переносит старый раздел новой версией конфигурации.
+- **Этап 28 (2026-10-17):** (1) страница браузера для `service_call` — одна на корневой вызов и освобождается по `end_call`, без явного `session_id`: потребителю не нужно управлять сессией, утечек нет; (2) внешней проверки итогового адреса в daemon нет — смысл `params` знает только поставщик, а нативный пакет и так доверенный; (3) Go-клиент поставщика генерирует потребитель из копии манифеста поставщика (`contracts/<имя>.yaml`): теги коннекторов (`v4`) — не semver, отдельный Go-модуль клиента пришлось бы версионировать отдельно; (4) настройки браузерной службы переезжают из раздела `browser` в `connectors.browser`, ключ модели — через `reveal`; daemon один раз переносит старый раздел новой версией конфигурации. (5) запись нативной версии в индексе registry ссылается на `.platforms.json` прежними полями `url` / `sha256` / `digest`: индекс разбирается с `DisallowUnknownFields`, новое поле сломало бы магазин у всех ядер v0.5; прежние ядра просто не могут поставить browser 6; (6) сборка нативных пакетов — `gate4ai connectors pack`, а не GoReleaser: тот же путь, что у WASM, и тот же `verify` для ревью registry; (7) **расхождение со спецификацией 0.6** (на подтверждение человека): там «вложенный вызов — политика по классу вызываемого действия, подтверждение»; сделано — без правила вложенный вызов разрешён (его покрывает решение по вызывающему действию, иначе каждый шаг `browser.act` у `tbank` шёл бы на подтверждение), явный `deny` действует, `ask` во вложенном вызове не поддерживается (правило ставится на вызывающее действие); (8) браузер — версия 6 (версия 5 — WASM, выпущена 2026-10-17 до этапа); tbank — версия 2.
 
 ## Нужно от человека
 
@@ -406,3 +409,5 @@
 - 2026-10-16 — этап 26 — `browser_act` в sdk-go и браузерном воркере (CDP, Stagehand), коннектор `tbank` (СБП по телефону, перевод по карте, оплата счёта по УИН и реквизитам, проверка по ленте операций), e2e на настоящем Chrome с фейковым сайтом банка
 - 2026-10-16 — этап 27 — установка коннектора из папки с исходниками: `connectors install <папка>`, `update` пересобирает из неё, `--watch` на каждое изменение; сборка в окружении CLI, источник `dir:` в install.json
 - 2026-10-17 — лицензии — всё под AGPL-3.0-only, кроме sdk-go (Apache-2.0) и registry (CC0): LICENSE ядра и relay, SPDX-заголовки, `LICENSE-EXCEPTION` ядра для коннекторов через ABI, исключение в коннекторах снято, CLA для всех AGPL-репозиториев; документация, спецификация (с согласия человека), сайт
+- 2026-10-17 — выпуск v0.5.1 — переход на sdk-go v0.5.0 (сайты браузера: белый и чёрный список), лицензии AGPL; CI и release зелёные, gate4.ai/latest отдаёт v0.5.1, локальная установка обновлена
+- 2026-10-17 — этап 28 — files встроен в ядро; нативные пакеты (процесс под надзором, магазин с .platforms.json); service_call и контракты (sdk-go v0.6.0: native, contract; browser_* убраны); браузер — нативный пакет gate4ai-browser 6, tbank 2 через service_call; спецификация 0.6

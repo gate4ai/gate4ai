@@ -46,13 +46,8 @@ func (ix *Index) VerifyPackages(ctx context.Context, base string) (checked int, 
 	for _, name := range names {
 		e := ix.Connectors[name]
 		for _, rel := range e.Versions {
-			ref := resolveRef(base, rel.URL)
-			b, err := fetch(ctx, ref)
-			if err == nil {
-				_, err = CheckRelease(b, name, e.Publisher, rel, ix.Publishers[e.Publisher])
-			}
-			if err != nil {
-				errs = append(errs, fmt.Sprintf("%s %s (%s): %v", name, rel.Version, ref, err))
+			if _, err := FetchRelease(ctx, base, name, e.Publisher, rel, ix.Publishers[e.Publisher], ""); err != nil {
+				errs = append(errs, fmt.Sprintf("%s %s: %v", name, rel.Version, err))
 				continue
 			}
 			checked++
@@ -63,6 +58,7 @@ func (ix *Index) VerifyPackages(ctx context.Context, base string) (checked int, 
 
 // PackInfo — вывод gate4ai connectors pack (pack.json релиза).
 type PackInfo struct {
+	Package      string   `json:"package,omitempty"` // файл пакета (у нативного — список платформ)
 	Connector    string   `json:"connector"`
 	Version      string   `json:"version"`
 	Digest       string   `json:"digest"`

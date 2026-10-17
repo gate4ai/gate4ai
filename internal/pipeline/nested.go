@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package pipeline
+
+import (
+	"context"
+	"slices"
+	"strings"
+
+	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/sdk-go/manifest"
+
+	"github.com/gate4ai/gate4ai/internal/config"
+	"github.com/gate4ai/gate4ai/internal/policy"
+)
+
+// MaxDepth — глубина вложенных вызовов service_call.
+const MaxDepth = 4
+
+// callInfo — исполняемое действие: на него ссылаются вложенные вызовы.
+type callInfo struct {
+	Agent string
+	ID    string   // квитанция этого действия
+	Root  string   // квитанция корневого действия агента
+	Depth int      // 0 — действие агента
+	Chain []string // коннекторы от корня до этого действия
+}
+
+type callKey struct{}
+
+func withCall(ctx context.Context, c callInfo) context.Context {
+	return context.WithValue(ctx, callKey{}, c)
+}
+
+func callFrom(ctx context.Context) (callInfo, bool) {
+	c, ok := ctx.Value(callKey{}).(callInfo)
+	return c, ok
+}
+
+// nestedKey — вызывающий коннектор вложенного вызова (для ExecRequest.Caller).
+type nestedKey struct{}
+
+type nestedCall struct {
+	caller string
+	params map[string]any
+}
+
+// ExecuteNested — вызов service_call коннектора caller во время его действия
+// (ctx — контекст этого действия): поставщик и контракт сверяются с
+// разрешением rule из манифеста вызывающего, аргументы — со схемой поставщика;
+// решение — по правилам профиля агента корневого действия (policy.Request.Nested:
+// без правила действие покрыто решением по родительскому). Квитанция ссылается
+// на родительскую; страница и прочее состояние поставщика живут до конца
+// корневого действия (Caller.Call).
+func (p *Pipeline) ExecuteNested(ctx context.Context, caller string, rule manifest.ServiceRule, r abi.ServiceCallRequest) (abi.ExecResult, error) {
+	parent, ok := callFrom(ctx)
+	if !ok {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "service_call is only available while an action runs")
+	}
+	full := r.Target + "." + r.Action
+	if parent.Depth+1 >= MaxDepth {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeLimit, "service_call %s: nesting deeper than %d", full, MaxDepth)
+	}
+	if slices.Contains(parent.Chain, r.Target) {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "service_call %s: cycle %s → %s", full, strings.Join(parent.Chain, " → "), r.Target)
+	}
+	cli, act, ok := p.Registry.Lookup(full)
+	if !ok {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeNotFound, "service_call %s: connector or action is not installed", full)
+	}
+	m := cli.Manifest()
+	if !m.IsService(r.Action) {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "service_call %s: %s does not offer %s to other connectors", full, r.Target, r.Action)
+	}
+	if m.Contract != rule.Contract {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeNotSupported, "service_call %s: %s %s provides contract %d, %s needs contract %d: update the connectors",
+			full, r.Target, m.Version, m.Contract, caller, rule.Contract)
+	}
+	args, err := act.Normalize(r.Args)
+	if err != nil {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "service_call %s: %v", full, err)
+	}
+	req := policy.Request{Agent: parent.Agent, Action: full, Class: act.Class, Args: args, Provenance: p.provenance(args), Now: p.Now(), Nested: true}
+	dec := p.Engine().Decide(req, p.State.Counters())
+	switch dec.Effect {
+	case config.EffectDeny:
+		res := p.deny(parent.Agent, act, full, args, dec, nil)
+		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "service_call %s denied by policy: %s", full, res.Reason)
+	case config.EffectAsk:
+		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied,
+			"service_call %s: rule %s asks for approval, which is not supported for nested calls; put the ask rule on the calling action instead",
+			full, strings.Join(dec.RuleIDs, ", "))
+	}
+	ctx = context.WithValue(ctx, nestedKey{}, nestedCall{caller: caller, params: rule.Params})
+	res := p.run(ctx, parent.Agent, full, cli, act, args, dec, nil)
+	switch res.Status {
+	case StatusOK:
+	case StatusVerificationFailed:
+		return abi.ExecResult{}, abi.Errorf(abi.CodeConnector, "service_call %s: %s", full, res.Message)
+	default:
+		code := abi.CodeConnector
+		switch {
+		case res.connectorCode != "":
+			code = res.connectorCode
+		case res.Code == CodeInvalidArgs:
+			code = abi.CodeBadRequest
+		}
+		return abi.ExecResult{}, abi.Errorf(code, "service_call %s: %s", full, res.Message)
+	}
+	return abi.ExecResult{Structured: res.Result, Content: res.Content, ResultRef: res.ID}, nil
+}

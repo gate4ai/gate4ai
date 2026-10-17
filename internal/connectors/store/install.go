@@ -7,12 +7,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/gate4ai/sdk-go/manifest"
+
+	"github.com/gate4ai/gate4ai/internal/connectors/native"
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 )
 
@@ -38,6 +42,7 @@ type Options struct {
 	RegistryKeys []string // ключи подписи индекса
 	TrustedKeys  []string // ключи издателей, которым владелец доверяет без registry
 	Builtin      []string // имена коннекторов ядра: из магазина не ставятся
+	Log          *slog.Logger
 }
 
 // Plan — что будет установлено; показывается владельцу для согласия.
@@ -52,14 +57,20 @@ type Plan struct {
 	Classes      []string `json:"classes"`
 	Installed    string   `json:"installed,omitempty"` // установленная версия
 	// NeedsConsent — возможности новые или изменились по сравнению с согласованными.
-	NeedsConsent bool     `json:"needs_consent"`
-	Warnings     []string `json:"warnings,omitempty"`
+	NeedsConsent bool `json:"needs_consent"`
+	// Native — нативный пакет: работает без песочницы, с правами пользователя.
+	Native   bool     `json:"native,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 
 	pkg *Package
 }
 
 // ErrConsent — установка требует согласия на возможности.
 var ErrConsent = errors.New("consent required")
+
+// ErrNativeThirdParty — нативный пакет не от gate4.ai (и не своя сборка владельца).
+var ErrNativeThirdParty = errors.New("native packages are accepted only from gate4.ai for now (they run without a sandbox); " +
+	"if you want to publish one, contact us at https://gate4.ai — we are open to it")
 
 func (o Options) indexKeysOK() bool { return o.Registry != "" && len(o.RegistryKeys) > 0 }
 
@@ -159,6 +170,16 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 		p.Installed = info.Version
 		p.NeedsConsent = !slices.Equal(info.Capabilities, p.Capabilities)
 	}
+	if m.Runtime == manifest.RuntimeNative {
+		if p.Trust != TrustVerified && p.Trust != TrustLocal {
+			return nil, fmt.Errorf("connector %s: %s", m.Connector, ErrNativeThirdParty)
+		}
+		if p.pkg.Sig.Platform != HostPlatform() {
+			return nil, fmt.Errorf("connector %s: the package is built for %s, this computer is %s", m.Connector, p.pkg.Sig.Platform, HostPlatform())
+		}
+		p.Native = true
+		p.Warnings = append(p.Warnings, "native connector: runs as a separate program without a sandbox, with your user's rights")
+	}
 	if p.Trust == TrustCommunity {
 		p.Warnings = append(p.Warnings, "community connector: not reviewed by gate4.ai; only read actions will be available")
 	}
@@ -211,20 +232,34 @@ func (o Options) prepareDir(ctx context.Context, dir string, dev bool) (*Plan, e
 	if err != nil {
 		return nil, err
 	}
+	m, err := manifest.Parse(man)
+	if err != nil {
+		return nil, err
+	}
 	tmp, err := os.MkdirTemp("", "g4abuild")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(tmp)
 	out := filepath.Join(tmp, ModuleFile)
-	if err := wasm.BuildGo(ctx, dir, out); err != nil {
+	build := func() error { return wasm.BuildGo(ctx, dir, out) }
+	if m.Runtime == manifest.RuntimeNative {
+		out = filepath.Join(tmp, BinaryName(HostPlatform()))
+		build = func() error { return native.BuildGo(ctx, dir, HostPlatform(), out) }
+	}
+	if err := build(); err != nil {
 		return nil, err
 	}
 	wb, err := os.ReadFile(out)
 	if err != nil {
 		return nil, err
 	}
-	b, err := Pack(man, wb, nil)
+	var b []byte
+	if m.Runtime == manifest.RuntimeNative {
+		b, err = PackNative(man, wb, HostPlatform(), nil)
+	} else {
+		b, err = Pack(man, wb, nil)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -260,14 +295,9 @@ func (o Options) prepareRegistry(ctx context.Context, source string) (*Plan, err
 		return nil, err
 	}
 	pub := ix.Publishers[e.Publisher]
-	ref := resolveRef(o.Registry, rel.URL)
-	b, err := fetch(ctx, ref)
+	pkg, err := FetchRelease(ctx, o.Registry, name, e.Publisher, rel, pub, HostPlatform())
 	if err != nil {
-		return nil, fmt.Errorf("download %s: %w", ref, err)
-	}
-	pkg, err := CheckRelease(b, name, e.Publisher, rel, pub)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", ref, err)
+		return nil, err
 	}
 	return &Plan{Source: "registry:" + name + "@" + rel.Version, Trust: pub.Trust, Publisher: e.Publisher, Repo: e.Repo, pkg: pkg}, nil
 }
@@ -281,10 +311,15 @@ func nonNil(s []string) []string {
 	return out
 }
 
+// ConsentOK — согласия consent достаточно для установки плана.
+func (p *Plan) ConsentOK(consent []string) bool {
+	return !p.NeedsConsent || slices.Equal(nonNil(consent), nonNil(p.Capabilities))
+}
+
 // Install устанавливает пакет плана. consent — возможности, на которые
 // согласился владелец; они должны совпасть с планом, если согласие нужно.
 func (o Options) Install(p *Plan, consent []string) (Info, error) {
-	if p.NeedsConsent && !slices.Equal(nonNil(consent), nonNil(p.Capabilities)) {
+	if !p.ConsentOK(consent) {
 		return Info{}, ErrConsent
 	}
 	name := p.Connector
@@ -301,11 +336,17 @@ func (o Options) Install(p *Plan, consent []string) (Info, error) {
 	info := Info{Connector: name, Version: p.Version, Digest: p.pkg.Sig.Digest, Trust: p.Trust, Publisher: p.Publisher,
 		Source: p.Source, Capabilities: nonNil(p.Capabilities), InstalledAt: time.Now().UTC()}
 	ib, _ := json.MarshalIndent(info, "", "  ")
-	for _, f := range []struct {
+	type file struct {
 		name string
 		data []byte
-	}{{ManifestFile, p.pkg.ManifestYAML}, {ModuleFile, p.pkg.Wasm}, {InfoFile, ib}} {
-		if err := os.WriteFile(filepath.Join(tmp, f.name), f.data, 0o600); err != nil {
+		mode os.FileMode
+	}
+	files := []file{{ManifestFile, p.pkg.ManifestYAML, 0o600}, {ModuleFile, p.pkg.Wasm, 0o600}, {InfoFile, ib, 0o600}}
+	if p.pkg.Native() {
+		files[1] = file{BinaryName(p.pkg.Sig.Platform), p.pkg.Binary, 0o700}
+	}
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(tmp, f.name), f.data, f.mode); err != nil {
 			return Info{}, err
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -62,6 +63,8 @@ type Result struct {
 	RuleIDs      []string      `json:"rule_ids,omitempty"`
 	Message      string        `json:"message,omitempty"`
 	Provenance   *Provenance   `json:"provenance,omitempty"`
+	// connectorCode — код ошибки коннектора (abi) для вложенного вызова.
+	connectorCode string
 }
 
 // Provenance — метка недоверенного контента в ответе.
@@ -99,6 +102,9 @@ type Pipeline struct {
 	// решения политики (ключ — коннектор): ошибка — invalid_arguments, текст —
 	// «что именно будет сделано» в запросе подтверждения вместо списка аргументов.
 	Describe map[string]func(agent string, args map[string]any) (string, error)
+	// EndCall — корневое действие агента закончилось (вместе с вложенными
+	// вызовами): поставщики освобождают его состояние.
+	EndCall func(root string)
 
 	mu      sync.RWMutex
 	engine  *policy.Engine
@@ -149,6 +155,12 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 		return res
 	}
 	conn := strings.SplitN(c.Action, ".", 2)[0]
+	if act.ServiceOnly {
+		// Действие только для других коннекторов (service_call): агент его не видит.
+		res.Status, res.Code = StatusError, CodeUnknownAction
+		res.Message = fmt.Sprintf("unknown action %q", c.Action)
+		return res
+	}
 	if prof, ok := p.cfg().ProfileOf(c.Agent); !ok || (!prof.HasConnector(conn) && !(c.Internal && policy.Implicit[conn]) && !policy.Everyone[conn]) || (policy.Implicit[conn] && !c.Internal) {
 		// Коннекторы вне профиля агент не видит вовсе.
 		res.Status, res.Code = StatusError, CodeUnknownAction
@@ -237,17 +249,35 @@ func (p *Pipeline) run(ctx context.Context, agent, action string, cli connectors
 	// подставляет хост только в функциях хоста и только для адресов привязки.
 	settings := p.cfg().Connectors[conn]
 	// 6. Исполнение.
-	receipt := &audit.Receipt{Agent: agent, Action: action, Class: act.Class, Args: p.maskArgs(act, args),
+	receipt := &audit.Receipt{ID: audit.NewID(), Agent: agent, Action: action, Class: act.Class, Args: p.maskArgs(act, args),
 		Decision: audit.Decision{Effect: config.EffectAllow, RuleIDs: dec.RuleIDs, Reason: dec.Reason}, Approval: appr}
 	if appr != nil {
 		receipt.Decision.Effect = config.EffectAsk
 	}
-	ex, err := cli.Execute(WithAgent(ctx, agent), abi.ExecRequest{Action: act.Name, Args: args, Settings: settings})
+	// Вложенные вызовы (service_call) ссылаются на это действие; состояние
+	// поставщиков живёт до конца корневого действия.
+	info := callInfo{Agent: agent, ID: receipt.ID, Root: receipt.ID, Chain: []string{conn}}
+	exReq := abi.ExecRequest{Action: act.Name, Args: args, Settings: settings}
+	if parent, ok := callFrom(ctx); ok {
+		receipt.Parent = parent.ID
+		info.Root, info.Depth, info.Chain = parent.Root, parent.Depth+1, append(slices.Clone(parent.Chain), conn)
+		if n, ok := ctx.Value(nestedKey{}).(nestedCall); ok {
+			exReq.Caller = &abi.Caller{Connector: n.caller, Call: parent.Root, Params: n.params}
+		}
+	} else if p.EndCall != nil {
+		defer p.EndCall(info.Root)
+	}
+	ctx = withCall(ctx, info)
+	ex, err := cli.Execute(WithAgent(ctx, agent), exReq)
 	if err != nil {
 		receipt.Execution = audit.Execution{Status: "error", Error: p.maskString(err.Error())}
 		receipt.Verification = audit.Verification{Status: "not_applicable"}
 		hash, _ := p.Journal.Append(receipt)
 		res.Status, res.Code = StatusError, CodeExecution
+		var ae *abi.Error
+		if errors.As(err, &ae) {
+			res.connectorCode = ae.Code
+		}
 		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "connection closed") {
 			res.Code = CodeOffline
 		}
