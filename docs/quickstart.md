@@ -199,3 +199,15 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 ## Тесты
 
 `go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из спецификации на собранных бинарниках и настоящих коннекторах — в репозитории [gate4ai/e2e](https://github.com/gate4ai/e2e).
+
+## Разработка из общего каталога репозиториев
+
+Скрипты запускаются из каталога, где рядом лежат клоны `gate4ai/`, `sdk-go/`, `relay/`, `connectors/*`, `e2e/` (или из набора worktree задачи pitwall с той же раскладкой). Go-модули собираются вместе через временный `go.work` (`GOWORK`), так что правка `sdk-go` сразу видна ядру и коннекторам; в дереве ничего не остаётся.
+
+```sh
+PITWALL_REPOS="gate4ai connectors/mail" gate4ai/scripts/test-set.sh   # vet и тесты изменённых репозиториев; e2e — если изменились sdk-go или два Go-репозитория
+PORT=7531 gate4ai/scripts/stand.sh                                     # dev-стенд: daemon из исходников на 127.0.0.1:$PORT, данные в .stand/, коннекторы из папок с --watch
+STAND_PUBLIC=1 PORT=7531 gate4ai/scripts/stand.sh                      # то же, плюс адрес в relay.gate4.ai для claude.ai
+```
+
+Стенд не трогает установленный `gate4ai`: свои данные, сокеты в `/tmp`, хранилище ключей в файле, без трея и автозапуска.
