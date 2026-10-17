@@ -240,9 +240,9 @@
 - [x] Манифест (sdk-go): `runtime: native`, `platforms`, `contract`, `services`, `service_only` (действие только для других коннекторов, агенту не показывается), `capabilities.services`, `capabilities.reveal` (только native); проверка манифеста
 - [x] Пакет `.g4c` под платформу (`connector`/`connector.exe`, платформа в `package.json` и в дайджесте) и список `<connector>-<version>.platforms.json`; запись индекса ссылается на список прежними полями; установка скачивает только свою платформу, сверяет sha256, дайджест и подпись издателя
 - [x] Сборка: `gate4ai connectors pack` под каждую платформу из `manifest.platforms` (`CGO_ENABLED=0 -trimpath -buildvcs=false`, Go из `go.mod`), `verify` пересобирает каждую платформу списка; CI `gate4ai-browser` выпускает все `.g4c`, список и `pack.json`
-- [ ] CI registry: новые версии с `.platforms.json` пересобираются по каждой платформе (`gate4ai connectors verify src <url>`) — в pull request с browser 6
+- [x] CI registry: новые версии с `.platforms.json` пересобираются по каждой платформе (`gate4ai connectors verify src <url>`) — в pull request с browser 6
 - [x] Доверие: нативный пакет — только `TrustVerified` или своя сборка владельца (`--dev`), иначе отказ «native packages are accepted only from gate4.ai for now … contact us … we are open to it»; предупреждение на экране согласия; текст для издателей — connector-architecture.md, README sdk-go
-- [ ] Тот же текст — в CONTRIBUTING.md registry (в pull request с browser 6)
+- [x] Тот же текст — в CONTRIBUTING.md registry (в pull request с browser 6)
 
 **28d. Надзор за нативными службами**
 - [x] `internal/connectors/native`: процесс на коннектор при первом вызове, JSON-RPC 2.0 по stdio (`initialize` — протокол и манифест, `execute`, `verify`, `end_call`, `shutdown`; процесс → хост `host` — функции хоста с проверкой возможностей), `reveal`, stderr — в лог daemon, таймаут вызова
@@ -267,7 +267,7 @@
 - [x] sdk-go v0.6.0: `browser_*`, `Browser`, `BrowserSession`, `capabilities.browser` убраны (`domain.Sites` остаётся общим списком сайтов)
 - [x] e2e: встроенный `files`, нативный `browser` из исходников, `service_call` WASM → нативный (`testdata/pagereader`, headless Chrome), `tbank` через нативный браузер
 - [x] Документы: specification.md 0.6, connector-architecture.md 0.4, architecture.md, secret-architecture.md, publishing.md, quickstart.md, README.md; README sdk-go, gate4ai-browser, tbank
-- [ ] Выпуск: sdk-go v0.6.0 → ядро → gate4ai-browser → e2e (CI зелёный) → gate4ai-browser v6 (native) + registry → релиз ядра v0.6.0 → локальная установка; `gate4ai-files` — в архив
+- [x] Выпуск: sdk-go v0.6.0 → ядро → gate4ai-browser → e2e (CI зелёный) → gate4ai-browser v6 (native) + registry → релиз ядра v0.6.0 → локальная установка; `gate4ai-files` — в архив
 
 ## Допущения
 
@@ -411,3 +411,4 @@
 - 2026-10-17 — лицензии — всё под AGPL-3.0-only, кроме sdk-go (Apache-2.0) и registry (CC0): LICENSE ядра и relay, SPDX-заголовки, `LICENSE-EXCEPTION` ядра для коннекторов через ABI, исключение в коннекторах снято, CLA для всех AGPL-репозиториев; документация, спецификация (с согласия человека), сайт
 - 2026-10-17 — выпуск v0.5.1 — переход на sdk-go v0.5.0 (сайты браузера: белый и чёрный список), лицензии AGPL; CI и release зелёные, gate4.ai/latest отдаёт v0.5.1, локальная установка обновлена
 - 2026-10-17 — этап 28 — files встроен в ядро; нативные пакеты (процесс под надзором, магазин с .platforms.json); service_call и контракты (sdk-go v0.6.0: native, contract; browser_* убраны); браузер — нативный пакет gate4ai-browser 6, tbank 2 через service_call; спецификация 0.6
+- 2026-10-17 — выпуск v0.6.0 — этап 28: sdk-go v0.6.2 (v0.6.1 — гонка перезапуска процесса, v0.6.2 — устаревший capabilities.browser читается), gate4ai-browser 6 (native) в registry (#3), сайт: встроенный files и нативные пакеты в каталоге; CI и release зелёные, gate4.ai/latest отдаёт v0.6.0; локально WASM-браузер 4 заменён нативным 6 из магазина; gate4ai-files — в архиве
