@@ -92,6 +92,17 @@ func TestFirstRunPaths(t *testing.T) {
 	if cfg.Agents["cursor"].Profile != "cursor" || !cfg.Profiles["cursor"].HasConnector("notes") || len(cfg.Profiles["cursor"].Rules) != 1 {
 		t.Fatalf("%+v", cfg.Profiles["cursor"])
 	}
+	// Блок «для нового профиля» помечен для показа только при profile=_new.
+	if p := get("/agents/new?client=cli"); !strings.Contains(p, `data-show-when="profile=_new"`) || !strings.Contains(p, `value="cursor">существующий: cursor`) {
+		t.Fatal("new-profile block", p)
+	}
+	// С существующим профилем поля нового профиля не приходят и не нужны.
+	if p := post("/agents", url.Values{"name": {"cli2"}, "client": {"cli"}, "profile": {"cursor"}}); !strings.Contains(p, "Агент cli2 добавлен") {
+		t.Fatal(p)
+	}
+	if cfg := d.Config.Current(); cfg.Agents["cli2"].Profile != "cursor" || len(cfg.Profiles["cursor"].Rules) != 1 {
+		t.Fatalf("%+v", cfg.Agents["cli2"])
+	}
 	// Автоподключение: токен в ~/.cursor/mcp.json, агент работает этим токеном.
 	p = post("/agents/cursor/client", url.Values{"client": {"cursor"}})
 	if !strings.Contains(p, "Cursor подключён") {

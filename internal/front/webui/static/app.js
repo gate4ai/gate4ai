@@ -30,6 +30,24 @@
     if (e.target.matches("[data-autosubmit]")) e.target.form.submit();
   });
 
+  // Блок формы только для одного значения поля: <fieldset data-show-when="profile=_new">.
+  // Скрытый блок ещё и выключен, чтобы его поля не уходили с формой.
+  function showWhen() {
+    document.querySelectorAll("[data-show-when]").forEach(function (b) {
+      var kv = b.getAttribute("data-show-when").split("="), f = b.closest("form");
+      var el = f && f.elements[kv[0]];
+      if (!el) return;
+      var on = el.value === kv.slice(1).join("=");
+      b.hidden = !on;
+      b.disabled = !on;
+    });
+  }
+  showWhen();
+  window.addEventListener("pageshow", showWhen);
+  document.addEventListener("change", function (e) {
+    if (e.target.form && e.target.form.querySelector("[data-show-when]")) showWhen();
+  });
+
   // Ещё одно условие правила.
   document.addEventListener("click", function (e) {
     var b = e.target.closest("[data-add-cond]");

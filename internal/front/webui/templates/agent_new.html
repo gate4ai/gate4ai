@@ -17,7 +17,7 @@
 <option value="_new" selected>Новый профиль для этого агента</option>
 {{range $d.Profiles}}<option value="{{.}}">существующий: {{.}}</option>{{end}}
 </select>
-<fieldset style="border:1px solid var(--line);border-radius:8px;margin-top:.6rem"><legend class="help">для нового профиля</legend>
+<fieldset data-show-when="profile=_new" style="border:1px solid var(--line);border-radius:8px;margin-top:.6rem"><legend class="help">для нового профиля</legend>
 <label>К каким коннекторам дать доступ</label>
 {{range $d.Connectors}}<label class="inline"><input type="checkbox" name="connectors" value="{{.}}" checked> {{.}}</label>{{else}}<p class="warn">Коннекторов ещё нет — агент пока ничего не увидит. <a href="{{$.Base}}/connectors">Поставьте коннектор</a> (можно и потом).</p>{{end}}
 <label>Готовый набор правил</label>
