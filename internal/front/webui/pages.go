@@ -636,6 +636,7 @@ type storeItem struct {
 	Capabilities                                                []string
 	Installed                                                   string // установленная версия
 	Loaded, Update, Revoked                                     bool
+	Builtin                                                     bool // часть ядра, из магазина не ставится
 	Profiles                                                    []string
 }
 
@@ -674,6 +675,9 @@ func (u *UI) storeItems(ctx context.Context, refresh bool) ([]storeItem, string)
 	var items []storeItem
 	if ix != nil {
 		for name, e := range ix.Connectors {
+			if slices.Contains(daemon.BuiltinConnectors, name) {
+				continue
+			}
 			it := storeItem{Name: name, Description: e.Description, Publisher: e.Publisher, License: e.License, Repo: e.Repo}
 			if p, ok := ix.Publishers[e.Publisher]; ok {
 				it.Trust = p.Trust
@@ -691,6 +695,16 @@ func (u *UI) storeItems(ctx context.Context, refresh bool) ([]storeItem, string)
 			seen[name] = true
 			items = append(items, it)
 		}
+	}
+	for _, name := range daemon.BuiltinConnectors {
+		c, ok := u.D.Registry.Get(name)
+		if !ok || policy.Implicit[name] || policy.Everyone[name] {
+			continue
+		}
+		m := c.Manifest()
+		seen[name] = true
+		items = append(items, storeItem{Name: name, Description: m.Description, Publisher: "gate4ai", Trust: "verified", Installed: m.Version,
+			Version: m.Version, Loaded: true, Builtin: true, Capabilities: m.Capabilities.Summary(), Profiles: profilesOf(name)})
 	}
 	for name, in := range inst {
 		if seen[name] {

@@ -1,0 +1,81 @@
+connector: files
+description: Files in allowed folders
+version: "5"
+runtime: builtin
+capabilities:
+  files: ["${setting:roots}/**"]
+limits: { memory_mb: 64, timeout_s: 30 }
+actions:
+  - name: read
+    class: read
+    description: Read a file (text as text, images as images, other files as binary resources)
+    input_schema:
+      type: object
+      properties: &path
+        path: { type: string, format: path, description: "absolute path or ~/…" }
+      required: [path]
+    output_schema:
+      type: object
+      properties:
+        path: { type: string }
+        mime_type: { type: string }
+        size: { type: integer }
+        truncated: { type: boolean }
+      required: [path, mime_type, size]
+    example: gate4ai files read --path ~/Documents/obsidian/inbox.md
+  - name: list
+    class: read
+    description: List a directory
+    input_schema:
+      type: object
+      properties: *path
+      required: [path]
+    output_schema:
+      type: object
+      properties:
+        path: { type: string }
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              dir: { type: boolean }
+              size: { type: integer }
+            required: [name, dir]
+      required: [path, entries]
+  - name: append
+    class: write
+    verify: read_back
+    evidence: json
+    description: Append text to the end of a file (never overwrites)
+    input_schema:
+      type: object
+      properties:
+        path: { type: string, format: path, description: "absolute path or ~/…" }
+        text: { type: string }
+      required: [path, text]
+    output_schema:
+      type: object
+      properties:
+        path: { type: string }
+        appended_bytes: { type: integer }
+      required: [path, appended_bytes]
+    example: 'gate4ai files append --path ~/Documents/obsidian/log.md --text "- done"'
+  - name: write
+    class: write
+    verify: read_back
+    evidence: json
+    description: Create or overwrite a file (needs approval by default)
+    input_schema:
+      type: object
+      properties:
+        path: { type: string, format: path, description: "absolute path or ~/…" }
+        content: { type: string }
+      required: [path, content]
+    output_schema:
+      type: object
+      properties:
+        path: { type: string }
+        bytes: { type: integer }
+      required: [path, bytes]

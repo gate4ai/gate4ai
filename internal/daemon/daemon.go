@@ -20,6 +20,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/connectors"
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/files"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 	"github.com/gate4ai/gate4ai/internal/front/oauth"
@@ -113,8 +114,14 @@ func New(opt Options) (*Daemon, error) {
 	}
 	// Каталог действий — из манифестов установленных пакетов (компиляция — в фоне);
 	// отзыв версий проверяется после чтения конфигурации (ключи registry — в ней).
+	d.retireBuiltinPackages()
 	for _, c := range (store.Options{Dir: d.ConnectorsDir}).LoadAll(context.Background(), d.Wasm, d.Log) {
 		d.Registry.Add(c)
+	}
+	if fc, err := d.Wasm.Builtin(files.Manifest(), files.Files{}); err == nil {
+		d.Registry.Add(fc)
+	} else {
+		return nil, err
 	}
 	for _, c := range opt.Connectors {
 		d.Registry.Add(c)

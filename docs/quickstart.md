@@ -8,7 +8,7 @@
 
 ```sh
 make bin             # bin/gate4ai, bin/gate4ai-relay
-make connectors      # bin/connectors/{mail,files,browser,tbank}.g4c — пакеты официальных коннекторов
+make connectors      # bin/connectors/{mail,browser,tbank}.g4c — пакеты официальных коннекторов
 ./scripts/ci.sh      # по всем модулям workspace: build / vet / test + кросс-сборка darwin и windows
 ```
 
@@ -25,14 +25,13 @@ make connectors      # bin/connectors/{mail,files,browser,tbank}.g4c — пак�
 ## 1. Daemon и коннекторы
 
 ```sh
-gate4ai daemon start             # в фоне; первый запуск: агентов нет, магазин подключён, files и browser ставятся из него (автозапуск: gate4ai service install)
+gate4ai daemon start             # в фоне; первый запуск: агентов нет, files встроен, магазин подключён, browser ставится из него (автозапуск: gate4ai service install)
 gate4ai connectors install bin/connectors/mail.g4c --dev
-gate4ai connectors install bin/connectors/files.g4c --dev
 gate4ai connectors install bin/connectors/browser.g4c --dev
 gate4ai connectors list
 ```
 
-Первый запуск без `--config` сам ставит из магазина `files` и `browser` (проверенные gate4.ai, согласие на их возможности — без вопроса; без сети — повтор в фоне и при следующем запуске). Своя сборка (`--dev`, как выше) заменяет поставленную из магазина; поставленный владельцем коннектор daemon не трогает. С `--config` и на уже настроенной установке сам ничего не ставит.
+Файлы — встроенный коннектор `files` (часть ядра, из магазина не ставится): в начальной конфигурации он в профиле `default` с корнем `~` (`connectors.files.roots`) и правилом `ask` на каждое действие; пакет `files` из магазина, поставленный прежней версией, daemon при запуске удаляет, настройки и правила остаются. Первый запуск без `--config` сам ставит из магазина `browser` (проверенный gate4.ai, согласие на его возможности — без вопроса; без сети — повтор в фоне и при следующем запуске). Своя сборка (`--dev`, как выше) заменяет поставленную из магазина; поставленный владельцем коннектор daemon не трогает. С `--config` и на уже настроенной установке сам ничего не ставит.
 
 Каждый установленный или обновлённый коннектор daemon добавляет в профиль `default` (если он есть) и пишет туда правило `ask` (`<коннектор>-<действие>-ask`) на каждое действие, для которого в этом профиле ещё нет правила, — в том числе на чтение, у которого по умолчанию `allow`. Правила владельца на эти действия остаются как есть.
 

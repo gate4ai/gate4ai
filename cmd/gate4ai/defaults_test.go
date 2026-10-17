@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gate4ai/gate4ai/internal/config"
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/files"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
@@ -26,13 +27,15 @@ import (
 	"github.com/gate4ai/sdk-go/manifest"
 )
 
-// defaultActions — действия коннекторов по умолчанию (как в их манифестах).
+// defaultActions — действия коннекторов по умолчанию (как в их манифестах):
+// files встроен в ядро, browser ставится из магазина.
 var defaultActions = map[string][]string{
 	"files":   {"read", "list", "append", "write"},
 	"browser": {"read", "screenshot", "extract"},
 }
 
 var defaultManifests = map[string]string{
+	// Пакет files из магазина до v0.6: ядро его не ставит и удаляет установленный.
 	"files": `connector: files
 version: "4"
 runtime: wasm
@@ -69,7 +72,15 @@ actions:
 
 // Манифесты коннекторов монорепозитория (если он рядом) — с теми же действиями.
 func TestDefaultActionsMatchManifests(t *testing.T) {
-	for name, want := range defaultActions {
+	var got []string
+	for _, a := range files.Manifest().Actions {
+		got = append(got, a.Name)
+	}
+	if !slices.Equal(got, defaultActions["files"]) {
+		t.Fatalf("files actions %v: update defaultActions", got)
+	}
+	for _, name := range defaultConnectors {
+		want := defaultActions[name]
 		raw, err := os.ReadFile(filepath.Join("..", "..", "..", "connectors", name, "manifest.yaml"))
 		if err != nil {
 			t.Skip("connectors sources are not next to the host:", err)
@@ -159,8 +170,8 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 	raw, _ := d.Config.CurrentRaw()
 	raw = regexp.MustCompile(`registry_keys: .*`).ReplaceAll(raw, []byte(`registry_keys: ["`+regPub2+`"]`))
 	raw = append(raw, "agents:\n  bot: { profile: default }\n"...)
-	raw = bytes.Replace(raw, []byte("default: { connectors: [] }"),
-		[]byte("default:\n    connectors: []\n    rules:\n      - { id: owner-bank, action: bank.balance, effect: deny }"), 1)
+	raw = bytes.Replace(raw, []byte("    rules:\n"),
+		[]byte("    rules:\n      - { id: owner-bank, action: bank.balance, effect: deny }\n"), 1)
 	if _, err := d.Config.Put(auth.OwnerVia("test"), raw, "agent"); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +180,7 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 	cancel()
 
 	list, err := store.List(d.ConnectorsDir)
-	if err != nil || len(list) != 2 || list[0].Name == "bank" || list[1].Name == "bank" {
+	if err != nil || len(list) != 1 || list[0].Name != "browser" {
 		t.Fatal(list, err)
 	}
 	for _, it := range list {
@@ -182,7 +193,7 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 	}
 	c := d.Config.Current()
 	if !c.Profiles["default"].HasConnector("files") || !c.Profiles["default"].HasConnector("browser") ||
-		len(c.Connectors["files"]) != 0 || len(c.Connectors["browser"]) != 0 {
+		!slices.Equal(c.Connectors["files"]["roots"].([]any), []any{"~"}) || len(c.Connectors["browser"]) != 0 {
 		t.Fatal(c.Profiles["default"], c.Connectors)
 	}
 	for conn, acts := range defaultActions {
@@ -198,7 +209,12 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 			if dec.Effect != config.EffectAsk || dec.Default || !slices.Equal(dec.RuleIDs, []string{conn + "-" + a.Name + "-ask"}) {
 				t.Fatal(action, dec)
 			}
-			if r := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: action}); r.Status != pipeline.StatusPending {
+			args := map[string]map[string]any{"read": {"path": "~/a"}, "list": {"path": "~"}, "append": {"path": "~/a", "text": "x"},
+				"write": {"path": "~/a", "content": "x"}}[a.Name]
+			if conn != "files" {
+				args = nil
+			}
+			if r := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: action, Args: args}); r.Status != pipeline.StatusPending {
 				t.Fatal(action, r)
 			}
 		}
@@ -232,5 +248,50 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 	defer d.Close()
 	if _, err := os.Stat(filepath.Join(home, "default-connectors.json")); !os.IsNotExist(err) {
 		t.Fatal("existing install got pending defaults")
+	}
+}
+
+// Пакет files из магазина (до v0.6) при запуске daemon заменяется встроенным
+// коннектором: правила и настройки остаются, поставить его снова нельзя.
+func TestStoreFilesReplacedByBuiltin(t *testing.T) {
+	dir := t.TempDir()
+	index, regPub := localRegistry(t, filepath.Join(dir, "registry"))
+	cfg := regexp.MustCompile(`registry: \S+`).ReplaceAllString(emptyConfig, "registry: "+index)
+	cfg = regexp.MustCompile(`registry_keys: .*`).ReplaceAllString(cfg, `registry_keys: ["`+regPub+`"]`)
+	home := filepath.Join(dir, "home")
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	d, err := daemon.New(daemon.Options{Home: home, InitialConfig: []byte(cfg), Keys: keys.NewMemory(), Log: log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.PrepareConnector(context.Background(), "files"); err == nil || !strings.Contains(err.Error(), "part of gate4ai") {
+		t.Fatal("store files must be refused:", err)
+	}
+	// Установка прежней версией ядра — пакет в каталоге коннекторов.
+	opts := d.StoreOptions()
+	opts.Builtin = nil
+	plan, err := opts.Prepare(context.Background(), "files", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := opts.Install(plan, plan.Capabilities); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+
+	d, err = daemon.New(daemon.Options{Home: home, Keys: keys.NewMemory(), Log: log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if list, _ := store.List(d.ConnectorsDir); len(list) != 0 {
+		t.Fatal("store package left:", list)
+	}
+	cli, ok := d.Registry.Get("files")
+	if !ok || cli.Manifest().Runtime != manifest.RuntimeBuiltin {
+		t.Fatal("built-in files not registered")
+	}
+	if dec := d.Pipeline.Engine().Decide(policy.Request{Agent: "x", Action: "files.read", Class: "read"}, nil); dec.Effect == "" {
+		t.Fatal(dec)
 	}
 }

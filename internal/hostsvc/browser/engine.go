@@ -51,9 +51,9 @@ var ErrDomain = errors.New("site is not allowed by the connector's capabilities.
 
 // Executor — единая точка исполнения действий в браузере.
 type Executor struct {
-	Engine  Engine
-	Sites   domain.Sites
-	Pacing  Pacing
+	Engine Engine
+	Sites  domain.Sites
+	Pacing Pacing
 }
 
 func (x *Executor) pace(ctx context.Context, step string) error {

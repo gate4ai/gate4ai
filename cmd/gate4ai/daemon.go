@@ -22,21 +22,30 @@ import (
 )
 
 // emptyConfig — первая версия конфигурации, если не передан --config: агентов
-// нет, официальный магазин коннекторов подключён. Каждый установленный коннектор
-// daemon добавляет в профиль default с правилом ask на каждое действие.
-const emptyConfig = `# gate4ai: no agents yet. Connectors files and browser are installed from the store;
-# every installed connector is added to profile default, each of its actions asks you
-# first. Add agents and your rules (see the README), then: gate4ai policy set config.yaml
+// нет, официальный магазин коннекторов подключён, встроенный коннектор files
+// виден в профиле default с правилом ask на каждое действие. Каждый
+// установленный из магазина коннектор daemon добавляет туда же с ask.
+const emptyConfig = `# gate4ai: no agents yet. Files are built in (every action asks you first);
+# the browser connector is installed from the store and added to profile default
+# the same way. Add agents and your rules (see the README), then: gate4ai policy set config.yaml
 store:
   registry: https://raw.githubusercontent.com/gate4ai/registry/main/index.json
   registry_keys: ["ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="]
+connectors:
+  files: { roots: ["~"] }
 profiles:
-  default: { connectors: [] }
+  default:
+    connectors: [files]
+    rules:
+      - { id: files-read-ask, action: files.read, effect: ask }
+      - { id: files-list-ask, action: files.list, effect: ask }
+      - { id: files-append-ask, action: files.append, effect: ask }
+      - { id: files-write-ask, action: files.write, effect: ask }
 `
 
 // defaultConnectors — коннекторы, которые свежая установка без --config ставит
 // из магазина сама (с согласием на возможности, пока магазин доступен — в фоне).
-var defaultConnectors = []string{"files", "browser"}
+var defaultConnectors = []string{"browser"}
 
 // runDaemon — `gate4ai daemon`: политики, подтверждения, секреты, журнал.
 func runDaemon(args []string, tty bool) int {

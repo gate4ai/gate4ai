@@ -324,7 +324,7 @@ func (e *Env) tools(ctx context.Context, args []string) int {
 		if e.Getenv("GATE4AI_TOKEN") != "" {
 			fmt.Fprintln(e.Stderr, "gate4ai: no actions are allowed for this agent; the owner allows them in the agent's profile (gate4ai policy set)")
 		} else {
-			fmt.Fprintln(e.Stderr, "gate4ai: no actions yet: install connectors (gate4ai connectors install files) and allow them in a profile (gate4ai policy set config.yaml)")
+			fmt.Fprintln(e.Stderr, "gate4ai: no actions yet: allow connectors in a profile (gate4ai policy set config.yaml); more connectors: gate4ai connectors install <name>")
 		}
 	}
 	if *asJSON {

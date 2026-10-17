@@ -28,6 +28,6 @@ bin:
 KEY ?=
 connectors: bin
 	mkdir -p bin/connectors
-	for c in files mail browser tbank; do \
+	for c in mail browser tbank; do \
 		./bin/gate4ai connectors pack connectors/$$c $(if $(KEY),--key $(KEY)) -o bin/connectors/$$c.g4c || exit 1; \
 	done

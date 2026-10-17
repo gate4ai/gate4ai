@@ -247,18 +247,23 @@ func (c *Connector) trap(ctx context.Context, err error, stderr *limitedBuffer) 
 }
 
 func (c *Connector) dispatcher(ctx context.Context, settings map[string]any) (*hostfuncs.Dispatcher, error) {
-	chk, err := capability.New(c.man, settings, c.e.svc.Home)
+	return c.e.dispatcher(ctx, c.man, c.limits, settings)
+}
+
+// dispatcher — функции хоста для одного вызова коннектора m.
+func (e *Engine) dispatcher(ctx context.Context, m manifest.Manifest, lim manifest.Limits, settings map[string]any) (*hostfuncs.Dispatcher, error) {
+	chk, err := capability.New(m, settings, e.svc.Home)
 	if err != nil {
 		return nil, err
 	}
 	var kv hostfuncs.KV
-	if c.e.svc.KV != nil {
-		kv = c.e.svc.KV(c.man.Connector)
+	if e.svc.KV != nil {
+		kv = e.svc.KV(m.Connector)
 	}
-	name := c.man.Connector
-	log := c.e.svc.Log
-	return &hostfuncs.Dispatcher{Ctx: ctx, Check: chk, Secrets: c.e.svc.Secrets, KV: kv, Browser: c.e.svc.Browser,
-		Dial: c.e.svc.Dial, RootCAs: c.e.svc.RootCAs, Timeout: time.Duration(c.limits.TimeoutS) * time.Second,
+	name := m.Connector
+	log := e.svc.Log
+	return &hostfuncs.Dispatcher{Ctx: ctx, Check: chk, Secrets: e.svc.Secrets, KV: kv, Browser: e.svc.Browser,
+		Dial: e.svc.Dial, RootCAs: e.svc.RootCAs, Timeout: time.Duration(lim.TimeoutS) * time.Second,
 		Log: func(level, msg string) {
 			lv := map[string]slog.Level{"debug": slog.LevelDebug, "warn": slog.LevelWarn, "error": slog.LevelError}[level]
 			log.Log(context.Background(), lv, msg, "connector", name)

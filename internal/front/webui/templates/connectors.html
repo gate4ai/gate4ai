@@ -22,7 +22,7 @@
 {{range $d.Items}}
 <div class="card" style="margin:0">
 <div class="row between"><b style="font-size:1.1rem">{{.Name}}</b>
-{{if .Installed}}{{if .Revoked}}<span class="badge bad">версия отозвана</span>{{else if .Loaded}}<span class="badge ok">установлен {{.Installed}}</span>{{else}}<span class="badge warn">не загружен</span>{{end}}{{else}}<span class="badge">{{.Version}}</span>{{end}}</div>
+{{if .Builtin}}<span class="badge ok">встроен в gate4.ai</span>{{else if .Installed}}{{if .Revoked}}<span class="badge bad">версия отозвана</span>{{else if .Loaded}}<span class="badge ok">установлен {{.Installed}}</span>{{else}}<span class="badge warn">не загружен</span>{{end}}{{else}}<span class="badge">{{.Version}}</span>{{end}}</div>
 <p>{{.Description}}</p>
 <p class="help">{{or .Publisher "—"}}{{if eq .Trust "verified"}} · проверен gate4.ai{{else if .Trust}} · {{.Trust}}{{end}}{{if .License}} · {{.License}}{{end}}</p>
 {{if .Profiles}}<p class="help">Доступ: {{join .Profiles ", "}}</p>{{end}}

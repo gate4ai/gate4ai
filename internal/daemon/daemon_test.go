@@ -136,7 +136,7 @@ func TestDaemonSockets(t *testing.T) {
 	}
 	var all []Tool
 	owner.do(t, "GET", "/v1/tools", nil, &all)
-	if len(all) != 5 {
+	if len(all) != 9 { // + 4 действия встроенного files
 		t.Fatal("owner sees all", len(all))
 	}
 

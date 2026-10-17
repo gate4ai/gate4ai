@@ -73,7 +73,7 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 			return e.fail(err)
 		}
 		if json.Unmarshal(raw, &res) == nil && len(res.Connectors) == 0 {
-			fmt.Fprintln(e.Stderr, "gate4ai: no connectors installed: gate4ai connectors install files (from the store) or gate4ai connectors install <file.g4c>")
+			fmt.Fprintln(e.Stderr, "gate4ai: no connectors installed: gate4ai connectors install browser (from the store) or gate4ai connectors install <file.g4c>")
 		}
 		var out any
 		_ = json.Unmarshal(raw, &out)

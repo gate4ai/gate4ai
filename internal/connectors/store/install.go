@@ -37,6 +37,7 @@ type Options struct {
 	Registry     string   // индекс registry: URL или путь ("" — без registry)
 	RegistryKeys []string // ключи подписи индекса
 	TrustedKeys  []string // ключи издателей, которым владелец доверяет без registry
+	Builtin      []string // имена коннекторов ядра: из магазина не ставятся
 }
 
 // Plan — что будет установлено; показывается владельцу для согласия.
@@ -138,6 +139,9 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 		return nil, err
 	}
 	m := p.pkg.Manifest
+	if slices.Contains(o.Builtin, m.Connector) {
+		return nil, fmt.Errorf("connector %s is part of gate4ai and is not installed from the store", m.Connector)
+	}
 	p.Connector, p.Version, p.Capabilities = m.Connector, m.Version, m.Capabilities.Summary()
 	if p.Capabilities == nil {
 		p.Capabilities = []string{}

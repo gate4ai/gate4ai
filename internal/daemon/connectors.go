@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/files"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/policy"
 )
@@ -16,7 +17,29 @@ import (
 // StoreOptions — магазин коннекторов по текущей конфигурации.
 func (d *Daemon) StoreOptions() store.Options {
 	s := d.Config.Current().Store
-	return store.Options{Dir: d.ConnectorsDir, Registry: s.Registry, RegistryKeys: s.RegistryKeys, TrustedKeys: s.TrustedKeys}
+	return store.Options{Dir: d.ConnectorsDir, Registry: s.Registry, RegistryKeys: s.RegistryKeys, TrustedKeys: s.TrustedKeys,
+		Builtin: BuiltinConnectors}
+}
+
+// BuiltinConnectors — коннекторы ядра: из магазина не ставятся.
+var BuiltinConnectors = []string{files.Name, SelfConnector, "egress"}
+
+// retireBuiltinPackages удаляет пакеты из магазина с именами коннекторов ядра
+// (files до v0.6 ставился из магазина): настройки и правила остаются — имена
+// действий те же.
+func (d *Daemon) retireBuiltinPackages() {
+	opts := store.Options{Dir: d.ConnectorsDir}
+	for _, name := range BuiltinConnectors {
+		info, err := opts.Info(name)
+		if err != nil {
+			continue
+		}
+		if err := opts.Remove(name); err != nil {
+			d.Log.Error("store package of a built-in connector not removed", "connector", name, "err", err)
+			continue
+		}
+		d.Log.Info("store package replaced by the built-in connector", "connector", name, "package_version", info.Version)
+	}
 }
 
 // dropRevoked выгружает отозванные версии по кэшу индекса registry.
@@ -122,6 +145,15 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			return
 		}
 		out := []map[string]any{}
+		for _, name := range BuiltinConnectors {
+			c, ok := d.Registry.Get(name)
+			if !ok || policy.Implicit[name] || policy.Everyone[name] {
+				continue
+			}
+			m := c.Manifest()
+			out = append(out, map[string]any{"connector": name, "version": m.Version, "trust": "builtin", "publisher": "gate4ai",
+				"source": "built in", "loaded": true, "capabilities": m.Capabilities.Summary()})
+		}
 		for _, it := range list {
 			_, loaded := d.Registry.Get(it.Name)
 			out = append(out, map[string]any{"connector": it.Name, "version": it.Manifest.Version, "trust": it.Info.Trust,
