@@ -320,3 +320,52 @@ func TestStoreFilesReplacedByBuiltin(t *testing.T) {
 		t.Fatal(dec)
 	}
 }
+
+// Установленный WASM-браузер (до v0.6, capabilities.browser) читается, а daemon
+// ставит вместо него нативный из магазина; остальные коннекторы загружаются.
+func TestWasmBrowserReplacedByNative(t *testing.T) {
+	dir := t.TempDir()
+	index, regPub := localRegistry(t, filepath.Join(dir, "registry"))
+	cfg := regexp.MustCompile(`registry: \S+`).ReplaceAllString(emptyConfig, "registry: "+index)
+	cfg = regexp.MustCompile(`registry_keys: .*`).ReplaceAllString(cfg, `registry_keys: ["`+regPub+`"]`)
+	home := filepath.Join(dir, "home")
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	d, err := daemon.New(daemon.Options{Home: home, InitialConfig: []byte(cfg), Keys: keys.NewMemory(), Log: log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := d.StoreOptions()
+	legacy := filepath.Join(dir, "browser-5.g4c")
+	b, err := store.Pack([]byte("connector: browser\nversion: \"5\"\nruntime: wasm\ncapabilities:\n  browser:\n    domains: [\"${setting:allowed_domains}\"]\nactions:\n  - { name: read, class: read }\n"),
+		[]byte("\x00asm\x01\x00\x00\x00"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(legacy, b, 0o644)
+	for _, src := range []string{legacy, "bank"} {
+		plan, err := opts.Prepare(context.Background(), src, true)
+		if err != nil {
+			t.Fatal(src, err)
+		}
+		if _, err := opts.Install(plan, plan.Capabilities); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.Close()
+
+	d, err = daemon.New(daemon.Options{Home: home, Keys: keys.NewMemory(), Log: log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if _, ok := d.Registry.Get("bank"); !ok {
+		t.Fatal("other connectors must load next to the legacy browser")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	d.InstallDefaults(ctx)
+	cancel()
+	c, ok := d.Registry.Get("browser")
+	if !ok || c.Manifest().Runtime != manifest.RuntimeNative || c.Manifest().Version != "6" {
+		t.Fatal("browser not replaced by the native package", ok)
+	}
+}
