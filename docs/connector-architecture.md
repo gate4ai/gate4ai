@@ -53,16 +53,16 @@ runtime: wasm                      # wasm | native (native — позже)
 
 capabilities:
   network:
-    - { host: lk.mosenergosbyt.ru, port: 443, scheme: https }
+    - { host: app.example.org, port: 443, scheme: https }
   browser:
-    domains: ["lk.mosenergosbyt.ru"]
+    domains: ["app.example.org"]
   files: []                        # пути — шаблоны от настроек: "${setting:root}/**"
   storage: { quota_mb: 5 }
   events: []                       # подписки на события (целевое)
 
 credentials:                       # слоты учёток; заполняет пользователь в экземпляре коннектора
-  - { slot: login, types: [login], form: true, bind: ["https://lk.mosenergosbyt.ru"] }
-  - { slot: otp,   types: [gate4ai/totp], module: gate4ai/auth-totp@1, form: true, bind: ["https://lk.mosenergosbyt.ru"] }
+  - { slot: login, types: [login], form: true, bind: ["https://app.example.org"] }
+  - { slot: otp,   types: [gate4ai/totp], module: gate4ai/auth-totp@1, form: true, bind: ["https://app.example.org"] }
 
 limits:
   memory_mb: 64
@@ -211,7 +211,7 @@ native:
 
 - **Виды пакетов:** коннекторы (`kind: connector`) и auth-модули (`kind: auth`, имя `<издатель>/auth-<протокол>`; видят значения учёток, поэтому ставятся только с уровнями «проверен gate4.ai» и «проверенный издатель»; модуль сообщества — с явным согласием и предупреждением).
 - **Пакет:** `.wasm` + манифест + подпись (Sigstore / cosign); воспроизводимая сборка из открытого исходника (лицензия коннекторов магазина — совместимая с AGPL-3.0, исходник обязателен).
-- **Согласие при установке:** понятный список возможностей («запросы к lk.mosenergosbyt.ru, учётка для входа на lk.mosenergosbyt.ru, класс money»).
+- **Согласие при установке:** понятный список возможностей («запросы к app.example.org, учётка для входа на app.example.org, класс money»).
 - **Уровни доверия:** «проверен gate4.ai» (ревью кода и возможностей), «проверенный издатель», «сообщество» (с предупреждением; по умолчанию — только действия класса `read`).
 - **Версии зафиксированы;** автообновление — только в пределах уже согласованных возможностей.
 - **Отзыв:** список отозванных версий доставляется через relay; отозванный коннектор отключается у всех.

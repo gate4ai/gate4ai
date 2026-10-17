@@ -30,7 +30,7 @@ profiles:
         effect: allow
       - id: browser-read-allowed
         action: browser.read
-        when: domain_matches(url, ["*.gosuslugi.ru", "lk.mosenergosbyt.ru"])
+        when: domain_matches(url, ["*.example.com", "app.example.org"])
         effect: allow
       - id: utilities-payments
         action: payments.pay_bill

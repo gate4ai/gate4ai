@@ -90,9 +90,9 @@ func TestExamplePolicyTable(t *testing.T) {
 		{"append traversal is not obsidian", "claude-ai", "files.append", ClassWrite,
 			map[string]any{"path": "~/Documents/obsidian/../../.bashrc", "text": "x"}, nil, fakeCounters{}, "ask", []string{}, ""},
 		{"browser allowed domain", "claude-ai", "browser.read", ClassRead,
-			map[string]any{"url": "https://www.gosuslugi.ru/x"}, nil, fakeCounters{}, "allow", []string{"browser-read-allowed"}, ""},
+			map[string]any{"url": "https://www.example.com/x"}, nil, fakeCounters{}, "allow", []string{"browser-read-allowed"}, ""},
 		{"browser lookalike domain uses default", "claude-ai", "browser.read", ClassRead,
-			map[string]any{"url": "https://gosuslugi.ru.evil.test/"}, nil, fakeCounters{}, "allow", []string{}, "default"},
+			map[string]any{"url": "https://example.com.evil.test/"}, nil, fakeCounters{}, "allow", []string{}, "default"},
 		{"utility payment asks with obligation", "claude-ai", "payments.pay_bill", ClassMoney,
 			map[string]any{"payee": "@uk-dom", "amount": 5000.0}, nil, fakeCounters{spent: 1000}, "ask", []string{"utilities-payments"}, ""},
 		{"daily cap beats ask", "claude-ai", "payments.pay_bill", ClassMoney,
@@ -271,19 +271,19 @@ func TestGlob(t *testing.T) {
 }
 
 func TestDomainMatches(t *testing.T) {
-	pats := []string{"*.gosuslugi.ru", "lk.mosenergosbyt.ru"}
+	pats := []string{"*.example.com", "app.example.org"}
 	cases := map[string]bool{
-		"https://www.gosuslugi.ru/":           true,
-		"https://esia.gosuslugi.ru:443/login": true,
-		"https://gosuslugi.ru/":               false,
-		"https://evilgosuslugi.ru/":           false,
-		"https://gosuslugi.ru.evil.test/":     false,
-		"https://LK.Mosenergosbyt.RU/pay":     true,
-		"http://lk.mosenergosbyt.ru.":         true,
+		"https://www.example.com/":            true,
+		"https://login.example.com:443/login": true,
+		"https://example.com/":                false,
+		"https://evilexample.com/":            false,
+		"https://example.com.evil.test/":      false,
+		"https://APP.Example.ORG/pay":         true,
+		"http://app.example.org.":             true,
 		"javascript:alert(1)":                 false,
 		"file:///etc/passwd":                  false,
-		"https://user@lk.mosenergosbyt.ru/":   false,
-		"lk.mosenergosbyt.ru":                 true,
+		"https://user@app.example.org/":       false,
+		"app.example.org":                     true,
 		"":                                    false,
 	}
 	for u, want := range cases {

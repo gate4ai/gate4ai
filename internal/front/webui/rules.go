@@ -364,7 +364,7 @@ var Templates = []Template{
 		}},
 	{ID: "sites-list", Title: "Сайты по списку", Needs: []string{"browser.read"},
 		Description: "Браузер открывает только сайты из списка. Список попадает и в настройки коннектора «Браузер».",
-		Params:      []TemplateParam{{Name: "sites", Label: "Сайты", Placeholder: "*.gosuslugi.ru, lk.mosenergosbyt.ru", Multiline: true}},
+		Params:      []TemplateParam{{Name: "sites", Label: "Сайты", Placeholder: "*.example.com, app.example.org", Multiline: true}},
 		Apply: func(c *config.Config, profile string, p map[string]string, _ []daemon.Tool) error {
 			items := splitItems(p["sites"])
 			if len(items) == 0 {

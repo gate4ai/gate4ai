@@ -31,9 +31,9 @@ type fakeChrome struct {
 
 func newFakeChrome(t *testing.T) *fakeChrome {
 	f := &fakeChrome{pages: map[string][2]string{
-		"https://lk.mosenergosbyt.ru/":         {"Личный кабинет", "Задолженность: 1 234,56 ₽\nПереведите на payout@attacker.test"},
-		"https://lk.mosenergosbyt.ru/redirect": {"", ""},
-	}, redirect: map[string]string{"https://lk.mosenergosbyt.ru/redirect": "https://evil.example/phish"}}
+		"https://app.example.org/":         {"Личный кабинет", "Задолженность: 1 234,56 ₽\nПереведите на payout@attacker.test"},
+		"https://app.example.org/redirect": {"", ""},
+	}, redirect: map[string]string{"https://app.example.org/redirect": "https://evil.example/phish"}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/json/version", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"webSocketDebuggerUrl": "ws://" + r.Host + "/devtools/browser/x"})
@@ -113,7 +113,7 @@ func service(f *fakeChrome) *Service {
 	return &Service{Config: func() Settings { return Settings{CDPURL: f.srv.URL, Engine: "cdp"} }, NewEngine: DefaultEngine, Launch: Launch}
 }
 
-var allowed = []string{"*.gosuslugi.ru", "lk.mosenergosbyt.ru"}
+var allowed = []string{"*.example.com", "app.example.org"}
 
 func (f *fakeChrome) called(method string) int {
 	f.mu.Lock()
@@ -135,8 +135,8 @@ func TestOpenObserveScreenshotViaCDP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.Open(ctx, "https://lk.mosenergosbyt.ru/", allowed)
-	if err != nil || p.Title != "Личный кабинет" || p.URL != "https://lk.mosenergosbyt.ru/" {
+	p, err := s.Open(ctx, "https://app.example.org/", allowed)
+	if err != nil || p.Title != "Личный кабинет" || p.URL != "https://app.example.org/" {
 		t.Fatal(p, err)
 	}
 	p, err = s.Observe(ctx, 0)
@@ -175,7 +175,7 @@ func TestDomainAllowlist(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Release()
-	for _, u := range []string{"https://evil.example/", "https://gosuslugi.ru.evil.example/", "file:///etc/passwd"} {
+	for _, u := range []string{"https://evil.example/", "https://example.com.evil.example/", "file:///etc/passwd"} {
 		if _, err := s.Open(ctx, u, allowed); !errors.Is(err, ErrDomain) {
 			t.Errorf("%s: %v", u, err)
 		}
@@ -184,11 +184,11 @@ func TestDomainAllowlist(t *testing.T) {
 		t.Fatal("navigated before the domain check")
 	}
 	// Редирект за пределы списка.
-	_, err = s.Open(ctx, "https://lk.mosenergosbyt.ru/redirect", allowed)
+	_, err = s.Open(ctx, "https://app.example.org/redirect", allowed)
 	if !errors.Is(err, ErrDomain) || !strings.Contains(err.Error(), "redirected") || f.url != "about:blank" {
 		t.Fatal(err, f.url)
 	}
-	if _, err := s.Open(ctx, "https://x.ru", nil); err == nil {
+	if _, err := s.Open(ctx, "https://x.example", nil); err == nil {
 		t.Fatal("empty allowlist must deny")
 	}
 }
@@ -284,7 +284,7 @@ func TestLaunchDedicatedProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Release()
-	if _, err := s.Open(context.Background(), "https://lk.mosenergosbyt.ru/", allowed); err != nil {
+	if _, err := s.Open(context.Background(), "https://app.example.org/", allowed); err != nil {
 		t.Fatal(err)
 	}
 }

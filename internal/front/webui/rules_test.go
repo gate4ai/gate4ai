@@ -20,7 +20,7 @@ func TestBuildWhenCompilesAndReads(t *testing.T) {
 		{Cond{Kind: "in_list", Arg: "to", Value: "trusted"}, `to.all(x, x in lists.trusted)`, "все to — из списка «trusted»"},
 		{Cond{Kind: "in_folder", Arg: "path", Value: "~/notes/"}, `glob(path, "~/notes/**")`, "path внутри папки ~/notes"},
 		{Cond{Kind: "in_folder", Arg: "path", Value: "~/notes", Not: true}, `!(glob(path, "~/notes/**"))`, "path вне папки ~/notes"},
-		{Cond{Kind: "domain", Arg: "url", Value: "*.gosuslugi.ru, example.org"}, `domain_matches(url, ["*.gosuslugi.ru", "example.org"])`, ""},
+		{Cond{Kind: "domain", Arg: "url", Value: "*.example.com, example.org"}, `domain_matches(url, ["*.example.com", "example.org"])`, ""},
 		{Cond{Kind: "lte", Arg: "amount", Value: "15000"}, `amount <= 15000`, "amount не больше 15000"},
 		{Cond{Kind: "untrusted", Arg: "to"}, `"to" in provenance && 'untrusted_content' in provenance["to"]`, "to взят из входящего письма или страницы"},
 		{Cond{Kind: "contains", Arg: "text", Value: `say "hi"`}, `text.contains("say \"hi\"")`, ""},

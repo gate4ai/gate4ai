@@ -90,7 +90,7 @@ connectors:
   files:
     roots: ["~/Documents/obsidian"]
   browser:
-    allowed_domains: ["*.gosuslugi.ru", "lk.mosenergosbyt.ru"]
+    allowed_domains: ["*.example.com", "app.example.org"]
 browser:                      # браузерный воркер — служба хоста для коннекторов
   engine: stagehand
   model: openai/gpt-5.4-mini

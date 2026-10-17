@@ -40,7 +40,7 @@ var settingHints = map[string]map[string]fieldHint{
 		"roots": {"Разрешённые папки", fieldList, "Коннектор видит только эти папки (и всё внутри). По одной на строку.", "~/Documents/notes"},
 	},
 	"browser": {
-		"allowed_domains": {"Разрешённые сайты", fieldList, "Браузер открывает только эти сайты; *.example.com — все поддомены.", "*.gosuslugi.ru"},
+		"allowed_domains": {"Разрешённые сайты", fieldList, "Браузер открывает только эти сайты; *.example.com — все поддомены.", "*.example.com"},
 	},
 	"email": {
 		"address":       {"Адрес почты", fieldText, "", "me@example.com"},
