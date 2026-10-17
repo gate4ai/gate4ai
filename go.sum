@@ -36,8 +36,8 @@ github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkp
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/gate4ai/relay v0.1.0 h1:bip3Bq1nvjNmgWo4uk+EDPqPYXAGWSs+9e71d/zt26k=
 github.com/gate4ai/relay v0.1.0/go.mod h1:NM16J9h1maIuq+1kacXaqfcVWr+T0+OKqEXc9fqz/nA=
-github.com/gate4ai/sdk-go v0.4.0 h1:aq/zf1nVmGQ512ZJk4RRkzoPr6AUVo1lZbO1NAYG2o4=
-github.com/gate4ai/sdk-go v0.4.0/go.mod h1:0fLgCgbYMkLrVGtWMvcjYzEAxDjBhJ5g0Oxif8Ymc6s=
+github.com/gate4ai/sdk-go v0.5.0 h1:ps27hgsdSItHkrSDdQ6fVL3uN+g6X8NsStUZM0UDJG0=
+github.com/gate4ai/sdk-go v0.5.0/go.mod h1:0fLgCgbYMkLrVGtWMvcjYzEAxDjBhJ5g0Oxif8Ymc6s=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
 github.com/go-jose/go-jose/v4 v4.1.4/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
 github.com/go-logr/logr v1.4.2 h1:6pFjapn8bFcIbiKo3XT4j/BhANplGihG6tvd+8rYgrY=

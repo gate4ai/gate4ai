@@ -46,13 +46,13 @@ type Pacing func(ctx context.Context, step string) error
 // NoPacing — нулевые задержки (MVP).
 func NoPacing(context.Context, string) error { return nil }
 
-// ErrDomain — домен не в списке разрешённых.
-var ErrDomain = errors.New("domain is not in the connector's capabilities.browser.domains")
+// ErrDomain — сайт не разрешён списком коннектора (capabilities.browser).
+var ErrDomain = errors.New("site is not allowed by the connector's capabilities.browser")
 
 // Executor — единая точка исполнения действий в браузере.
 type Executor struct {
 	Engine  Engine
-	Allowed []string
+	Sites   domain.Sites
 	Pacing  Pacing
 }
 
@@ -63,9 +63,9 @@ func (x *Executor) pace(ctx context.Context, step string) error {
 	return x.Pacing(ctx, step)
 }
 
-// CheckURL — URL разрешён списком доменов коннектора (дополнительно к политике).
+// CheckURL — URL разрешён списком сайтов коннектора (дополнительно к политике).
 func (x *Executor) CheckURL(u string) error {
-	if !domain.Matches(u, x.Allowed) {
+	if !x.Sites.Allows(u) {
 		return fmt.Errorf("%w: %s", ErrDomain, domain.HostOf(u))
 	}
 	return nil

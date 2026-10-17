@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/sdk-go/domain"
 	"github.com/gate4ai/sdk-go/hostfuncs"
 )
 
@@ -65,7 +66,7 @@ func TestActRealChrome(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer eng.Close()
-	x := &Executor{Engine: eng, Allowed: []string{"127.0.0.1"}}
+	x := &Executor{Engine: eng, Sites: domain.Sites{Domains: []string{"127.0.0.1"}}}
 	if _, err := x.Open(ctx, srv.URL+"/"); err != nil {
 		t.Fatal(err)
 	}

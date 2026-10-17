@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/sdk-go/domain"
 	"github.com/gate4ai/sdk-go/hostfuncs"
 )
 
@@ -145,8 +146,8 @@ type session struct {
 	done bool
 }
 
-func (ss *session) Open(ctx context.Context, url string, allowed []string) (abi.BrowserPage, error) {
-	ss.x.Allowed = allowed
+func (ss *session) Open(ctx context.Context, url string, sites domain.Sites) (abi.BrowserPage, error) {
+	ss.x.Sites = sites
 	final, err := ss.x.Open(ctx, url)
 	if err != nil {
 		return abi.BrowserPage{}, err
@@ -180,6 +181,6 @@ func (ss *session) Release() {
 		return
 	}
 	ss.done = true
-	ss.x.Allowed = nil
+	ss.x.Sites = domain.Sites{}
 	ss.s.session.Unlock()
 }

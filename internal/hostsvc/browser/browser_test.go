@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/coder/websocket"
+	"github.com/gate4ai/sdk-go/domain"
 )
 
 // fakeChrome — фейковый браузер с CDP: страницы в памяти, редиректы.
@@ -113,7 +114,7 @@ func service(f *fakeChrome) *Service {
 	return &Service{Config: func() Settings { return Settings{CDPURL: f.srv.URL, Engine: "cdp"} }, NewEngine: DefaultEngine, Launch: Launch}
 }
 
-var allowed = []string{"*.example.com", "app.example.org"}
+var allowed = domain.Sites{Domains: []string{"*.example.com", "app.example.org"}}
 
 func (f *fakeChrome) called(method string) int {
 	f.mu.Lock()
@@ -188,7 +189,7 @@ func TestDomainAllowlist(t *testing.T) {
 	if !errors.Is(err, ErrDomain) || !strings.Contains(err.Error(), "redirected") || f.url != "about:blank" {
 		t.Fatal(err, f.url)
 	}
-	if _, err := s.Open(ctx, "https://x.example", nil); err == nil {
+	if _, err := s.Open(ctx, "https://x.example", domain.Sites{}); err == nil {
 		t.Fatal("empty allowlist must deny")
 	}
 }
@@ -210,7 +211,7 @@ func (s *stubEngine) Key(context.Context, string) error        { return nil }
 
 func TestExecutorPacingAndExtractStub(t *testing.T) {
 	var steps []string
-	x := &Executor{Engine: &stubEngine{}, Allowed: []string{"example.com"}, Pacing: func(_ context.Context, s string) error { steps = append(steps, s); return nil }}
+	x := &Executor{Engine: &stubEngine{}, Sites: domain.Sites{Domains: []string{"example.com"}}, Pacing: func(_ context.Context, s string) error { steps = append(steps, s); return nil }}
 	ctx := context.Background()
 	if _, err := x.Open(ctx, "https://example.com/"); err != nil {
 		t.Fatal(err)
