@@ -10,6 +10,8 @@
 #   deploy.sh connector           версия в manifest.yaml +1, коммит, тег v<версия>, push, дождаться релиза
 #   deploy.sh registry            записать выпущенную версию коннектора в registry: add + sign, PR, CI, слияние
 #   deploy.sh in-registry         проверка: версия коннектора из manifest.yaml есть в registry (origin/main)
+#   deploy.sh sdk-current         проверка: go.mod требует последний тег sdk-go, и в sdk-go нет коммитов после него
+#   deploy.sh sdk-bump            go.mod на последний тег sdk-go (go get + tidy), vet и тесты без go.work, коммит
 #   deploy.sh local               дождаться, что gate4.ai/latest отдаёт последний тег ядра, и обновить
 #                                 локальную установку тем же install.sh, что у пользователей
 set -euo pipefail
@@ -135,6 +137,54 @@ registry() {
   say "$name $version is in the registry"
 }
 
+# sdk_required — версия github.com/gate4ai/sdk-go в go.mod репозитория.
+sdk_required() {
+  awk '$1 == "github.com/gate4ai/sdk-go" { print $2 } $1 == "require" && $2 == "github.com/gate4ai/sdk-go" { print $3 }' go.mod
+}
+
+# sdk_latest — последний тег sdk-go; падает, если в main sdk-go есть коммиты после него
+# (их ещё выпустят тегом — значит, обновление go.mod впереди).
+sdk_latest() {
+  local sdk=$root/sdk-go latest
+  latest=$(git -C "$sdk" describe --tags --abbrev=0 main)
+  [ "$(git -C "$sdk" rev-list --count "$latest..main")" = 0 ] || die "sdk-go has commits after $latest, not tagged yet"
+  echo "$latest"
+}
+
+sdk_current() {
+  local want have
+  want=$(sdk_latest)
+  have=$(sdk_required)
+  [ -n "$have" ] || die "go.mod does not require github.com/gate4ai/sdk-go"
+  [ "$have" = "$want" ] || die "requires sdk-go $have, the latest is $want"
+  say "requires sdk-go $want"
+}
+
+sdk_bump() {
+  local want have i
+  want=$(sdk_latest)
+  have=$(sdk_required)
+  if [ "$have" = "$want" ]; then
+    say "requires sdk-go $want already"
+    return 0
+  fi
+  [ -z "$(git status --porcelain)" ] || die "$repo has changes not committed"
+  say "sdk-go $have -> $want"
+  # Свежий тег доходит до proxy.golang.org не сразу.
+  for i in $(seq 1 20); do
+    GOWORK=off go get "github.com/gate4ai/sdk-go@$want" && break
+    [ "$i" = 20 ] && die "go get github.com/gate4ai/sdk-go@$want failed for 5 minutes"
+    sleep 15
+  done
+  GOWORK=off go mod tidy
+  # Так, как соберёт CI: с опубликованным sdk-go, без соседних клонов из go.work.
+  say "go vet and go test with sdk-go $want"
+  GOWORK=off go vet ./...
+  GOWORK=off go test ./...
+  git commit -q -m "sdk-go $want" go.mod go.sum
+  say "committed: sdk-go $want"
+}
+
 local_install() {
   local want got i
   want=$(git -C "$root/gate4ai" describe --tags --abbrev=0 main)
@@ -162,6 +212,8 @@ case "${1:-}" in
   connector) connector ;;
   registry) registry ;;
   in-registry) in_registry ;;
+  sdk-current) sdk_current ;;
+  sdk-bump) sdk_bump ;;
   local) local_install ;;
-  *) die "usage: deploy.sh push [branch] | tag | connector | registry | in-registry | local" ;;
+  *) die "usage: deploy.sh push [branch] | tag | connector | registry | in-registry | sdk-current | sdk-bump | local" ;;
 esac
