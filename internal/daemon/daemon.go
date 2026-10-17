@@ -40,6 +40,9 @@ type Options struct {
 	Keys          keys.Store
 	// ConnectorsDir — установленные коннекторы ("" — <Home>/connectors).
 	ConnectorsDir string
+	// DefaultConnectors — коннекторы из магазина, которые ставятся на свежей
+	// установке (хранилище конфигурации пусто): см. InstallDefaults.
+	DefaultConnectors []string
 	// Connectors — дополнительные коннекторы в том же процессе (тесты).
 	Connectors []connectors.Client
 	// Browser — браузерный воркер (nil — по разделу browser конфигурации).
@@ -70,6 +73,7 @@ type Daemon struct {
 	ConnectorsDir string
 
 	mu        sync.Mutex
+	installMu sync.Mutex    // установка коннекторов: владелец и коннекторы по умолчанию
 	stop      chan struct{} // закрывается RequestStop
 	stopOnce  sync.Once
 	notifiers *MultiNotifier
@@ -125,9 +129,16 @@ func New(opt Options) (*Daemon, error) {
 	validator := func(c *config.Config) config.Errors {
 		return policy.Validator(policy.Catalog(d.Registry.Catalog()))(c)
 	}
+	_, err = os.Stat(filepath.Join(opt.Home, "config", "current"))
+	fresh := errors.Is(err, os.ErrNotExist)
 	d.Config, err = config.OpenStore(filepath.Join(opt.Home, "config"), opt.InitialConfig, validator)
 	if err != nil {
 		return nil, err
+	}
+	if fresh {
+		if err := d.savePendingDefaults(opt.DefaultConnectors); err != nil {
+			return nil, err
+		}
 	}
 	d.dropRevoked()
 	d.AddRoutes(d.connectorRoutes)

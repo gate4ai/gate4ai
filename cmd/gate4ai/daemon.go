@@ -22,15 +22,21 @@ import (
 )
 
 // emptyConfig — первая версия конфигурации, если не передан --config: агентов
-// нет, официальный магазин коннекторов подключён (ставить коннекторы можно сразу).
-const emptyConfig = `# gate4ai: no agents yet. Install connectors (gate4ai connectors install files),
-# then write your policy (see the README) and apply it: gate4ai policy set config.yaml
+// нет, официальный магазин коннекторов подключён. Каждый установленный коннектор
+// daemon добавляет в профиль default с правилом ask на каждое действие.
+const emptyConfig = `# gate4ai: no agents yet. Connectors files and browser are installed from the store;
+# every installed connector is added to profile default, each of its actions asks you
+# first. Add agents and your rules (see the README), then: gate4ai policy set config.yaml
 store:
   registry: https://raw.githubusercontent.com/gate4ai/registry/main/index.json
   registry_keys: ["ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="]
 profiles:
   default: { connectors: [] }
 `
+
+// defaultConnectors — коннекторы, которые свежая установка без --config ставит
+// из магазина сама (с согласием на возможности, пока магазин доступен — в фоне).
+var defaultConnectors = []string{"files", "browser"}
 
 // runDaemon — `gate4ai daemon`: политики, подтверждения, секреты, журнал.
 func runDaemon(args []string, tty bool) int {
@@ -83,18 +89,18 @@ func daemonMain(args []string, tty bool) error {
 	if err != nil {
 		return err
 	}
-	// Без --config пустое хранилище получает пустую политику: агентов нет, значит
-	// агентам ничего не разрешено. Правила задаются после установки коннекторов
-	// (gate4ai connectors install, затем gate4ai policy set).
-	initial := []byte(emptyConfig)
+	// Без --config пустое хранилище получает начальную политику: агентов нет, значит
+	// агентам ничего не разрешено; коннекторы по умолчанию ставятся из магазина.
+	initial, defaults := []byte(emptyConfig), defaultConnectors
 	if *cfgFile != "" {
 		if initial, err = os.ReadFile(*cfgFile); err != nil {
 			return err
 		}
+		defaults = nil
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	d, err := daemon.New(daemon.Options{Home: *home, InitialConfig: initial, Keys: ks, ConnectorsDir: *connDir, Log: log})
+	d, err := daemon.New(daemon.Options{Home: *home, InitialConfig: initial, DefaultConnectors: defaults, Keys: ks, ConnectorsDir: *connDir, Log: log})
 	if err != nil {
 		return err
 	}
@@ -102,6 +108,7 @@ func daemonMain(args []string, tty bool) error {
 	if err := setup(ctx, d, log); err != nil {
 		return err
 	}
+	go d.InstallDefaults(ctx)
 	if tty {
 		go banner(ctx, *ownerSock)
 	}

@@ -33,7 +33,8 @@ func (d *Daemon) dropRevoked() {
 	}
 }
 
-// reloadConnector — после установки, обновления или удаления: реестр и политика.
+// reloadConnector — после установки, обновления или удаления: реестр и политика;
+// установленный коннектор попадает в профиль default с правилами ask (askInDefault).
 func (d *Daemon) reloadConnector(name string, removed bool) error {
 	d.Registry.Remove(name)
 	if !removed {
@@ -42,6 +43,9 @@ func (d *Daemon) reloadConnector(name string, removed bool) error {
 			return err
 		}
 		d.Registry.Add(c)
+		if err := d.askInDefault(name); err != nil {
+			d.Log.Warn("connector not added to profile "+DefaultProfile, "connector", name, "err", err)
+		}
 	}
 	e, err := policy.New(d.Config.Current(), policy.Catalog(d.Registry.Catalog()))
 	if err != nil {
@@ -61,6 +65,8 @@ func (d *Daemon) InstallConnector(ctx context.Context, source string, consent []
 	if err != nil {
 		return store.Info{}, nil, "", err
 	}
+	d.installMu.Lock()
+	defer d.installMu.Unlock()
 	info, err := opts.Install(plan, consent)
 	if err != nil {
 		return store.Info{}, plan, "", err
@@ -141,6 +147,8 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			writeJSON(w, 200, map[string]any{"status": "up_to_date", "plan": plan})
 			return
 		}
+		d.installMu.Lock()
+		defer d.installMu.Unlock()
 		info, err := opts.Install(plan, consent)
 		if errors.Is(err, store.ErrConsent) {
 			writeJSON(w, 409, map[string]any{"error": map[string]string{"code": "consent_required",

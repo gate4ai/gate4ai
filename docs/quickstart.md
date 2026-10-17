@@ -25,12 +25,16 @@ make connectors      # bin/connectors/{mail,files,browser,tbank}.g4c — пак�
 ## 1. Daemon и коннекторы
 
 ```sh
-gate4ai daemon start             # в фоне; первый запуск: агентов нет, магазин подключён (автозапуск: gate4ai service install)
+gate4ai daemon start             # в фоне; первый запуск: агентов нет, магазин подключён, files и browser ставятся из него (автозапуск: gate4ai service install)
 gate4ai connectors install bin/connectors/mail.g4c --dev
 gate4ai connectors install bin/connectors/files.g4c --dev
 gate4ai connectors install bin/connectors/browser.g4c --dev
 gate4ai connectors list
 ```
+
+Первый запуск без `--config` сам ставит из магазина `files` и `browser` (проверенные gate4.ai, согласие на их возможности — без вопроса; без сети — повтор в фоне и при следующем запуске). Своя сборка (`--dev`, как выше) заменяет поставленную из магазина; поставленный владельцем коннектор daemon не трогает. С `--config` и на уже настроенной установке сам ничего не ставит.
+
+Каждый установленный или обновлённый коннектор daemon добавляет в профиль `default` (если он есть) и пишет туда правило `ask` (`<коннектор>-<действие>-ask`) на каждое действие, для которого в этом профиле ещё нет правила, — в том числе на чтение, у которого по умолчанию `allow`. Правила владельца на эти действия остаются как есть.
 
 Коннекторы — WASM-модули: всё, что им можно, объявлено в манифесте (`capabilities`) и показывается при установке; без согласия владельца коннектор не ставится, а обновление с новыми возможностями требует согласия заново. `--dev` — пакет собственной сборки без подписи доверенного издателя. Из магазина: `gate4ai connectors install email` (нужны `store.registry` и `store.registry_keys` в конфигурации), `gate4ai connectors update <имя>`, `gate4ai connectors refresh` — список отозванных версий.
 
