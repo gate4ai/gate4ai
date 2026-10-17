@@ -59,8 +59,13 @@ type bank struct {
 }
 
 func (b *bank) Manifest() manifest.Manifest {
-	return manifest.Manifest{Connector: "bank", Actions: []manifest.Action{
-		{Name: "pay", Class: "money", Verify: "feed", InputSchema: manifest.MustSchema(`{ type: object, properties: {} }`)},
+	return manifest.Manifest{Connector: "bank", Capabilities: manifest.Capabilities{Services: []manifest.ServiceCap{
+		{Target: "web", Contract: 1, Actions: []string{"open", "act", "read", "nope"}},
+		{Target: "bank", Contract: 1, Actions: []string{"pay"}},
+	}}, Actions: []manifest.Action{
+		{Name: "pay", Class: "money", Verify: "feed", InputSchema: manifest.MustSchema(`{ type: object, properties: {} }`),
+			Calls: []string{"web.open", "web.act", "web.read", "web.nope", "bank.pay"}},
+		{Name: "look", Class: "read", InputSchema: manifest.MustSchema(`{ type: object, properties: {} }`), Calls: []string{"web.open", "web.act"}},
 	}}
 }
 
@@ -86,6 +91,7 @@ profiles:
     connectors: [bank]
     rules:
       - { id: pay-ok, action: bank.pay, effect: allow }
+      - { id: look-ok, action: bank.look, effect: allow }
       - { id: no-evil, action: web.open, when: 'url.contains("evil")', effect: deny }
       - { id: ask-read, action: web.read, effect: ask }
 `
@@ -214,5 +220,39 @@ func TestNestedDepth(t *testing.T) {
 	if _, err := p.ExecuteNested(ctx, "bank", b.rule, abi.ServiceCallRequest{Target: "web", Action: "open", Args: map[string]any{"url": "u"}}); err == nil ||
 		!strings.Contains(err.Error(), "nesting") {
 		t.Fatal("depth:", err)
+	}
+}
+
+// Из действия — только объявленные в calls подвызовы и не выше его класса.
+func TestNestedCallsDeclaredByAction(t *testing.T) {
+	p, b, _, _, _ := nestedEnv(t)
+	b.calls = []abi.ServiceCallRequest{
+		{Target: "web", Action: "open", Args: map[string]any{"url": "https://bank.example/"}}, // объявлен у look, read
+		{Target: "web", Action: "act"},  // объявлен, но write выше read
+		{Target: "web", Action: "read"}, // не объявлен у look
+	}
+	res := p.Execute(context.Background(), Call{Agent: "bot", Action: "bank.look"})
+	if res.Status != StatusOK {
+		t.Fatal(res)
+	}
+	if b.got[0] != nil {
+		t.Fatal("declared read call:", b.got[0])
+	}
+	if b.got[1] == nil || !strings.Contains(b.got[1].Error(), "above the class read") {
+		t.Fatal("class escalation:", b.got[1])
+	}
+	if b.got[2] == nil || !strings.Contains(b.got[2].Error(), "does not declare") {
+		t.Fatal("undeclared call:", b.got[2])
+	}
+}
+
+// Запрос подтверждения называет подвызовы: подтверждение их покрывает.
+func TestApprovalShowsCalls(t *testing.T) {
+	p, b, _, _, _ := nestedEnv(t)
+	m := b.Manifest()
+	act, _ := m.Find("look")
+	a, err := p.requestApproval("bot", "bank.look", act, map[string]any{}, nil, policy.Decision{Effect: config.EffectAsk})
+	if err != nil || !strings.Contains(a.Preview, "also runs: web.open, web.act") {
+		t.Fatal(a, err)
 	}
 }

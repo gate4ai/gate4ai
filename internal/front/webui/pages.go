@@ -710,7 +710,7 @@ func (u *UI) storeItems(ctx context.Context, refresh bool) ([]storeItem, string)
 		m := c.Manifest()
 		seen[name] = true
 		items = append(items, storeItem{Name: name, Description: m.Description, Publisher: "gate4ai", Trust: "verified", Installed: m.Version,
-			Version: m.Version, Loaded: true, Builtin: true, Capabilities: m.Capabilities.Summary(), Profiles: profilesOf(name)})
+			Version: m.Version, Loaded: true, Builtin: true, Capabilities: m.Summary(), Profiles: profilesOf(name)})
 	}
 	for name, in := range inst {
 		if seen[name] {

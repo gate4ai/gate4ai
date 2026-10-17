@@ -153,7 +153,7 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 	if slices.Contains(o.Builtin, m.Connector) {
 		return nil, fmt.Errorf("connector %s is part of gate4ai and is not installed from the store", m.Connector)
 	}
-	p.Connector, p.Version, p.Capabilities = m.Connector, m.Version, m.Capabilities.Summary()
+	p.Connector, p.Version, p.Capabilities = m.Connector, m.Version, m.Summary()
 	if p.Capabilities == nil {
 		p.Capabilities = []string{}
 	}

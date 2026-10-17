@@ -30,6 +30,10 @@ func (p *Pipeline) requestApproval(agent, action string, act manifest.Action, ar
 			a.Preview = previewText(agent, action, text, dec)
 		}
 	}
+	if len(act.Calls) > 0 {
+		// Подвызовы покрываются этим подтверждением: человек должен их видеть.
+		a.Preview += "\nalso runs: " + strings.Join(act.Calls, ", ")
+	}
 	canon, _ := audit.Canonicalize(map[string]any{"id": a.ID, "agent": agent, "action": action, "args": p.maskArgs(act, args)})
 	a.PreviewHash = audit.HashBytes(canon)
 	if err := p.State.PutApproval(a); err != nil {

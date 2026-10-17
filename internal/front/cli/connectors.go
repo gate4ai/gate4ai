@@ -403,7 +403,7 @@ func (e *Env) pack(ctx context.Context, args []string) int {
 		return e.fail(err)
 	}
 	res := map[string]any{"package": filepath.Base(*out), "connector": p.Manifest.Connector, "version": p.Manifest.Version,
-		"digest": p.Sig.Digest, "sha256": store.SHA256(pkg), "signed_by": p.Sig.PublicKey, "capabilities": p.Manifest.Capabilities.Summary()}
+		"digest": p.Sig.Digest, "sha256": store.SHA256(pkg), "signed_by": p.Sig.PublicKey, "capabilities": p.Manifest.Summary()}
 	if toolchain != "" {
 		res["go"] = toolchain
 	}
@@ -452,7 +452,7 @@ func (e *Env) packNative(ctx context.Context, dir string, man []byte, m manifest
 		}
 		if single {
 			e.printJSON(map[string]any{"package": filepath.Base(file), "connector": m.Connector, "version": m.Version, "platform": plat,
-				"digest": p.Sig.Digest, "sha256": store.SHA256(pkg), "signed_by": signedBy, "capabilities": m.Capabilities.Summary(), "go": tc})
+				"digest": p.Sig.Digest, "sha256": store.SHA256(pkg), "signed_by": signedBy, "capabilities": m.Summary(), "go": tc})
 			return ExitOK
 		}
 		set.Platforms[plat] = store.Artifact{URL: name, SHA256: store.SHA256(pkg), Digest: p.Sig.Digest}
@@ -463,7 +463,7 @@ func (e *Env) packNative(ctx context.Context, dir string, man []byte, m manifest
 		return e.fail(err)
 	}
 	e.printJSON(map[string]any{"package": filepath.Base(out), "connector": m.Connector, "version": m.Version,
-		"digest": store.SetDigest(set), "sha256": store.SHA256(sb), "signed_by": signedBy, "capabilities": m.Capabilities.Summary(),
+		"digest": store.SetDigest(set), "sha256": store.SHA256(sb), "signed_by": signedBy, "capabilities": m.Summary(),
 		"go": tc, "platforms": set.Platforms})
 	return ExitOK
 }

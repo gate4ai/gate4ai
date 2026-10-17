@@ -20,10 +20,11 @@ const MaxDepth = 4
 // callInfo — исполняемое действие: на него ссылаются вложенные вызовы.
 type callInfo struct {
 	Agent string
-	ID    string   // квитанция этого действия
-	Root  string   // квитанция корневого действия агента
-	Depth int      // 0 — действие агента
-	Chain []string // коннекторы от корня до этого действия
+	Act   manifest.Action // исполняемое действие: его calls и класс
+	ID    string          // квитанция этого действия
+	Root  string          // квитанция корневого действия агента
+	Depth int             // 0 — действие агента
+	Chain []string        // коннекторы от корня до этого действия
 }
 
 type callKey struct{}
@@ -48,8 +49,9 @@ type nestedCall struct {
 // ExecuteNested — вызов service_call коннектора caller во время его действия
 // (ctx — контекст этого действия): поставщик и контракт сверяются с
 // разрешением rule из манифеста вызывающего, аргументы — со схемой поставщика;
-// решение — по правилам профиля агента корневого действия (policy.Request.Nested:
-// без правила действие покрыто решением по родительскому). Квитанция ссылается
+// подвызов объявлен в calls вызывающего действия, а класс не выше его класса —
+// поэтому разрешение вызывающего действия его покрывает (policy.Request.Nested:
+// без правила разрешено, явный deny действует). Квитанция ссылается
 // на родительскую; страница и прочее состояние поставщика живут до конца
 // корневого действия (Caller.Call).
 func (p *Pipeline) ExecuteNested(ctx context.Context, caller string, rule manifest.ServiceRule, r abi.ServiceCallRequest) (abi.ExecResult, error) {
@@ -64,9 +66,16 @@ func (p *Pipeline) ExecuteNested(ctx context.Context, caller string, rule manife
 	if slices.Contains(parent.Chain, r.Target) {
 		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "service_call %s: cycle %s → %s", full, strings.Join(parent.Chain, " → "), r.Target)
 	}
+	if !parent.Act.CallsAction(r.Target, r.Action) {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "service_call %s: action %s.%s does not declare this call (calls)", full, caller, parent.Act.Name)
+	}
 	cli, act, ok := p.Registry.Lookup(full)
 	if !ok {
 		return abi.ExecResult{}, abi.Errorf(abi.CodeNotFound, "service_call %s: connector or action is not installed", full)
+	}
+	if manifest.ClassRank(act.Class) > manifest.ClassRank(parent.Act.Class) {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "service_call %s: class %s is above the class %s of %s.%s, whose approval would not cover it",
+			full, act.Class, parent.Act.Class, caller, parent.Act.Name)
 	}
 	m := cli.Manifest()
 	if !m.IsService(r.Action) {

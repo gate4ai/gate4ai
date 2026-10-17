@@ -36,6 +36,7 @@ type Tool struct {
 	InputSchema  map[string]any  `json:"input_schema"`            // аргументы — JSON Schema для MCP
 	OutputSchema map[string]any  `json:"output_schema,omitempty"` // структурированный результат — JSON Schema для MCP
 	Example      string          `json:"example,omitempty"`
+	Calls        []string        `json:"calls,omitempty"` // подвызовы (service_call), покрытые разрешением действия
 }
 
 // Tools — каталог действий; для агента — только коннекторы его профиля.
@@ -57,7 +58,11 @@ func (d *Daemon) Tools(p auth.Principal) []Tool {
 			if a.ServiceOnly {
 				continue // только для других коннекторов (service_call)
 			}
-			t := Tool{Name: m.Full(a), Connector: m.Connector, Action: a.Name, Description: a.Description,
+			desc := a.Description
+			if len(a.Calls) > 0 {
+				desc = strings.TrimSuffix(desc, ".") + ". Also runs: " + strings.Join(a.Calls, ", ") + " (covered by approving this action)."
+			}
+			t := Tool{Name: m.Full(a), Connector: m.Connector, Action: a.Name, Description: desc, Calls: a.Calls,
 				Class: a.Class, Schema: a.InputSchema, InputSchema: a.JSONSchema(), Example: a.Example}
 			if a.OutputSchema != nil {
 				t.OutputSchema = a.OutputSchema.JSONSchema()

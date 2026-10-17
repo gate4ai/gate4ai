@@ -27,7 +27,7 @@ func CheckRelease(b []byte, name, publisher string, rel Release, pub Publisher) 
 	if _, ok := VerifySig(pub.Keys, pkg.Sig.Digest, pkg.Sig.Signature); !ok {
 		return nil, fmt.Errorf("package %s %s is not signed by publisher %s", name, rel.Version, publisher)
 	}
-	if !slices.Equal(pkg.Manifest.Capabilities.Summary(), nonNil(rel.Capabilities)) {
+	if !slices.Equal(pkg.Manifest.Summary(), nonNil(rel.Capabilities)) {
 		return nil, errors.New("package capabilities differ from the reviewed capabilities in the registry")
 	}
 	return pkg, nil

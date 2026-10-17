@@ -178,7 +178,7 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			}
 			m := c.Manifest()
 			out = append(out, map[string]any{"connector": name, "version": m.Version, "trust": "builtin", "publisher": "gate4ai",
-				"source": "built in", "loaded": true, "capabilities": m.Capabilities.Summary()})
+				"source": "built in", "loaded": true, "capabilities": m.Summary()})
 		}
 		for _, it := range list {
 			c, loaded := d.Registry.Get(it.Name)

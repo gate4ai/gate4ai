@@ -256,7 +256,7 @@ func (p *Pipeline) run(ctx context.Context, agent, action string, cli connectors
 	}
 	// Вложенные вызовы (service_call) ссылаются на это действие; состояние
 	// поставщиков живёт до конца корневого действия.
-	info := callInfo{Agent: agent, ID: receipt.ID, Root: receipt.ID, Chain: []string{conn}}
+	info := callInfo{Agent: agent, Act: act, ID: receipt.ID, Root: receipt.ID, Chain: []string{conn}}
 	exReq := abi.ExecRequest{Action: act.Name, Args: args, Settings: settings}
 	if parent, ok := callFrom(ctx); ok {
 		receipt.Parent = parent.ID

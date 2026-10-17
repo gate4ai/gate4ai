@@ -191,7 +191,7 @@ func (o Options) check(it Installed, ix *Index) ([]byte, error) {
 	if digest != it.Info.Digest {
 		return nil, errors.New("files changed after installation (digest mismatch)")
 	}
-	if !equalStrings(it.Manifest.Capabilities.Summary(), nonNil(it.Info.Capabilities)) {
+	if !equalStrings(it.Manifest.Summary(), nonNil(it.Info.Capabilities)) {
 		return nil, errors.New("capabilities differ from what the owner consented to")
 	}
 	if ix != nil {
