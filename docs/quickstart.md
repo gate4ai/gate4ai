@@ -12,7 +12,7 @@ make connectors      # bin/connectors/{mail,browser}.g4c — пакеты офи
 ./scripts/ci.sh      # по всем модулям workspace: build / vet / test + кросс-сборка darwin и windows
 ```
 
-Ядро — один Go-модуль; `sdk-go`, `relay` и коннекторы — отдельные репозитории github.com/gate4ai, см. [repo-structure.md](../../repo-structure.md).
+Ядро — один Go-модуль; `sdk-go`, `relay` и коннекторы — отдельные репозитории github.com/gate4ai.
 
 Положите `gate4ai` в `PATH`.
 

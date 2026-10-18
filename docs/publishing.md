@@ -67,7 +67,7 @@ done
 | — | `connectors/tbank/` (без репозитория) удалён 2026-10-18 по решению человека: коннектор будет сделан заново |
 | `www/` | `gate4ai/www` — сайт gate4.ai (Rust), **приватный**, создан 2026-10-14; деплой на сервер relay из CI |
 | `e2e/` | `gate4ai/e2e` — сквозные тесты (AGPL-3.0-only), создан 2026-10-14, ещё не опубликован |
-| `connectors/auth/` | auth-модули (пока только [README](../../connectors/auth/README.md), вне git) |
+| `connectors/auth/` | auth-модули (пока только README, вне git) |
 | `.secrets/keys/` | ключ издателя и ключ registry; вне git |
 
 ## 6. Выпуск версии коннектора
