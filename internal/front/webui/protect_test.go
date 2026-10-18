@@ -154,7 +154,7 @@ func TestLoginPassword(t *testing.T) {
 	for i := 0; i < maxTries; i++ {
 		_, page = b3.submitPassword(page, "guess")
 	}
-	if strings.Contains(page, `name="password"`) || !strings.Contains(page, "получите новую") {
+	if strings.Contains(page, `name="password"`) || !strings.Contains(page, "начните вход заново") {
 		t.Fatal("attempt must end after too many wrong passwords", page)
 	}
 	// Подряд неверные пароли по разным ссылкам — задержка для всех.
@@ -186,7 +186,7 @@ func TestLoginPassword(t *testing.T) {
 		t.Fatal("password not changed")
 	}
 	post2("/settings/login/password", url.Values{"remove": {"1"}, "current": {"battery staple"}})
-	if u.Protection().On() {
+	if u.Protection().Custom() {
 		t.Fatal("password not removed")
 	}
 	b6 := newBrowser(t, base)
@@ -217,7 +217,7 @@ func protectedSession(t *testing.T, u *UI, base, pw string) (*browser, string, f
 func TestLoginTelegram(t *testing.T) {
 	u, _, _, base := setup(t)
 	_, _, post, _ := loginAs(t, u, base)
-	if p := post("/settings/login/telegram", url.Values{"on": {"1"}}); !strings.Contains(p, "подключите Telegram-бот") || u.Protection().On() {
+	if p := post("/settings/login/telegram", url.Values{"on": {"1"}}); !strings.Contains(p, "подключите Telegram-бот") || u.Protection().Custom() {
 		t.Fatal("telegram confirmation enabled without a bot")
 	}
 	f := &fakeConfirm{}
@@ -311,7 +311,7 @@ func TestLoginPasswordAndTelegram(t *testing.T) {
 		t.Fatal("no password: no Telegram request, no session")
 	}
 	// Восстановление: сброс снимает защиту и закрывает сессии.
-	if err := u.ResetProtection(); err != nil || u.Protection().On() || b.loggedIn() {
+	if err := u.ResetProtection(); err != nil || u.Protection().Custom() || b.loggedIn() {
 		t.Fatal("reset")
 	}
 }
@@ -340,5 +340,104 @@ func TestRemoteLoginProtected(t *testing.T) {
 	}
 	if rec.code != http.StatusSeeOther || rec.h.Get("Location") != "/ui/login" {
 		t.Fatal("remote link must start a login attempt", rec.code, rec.h.Get("Location"))
+	}
+}
+
+func TestLoginWithoutLink(t *testing.T) {
+	u, d, _, base := setup(t)
+	_, _, post, _ := loginAs(t, u, base)
+	// Ссылка — единственный способ: выключить нельзя.
+	if p := post("/settings/login/link", url.Values{"on": {"0"}}); !strings.Contains(p, "хотя бы один способ") || u.Protection().NoLink {
+		t.Fatal("link disabled with no other way to log in", p)
+	}
+	post("/settings/login/password", url.Values{"password": {"correct horse"}, "repeat": {"correct horse"}})
+	_, _, post = protectedSession(t, u, base, "correct horse")
+	if p := post("/settings/login/link", url.Values{"on": {"0"}}); !strings.Contains(p, "текущий пароль") || u.Protection().NoLink {
+		t.Fatal("link disabled without current password")
+	}
+	post("/settings/login/link", url.Values{"on": {"0"}, "current": {"correct horse"}})
+	if !u.Protection().NoLink {
+		t.Fatal("link not disabled")
+	}
+	_, _, post = protectedSession(t, u, base, "correct horse") // старая сессия закрыта; ссылка тоже ведёт ко входу
+	// Последний оставшийся способ не снимается.
+	if p := post("/settings/login/password", url.Values{"remove": {"1"}, "current": {"correct horse"}}); !strings.Contains(p, "хотя бы один способ") || u.Protection().Password == "" {
+		t.Fatal("removed the last way to log in")
+	}
+
+	// Постоянный адрес: форма пароля без ссылки, GET попытку не начинает.
+	b2 := newBrowser(t, base)
+	st, page := b2.get("/")
+	if st != 401 || !strings.Contains(page, `name="start"`) || !strings.Contains(page, `name="password"`) {
+		t.Fatal("no login form at the permanent address", st, page)
+	}
+	if st, _ := b2.post("/login", url.Values{"start": {"1"}, "password": {"wrong password"}}); st != 401 || b2.loggedIn() {
+		t.Fatal("wrong password logged in")
+	}
+	if b2.post("/login", url.Values{"start": {"1"}, "password": {"correct horse"}}); !b2.loggedIn() {
+		t.Fatal("password at the permanent address did not log in")
+	}
+	// Чужой сайт попытку входа не начинает.
+	req, _ := http.NewRequest("POST", base+"/login", strings.NewReader("start=1&password=correct+horse"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://evil.example")
+	if r, _ := http.DefaultClient.Do(req); r.StatusCode != 403 {
+		t.Fatal("cross-origin login start", r.StatusCode)
+	}
+	// Удалённо ссылка нужна всегда.
+	d.AddPublicURL(func() string { return "https://dev.example" })
+	rq, _ := http.NewRequest("POST", "https://dev.example/ui/login", strings.NewReader("start=1&password=correct+horse"))
+	rq.Host = "dev.example"
+	rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := &recorder{h: http.Header{}}
+	u.RemoteHandler().ServeHTTP(rec, rq)
+	for _, c := range (&http.Response{Header: rec.h}).Cookies() {
+		if c.Name == "g4a_rsession" || c.Name == "g4a_rlogin" {
+			t.Fatal("remote login without a link")
+		}
+	}
+
+	// Только Telegram, без ссылки: подтверждение — по кнопке «Войти», не по GET.
+	f := &fakeConfirm{}
+	u.Confirm = f
+	_, _, post3 := protectedSession(t, u, base, "correct horse")
+	post3("/settings/login/telegram", url.Values{"on": {"1"}, "current": {"correct horse"}})
+	_, _, post3 = protectedSessionTG(t, u, base, f, "correct horse")
+	post3("/settings/login/password", url.Values{"remove": {"1"}, "current": {"correct horse"}})
+	if p := u.Protection(); p.Password != "" || !p.Telegram || !p.NoLink {
+		t.Fatal("telegram only", p)
+	}
+	b4 := newBrowser(t, base)
+	n := f.n()
+	if b4.get("/login"); f.n() != n {
+		t.Fatal("GET must not ask Telegram")
+	}
+	b4.post("/login", url.Values{"start": {"1"}})
+	if f.n() != n+1 || b4.loggedIn() {
+		t.Fatal("start must ask Telegram and wait")
+	}
+	f.press(n, true)
+	if b4.get("/login"); !b4.loggedIn() {
+		t.Fatal("telegram-only login")
+	}
+}
+
+// protectedSessionTG — вход с паролем и подтверждением в Telegram.
+func protectedSessionTG(t *testing.T, u *UI, base string, f *fakeConfirm, pw string) (*browser, string, func(string, url.Values) string) {
+	t.Helper()
+	b := newBrowser(t, base)
+	b.post("/login", url.Values{"start": {"1"}, "password": {pw}})
+	f.press(f.n()-1, true)
+	b.get("/login")
+	_, page := b.get("/settings")
+	m := csrfRe.FindStringSubmatch(page)
+	if m == nil {
+		t.Fatal("not logged in", page)
+	}
+	return b, m[1], func(path string, v url.Values) string {
+		t.Helper()
+		v.Set("csrf", m[1])
+		_, p := b.post(path, v)
+		return p
 	}
 }

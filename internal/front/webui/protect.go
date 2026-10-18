@@ -2,12 +2,16 @@
 
 package webui
 
-// Защита входа: пароль (хэш argon2id в State Store) и/или подтверждение входа в
-// личном Telegram-боте — на другом устройстве, не на этом компьютере. Пока защита
-// выключена, одноразовая ссылка сразу даёт сессию. Включена — ссылка открывает
-// только попытку входа, привязанную к браузеру cookie; сессию даёт пароль и/или
-// «Разрешить вход» в Telegram. Поэтому агент на этом же компьютере, выполнив
-// `gate4ai ui --print`, готовой сессии не получает. Настройки защиты хранятся не в
+// Защита входа — три способа, которые владелец сочетает в Настройках (нужно
+// пройти все включённые, хотя бы один включён всегда): одноразовая ссылка с
+// устройства (`gate4ai ui`, трей; по умолчанию — только она), пароль (хэш
+// argon2id в State Store) и подтверждение входа в личном Telegram-боте — на
+// другом устройстве, не на этом компьютере. Без пароля и Telegram ссылка сразу
+// даёт сессию, как раньше. С ними ссылка открывает только попытку входа,
+// привязанную к браузеру cookie; поэтому агент на этом же компьютере, выполнив
+// `gate4ai ui --print`, готовой сессии не получает. Без ссылки вход начинается на
+// постоянном адресе Web UI. Удалённо (/ui/ на публичном адресе, он открыт в
+// интернет) ссылка нужна всегда. Настройки защиты хранятся не в
 // конфигурации (её может менять агент через gate4ai.change_policy), а в State Store;
 // API, который их отдаёт, нет.
 
@@ -31,14 +35,29 @@ const protectionKey = "ui.login"
 
 // Protection — защита входа в Web UI.
 type Protection struct {
+	NoLink   bool   `json:"no_link,omitempty"`  // на этом компьютере вход без одноразовой ссылки
 	Password string `json:"password,omitempty"` // $argon2id$v=19$m=…,t=…,p=…$соль$хэш; "" — без пароля
 	Telegram bool   `json:"telegram,omitempty"` // подтверждение входа в Telegram-боте
 }
 
-// On — защита включена.
-func (p Protection) On() bool { return p.Password != "" || p.Telegram }
+// Extra — кроме ссылки нужен пароль и/или подтверждение в Telegram.
+func (p Protection) Extra() bool { return p.Password != "" || p.Telegram }
 
-// Requires — что нужно для входа: password, telegram.
+// Custom — защита отличается от умолчания (только ссылка).
+func (p Protection) Custom() bool { return p.NoLink || p.Extra() }
+
+// linkRequired — нужна ли одноразовая ссылка (удалённо — всегда).
+func (p Protection) linkRequired(m mount) bool { return m.remote || !p.NoLink }
+
+// valid — хотя бы один способ входа остаётся.
+func (p Protection) valid() error {
+	if p.NoLink && !p.Extra() {
+		return errors.New("должен остаться хотя бы один способ входа: ссылка, пароль или Telegram")
+	}
+	return nil
+}
+
+// Requires — что нужно для входа, кроме ссылки: password, telegram.
 func (p Protection) Requires() []string {
 	out := []string{}
 	if p.Password != "" {
@@ -153,6 +172,25 @@ func (m mount) attemptCookie() string {
 		return "g4a_rlogin"
 	}
 	return "g4a_login"
+}
+
+func (u *UI) setAttemptCookie(w http.ResponseWriter, m mount, id string) {
+	http.SetCookie(w, &http.Cookie{Name: m.attemptCookie(), Value: id, Path: m.base + "/", HttpOnly: true, Secure: m.remote,
+		SameSite: http.SameSiteStrictMode, MaxAge: int(attemptTTL.Seconds())})
+}
+
+// loginPage — страница «нужен вход»: без попытки входа. Если ссылка не нужна —
+// начало входа (пароль и/или кнопка «Войти»), иначе — как получить ссылку.
+func (u *UI) loginPage(w http.ResponseWriter, m mount) {
+	p := u.Protection()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(401)
+	if !p.linkRequired(m) {
+		_ = tpl.ExecuteTemplate(w, "login_step.html", view{Base: m.base, Remote: m.remote,
+			Data: map[string]any{"Start": true, "Password": p.Password != "", "Telegram": map[bool]string{true: tgNeed}[p.Telegram]}})
+		return
+	}
+	_ = tpl.ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote})
 }
 
 func loginCode() string {
@@ -274,9 +312,19 @@ func (u *UI) loginPost(m mount) http.HandlerFunc {
 		_ = r.ParseForm()
 		u.mu.Lock()
 		id, a := u.attemptOf(m, r)
+		// Без ссылки попытка начинается кнопкой «Войти» на постоянном адресе (POST
+		// с проверкой Origin: чужой сайт попытку не начнёт и Telegram не потревожит).
+		// Повторное «Войти» начинает попытку заново (неверные пароли считает общая задержка).
+		if p := u.Protection(); r.PostForm.Get("start") == "1" && !p.linkRequired(m) {
+			delete(u.attempts, id)
+			id = u.newAttempt(m, p)
+			a = u.attempts[id]
+			u.setAttemptCookie(w, m, id)
+			r.PostForm.Set("csrf", a.csrf)
+		}
 		if a == nil || subtle.ConstantTimeCompare([]byte(r.PostForm.Get("csrf")), []byte(a.csrf)) != 1 {
 			u.mu.Unlock()
-			loginPage(w, m)
+			u.loginPage(w, m)
 			return
 		}
 		needPw, tg := a.password, a.telegram
@@ -291,7 +339,7 @@ func (u *UI) loginPost(m mount) http.HandlerFunc {
 					u.mu.Unlock()
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					w.WriteHeader(401)
-					_ = tpl.ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote, Error: "Слишком много неверных паролей для этой ссылки — получите новую."})
+					_ = tpl.ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote, Error: "Слишком много неверных паролей — начните вход заново."})
 					return
 				}
 				u.mu.Unlock()
@@ -316,7 +364,7 @@ func (u *UI) loginStep(w http.ResponseWriter, r *http.Request, m mount, id, errM
 	a, ok := u.attempts[id]
 	if !ok {
 		u.mu.Unlock()
-		loginPage(w, m)
+		u.loginPage(w, m)
 		return
 	}
 	send := !a.password && a.telegram == tgNeed
@@ -377,7 +425,7 @@ func (u *UI) authorizeProtection(r *http.Request, p Protection) (string, error) 
 	if !ok {
 		return "", errors.New("login required")
 	}
-	if p.On() && !s.protected {
+	if p.Custom() && !s.protected {
 		return "", errors.New("эта сессия открыта без защиты входа: войдите заново (выход → gate4ai ui), чтобы изменить защиту")
 	}
 	if p.Password != "" {
@@ -391,11 +439,14 @@ func (u *UI) authorizeProtection(r *http.Request, p Protection) (string, error) 
 // saveProtection сохраняет защиту и закрывает все остальные сессии и попытки
 // входа: дальше в Web UI войти можно только с новой защитой.
 func (u *UI) saveProtection(sid string, p Protection) error {
+	if err := p.valid(); err != nil {
+		return err
+	}
 	b, _ := json.Marshal(p)
 	if err := u.D.State.Set(protectionKey, string(b)); err != nil {
 		return err
 	}
-	u.dropSessions(sid, p.On())
+	u.dropSessions(sid, p.Custom())
 	return nil
 }
 
@@ -417,7 +468,7 @@ func (u *UI) setLoginPassword(w http.ResponseWriter, r *http.Request) map[string
 		case pw != f.Get("repeat"):
 			return redirectErr("/settings#login", errors.New("пароли не совпадают"))
 		}
-		flash = "Пароль задан: вход в Web UI по ссылке теперь требует пароль. Остальные сессии закрыты."
+		flash = "Пароль задан: вход в Web UI теперь требует пароль. Остальные сессии закрыты."
 		p.Password = hashPassword(pw)
 	}
 	if err := u.saveProtection(sid, p); err != nil {
@@ -442,4 +493,18 @@ func (u *UI) setLoginTelegram(w http.ResponseWriter, r *http.Request) map[string
 	}
 	return redirect("/settings#login", map[bool]string{true: "Вход в Web UI теперь подтверждается в Telegram. Остальные сессии закрыты.",
 		false: "Подтверждение входа в Telegram выключено."}[on])
+}
+
+func (u *UI) setLoginLink(w http.ResponseWriter, r *http.Request) map[string]any {
+	p := u.Protection()
+	sid, err := u.authorizeProtection(r, p)
+	if err != nil {
+		return redirectErr("/settings#login", err)
+	}
+	p.NoLink = r.PostForm.Get("on") != "1"
+	if err := u.saveProtection(sid, p); err != nil {
+		return redirectErr("/settings#login", err)
+	}
+	return redirect("/settings#login", map[bool]string{true: "Вход на этом компьютере — по одноразовой ссылке (gate4ai ui, трей).",
+		false: "Одноразовая ссылка больше не нужна: входите на " + "http://" + u.Addr + "/ — с паролем и/или подтверждением в Telegram. Остальные сессии закрыты."}[!p.NoLink])
 }

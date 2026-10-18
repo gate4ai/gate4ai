@@ -241,8 +241,10 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 				return
 			}
 		}
-		// requires — что ещё нужно для входа по ссылке (пароль, подтверждение в Telegram).
-		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": u.Protection().Requires()})
+		// requires — что ещё нужно для входа по ссылке (пароль, подтверждение в Telegram);
+		// link_required — нужна ли ссылка вообще (иначе вход и по постоянному адресу).
+		p := u.Protection()
+		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": p.Requires(), "link_required": req.Remote || !p.NoLink})
 	})
 	mux.HandleFunc("GET /v1/tray/state", func(w http.ResponseWriter, r *http.Request) {
 		if !daemon.PrincipalFrom(r.Context()).IsOwner() {
@@ -378,6 +380,7 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/settings/remote-link", u.remoteLink)
 	change("/settings/login/password", u.setLoginPassword)
 	change("/settings/login/telegram", u.setLoginTelegram)
+	change("/settings/login/link", u.setLoginLink)
 	return u.guard(m, mux)
 }
 
@@ -446,7 +449,7 @@ func (u *UI) login(m mount) http.HandlerFunc {
 			u.mu.Unlock()
 			if valid {
 				p := u.Protection()
-				if !p.On() {
+				if !p.Extra() {
 					u.startSession(w, m, false)
 					http.Redirect(w, r, m.base+"/", http.StatusSeeOther)
 					return
@@ -454,8 +457,7 @@ func (u *UI) login(m mount) http.HandlerFunc {
 				u.mu.Lock()
 				id := u.newAttempt(m, p)
 				u.mu.Unlock()
-				http.SetCookie(w, &http.Cookie{Name: m.attemptCookie(), Value: id, Path: m.base + "/", HttpOnly: true, Secure: m.remote,
-					SameSite: http.SameSiteStrictMode, MaxAge: int(attemptTTL.Seconds())})
+				u.setAttemptCookie(w, m, id)
 				// Без токена в адресе: дальше попытка живёт только в cookie этого браузера.
 				http.Redirect(w, r, m.base+"/login", http.StatusSeeOther)
 				return
@@ -468,14 +470,8 @@ func (u *UI) login(m mount) http.HandlerFunc {
 			u.loginStep(w, r, m, id, "")
 			return
 		}
-		loginPage(w, m)
+		u.loginPage(w, m)
 	}
-}
-
-func loginPage(w http.ResponseWriter, m mount) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(401)
-	_ = tpl.ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote})
 }
 
 type view struct {
@@ -498,7 +494,7 @@ func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, erro
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, s, ok := u.session(m, r)
 		if !ok {
-			loginPage(w, m)
+			u.loginPage(w, m)
 			return
 		}
 		name, data, err := f(r)
