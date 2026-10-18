@@ -127,11 +127,17 @@ registry() {
   writer gh release download "v$version" -R "$slug" -p pack.json -D "$work/.." --clobber
   (cd "$work" && gate4ai registry add index.json ../pack.json --publisher gate4ai \
     && gate4ai registry sign index.json --key "$root/.secrets/keys/registry.key")
-  git -C "$work" commit -q -am "$name v$version"
+  git -C "$work" commit -q -s -am "$name v$version" # -s: registry принимает коммиты с DCO
   gpush "$work" -f origin "$branch"
   pr=$(writer gh pr list -R gate4ai/registry --head "$branch" --json number -q '.[0].number')
   [ -n "$pr" ] || pr=$(writer gh pr create -R gate4ai/registry --head "$branch" --title "$name v$version" --body "Release v$version of $slug." | sed -E 's#.*/##')
   say "waiting for the checks of registry PR #$pr"
+  # Сразу после push у PR ещё нет проверок, и gh pr checks падает: ждать запуск Actions.
+  local i
+  for i in $(seq 1 60); do
+    [ "$(writer gh pr view "$pr" -R gate4ai/registry --json statusCheckRollup -q '[.statusCheckRollup[] | select(.workflowName != "")] | length' 2>/dev/null || echo 0)" != 0 ] && break
+    sleep 5
+  done
   writer gh pr checks "$pr" -R gate4ai/registry --watch --interval 15 >/dev/null || die "registry PR #$pr: checks failed"
   writer gh pr merge "$pr" -R gate4ai/registry --merge --delete-branch
   git -C "$reg" fetch -q origin main
