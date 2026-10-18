@@ -182,7 +182,7 @@ gate4ai daemon --public 127.0.0.1:8080 --public-url https://gate.example.com   #
 ## 4. Подтверждения, Web UI, журнал
 
 - Подтверждения: Telegram-бот (кнопки «Разрешить / Отклонить / Показать текст»), уведомления ОС, трей, Web UI, `gate4ai approvals approve <id>`.
-- Web UI: `gate4ai ui` — откроет браузер по одноразовой ссылке (http://127.0.0.1:7431). С телефона: `gate4ai ui --remote` выдаёт одноразовую ссылку на `<публичный адрес>/ui/`; удалённо доступны подтверждения и журнал, политики, агенты и секреты меняются только на этом компьютере.
+- Web UI: `gate4ai ui` — откроет браузер по одноразовой ссылке (http://127.0.0.1:7431). С телефона: `gate4ai ui --remote` выдаёт одноразовую ссылку на `<публичный адрес>/ui/` (действует 2 минуты, открывается один раз); удалённо доступны подтверждения и журнал, политики, агенты и секреты меняются только на этом компьютере. Пока устройство не подключено к relay (`gate4ai relay status`: `"online": false`, причина — в `error`, например не выпущен сертификат), ссылка не выдаётся: она бы не открылась. Выпуск сертификата при неудаче повторяется сам (через 5 минут, затем реже, до часа).
 - Telegram вебхуком вместо polling: `approvals.telegram.webhook: true` (нужен публичный адрес).
 - Журнал: `gate4ai log`, `gate4ai show '#a3f9c21e'`, `gate4ai journal verify`, `gate4ai export -o backup.tar.gz --passphrase-env PASS`, офлайн-проверка `gate4ai verify backup.tar.gz --pubkey <hex>`.
 - Политики: `gate4ai policy test --agent claude-ai --action email.send --args '{"to":["x@y.z"],"subject":"s"}'`, `gate4ai policy versions`, `gate4ai policy rollback <n>`.

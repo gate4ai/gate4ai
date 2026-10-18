@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/daemon"
@@ -28,7 +29,12 @@ type Status struct {
 	DeviceID   string `json:"device_id,omitempty"`
 	Host       string `json:"host,omitempty"`    // <device-id>.<домен relay>
 	MCPURL     string `json:"mcp_url,omitempty"` // https://<host>/mcp
+	// Error — почему устройство не подключается (например, не выпущен сертификат).
+	Error string `json:"error,omitempty"`
 }
+
+// RetryCert — первая пауза перед повторным выпуском сертификата устройства.
+var RetryCert = 5 * time.Minute
 
 // DefaultURL — relay gate4.ai по умолчанию.
 const DefaultURL = "https://relay.gate4.ai"
@@ -41,6 +47,7 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 	var cur *Device
 	var stop context.CancelFunc
 	var key string
+	var lastErr string
 	d.AddPublicURL(func() string {
 		if c := d.Config.Current().Relay; c.URL != "" && c.DeviceID != "" {
 			return "https://" + deviceHost(c)
@@ -63,6 +70,7 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 			return
 		}
 		key = k
+		lastErr = ""
 		if stop != nil {
 			stop()
 			stop, cur = nil, nil
@@ -74,19 +82,34 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 		dctx, cancel := context.WithCancel(ctx)
 		stop = cancel
 		// Выпуск сертификата (ACME) может занять время — не блокируем daemon.
+		// Неудачу повторяем с растущей паузой (лимит Let's Encrypt — 5 неудачных
+		// проверок в час на имя), а не отключаем relay до перезапуска.
 		go func() {
-			dev, err := deviceFor(dctx, d, r, tok)
-			if err != nil {
-				d.Log.Error("relay disabled", "err", err)
-				return
-			}
-			mu.Lock()
-			if dctx.Err() != nil {
+			wait := RetryCert
+			var dev *Device
+			for {
+				var err error
+				dev, err = deviceFor(dctx, d, r, tok)
+				mu.Lock()
+				if dctx.Err() != nil {
+					mu.Unlock()
+					return
+				}
+				if err == nil {
+					cur, lastErr = dev, ""
+					mu.Unlock()
+					break
+				}
+				lastErr = err.Error()
 				mu.Unlock()
-				return
+				d.Log.Error("relay: device certificate not obtained, retrying", "err", err, "in", wait)
+				select {
+				case <-dctx.Done():
+					return
+				case <-time.After(wait):
+				}
+				wait = min(2*wait, time.Hour)
 			}
-			cur = dev
-			mu.Unlock()
 			d.Journal.SetWitness(dev)
 			_ = d.Journal.RetryWitness()
 			dev.Run(dctx)
@@ -94,10 +117,10 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 	}
 	status := func() Status {
 		mu.Lock()
-		dev := cur
+		dev, e := cur, lastErr
 		mu.Unlock()
 		c := d.Config.Current().Relay
-		st := Status{Configured: c.DeviceID != "", Online: dev != nil && dev.Online(), URL: c.URL, DeviceID: c.DeviceID}
+		st := Status{Configured: c.DeviceID != "", Online: dev != nil && dev.Online(), URL: c.URL, DeviceID: c.DeviceID, Error: e}
 		if c.DeviceID != "" {
 			st.Host = deviceHost(c)
 			st.MCPURL = "https://" + st.Host + "/mcp"
@@ -132,6 +155,9 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 			out := map[string]any{"configured": st.Configured, "online": st.Online}
 			if st.MCPURL != "" {
 				out["mcp_url"] = st.MCPURL
+			}
+			if st.Error != "" {
+				out["error"] = st.Error
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(out)

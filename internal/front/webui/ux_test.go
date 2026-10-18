@@ -16,6 +16,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
+	"github.com/gate4ai/gate4ai/internal/relayclient"
 )
 
 type fakeAutostart struct{ on bool }
@@ -291,5 +292,26 @@ func TestReferrerPolicyKeepsOrigin(t *testing.T) {
 	}
 	if p := r.Header.Get("Referrer-Policy"); p == "no-referrer" || p == "" {
 		t.Fatal(p)
+	}
+}
+
+// Relay настроен, но туннеля нет: ссылка не выдаётся (она бы зависла до таймаута),
+// вместо неё — причина; появилась связь — ссылка есть.
+func TestRemoteLinkRelayOffline(t *testing.T) {
+	u, d, _, base := setup(t)
+	st := relayclient.Status{Configured: true, Host: "abc.relay.test", Error: "obtaining certificate: no NS"}
+	u.Relay = func() relayclient.Status { return st }
+	d.AddPublicURL(func() string { return "https://abc.relay.test" })
+	if _, err := u.RemoteLoginURL(); !errors.Is(err, errRelayOffline) || !strings.Contains(err.Error(), "no NS") {
+		t.Fatal(err)
+	}
+	_, _, _, get := loginAs(t, u, base)
+	if p := get("/settings?link=1"); !strings.Contains(p, "не подключено к relay") || !strings.Contains(p, "Причина: obtaining certificate: no NS") ||
+		strings.Contains(p, "/ui/login?t=") {
+		t.Fatal(p)
+	}
+	st.Online, st.Error = true, ""
+	if l, err := u.RemoteLoginURL(); err != nil || !strings.HasPrefix(l, "https://abc.relay.test/ui/login?t=") {
+		t.Fatal(l, err)
 	}
 }

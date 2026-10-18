@@ -10,8 +10,10 @@ import (
 	"encoding/pem"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -109,4 +111,36 @@ func TestDaemonThroughRelay(t *testing.T) {
 
 func sampleReceipt() *audit.Receipt {
 	return &audit.Receipt{Agent: "a", Action: "notes.read", Class: "read", Decision: audit.Decision{Effect: "allow"}, Execution: audit.Execution{Status: "ok"}}
+}
+
+// Сертификат устройства не выпускается: relay не отключается до перезапуска —
+// причина видна в статусе, выпуск повторяется.
+func TestCertFailureRetried(t *testing.T) {
+	old := RetryCert
+	RetryCert = 50 * time.Millisecond
+	defer func() { RetryCert = old }()
+	ca := httptest.NewServer(http.NotFoundHandler()) // ACME CA без каталога
+	defer ca.Close()
+	var hits atomic.Int32
+	ca.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); http.NotFound(w, r) })
+	home := t.TempDir()
+	c, _ := connectors.NewInProcess(noop{})
+	d, err := daemon.New(daemon.Options{Home: filepath.Join(home, "d"), Keys: keys.NewMemory(), Connectors: []connectors.Client{c},
+		InitialConfig: []byte("agents: {a: {profile: p}}\nprofiles: {p: {connectors: [notes]}}\nrelay: {url: 'https://relay.test', device_id: abc, token: '@relay.token', acme_ca: '" + ca.URL + "/directory'}\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if err := d.Vault.Set("relay.token", "dev_x"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	status := Attach(ctx, d)
+	for i := 0; i < 500 && (status().Error == "" || hits.Load() < 2); i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if st := status(); st.Online || st.Error == "" || hits.Load() < 2 {
+		t.Fatalf("%+v, CA requests %d", st, hits.Load())
+	}
 }

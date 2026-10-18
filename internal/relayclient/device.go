@@ -241,13 +241,21 @@ func ACMETLS(ctx context.Context, c ACMEConfig) (*tls.Config, error) {
 	issuer := certmagic.NewACMEIssuer(cfg, certmagic.ACMEIssuer{CA: ca, Email: c.Email, Agreed: true,
 		DisableHTTPChallenge: true, DisableTLSALPNChallenge: true,
 		DNS01Solver: &certmagic.DNS01Solver{DNSManager: certmagic.DNSManager{DNSProvider: c.Provider, Resolvers: c.Resolvers}}})
-	cfg.Issuers = []certmagic.Issuer{issuer}
+	cfg.Issuers = []certmagic.Issuer{quietIssuer{issuer}}
 	if err := cfg.ManageSync(ctx, []string{c.Host}); err != nil {
 		return nil, err
 	}
 	t := cfg.TLSConfig()
 	t.NextProtos = []string{"http/1.1"}
 	return t, nil
+}
+
+// quietIssuer — ACME-эмитент без вопросов в stdin: ManageSync интерактивен, и без
+// email certmagic спрашивает его в терминале — daemon, запущенный в нём, ждал бы ответа.
+type quietIssuer struct{ *certmagic.ACMEIssuer }
+
+func (q quietIssuer) PreCheck(ctx context.Context, names []string, _ bool) error {
+	return q.ACMEIssuer.PreCheck(ctx, names, false)
 }
 
 // SelfSigned — самоподписанный сертификат (режим разработки и тесты).
