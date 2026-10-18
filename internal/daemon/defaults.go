@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/sdk-go/registry"
 
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
@@ -124,7 +125,7 @@ func (d *Daemon) installDefault(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if plan.Trust != store.TrustVerified {
+	if plan.Trust != registry.TrustVerified {
 		return fmt.Errorf("trust %s: only connectors verified by gate4.ai are installed without the owner", plan.Trust)
 	}
 	d.installMu.Lock()

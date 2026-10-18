@@ -3,7 +3,6 @@
 # Запускается из корня проекта или набора worktree; PITWALL_REPOS — изменённые
 # репозитории («gate4ai connectors/mail»), без него — все.
 #   Go-модуль:  go vet + go test, вместе с соседями через общий go.work;
-#   www:        cargo test;
 #   e2e:        если изменились sdk-go или хотя бы два Go-репозитория (или сам e2e).
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/workset.sh"
@@ -27,9 +26,6 @@ for r in $changed; do
       echo "== $m"
       (cd "$m" && go vet ./... && go test ./...)
     done
-  elif [ -f "$r/Cargo.toml" ]; then
-    echo "== $r"
-    (cd "$r" && cargo test --locked)
   else
     echo "== $r: nothing to test"
   fi

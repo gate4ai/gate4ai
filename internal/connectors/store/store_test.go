@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
+	"github.com/gate4ai/sdk-go/registry"
 )
 
 // Модуль-заглушка: для упаковки и установки достаточно заголовка WASM;
@@ -30,7 +31,7 @@ func manifestYAML(version, host string, write bool) []byte {
 }
 
 func keys(t *testing.T) (string, string) {
-	pub, priv, err := GenerateKey()
+	pub, priv, err := registry.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +51,7 @@ func packKey(m []byte, priv string) ([]byte, error) {
 	if priv == "" {
 		return Pack(m, fakeWasm, nil)
 	}
-	k, err := ParsePrivateKey(priv)
+	k, err := registry.ParsePrivateKey(priv)
 	if err != nil {
 		return nil, err
 	}
@@ -72,11 +73,11 @@ func TestPackageDigestAndSignature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if k, ok := VerifySig([]string{pub}, p.Sig.Digest, p.Sig.Signature); !ok || k != pub {
+	if k, ok := registry.VerifySig([]string{pub}, p.Sig.Digest, p.Sig.Signature); !ok || k != pub {
 		t.Fatal("signature")
 	}
 	other, _ := keys(t)
-	if _, ok := VerifySig([]string{other}, p.Sig.Digest, p.Sig.Signature); ok {
+	if _, ok := registry.VerifySig([]string{other}, p.Sig.Digest, p.Sig.Signature); ok {
 		t.Fatal("wrong key accepted")
 	}
 	// Подмена модуля внутри пакета ломает дайджест.
@@ -118,7 +119,7 @@ func TestInstallFromFileTrustAndConsent(t *testing.T) {
 	o.TrustedKeys = []string{pub}
 	signed := write(t, dir, "bank-2.g4c", pack(t, "2", "api.bank.example", true, priv))
 	p, err = o.Prepare(ctx, signed, false)
-	if err != nil || p.Trust != TrustPublisher || p.Installed != "1" {
+	if err != nil || p.Trust != registry.TrustPublisher || p.Installed != "1" {
 		t.Fatal(p, err)
 	}
 	// Возможности не изменились — обновление без повторного согласия.
@@ -153,7 +154,7 @@ type registryEnv struct {
 	regPriv string
 	pubPriv string
 	dir     string
-	index   Index
+	index   registry.Index
 }
 
 func newRegistry(t *testing.T, trust string) *registryEnv {
@@ -162,8 +163,8 @@ func newRegistry(t *testing.T, trust string) *registryEnv {
 	pubPub, pubPriv := keys(t)
 	r := &registryEnv{dir: dir, regPriv: regPriv, pubPriv: pubPriv,
 		o: Options{Dir: filepath.Join(dir, "home", "connectors"), Registry: filepath.Join(dir, "registry", "index.json"), RegistryKeys: []string{regPub}},
-		index: Index{Version: 1, Publishers: map[string]Publisher{"acme": {Keys: []string{pubPub}, Trust: trust}},
-			Connectors: map[string]Entry{"bank": {Publisher: "acme", Repo: "https://github.com/acme/gate4ai-bank", License: "AGPL-3.0-only"}}}}
+		index: registry.Index{Version: 1, Publishers: map[string]registry.Publisher{"acme": {Keys: []string{pubPub}, Trust: trust}},
+			Connectors: map[string]registry.Entry{"bank": {Publisher: "acme", Repo: "https://github.com/acme/gate4ai-bank", License: "AGPL-3.0-only"}}}}
 	os.MkdirAll(filepath.Join(dir, "registry", "packages"), 0o755)
 	return r
 }
@@ -173,7 +174,7 @@ func (r *registryEnv) publish(t *testing.T, version, host string) {
 	write(t, filepath.Join(r.dir, "registry", "packages"), "bank-"+version+".g4c", b)
 	p, _ := Open(b)
 	e := r.index.Connectors["bank"]
-	e.Versions = append(e.Versions, Release{Version: version, URL: "packages/bank-" + version + ".g4c", SHA256: SHA256(b),
+	e.Versions = append(e.Versions, registry.Release{Version: version, URL: "packages/bank-" + version + ".g4c", SHA256: SHA256(b),
 		Digest: p.Sig.Digest, Capabilities: p.Manifest.Capabilities.Summary()})
 	r.index.Connectors["bank"] = e
 	r.save(t)
@@ -182,7 +183,7 @@ func (r *registryEnv) publish(t *testing.T, version, host string) {
 func (r *registryEnv) save(t *testing.T) {
 	raw, _ := json.MarshalIndent(r.index, "", "  ")
 	write(t, filepath.Join(r.dir, "registry"), "index.json", raw)
-	sig, err := SignIndex(raw, r.regPriv)
+	sig, err := registry.SignIndex(raw, r.regPriv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,19 +191,19 @@ func (r *registryEnv) save(t *testing.T) {
 }
 
 func TestRegistryInstallRevokeAndTamper(t *testing.T) {
-	r := newRegistry(t, TrustVerified)
+	r := newRegistry(t, registry.TrustVerified)
 	r.publish(t, "1.9", "api.bank.example")
 	r.publish(t, "1.10", "api.bank.example")
 	ctx := context.Background()
 	p, err := r.o.Prepare(ctx, "bank", false)
-	if err != nil || p.Version != "1.10" || p.Trust != TrustVerified || p.Repo == "" {
+	if err != nil || p.Version != "1.10" || p.Trust != registry.TrustVerified || p.Repo == "" {
 		t.Fatal(p, err)
 	}
 	if _, err := r.o.Install(p, p.Capabilities); err != nil {
 		t.Fatal(err)
 	}
 	// Отзыв: последняя версия отозвана → берётся предыдущая; явная — отказ.
-	r.index.Revoked = []Revocation{{Connector: "bank", Version: "1.10", Reason: "leaks data"}}
+	r.index.Revoked = []registry.Revocation{{Connector: "bank", Version: "1.10", Reason: "leaks data"}}
 	r.save(t)
 	if p, err := r.o.Prepare(ctx, "bank", false); err != nil || p.Version != "1.9" {
 		t.Fatal(p, err)
@@ -217,7 +218,7 @@ func TestRegistryInstallRevokeAndTamper(t *testing.T) {
 	// Подпись индекса чужим ключом.
 	_, other := keys(t)
 	raw, _ := os.ReadFile(r.o.Registry)
-	sig, _ := SignIndex(raw, other)
+	sig, _ := registry.SignIndex(raw, other)
 	write(t, filepath.Join(r.dir, "registry"), "index.json.sig", []byte(sig))
 	if _, err := r.o.Prepare(ctx, "bank", false); err == nil || !strings.Contains(err.Error(), "signature") {
 		t.Fatal("index with a foreign signature accepted:", err)
@@ -231,7 +232,7 @@ func TestRegistryInstallRevokeAndTamper(t *testing.T) {
 }
 
 func TestRegistryCapabilitiesMustMatchReview(t *testing.T) {
-	r := newRegistry(t, TrustVerified)
+	r := newRegistry(t, registry.TrustVerified)
 	r.publish(t, "1", "api.bank.example")
 	e := r.index.Connectors["bank"]
 	e.Versions[0].Capabilities = []string{"network https://statements.bank.example"} // проверены другие возможности
@@ -241,14 +242,14 @@ func TestRegistryCapabilitiesMustMatchReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := r.index
-	bad.Connectors = map[string]Entry{"x": {Publisher: "nobody"}}
+	bad.Connectors = map[string]registry.Entry{"x": {Publisher: "nobody"}}
 	if err := bad.Check(); err == nil || !strings.Contains(err.Error(), "unknown publisher") || !strings.Contains(err.Error(), "repo") {
 		t.Fatal(err)
 	}
 }
 
 func TestLoadIntegrityAndCommunityReadOnly(t *testing.T) {
-	r := newRegistry(t, TrustCommunity)
+	r := newRegistry(t, registry.TrustCommunity)
 	r.publish(t, "1", "api.bank.example")
 	p, err := r.o.Prepare(context.Background(), "bank", false)
 	if err != nil {

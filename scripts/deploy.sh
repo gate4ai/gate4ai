@@ -6,7 +6,8 @@
 # уже сделанное он пропускает.
 #
 #   deploy.sh push [ветка]        отправить ветку (gate4ai-alex), дождаться ci.yml этого коммита
-#   deploy.sh tag                 следующий патч-тег vX.Y.Z+1 на отправленном main, дождаться релиза
+#   deploy.sh tag                 следующий патч-тег vX.Y.Z+1 на отправленном main (или отправить
+#                                 уже поставленный на main тег), дождаться релиза
 #   deploy.sh connector           версия в manifest.yaml +1, коммит, тег v<версия>, push, дождаться релиза
 #   deploy.sh registry            записать выпущенную версию коннектора в registry: add + sign, PR, CI, слияние
 #   deploy.sh in-registry         проверка: версия коннектора из manifest.yaml есть в registry (origin/main)
@@ -66,6 +67,11 @@ tag() {
   if [ "$(git rev-list --count "$last..main")" = 0 ]; then
     say "main is tagged already ($last)"
     next=$last
+    # Тег, поставленный вручную (например, минорный vX.Y+1.0), ещё может быть только локальным.
+    if [ -z "$(git ls-remote --tags origin "refs/tags/$next")" ]; then
+      say "pushing $next"
+      gpush "$repo" origin "$next"
+    fi
   else
     next=$(echo "$last" | awk -F. -v OFS=. '{ $NF = $NF + 1; print }')
     say "tagging $next (after $last)"

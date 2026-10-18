@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/sdk-go/registry"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 )
@@ -34,7 +35,7 @@ func packNative(t *testing.T, m []byte, plat, priv string) []byte {
 	if priv == "" {
 		b, err = PackNative(m, nativeBin, plat, nil)
 	} else {
-		k, _ := ParsePrivateKey(priv)
+		k, _ := registry.ParsePrivateKey(priv)
 		b, err = PackNative(m, nativeBin, plat, k)
 	}
 	if err != nil {
@@ -70,7 +71,7 @@ func TestNativeTrust(t *testing.T) {
 	for _, tc := range []struct {
 		trust string
 		ok    bool
-	}{{TrustVerified, true}, {TrustPublisher, false}, {TrustCommunity, false}} {
+	}{{registry.TrustVerified, true}, {registry.TrustPublisher, false}, {registry.TrustCommunity, false}} {
 		r := newRegistry(t, tc.trust)
 		r.publishNative(t, "1")
 		p, err := r.o.Prepare(context.Background(), "bank", false)
@@ -134,20 +135,20 @@ func (r *registryEnv) publishNative(t *testing.T, version string) {
 	sb, _ := json.Marshal(set)
 	write(t, pkgs, "bank-"+version+SetExt, sb)
 	e := r.index.Connectors["bank"]
-	e.Versions = append(e.Versions, Release{Version: version, URL: "packages/bank-" + version + SetExt, SHA256: SHA256(sb),
+	e.Versions = append(e.Versions, registry.Release{Version: version, URL: "packages/bank-" + version + SetExt, SHA256: SHA256(sb),
 		Digest: SetDigest(set), Capabilities: p.Manifest.Capabilities.Summary()})
 	r.index.Connectors["bank"] = e
 	r.save(t)
 }
 
 func TestRegistryPlatformSet(t *testing.T) {
-	r := newRegistry(t, TrustVerified)
+	r := newRegistry(t, registry.TrustVerified)
 	r.publishNative(t, "2")
 	ix, err := r.o.RefreshIndex(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n, errs := ix.VerifyPackages(context.Background(), r.o.Registry); n != 1 || len(errs) != 0 {
+	if n, errs := VerifyPackages(context.Background(), ix, r.o.Registry); n != 1 || len(errs) != 0 {
 		t.Fatal(n, errs)
 	}
 	e, rel, _ := ix.Resolve("bank", "")

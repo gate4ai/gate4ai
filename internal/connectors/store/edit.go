@@ -9,11 +9,13 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/gate4ai/sdk-go/registry"
 )
 
 // CheckRelease проверяет скачанный пакет против записи индекса: sha256,
 // дайджест, имя и версию, подпись ключом издателя, возможности, прошедшие ревью.
-func CheckRelease(b []byte, name, publisher string, rel Release, pub Publisher) (*Package, error) {
+func CheckRelease(b []byte, name, publisher string, rel registry.Release, pub registry.Publisher) (*Package, error) {
 	if SHA256(b) != rel.SHA256 {
 		return nil, errors.New("package sha256 does not match the registry")
 	}
@@ -24,7 +26,7 @@ func CheckRelease(b []byte, name, publisher string, rel Release, pub Publisher) 
 	if pkg.Sig.Digest != rel.Digest || pkg.Manifest.Connector != name || pkg.Manifest.Version != rel.Version {
 		return nil, errors.New("package does not match the registry entry")
 	}
-	if _, ok := VerifySig(pub.Keys, pkg.Sig.Digest, pkg.Sig.Signature); !ok {
+	if _, ok := registry.VerifySig(pub.Keys, pkg.Sig.Digest, pkg.Sig.Signature); !ok {
 		return nil, fmt.Errorf("package %s %s is not signed by publisher %s", name, rel.Version, publisher)
 	}
 	if !slices.Equal(pkg.Manifest.Summary(), nonNil(rel.Capabilities)) {
@@ -37,7 +39,7 @@ func CheckRelease(b []byte, name, publisher string, rel Release, pub Publisher) 
 // индекса, от него считаются относительные url) и проверяет их CheckRelease.
 // Для CI registry: pull request не пройдёт с записью, которой не соответствует
 // опубликованный пакет.
-func (ix *Index) VerifyPackages(ctx context.Context, base string) (checked int, errs []string) {
+func VerifyPackages(ctx context.Context, ix *registry.Index, base string) (checked int, errs []string) {
 	names := make([]string, 0, len(ix.Connectors))
 	for n := range ix.Connectors {
 		names = append(names, n)
@@ -72,7 +74,7 @@ type PackInfo struct {
 // назначает ревьюер registry, а не автор. Новый коннектор требует repo и
 // license. Версию нельзя заменить, а пакет должен быть подписан ключом,
 // который у издателя уже есть: смена ключа — отдельное решение ревьюера.
-func (ix *Index) AddRelease(publisher string, p PackInfo, url string, meta Entry) error {
+func AddRelease(ix *registry.Index, publisher string, p PackInfo, url string, meta registry.Entry) error {
 	if publisher == "" || p.Connector == "" || p.Version == "" || url == "" {
 		return errors.New("publisher, connector, version and url are required")
 	}
@@ -80,20 +82,20 @@ func (ix *Index) AddRelease(publisher string, p PackInfo, url string, meta Entry
 		return errors.New("the package is not signed (gate4ai connectors pack --key)")
 	}
 	if ix.Publishers == nil {
-		ix.Publishers = map[string]Publisher{}
+		ix.Publishers = map[string]registry.Publisher{}
 	}
 	if ix.Connectors == nil {
-		ix.Connectors = map[string]Entry{}
+		ix.Connectors = map[string]registry.Entry{}
 	}
 	pub, ok := ix.Publishers[publisher]
 	if !ok {
-		pub = Publisher{Keys: []string{p.SignedBy}, Trust: TrustCommunity}
+		pub = registry.Publisher{Keys: []string{p.SignedBy}, Trust: registry.TrustCommunity}
 	} else if !slices.Contains(pub.Keys, p.SignedBy) {
 		return fmt.Errorf("publisher %s: the package is signed by %s, which is not a key of this publisher", publisher, p.SignedBy)
 	}
 	e, ok := ix.Connectors[p.Connector]
 	if !ok {
-		e = Entry{Publisher: publisher, Repo: meta.Repo, License: meta.License, Description: meta.Description}
+		e = registry.Entry{Publisher: publisher, Repo: meta.Repo, License: meta.License, Description: meta.Description}
 		if !strings.HasPrefix(e.Repo, "https://") || e.License == "" {
 			return fmt.Errorf("new connector %s: repo (https://…) and license are required", p.Connector)
 		}
@@ -105,7 +107,7 @@ func (ix *Index) AddRelease(publisher string, p PackInfo, url string, meta Entry
 			return fmt.Errorf("connector %s %s is already in the index (versions are immutable; publish a new version)", p.Connector, p.Version)
 		}
 	}
-	e.Versions = append(e.Versions, Release{Version: p.Version, URL: url, SHA256: p.SHA256, Digest: p.Digest, Capabilities: nonNil(p.Capabilities)})
+	e.Versions = append(e.Versions, registry.Release{Version: p.Version, URL: url, SHA256: p.SHA256, Digest: p.Digest, Capabilities: nonNil(p.Capabilities)})
 	ix.Publishers[publisher] = pub
 	ix.Connectors[p.Connector] = e
 	return ix.Check()

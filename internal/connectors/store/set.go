@@ -11,6 +11,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/gate4ai/sdk-go/registry"
 )
 
 // Нативный пакет — по .g4c на платформу и список платформ
@@ -77,7 +79,7 @@ func ParseSet(b []byte) (PlatformSet, error) {
 // FetchRelease скачивает и проверяет версию из индекса (base — адрес индекса):
 // пакет WASM или, для нативного, пакет под платформу platform ("" — все
 // платформы списка, для CI registry; возвращается пакет первой по имени).
-func FetchRelease(ctx context.Context, base, name, publisher string, rel Release, pub Publisher, platform string) (*Package, error) {
+func FetchRelease(ctx context.Context, base, name, publisher string, rel registry.Release, pub registry.Publisher, platform string) (*Package, error) {
 	ref := resolveRef(base, rel.URL)
 	b, err := fetch(ctx, ref)
 	if err != nil {
@@ -122,7 +124,7 @@ func FetchRelease(ctx context.Context, base, name, publisher string, rel Release
 		if err != nil {
 			return nil, fmt.Errorf("download %s: %w", aref, err)
 		}
-		pkg, err := CheckRelease(ab, name, publisher, Release{Version: rel.Version, SHA256: a.SHA256, Digest: a.Digest, Capabilities: rel.Capabilities}, pub)
+		pkg, err := CheckRelease(ab, name, publisher, registry.Release{Version: rel.Version, SHA256: a.SHA256, Digest: a.Digest, Capabilities: rel.Capabilities}, pub)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", aref, err)
 		}

@@ -28,7 +28,7 @@
 | Каналы подтверждений для Web UI: состояние, статистика, мастер Telegram; браузерный push (Web Push, VAPID, RFC 8291) | `internal/approval/channels.go`, `internal/approval/webpush.go` |
 | Автозапуск (systemd --user / XDG, LaunchAgent, HKCU Run) — общий для `gate4ai service` и Web UI | `internal/platform/autostart` |
 | Трей (бинарник `gate4ai-tray`) | `cmd/gate4ai-tray` (меню, fyne.io/systray), `internal/front/tray` (состояние, решения, уведомления) |
-| Магазин: пакеты .g4c, индекс registry, установка с согласием, отзыв | `internal/connectors/store`, `registry/` |
+| Магазин: пакеты .g4c, индекс registry, установка с согласием, отзыв | `internal/connectors/store`, `registry/`; формат индекса и его подпись — `sdk-go/registry` (те же правила у сайта gate4.ai) |
 | Изоляция: Egress Proxy, `gate4ai run`, `doctor` | `internal/hostsvc/egress`, `internal/sandbox` |
 | Сквозной тест (хост + настоящие коннекторы) | отдельный репозиторий `gate4ai/e2e` |
 | Разделение на репозитории, проверка истории на секреты | `scripts/split.sh`, `scripts/secret-scan.sh`, [publishing.md](publishing.md) |
