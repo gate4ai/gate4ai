@@ -1426,7 +1426,7 @@ func (u *UI) registerRelay(w http.ResponseWriter, r *http.Request) map[string]an
 	if err != nil {
 		return redirectErr("/settings#relay", fmt.Errorf("relay %s: %v", addr, err))
 	}
-	return redirect("/settings#relay", fmt.Sprintf("Устройство подключено к relay: %v. Адрес для облачных агентов: %v", res["host"], res["mcp_url"]))
+	return redirect("/settings#relay", fmt.Sprintf("Устройство подключено к relay. Адрес для Claude.ai / ChatGPT: %v", res["mcp_url"]))
 }
 
 func (u *UI) toggleAutostart(w http.ResponseWriter, r *http.Request) map[string]any {

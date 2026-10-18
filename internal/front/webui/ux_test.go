@@ -16,6 +16,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
+	"github.com/gate4ai/gate4ai/internal/relayclient"
 )
 
 type fakeAutostart struct{ on bool }
@@ -198,6 +199,15 @@ func TestFirstRunPaths(t *testing.T) {
 	}
 	if p := get("/settings?link=1"); !strings.Contains(p, "Нет публичного адреса") {
 		t.Fatal("remote link without public address")
+	}
+	// Relay включён: один адрес для облачных агентов, детали relay — в раскрывающемся блоке.
+	u.Relay = func() relayclient.Status {
+		return relayclient.Status{Configured: true, Online: true, URL: "https://relay.test", DeviceID: "dev1", Host: "dev1.relay.test", MCPURL: "https://dev1.relay.test"}
+	}
+	p = get("/settings")
+	if !strings.Contains(p, `<code id="mcp">https://dev1.relay.test</code>`) || !strings.Contains(p, "custom connector") ||
+		!strings.Contains(p, "<summary>Технические детали</summary>") || strings.Contains(p, "Адрес устройства") {
+		t.Fatal("relay block", p)
 	}
 }
 
