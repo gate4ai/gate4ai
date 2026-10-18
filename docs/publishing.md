@@ -63,11 +63,11 @@ done
 | `sdk-go/`, `relay/`, `registry/`, `.github/` | одноимённые `gate4ai/*` |
 | — | `gate4ai/tray` удалён 2026-10-14: трей теперь `cmd/gate4ai-tray` в `gate4ai/gate4ai` |
 | `connectors/mail/`, `connectors/browser/` | `gate4ai/gate4ai-mail`, `gate4ai-browser` |
-| `connectors/files/` | `gate4ai/gate4ai-files` — в архиве: с v0.6 ядра файлы — встроенный коннектор (`internal/connectors/builtin/files`), запись в registry не обновляется |
-| `connectors/tbank/` | — (отдельного репозитория нет, решение человека 2026-10-16) |
+| — | `gate4ai/gate4ai-files` — в архиве, локальный клон удалён 2026-10-18: с v0.6 ядра файлы — встроенный коннектор (`internal/connectors/builtin/files`); запись в registry убрана 2026-10-18 |
+| — | `connectors/tbank/` (без репозитория) удалён 2026-10-18 по решению человека: коннектор будет сделан заново |
 | `www/` | `gate4ai/www` — сайт gate4.ai (Rust), **приватный**, создан 2026-10-14; деплой на сервер relay из CI |
 | `e2e/` | `gate4ai/e2e` — сквозные тесты (AGPL-3.0-only), создан 2026-10-14, ещё не опубликован |
-| `connectors/auth/` | будущие auth-модули |
+| `connectors/auth/` | auth-модули (пока только [README](../../connectors/auth/README.md), вне git) |
 | `.secrets/keys/` | ключ издателя и ключ registry; вне git |
 
 ## 6. Выпуск версии коннектора

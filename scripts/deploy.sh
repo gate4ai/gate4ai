@@ -18,9 +18,9 @@ set -euo pipefail
 root=${PITWALL_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 repo=$(git rev-parse --show-toplevel)
 cd "$repo"
-# Токен аккаунта с правом push (publish.sh): для git push и записи через gh.
-# shellcheck source=/dev/null
-. "$root/publish.sh"
+# Токен аккаунта с правом push (gh-push.sh): для git push и записи через gh.
+# shellcheck source=gh-push.sh
+. "$(dirname "$0")/gh-push.sh"
 writer() { GH_TOKEN=$T "$@"; }
 slug=$(git remote get-url origin | sed -E 's#.*github\.com[:/]##; s#\.git$##')
 say() { echo "deploy: $*"; }
