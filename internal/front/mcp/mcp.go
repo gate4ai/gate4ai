@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/platform/rpc"
 	"github.com/gate4ai/gate4ai/internal/platform/version"
@@ -48,7 +49,13 @@ type Server struct {
 	Backend Backend
 	mu      sync.Mutex
 	names   map[string]string // tool name → action
+	// notify — уведомления клиенту (stdio): список инструментов изменился.
+	notify rpc.Notify
 }
+
+// ToolsPoll — как часто stdio-сервер проверяет, не изменился ли каталог
+// (установка или удаление коннектора, правка профиля).
+var ToolsPoll = 5 * time.Second
 
 // NewServer создаёт сервер.
 func NewServer(b Backend) *Server { return &Server{Backend: b, names: map[string]string{}} }
@@ -69,7 +76,7 @@ func (s *Server) Handle(ctx context.Context, method string, params json.RawMessa
 		}
 		return map[string]any{
 			"protocolVersion": v,
-			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
+			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": s.notify != nil}},
 			"serverInfo":      map[string]any{"name": "gate4ai", "title": "gate4.ai", "version": version.Version},
 			"instructions": "Every tool runs under the user's policies: it may be allowed, denied (denied_by_policy) or need the user's approval (pending_approval). " +
 				"On denial do not retry or work around it; tell the user the reason. On pending_approval call gate4ai_status with the id later. " +
@@ -242,9 +249,36 @@ func mcpContent(c map[string]any) map[string]any {
 	return nil
 }
 
-// ServeStdio обслуживает MCP по stdio (построчный JSON-RPC).
+// ServeStdio обслуживает MCP по stdio (построчный JSON-RPC); когда каталог
+// инструментов меняется, клиент получает notifications/tools/list_changed и
+// перечитывает его — новый коннектор виден без перезапуска клиента.
 func (s *Server) ServeStdio(ctx context.Context, r io.Reader, w io.Writer) error {
-	return rpc.Serve(ctx, r, w, s.Handle)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	return rpc.ServeWith(ctx, r, w, s.Handle, func(n rpc.Notify) {
+		s.notify = n
+		go s.watchTools(ctx)
+	})
+}
+
+// watchTools сравнивает каталог с прошлым и сообщает об изменении.
+func (s *Server) watchTools(ctx context.Context) {
+	last := ""
+	for {
+		if tools, err := s.Backend.Tools(ctx); err == nil {
+			b, _ := json.Marshal(tools)
+			sig := string(b)
+			if last != "" && sig != last {
+				s.notify("notifications/tools/list_changed", nil)
+			}
+			last = sig
+		}
+		select {
+		case <-time.After(ToolsPoll):
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // HandleMessage обрабатывает одно JSON-RPC сообщение (для HTTP); nil — ответа нет.

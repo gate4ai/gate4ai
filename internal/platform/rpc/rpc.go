@@ -53,6 +53,15 @@ type Handler func(ctx context.Context, method string, params json.RawMessage) (a
 
 // Serve читает запросы из r и пишет ответы в w до EOF.
 func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
+	return ServeWith(ctx, r, w, h, nil)
+}
+
+// Notify — уведомление собеседнику (сервер → клиент, без id).
+type Notify func(method string, params any)
+
+// ServeWith — Serve, где сервер может сам слать уведомления: start получает
+// функцию отправки (в той же очереди записи, что и ответы).
+func ServeWith(ctx context.Context, r io.Reader, w io.Writer, h Handler, start func(Notify)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), MaxLine)
 	var wmu sync.Mutex
@@ -62,6 +71,15 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
 		wmu.Lock()
 		defer wmu.Unlock()
 		_ = enc.Encode(m)
+	}
+	if start != nil {
+		start(func(method string, params any) {
+			m := Message{JSONRPC: "2.0", Method: method}
+			if params != nil {
+				m.Params, _ = json.Marshal(params)
+			}
+			send(m)
+		})
 	}
 	for sc.Scan() {
 		var m Message

@@ -3,10 +3,14 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type fakeBackend struct{ calls []string }
@@ -111,5 +115,59 @@ func TestMCP(t *testing.T) {
 	out, _ := s.HandleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
 	if out != nil {
 		t.Fatal("notification answered")
+	}
+}
+
+// changing — каталог, в котором после первого запроса появляется инструмент.
+type changing struct {
+	fakeBackend
+	mu sync.Mutex
+	n  int
+}
+
+func (c *changing) Tools(ctx context.Context) ([]Tool, error) {
+	c.mu.Lock()
+	c.n++
+	n := c.n
+	c.mu.Unlock()
+	tools, _ := c.fakeBackend.Tools(ctx)
+	if n > 1 {
+		tools = append(tools, Tool{Name: "lk.visits", Class: "write", InputSchema: map[string]any{"type": "object"}})
+	}
+	return tools, nil
+}
+
+func TestStdioToolsListChanged(t *testing.T) {
+	old := ToolsPoll
+	ToolsPoll = 20 * time.Millisecond
+	defer func() { ToolsPoll = old }()
+	s := NewServer(&changing{})
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.ServeStdio(ctx, inR, outW)
+	go func() { inW.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}` + "\n")) }()
+	sc := bufio.NewScanner(outR)
+	gotInit, gotChanged := false, false
+	deadline := time.After(3 * time.Second)
+	lines := make(chan string)
+	go func() {
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+	for !(gotInit && gotChanged) {
+		select {
+		case l := <-lines:
+			if strings.Contains(l, `"listChanged":true`) {
+				gotInit = true
+			}
+			if strings.Contains(l, `"method":"notifications/tools/list_changed"`) {
+				gotChanged = true
+			}
+		case <-deadline:
+			t.Fatal("init:", gotInit, "list_changed:", gotChanged)
+		}
 	}
 }
