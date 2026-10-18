@@ -71,6 +71,8 @@ func TestPackVerifyReproducible(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds WASM")
 	}
+	// Временный модуль коннектора — вне общего go.work скриптов проекта (test-set.sh).
+	t.Setenv("GOWORK", "off")
 	dir := t.TempDir()
 	run := func(args ...string) (int, map[string]any, string) {
 		out, errb := &bytes.Buffer{}, &bytes.Buffer{}
@@ -110,6 +112,8 @@ func TestPackVerifyNative(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries")
 	}
+	// Временный модуль коннектора — вне общего go.work скриптов проекта (test-set.sh).
+	t.Setenv("GOWORK", "off")
 	dir := t.TempDir()
 	run := func(args ...string) (int, map[string]any, string) {
 		out, errb := &bytes.Buffer{}, &bytes.Buffer{}

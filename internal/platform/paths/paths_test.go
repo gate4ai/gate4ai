@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 )
 
@@ -13,6 +14,10 @@ import (
 func TestFindOwnerSocket(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("fallback paths are Linux-specific")
+	}
+	// /run/user/<uid> подменить нельзя: запущенный daemon пользователя найдётся первым.
+	if _, err := os.Stat(filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "gate4ai", "gate4ai.sock")); err == nil {
+		t.Skip("a gate4ai daemon of this user is running")
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
