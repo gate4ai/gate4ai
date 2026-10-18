@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
 	"os"
@@ -1404,7 +1405,8 @@ func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 		if l, err := u.RemoteLoginURL(); err == nil {
 			data["RemoteLink"] = l
 			if code, err := qr.Encode(l, qr.M); err == nil {
-				data["RemoteQR"] = "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG())
+				// template.URL: иначе html/template не пускает data: в src и подставляет #ZgotmplZ
+				data["RemoteQR"] = template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()))
 			}
 		} else {
 			data["RemoteLinkError"] = err.Error()
