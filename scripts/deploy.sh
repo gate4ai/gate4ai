@@ -123,7 +123,8 @@ registry() {
   branch="$name-v$version"
   work=$(mktemp -d)/registry
   git -C "$reg" worktree add -q -B "$branch" "$work" origin/main
-  trap 'git -C "$reg" worktree remove --force "$work" >/dev/null 2>&1 || true' EXIT
+  # Значения подставлены сразу: trap сработает при выходе из скрипта, когда local уже нет (set -u).
+  trap "git -C $(printf %q "$reg") worktree remove --force $(printf %q "$work") >/dev/null 2>&1 || true" EXIT
   writer gh release download "v$version" -R "$slug" -p pack.json -D "$work/.." --clobber
   (cd "$work" && gate4ai registry add index.json ../pack.json --publisher gate4ai \
     && gate4ai registry sign index.json --key "$root/.secrets/keys/registry.key")
