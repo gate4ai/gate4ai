@@ -173,6 +173,19 @@ func TestFirstRunPaths(t *testing.T) {
 	if p := post("/channels/telegram/toggle", url.Values{"on": {"1"}}); !strings.Contains(p, "@BotFather") {
 		t.Fatal("telegram without setup must open the wizard")
 	}
+	// Карточка Telegram: до настройки — инструкция и «Подключить», после — статус «подключён».
+	if p := get("/approvals"); !strings.Contains(p, "Подключить Telegram") || strings.Contains(p, "Telegram подключён") {
+		t.Fatal("telegram card before setup", p)
+	}
+	if err := u.edit("test", func(c *config.Config) error {
+		c.Approvals.Telegram = &config.Telegram{Token: "@telegram.bot", OwnerID: 42}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if p := get("/approvals"); strings.Contains(p, "Подключить Telegram") || strings.Contains(p, "@BotFather") || !strings.Contains(p, "Telegram подключён") {
+		t.Fatal("telegram card after setup", p)
+	}
 
 	// Настройки: автозапуск, таймаут, предложения выключены.
 	post("/settings/autostart", url.Values{"on": {"1"}})

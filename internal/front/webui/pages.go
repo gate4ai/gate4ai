@@ -182,6 +182,8 @@ func (u *UI) approvalsPage(m mount) func(r *http.Request) (string, map[string]an
 			}
 		}
 		data["PushOn"] = cfg.ChannelOn("webpush")
+		// Бот настроен (токен и ID сохранены) — карточка Telegram без инструкции подключения.
+		data["TelegramSet"] = cfg.Approvals.Telegram != nil
 		return "approvals", data, err
 	}
 }
