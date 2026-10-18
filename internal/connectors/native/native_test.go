@@ -31,13 +31,18 @@ actions:
   - { name: read, class: read, input_schema: { type: object, properties: { path: { type: string } } } }
   - { name: crash, class: read }
   - { name: slow, class: read }
+  - { name: wait, class: read }
 `
 
 // echo — нативный коннектор теста: тот же бинарник теста, запущенный с GATE4AI_TEST_ECHO=1.
 type echo struct{}
 
-func (echo) Execute(_ context.Context, h *abi.Host, r abi.ExecRequest) (abi.ExecResult, error) {
+func (echo) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.ExecResult, error) {
 	switch r.Action {
+	case "wait": // ждёт отмены и отмечает её в файле (процесс узнал об отмене)
+		<-ctx.Done()
+		os.WriteFile(os.Getenv("GATE4AI_TEST_MARK"), []byte(ctx.Err().Error()), 0o600)
+		return abi.ExecResult{}, ctx.Err()
 	case "crash":
 		os.Exit(3)
 	case "slow":
@@ -160,4 +165,28 @@ func TestBadBinaryAndManifest(t *testing.T) {
 	if _, err := q.Execute(context.Background(), abi.ExecRequest{Action: "read", Settings: map[string]any{"root": "~"}}); err == nil || !strings.Contains(err.Error(), "another manifest") {
 		t.Fatal("manifest mismatch:", err)
 	}
+}
+
+// Вызов отменён (агент прервал CLI, закрылся HTTP-запрос): процесс узнаёт об
+// этом и прерывает действие, а ответ — cancelled, не crashed.
+func TestCancelReachesTheProcess(t *testing.T) {
+	mark := filepath.Join(t.TempDir(), "cancelled")
+	t.Setenv("GATE4AI_TEST_MARK", mark)
+	p, _ := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(300 * time.Millisecond); cancel() }()
+	_, err := p.Execute(ctx, abi.ExecRequest{Action: "wait", Settings: map[string]any{"root": "~/notes"}})
+	if err == nil || !strings.Contains(err.Error(), abi.CodeCancelled) || strings.Contains(err.Error(), "crashed") {
+		t.Fatal(err)
+	}
+	for i := 0; i < 50; i++ {
+		if b, err := os.ReadFile(mark); err == nil {
+			if !strings.Contains(string(b), "canceled") {
+				t.Fatal(string(b))
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the process did not learn that the call was cancelled")
 }

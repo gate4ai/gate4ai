@@ -255,6 +255,9 @@ func (c *Connector) trap(ctx context.Context, err error, stderr *limitedBuffer) 
 	if ctx.Err() == context.DeadlineExceeded {
 		return abi.Errorf(abi.CodeLimit, "connector %s: time limit %ds exceeded", c.man.Connector, c.limits.TimeoutS)
 	}
+	if ctx.Err() == context.Canceled {
+		return abi.Errorf(abi.CodeCancelled, "connector %s: the call was cancelled because the request that started it ended", c.man.Connector)
+	}
 	msg := err.Error()
 	if s := stderr.String(); s != "" {
 		msg += ": " + s

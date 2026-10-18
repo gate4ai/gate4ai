@@ -163,7 +163,10 @@ func (p *Pipeline) decide(ctx context.Context, id, status, channel, who string) 
 	case !ok:
 		res = Result{Status: StatusError, Code: CodeUnknownAction, Action: a.Action, ID: a.ID, Message: "connector no longer available"}
 	case status == state.Approved:
-		res = p.run(ctx, a.Agent, a.Action, cli, act, a.Args, a.Decision, appr)
+		// Действие исполняется не в контексте того, кто одобрил: HTTP-запрос
+		// Web UI или трея заканчивается раньше многошагового действия. Срок
+		// задают лимиты коннектора (limits.timeout_s).
+		res = p.run(context.WithoutCancel(ctx), a.Agent, a.Action, cli, act, a.Args, a.Decision, appr)
 	default:
 		res = p.deny(a.Agent, act, a.Action, a.Args, a.Decision, appr)
 	}

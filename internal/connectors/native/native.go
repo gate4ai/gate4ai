@@ -237,8 +237,16 @@ func (p *Process) call(ctx context.Context, method string, settings map[string]a
 	raw, _ := json.Marshal(req)
 	var resp sdknative.RawResponse
 	if err := peer.Call(ctx, method, sdknative.CallParams{Call: id, Request: raw}, &resp); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
+		if ctx.Err() != nil {
+			// Ответа больше не ждём: процесс должен прервать вызов, иначе он
+			// доделает его без хозяина (страница браузера останется занятой).
+			_ = peer.Notify(sdknative.MethodCancel, sdknative.CancelParams{Call: id})
+		}
+		switch {
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
 			return nil, abi.Errorf(abi.CodeLimit, "connector %s: time limit %ds exceeded", p.man.Connector, lim.TimeoutS)
+		case errors.Is(ctx.Err(), context.Canceled):
+			return nil, cancelled(p.man.Connector)
 		}
 		return nil, abi.Errorf(abi.CodeConnector, "connector %s crashed: %v", p.man.Connector, err)
 	}
@@ -364,4 +372,10 @@ func BuildGo(ctx context.Context, srcDir, platform, out string) error {
 		return fmt.Errorf("go build %s for %s: %v\n%s", srcDir, platform, err, b)
 	}
 	return nil
+}
+
+// cancelled — вызов отменён тем, кто его начал (агент прервал CLI, закрылся
+// HTTP-запрос): коннектор не падал.
+func cancelled(name string) error {
+	return abi.Errorf(abi.CodeCancelled, "connector %s: the call was cancelled because the request that started it ended", name)
 }
