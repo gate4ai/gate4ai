@@ -204,10 +204,13 @@ func (u *UI) RemoteLoginURL() (string, error) {
 	return pub + remote.base + "/login?t=" + u.newLogin(true), nil
 }
 
+// loginTTL — срок одноразовой ссылки входа.
+const loginTTL = 2 * time.Minute
+
 func (u *UI) newLogin(rem bool) string {
 	t := random()
 	u.mu.Lock()
-	u.logins[t] = login{expires: u.Now().Add(2 * time.Minute), remote: rem}
+	u.logins[t] = login{expires: u.Now().Add(loginTTL), remote: rem}
 	u.mu.Unlock()
 	return t
 }

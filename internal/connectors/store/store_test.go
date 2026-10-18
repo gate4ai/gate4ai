@@ -190,6 +190,28 @@ func (r *registryEnv) save(t *testing.T) {
 	write(t, filepath.Join(r.dir, "registry"), "index.json.sig", []byte(sig))
 }
 
+// List не видит каталоги идущей установки: ".install-<имя>-*" и "<имя>.old".
+func TestListSkipsInstallInProgress(t *testing.T) {
+	dir := t.TempDir()
+	o := Options{Dir: filepath.Join(dir, "connectors")}
+	p, err := o.Prepare(context.Background(), write(t, dir, "bank-1.g4c", pack(t, "1", "api.bank.example", true, "")), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Install(p, p.Capabilities); err != nil {
+		t.Fatal(err)
+	}
+	for _, tmp := range []string{".install-bank-123", "bank.old"} {
+		if err := os.CopyFS(filepath.Join(o.Dir, tmp), os.DirFS(filepath.Join(o.Dir, "bank"))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := List(o.Dir)
+	if err != nil || len(list) != 1 || list[0].Name != "bank" {
+		t.Fatal(list, err)
+	}
+}
+
 func TestRegistryInstallRevokeAndTamper(t *testing.T) {
 	r := newRegistry(t, registry.TrustVerified)
 	r.publish(t, "1.9", "api.bank.example")

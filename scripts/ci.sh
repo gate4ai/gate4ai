@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI: SPDX-заголовки, затем для каждого модуля из go.work — сборка, vet и тесты
-# (плюс -race и кросс-сборка под macOS и Windows).
+# (плюс -race и кросс-сборка под macOS и Windows — локально; в CI её делает матрица build).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ./scripts/spdx.sh --check
@@ -21,9 +21,12 @@ for dir in $(go list -m -f '{{.Dir}}'); do
     go vet ./...
     go test ./...
     go test -race -short ./...
-    for os in darwin windows; do
-      GOOS=$os GOARCH=amd64 build
-    done
+    # В GitHub Actions (CI=true) под macOS и Windows собирает матрица build в ci.yml.
+    if [ -z "${CI:-}" ]; then
+      for os in darwin windows; do
+        GOOS=$os GOARCH=amd64 build
+      done
+    fi
     # SDK и коннекторы собираются и в WASM (сторона модуля).
     case "$dir" in
       */sdk-go|*/connectors/*) GOOS=wasip1 GOARCH=wasm go vet ./... ;;

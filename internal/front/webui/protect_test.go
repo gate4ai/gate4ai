@@ -343,6 +343,51 @@ func TestRemoteLoginProtected(t *testing.T) {
 	}
 }
 
+// Ссылка входа живёт loginTTL: и локальная, и удалённая (через relay); свежая открывается.
+func TestLoginLinkExpires(t *testing.T) {
+	u, d, _, base := setup(t)
+	d.AddPublicURL(func() string { return "https://dev.example" })
+	advance := clock(u)
+	localSession := func(l string) bool {
+		b := newBrowser(t, base)
+		b.get(l)
+		return b.loggedIn()
+	}
+	remoteSession := func(l string) bool {
+		req, _ := http.NewRequest("GET", l, nil)
+		req.Host = "dev.example"
+		rec := &recorder{h: http.Header{}}
+		u.RemoteHandler().ServeHTTP(rec, req)
+		for _, c := range (&http.Response{Header: rec.h}).Cookies() {
+			if c.Name == "g4a_rsession" {
+				return true
+			}
+		}
+		return false
+	}
+	local := u.LoginURL()
+	rem, err := u.RemoteLoginURL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	advance(loginTTL + time.Second)
+	if localSession(local) {
+		t.Fatal("local link works after loginTTL")
+	}
+	if remoteSession(rem) {
+		t.Fatal("remote link works after loginTTL")
+	}
+	local = u.LoginURL()
+	rem, _ = u.RemoteLoginURL()
+	advance(loginTTL - time.Second)
+	if !localSession(local) {
+		t.Fatal("fresh local link")
+	}
+	if !remoteSession(rem) {
+		t.Fatal("fresh remote link")
+	}
+}
+
 func TestLoginWithoutLink(t *testing.T) {
 	u, d, _, base := setup(t)
 	advance := clock(u)

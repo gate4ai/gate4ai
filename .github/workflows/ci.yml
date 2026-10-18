@@ -13,6 +13,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false
+      # Кэш Go с запасным ключом: после смены go.sum (обновление sdk-go при деплое)
+      # сборка начинается с прошлого кэша, а не с нуля, как у кэша setup-go.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-test-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-test-
       - run: ./scripts/ci.sh
   build:
     strategy:
