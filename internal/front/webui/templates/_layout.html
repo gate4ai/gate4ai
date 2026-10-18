@@ -55,7 +55,7 @@ form.inline{display:inline}
 <a href="{{.Base}}/policy" class="{{if or (eq .Nav "policy") (eq .Nav "rule") (eq .Nav "templates") (eq .Nav "policy_yaml")}}on{{end}}">Правила</a>{{end}}
 <a href="{{.Base}}/journal" class="{{if or (eq .Nav "journal") (eq .Nav "receipt")}}on{{end}}">Журнал</a>
 {{if not .Remote}}<a href="{{.Base}}/vault" class="{{if eq .Nav "vault"}}on{{end}}">Секреты</a>
-<a href="{{.Base}}/settings" class="{{if eq .Nav "settings"}}on{{end}}">Настройки</a>{{end}}
+<a href="{{.Base}}/settings" class="{{if or (eq .Nav "settings") (eq .Nav "relay")}}on{{end}}">Настройки</a>{{end}}
 <form method="post" action="{{$.Base}}/logout" style="margin-left:auto"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">Выйти</button></form>
 </header><main>
 {{if .Remote}}<div class="note">Удалённый вход: подтверждения и журнал. Правила, агенты, коннекторы и секреты меняются только на самом компьютере.</div>{{end}}
