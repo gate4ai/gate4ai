@@ -132,12 +132,11 @@ type UI struct {
 	// Confirm — подтверждение входа на другом устройстве (nil — Telegram-бот из Channels).
 	Confirm LoginConfirmer
 
-	mu          sync.Mutex
-	logins      map[string]login // одноразовые токены входа
-	sessions    map[string]session
-	attempts    map[string]*attempt // попытки входа при включённой защите
-	failures    int                 // неверных паролей подряд
-	lockedUntil time.Time           // до этого времени пароль не проверяется
+	mu       sync.Mutex
+	logins   map[string]login // одноразовые токены входа
+	sessions map[string]session
+	attempts map[string]*attempt // попытки входа при включённой защите
+	limits   [2]limiter          // защита от перебора пароля: локально, удалённо
 }
 
 type login struct {
@@ -244,7 +243,7 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		// requires — что ещё нужно для входа по ссылке (пароль, подтверждение в Telegram);
 		// link_required — нужна ли ссылка вообще (иначе вход и по постоянному адресу).
 		p := u.Protection()
-		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": p.Requires(), "link_required": req.Remote || !p.NoLink})
+		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": p.Requires(), "link_required": !p.NoLink})
 	})
 	mux.HandleFunc("GET /v1/tray/state", func(w http.ResponseWriter, r *http.Request) {
 		if !daemon.PrincipalFrom(r.Context()).IsOwner() {

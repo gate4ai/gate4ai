@@ -10,8 +10,9 @@ package webui
 // даёт сессию, как раньше. С ними ссылка открывает только попытку входа,
 // привязанную к браузеру cookie; поэтому агент на этом же компьютере, выполнив
 // `gate4ai ui --print`, готовой сессии не получает. Без ссылки вход начинается на
-// постоянном адресе Web UI. Удалённо (/ui/ на публичном адресе, он открыт в
-// интернет) ссылка нужна всегда. Настройки защиты хранятся не в
+// постоянном адресе Web UI — и на этом компьютере, и удалённо (/ui/ на публичном
+// адресе): сохранённая закладка работает и через неделю. От перебора пароля —
+// задержка после неверных паролей, у удалённого входа свой счётчик. Настройки защиты хранятся не в
 // конфигурации (её может менять агент через gate4ai.change_policy), а в State Store;
 // API, который их отдаёт, нет.
 
@@ -46,8 +47,8 @@ func (p Protection) Extra() bool { return p.Password != "" || p.Telegram }
 // Custom — защита отличается от умолчания (только ссылка).
 func (p Protection) Custom() bool { return p.NoLink || p.Extra() }
 
-// linkRequired — нужна ли одноразовая ссылка (удалённо — всегда).
-func (p Protection) linkRequired(m mount) bool { return m.remote || !p.NoLink }
+// linkRequired — нужна ли одноразовая ссылка.
+func (p Protection) linkRequired(m mount) bool { return !p.NoLink }
 
 // valid — хотя бы один способ входа остаётся.
 func (p Protection) valid() error {
@@ -262,44 +263,72 @@ func (u *UI) dropSessions(keep string, protected bool) {
 	u.attempts = map[string]*attempt{}
 }
 
+// limiter — защита от перебора пароля: после freeFailures неверных подряд каждая
+// следующая попытка ждёт вдвое дольше (до 15 минут); верный пароль сбрасывает.
+// У локального и удалённого входа счётчики свои: перебор из интернета не
+// закрывает вход на самом компьютере.
+type limiter struct {
+	failures int       // неверных паролей подряд
+	until    time.Time // до этого времени пароль не проверяется
+}
+
+func (u *UI) limiter(m mount) *limiter {
+	if m.remote {
+		return &u.limits[1]
+	}
+	return &u.limits[0]
+}
+
 // passwordAllowed — не действует ли задержка после неверных паролей (под u.mu).
-func (u *UI) passwordAllowed() (time.Duration, bool) {
-	if d := u.lockedUntil.Sub(u.Now()); d > 0 {
+func (u *UI) passwordAllowed(m mount) (time.Duration, bool) {
+	if d := u.limiter(m).until.Sub(u.Now()); d > 0 {
 		return d, false
 	}
 	return 0, true
 }
 
-// passwordResult учитывает результат ввода пароля (под u.mu): после freeFailures
-// неверных подряд каждая следующая попытка ждёт вдвое дольше (до 15 минут).
-func (u *UI) passwordResult(ok bool) {
+// passwordResult учитывает результат ввода пароля (под u.mu).
+func (u *UI) passwordResult(m mount, ok bool) {
+	l := u.limiter(m)
 	if ok {
-		u.failures = 0
+		l.failures = 0
 		return
 	}
-	u.failures++
-	if n := u.failures - freeFailures; n >= 0 {
+	l.failures++
+	if n := l.failures - freeFailures; n >= 0 {
 		d := time.Second << min(n, 10)
-		u.lockedUntil = u.Now().Add(min(d, 15*time.Minute))
+		l.until = u.Now().Add(min(d, 15*time.Minute))
 	}
 }
 
 // verifyPassword — пароль с учётом задержки после неверных попыток.
-func (u *UI) verifyPassword(enc, pw string) error {
+func (u *UI) verifyPassword(m mount, enc, pw string) error {
 	u.mu.Lock()
-	wait, ok := u.passwordAllowed()
+	wait, ok := u.passwordAllowed(m)
 	u.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("слишком много неверных паролей: подождите %d с", int(wait.Seconds())+1)
 	}
 	good := checkPassword(enc, pw)
 	u.mu.Lock()
-	u.passwordResult(good)
+	u.passwordResult(m, good)
 	u.mu.Unlock()
 	if !good {
 		return errors.New("неверный пароль")
 	}
 	return nil
+}
+
+// telegramBusy — другая попытка входа этого же места (локально / удалённо) ждёт
+// ответа в Telegram (под u.mu).
+func (u *UI) telegramBusy(m mount, id string) bool {
+	now := u.Now()
+	for aid, a := range u.attempts {
+		if aid != id && a.remote == m.remote && a.telegram == tgSent && !now.After(a.expires) {
+			return true
+		}
+	}
+	return false
 }
 
 // loginPost — ввод пароля и повторная отправка в Telegram на странице попытки входа.
@@ -331,7 +360,7 @@ func (u *UI) loginPost(m mount) http.HandlerFunc {
 		u.mu.Unlock()
 		msg := ""
 		if needPw {
-			if err := u.verifyPassword(u.Protection().Password, r.PostForm.Get("password")); err != nil {
+			if err := u.verifyPassword(m, u.Protection().Password, r.PostForm.Get("password")); err != nil {
 				msg = err.Error()
 				u.mu.Lock()
 				if a.tries++; a.tries >= maxTries {
@@ -368,6 +397,11 @@ func (u *UI) loginStep(w http.ResponseWriter, r *http.Request, m mount, id, errM
 		return
 	}
 	send := !a.password && a.telegram == tgNeed
+	if send && u.telegramBusy(m, id) {
+		// Одновременно ждёт ответа не больше одного запроса: кнопкой «Войти» из
+		// интернета Telegram не засыпать.
+		send, a.telegram, a.tgErr = false, tgError, "запрос на вход уже ждёт ответа в Telegram — ответьте на него или подождите 5 минут"
+	}
 	if send {
 		a.telegram = tgSent
 	}
@@ -429,7 +463,7 @@ func (u *UI) authorizeProtection(r *http.Request, p Protection) (string, error) 
 		return "", errors.New("эта сессия открыта без защиты входа: войдите заново (выход → gate4ai ui), чтобы изменить защиту")
 	}
 	if p.Password != "" {
-		if err := u.verifyPassword(p.Password, r.PostForm.Get("current")); err != nil {
+		if err := u.verifyPassword(local, p.Password, r.PostForm.Get("current")); err != nil {
 			return "", fmt.Errorf("текущий пароль: %v", err)
 		}
 	}

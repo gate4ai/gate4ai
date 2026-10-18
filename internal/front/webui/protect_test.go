@@ -345,6 +345,7 @@ func TestRemoteLoginProtected(t *testing.T) {
 
 func TestLoginWithoutLink(t *testing.T) {
 	u, d, _, base := setup(t)
+	advance := clock(u)
 	_, _, post, _ := loginAs(t, u, base)
 	// Ссылка — единственный способ: выключить нельзя.
 	if p := post("/settings/login/link", url.Values{"on": {"0"}}); !strings.Contains(p, "хотя бы один способ") || u.Protection().NoLink {
@@ -384,17 +385,40 @@ func TestLoginWithoutLink(t *testing.T) {
 	if r, _ := http.DefaultClient.Do(req); r.StatusCode != 403 {
 		t.Fatal("cross-origin login start", r.StatusCode)
 	}
-	// Удалённо ссылка нужна всегда.
+	// Удалённо — тоже по постоянному адресу (закладка /ui/), без ссылки.
 	d.AddPublicURL(func() string { return "https://dev.example" })
-	rq, _ := http.NewRequest("POST", "https://dev.example/ui/login", strings.NewReader("start=1&password=correct+horse"))
-	rq.Host = "dev.example"
-	rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := &recorder{h: http.Header{}}
-	u.RemoteHandler().ServeHTTP(rec, rq)
-	for _, c := range (&http.Response{Header: rec.h}).Cookies() {
-		if c.Name == "g4a_rsession" || c.Name == "g4a_rlogin" {
-			t.Fatal("remote login without a link")
+	remote := func(pw string) (string, bool) {
+		rq, _ := http.NewRequest("POST", "https://dev.example/ui/login", strings.NewReader(url.Values{"start": {"1"}, "password": {pw}}.Encode()))
+		rq.Host = "dev.example"
+		rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := &recorder{h: http.Header{}}
+		u.RemoteHandler().ServeHTTP(rec, rq)
+		for _, c := range (&http.Response{Header: rec.h}).Cookies() {
+			if c.Name == "g4a_rsession" && c.Value != "" {
+				return rec.buf.String(), true
+			}
 		}
+		return rec.buf.String(), false
+	}
+	if _, ok := remote("correct horse"); !ok {
+		t.Fatal("remote login by password without a link")
+	}
+	// Перебор из интернета: задержка удалённо, вход на компьютере не закрыт.
+	for i := 0; i < freeFailures; i++ {
+		if _, ok := remote("guess"); ok {
+			t.Fatal("wrong remote password")
+		}
+	}
+	if p, ok := remote("correct horse"); ok || !strings.Contains(p, "подождите") {
+		t.Fatal("no remote delay after failures", p)
+	}
+	b5 := newBrowser(t, base)
+	if b5.post("/login", url.Values{"start": {"1"}, "password": {"correct horse"}}); !b5.loggedIn() {
+		t.Fatal("remote failures locked the local login")
+	}
+	advance(2 * time.Second)
+	if _, ok := remote("correct horse"); !ok {
+		t.Fatal("remote login after delay")
 	}
 
 	// Только Telegram, без ссылки: подтверждение — по кнопке «Войти», не по GET.
@@ -416,9 +440,19 @@ func TestLoginWithoutLink(t *testing.T) {
 	if f.n() != n+1 || b4.loggedIn() {
 		t.Fatal("start must ask Telegram and wait")
 	}
+	// Пока один запрос ждёт ответа, второй в Telegram не уходит.
+	b6 := newBrowser(t, base)
+	if _, page := b6.post("/login", url.Values{"start": {"1"}}); f.n() != n+1 || !strings.Contains(page, "уже ждёт ответа") {
+		t.Fatal("second Telegram request while one is pending", f.n())
+	}
 	f.press(n, true)
 	if b4.get("/login"); !b4.loggedIn() {
 		t.Fatal("telegram-only login")
+	}
+	_, page = b6.get("/login")
+	b6.post("/login", url.Values{"csrf": {csrfRe.FindStringSubmatch(page)[1]}, "retry": {"1"}})
+	if f.n() != n+2 {
+		t.Fatal("retry after the first request was answered")
 	}
 }
 
