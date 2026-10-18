@@ -32,7 +32,7 @@ import (
 // files встроен в ядро, browser ставится из магазина.
 var defaultActions = map[string][]string{
 	"files":   {"read", "list", "append", "write"},
-	"browser": {"read", "screenshot", "extract", "open", "observe", "act", "network", "page_extract", "page_screenshot", "close"},
+	"browser": {"read", "screenshot", "extract", "open", "observe", "act", "network", "login", "fill_secret", "page_extract", "page_screenshot", "close"},
 }
 
 var defaultManifests = map[string]string{
@@ -65,6 +65,8 @@ actions:
   - { name: observe, class: read }
   - { name: act, class: write }
   - { name: network, class: read }
+  - { name: login, class: write }
+  - { name: fill_secret, class: write }
   - { name: page_extract, class: read }
   - { name: page_screenshot, class: read }
   - { name: close, class: read }

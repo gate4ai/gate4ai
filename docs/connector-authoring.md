@@ -1,6 +1,6 @@
 # Как написать коннектор к сайту (вместе с агентом)
 
-> Версия 0.1, 2026-10-18. Дополняет [connector-architecture.md](connector-architecture.md). Сценарий рассчитан на агента с shell (Claude Code): он исследует сайт через gate4ai, сразу видит ответы и пишет коннектор; человек отвечает на развилки и подтверждает действия.
+> Версия 0.2, 2026-10-18. Дополняет [connector-architecture.md](connector-architecture.md). Сценарий рассчитан на агента с shell (Claude Code): он исследует сайт через gate4ai, сразу видит ответы и пишет коннектор; человек отвечает на развилки и подтверждает действия.
 
 Коннектор к сайту — WASM-модуль поверх браузера пользователя: страницу открывает и действия на ней выполняет нативный пакет `browser` (`service_call`), сайты ограничены `params.domains` в манифесте коннектора. Логин, пароль и PIN коннектор не видит.
 
@@ -9,7 +9,7 @@
 - gate4ai запущен, `browser` установлен (`gate4ai connectors list`). Для разработки удобен стенд из исходников: `dev/scripts/stand.sh` (свои данные и сокеты, коннекторы из папок с `--watch`).
 - Сайт — в `connectors.browser.allowed_domains` (сайты агента): `gate4ai policy show`, правка — `gate4ai policy set` или Web UI.
 - Чтобы не подтверждать каждый шаг исследования, на время работы разрешите агенту `browser.open`, `browser.observe`, `browser.network`, `browser.close` (`allow`); `browser.act` (класс `write`) оставьте на подтверждение или разрешите только для этого сайта (`when: …`).
-- Войдите на сайт сами в окне выделенного профиля Chrome (`~/.gate4ai-chrome`): ввод учёток ядром (`login`) ещё не сделан, а пароль агенту давать нельзя.
+- Вход на сайт: опишите учётку в `credentials` политики (раздел 3а) и положите пароль в хранилище — `gate4ai vault set @site.password` (значение из stdin); тогда агент входит сам `browser.login`, не видя пароля. Или войдите сами в окне выделенного профиля Chrome (`~/.gate4ai-chrome`) — пароль агенту давать нельзя.
 
 ## 1. Заготовка
 
@@ -43,6 +43,55 @@ gate4ai browser close --session s-… > testdata/bills.json              # ша�
 - В манифесте у каждого действия: класс (`read` < `write` < `external` < `money`), схемы аргументов и результата, `calls` — подвызовы браузера (класс подвызова не выше класса действия: `act` — `write`, значит действие с кликами — не ниже `write`), для `money` — обязательный `verify`.
 - В коде — `h.ServiceCall("browser", "open" | "observe" | "act" | "page_extract" | "page_screenshot", args, &out)`; типизированный клиент — `gate4ai contract gen <манифест browser>`.
 - Тесты — на записанных шагах: `hosttest.Replay("browser", fixture)` отвечает на каждый вызов первым неиспользованным шагом с тем же действием и аргументами (без `session`), иначе первым с тем же действием. Перед коммитом уберите из фикстур личные данные.
+
+## 3а. Вход на сайт
+
+Логин, пароль и коды коннектор не видит: он называет учётку, значения вводит gate4ai.
+
+**Учётка — у владельца**, в политике (`gate4ai policy set` или YAML в Web UI); значения секретов — `gate4ai vault set <алиас>`:
+
+```yaml
+credentials:
+  "@site":
+    bind: ["https://login.example.org"]          # origin страницы входа
+    form:
+      fields:
+        - { selector: "#login", value: "me@example.org" }          # константа
+        - { selector: "#password", secret: "@site.password" }       # секрет — только в input[type=password]
+      submit: { selector: "button[type=submit]" }                   # или { press: Enter }
+      success: { url_prefix: "https://lk.example.org/" }
+    use: [connector-dev]        # агенты с этим профилем
+connectors:
+  lk_example: { credentials: { site: "@site" } }                     # слот коннектора → учётка
+```
+
+**Агент в сеансе:** `browser open` кабинета → сайт уводит на вход, ответ содержит `login_required: {account: "@site"}` → `gate4ai browser login --session s-… --account @site` → `status`: `logged_in`, `submitted` или `still_on_login` (капча, SMS, неверный пароль — человек завершает вход в окне Chrome gate4ai). После ввода секрета страницу нельзя читать (`secret_on_page`) до перехода — `act` (click, press, wait) работает.
+
+**Коннектор:** в манифесте — слот и подвызов, в коде — вход по `login_required`:
+
+```yaml
+capabilities:
+  services:
+    - { target: browser, contract: 1, actions: [open, observe, act, login], params: { domains: ["lk.example.org"] } }
+credentials:
+  - { slot: site, bind: ["https://login.example.org"] }   # в согласии: «входит на login.example.org с вашей учёткой»
+actions:
+  - name: summary
+    class: write                                          # login — класс write
+    calls: [browser.open, browser.login, browser.observe]
+```
+
+```go
+var open struct{ LoginRequired *struct{ Account string } `json:"login_required"` }
+h.ServiceCall("browser", "open", map[string]any{"url": "https://lk.example.org/"}, &open)
+if open.LoginRequired != nil {
+	h.ServiceCall("browser", "login", map[string]any{"account": "site"}, nil) // слот или алиас
+}
+```
+
+Сайты входа (`bind` учётки) в `params.domains` добавлять не нужно: на них страница может быть, если учётка доступна коннектору.
+
+**Сложный вход** (выбор способа, несколько шагов, SMS) — отдельный **коннектор входа**: WASM-коннектор с действием `login {account}` → `{status}`, который проходит шаги через `browser.observe` (до ввода секретов), `act`, `fill_secret {account, field, selector}` и `fill_secret {account, selector, source: human, prompt}` (код спрашивает человек, ответ в коннектор не попадает). Владелец ставит его в учётку: `via: { connector: site_login, action: login }`; остальные по-прежнему вызывают `browser.login`. Пример с фейковым браузером — `sdk-go/hosttest/login_test.go`.
 
 ## 4. Прогон в своём daemon
 

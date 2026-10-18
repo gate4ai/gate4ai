@@ -34,11 +34,13 @@ type Config struct {
 	Profiles   map[string]Profile        `yaml:"profiles" json:"profiles"`
 	Approvals  Approvals                 `yaml:"approvals,omitempty" json:"approvals"`
 	Connectors map[string]map[string]any `yaml:"connectors,omitempty" json:"connectors,omitempty"`
-	Retention  Retention                 `yaml:"retention,omitempty" json:"retention"`
-	Relay      Relay                     `yaml:"relay,omitempty" json:"relay"`
-	Egress     Egress                    `yaml:"egress,omitempty" json:"egress"`
-	Browser    Browser                   `yaml:"browser,omitempty" json:"browser"`
-	Store      ConnectorStore            `yaml:"store,omitempty" json:"store"`
+	// Credentials — учётки входа на сайты (browser.login): ключ — алиас (@emias).
+	Credentials map[string]Credential `yaml:"credentials,omitempty" json:"credentials,omitempty"`
+	Retention   Retention             `yaml:"retention,omitempty" json:"retention"`
+	Relay       Relay                 `yaml:"relay,omitempty" json:"relay"`
+	Egress      Egress                `yaml:"egress,omitempty" json:"egress"`
+	Browser     Browser               `yaml:"browser,omitempty" json:"browser"`
+	Store       ConnectorStore        `yaml:"store,omitempty" json:"store"`
 }
 
 // ConnectorStore — магазин коннекторов: индекс registry и ключи, которым владелец доверяет.

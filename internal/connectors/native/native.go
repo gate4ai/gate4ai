@@ -249,11 +249,11 @@ func (p *Process) call(ctx context.Context, method string, settings map[string]a
 }
 
 // Execute исполняет действие в процессе; значения алиасов из capabilities.reveal
-// хост передаёт в запросе.
+// хост передаёт в запросе вместе с теми, что уже положил pipeline (поля
+// учётки для browser.login / browser.fill_secret).
 func (p *Process) Execute(ctx context.Context, req abi.ExecRequest) (abi.ExecResult, error) {
 	var res abi.ExecResult
 	ev, err := p.call(ctx, sdknative.MethodExecute, req.Settings, func(d *hostfuncs.Dispatcher) (any, error) {
-		req.Revealed = nil
 		for _, alias := range d.Check.R.Reveal {
 			if d.Secrets == nil {
 				return nil, abi.Errorf(abi.CodeNotSupported, "no vault")

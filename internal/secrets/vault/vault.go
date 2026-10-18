@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 )
@@ -28,6 +29,29 @@ type Vault struct {
 	mu sync.RWMutex
 	// значения в памяти нужны фильтру маскирования
 	values map[string]string
+	// transient — значения не из хранилища (код, который человек ввёл для
+	// входа), которые маскируются до срока.
+	transient map[string]time.Time
+}
+
+// MaskAlso добавляет значение в маскирование на срок ttl (код от человека для
+// browser.fill_secret: в хранилище его нет, но в ответах его быть не должно).
+func (v *Vault) MaskAlso(value string, ttl time.Duration) {
+	if value == "" {
+		return
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.transient == nil {
+		v.transient = map[string]time.Time{}
+	}
+	now := time.Now()
+	for s, until := range v.transient {
+		if now.After(until) {
+			delete(v.transient, s)
+		}
+	}
+	v.transient[value] = now.Add(ttl)
 }
 
 // Open загружает индекс алиасов из keychain.

@@ -127,6 +127,30 @@ gate4ai policy set config.yaml -m "секреты добавлены"   # пер
 
 Проверка: `gate4ai doctor`.
 
+**Вход на сайты по учётке.** Чтобы агент или коннектор входил на сайт сам, не видя пароля, опишите учётку в `credentials` (поля — константы или секреты Vault, отправка, признак успеха, кому доступна) и положите секрет в хранилище:
+
+```yaml
+credentials:
+  "@site":
+    bind: ["https://login.example.org"]
+    form:
+      fields:
+        - { selector: "#login", value: "me@example.org" }
+        - { selector: "#password", secret: "@site.password" }   # только в input[type=password]; иначе type: text
+      submit: { selector: "button[type=submit]" }
+      success: { url_prefix: "https://lk.example.org/" }
+    use: [assistant]            # профили агентов
+    connectors: [lk_example]    # коннекторы
+```
+
+```sh
+printf %s 'пароль' | gate4ai vault set site.password
+gate4ai browser open --url https://lk.example.org/      # сайт увёл на вход: login_required {account: "@site"}
+gate4ai browser login --session s-… --account @site     # logged_in | submitted | still_on_login
+```
+
+Сложный вход (несколько шагов, SMS) — коннектор входа: `via: { connector: site_login, action: login }` вместо `form`. Код из SMS он спрашивает у вас: вопрос — в уведомлении и Web UI («Подтверждения»), ответ — `printf %s 123456 | gate4ai approvals answer <id>`. Учётки видны в Web UI на странице «Секреты», правятся в YAML политики. Подробнее — [secret-architecture.md](secret-architecture.md) («Ввод в браузере»), [connector-authoring.md](connector-authoring.md).
+
 ## 3. Агенты
 
 **С shell (CLI + skill):**

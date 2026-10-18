@@ -70,7 +70,7 @@ capabilities:
       actions: [open, observe, act]
       params: { sites: { domains: ["app.example.org"] } }   # передаются поставщику как разрешение
 
-credentials:                       # слоты учёток; заполняет пользователь в экземпляре коннектора
+credentials:                       # слоты учёток; сейчас — {slot, bind}, связь — connectors.<имя>.credentials
   - { slot: login, types: [login], form: true, bind: ["https://app.example.org"] }
   - { slot: otp,   types: [gate4ai/totp], module: gate4ai/auth-totp@1, form: true, bind: ["https://app.example.org"] }
 
@@ -245,7 +245,9 @@ SDK: `sdk-go/native` — `native.Serve(connector)` для тех же `connector
 
 Сделано: SDK `sdk-go` с манифестом и ABI v2 (формы данных MCP), WASM-хост на wazero, встроенный коннектор `files` (на PDK, `Engine.Builtin`), нативные пакеты (`internal/connectors/native`: процесс под надзором, JSON-RPC по stdio, `reveal`, перезапуск и отключение после частых падений; магазин — `.g4c` под платформу и список `.platforms.json`), `service_call` и контракты (`sdk-go/contract`, `gate4ai contract gen|diff`), коннектор `mail` — WASM-модуль (`tbank` удалён 2026-10-18, будет сделан заново), `browser` — нативный пакет, секреты в `Settings` не передаются, магазин с подписанными пакетами. `browser.act` — методы `click` / `fill` / `press` / `wait` по CSS-селектору и видимому тексту элемента (`text`, `value`, `timeout_ms`); после действия итоговый адрес снова проверяется по сайтам вызывающего. Сеанс браузера для агента (с 2026-10-18): `observe` с `elements` (видимые интерактивные элементы с однозначным селектором), `network` (fetch / XHR страницы, токены и ответы входа скрыты), `close` с записанными шагами — фикстурой для `hosttest.Replay`; заготовка коннектора — `gate4ai connectors new`, лог своей сборки — в ответе (`log`) и `gate4ai connectors logs`.
 
-Расходится с этим документом в браузере: проверка, что селектор `browser.act` взят из `observe`, и режим «секрет на странице» не делаются — вместе с `fill_secret` / `login` (этап 12). До них в банк человек входит сам в выделенном профиле Chrome.
+Вход на сайты (этап 12, 2026-10-18): учётки владельца — `credentials` в конфигурации (форма из полей-констант и секретов Vault с отправкой или `via` — коннектор входа; доступ — `use` профилей агентов и `connectors`), действия `browser.login {account}` и `browser.fill_secret` (класс `write`); значения daemon передаёт только нативному `browser` и только в этих действиях (`ExecRequest.Revealed`, форма — `ExecRequest.Login`, учётки вызывающего без значений — `ExecRequest.Accounts`); после ввода секрета страницу нельзя читать до перехода (`secret_on_page`); страница может быть на сайте входа доступной учётки вне сайтов вызывающего, ответ подсказывает `login_required`; учётка с `via` — daemon вызывает коннектор входа вложенным вызовом с тем же `account` (`Caller.Session` — сеанс агента); код от человека — `fill_secret` с `source: human` через вопрос в канале подтверждений; каждое использование — `secret.use` в журнале. Манифест: слоты `credentials: [{slot, bind}]` (в согласии), связь — `connectors.<имя>.credentials`.
+
+Расходится с этим документом в браузере: проверка, что селектор `browser.act` взят из `observe`, не делается; скриншоты при секрете на странице запрещены целиком (без закрашивания полей); слоты — без типов и способов (`types`, `form`, `module`).
 
 Расходится с целевой моделью секретов ([secret-architecture.md](secret-architecture.md)):
 - `http_request` подставляет плейсхолдеры `{{secret:@alias}}` по `capabilities.secrets[].bind` → заменяется на `auth: {slot}` и `credentials`;

@@ -25,6 +25,9 @@ type callInfo struct {
 	Root  string          // квитанция корневого действия агента
 	Depth int             // 0 — действие агента
 	Chain []string        // коннекторы от корня до этого действия
+	// Session — сеанс браузера агента, в котором идёт вход коннектором входа
+	// (browser.login учётки с via): страница вложенных вызовов browser.
+	Session string
 }
 
 type callKey struct{}

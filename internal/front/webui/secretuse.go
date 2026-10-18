@@ -52,6 +52,11 @@ func secretUses(cfg *config.Config, ms []manifest.Manifest) map[string][]SecretU
 			add(s.Secret, SecretUse{"Egress Proxy: " + s.Domain, ""})
 		}
 	}
+	for _, alias := range sortedAccounts(cfg) {
+		for _, sec := range cfg.Credentials[alias].Secrets() {
+			add(sec, SecretUse{"учётка " + alias + " (вход на " + strings.Join(cfg.Credentials[alias].Bind, ", ") + ")", "/vault#accounts"})
+		}
+	}
 	if k := cfg.Browser.ModelKey; k != "" { // раздел browser до v0.6, переносится в connectors.browser
 		add(k, SecretUse{"браузер: ключ модели", ""})
 	}
@@ -115,4 +120,62 @@ func settingAliases(v any, f func(string)) {
 			settingAliases(x, f)
 		}
 	}
+}
+
+func sortedAccounts(cfg *config.Config) []string {
+	out := make([]string, 0, len(cfg.Credentials))
+	for a := range cfg.Credentials {
+		out = append(out, a)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// AccountView — учётка входа на сайт для страницы секретов (без значений).
+type AccountView struct {
+	Alias      string
+	Bind       []string
+	Via        string
+	Fields     []AccountFieldView
+	Submit     string
+	Success    string
+	Use        []string
+	Connectors []string
+	Missing    []string // секреты формы, которых нет в хранилище
+}
+
+// AccountFieldView — поле формы: константа или алиас секрета.
+type AccountFieldView struct {
+	Selector, Value, Secret, Type string
+	Set                           bool
+}
+
+// accountsView — учётки из конфигурации; set — алиасы, заданные в хранилище.
+func accountsView(cfg *config.Config, set map[string]bool) []AccountView {
+	var out []AccountView
+	for _, alias := range sortedAccounts(cfg) {
+		cr := cfg.Credentials[alias]
+		v := AccountView{Alias: alias, Bind: cr.Bind, Use: cr.Use, Connectors: cr.Connectors}
+		if cr.Via != nil {
+			v.Via = cr.Via.Full()
+		}
+		if f := cr.Form; f != nil {
+			for _, fl := range f.Fields {
+				fv := AccountFieldView{Selector: fl.Selector, Value: fl.Value, Secret: fl.Secret, Type: fl.Type, Set: set[fl.Secret]}
+				if fl.Secret != "" && !fv.Set {
+					v.Missing = append(v.Missing, fl.Secret)
+				}
+				v.Fields = append(v.Fields, fv)
+			}
+			v.Submit = f.Submit.Selector
+			if f.Submit.Press != "" {
+				v.Submit = "клавиша " + f.Submit.Press
+			}
+			if f.Success != nil {
+				v.Success = f.Success.URLPrefix
+			}
+		}
+		out = append(out, v)
+	}
+	return out
 }

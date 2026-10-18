@@ -106,6 +106,11 @@ func (d *Desktop) Notify(a *state.Approval) {
 // Resolved — решение принято (уведомление не нужно).
 func (d *Desktop) Resolved(a *state.Approval) {}
 
+// Asked — вопрос с вводом значения (код для входа на сайт).
+func (d *Desktop) Asked(id, text string) {
+	_ = d.show("gate4.ai: нужен код", text+"\nВведите в Web UI («Подтверждения») или: gate4ai approvals answer "+id)
+}
+
 // Denied — агенту отказано политикой; пользователь узнаёт об этом.
 func (d *Desktop) Denied(agent, action, reason string) {
 	_ = d.show("gate4.ai: действие запрещено", fmt.Sprintf("%s: %s — %s", agent, action, reason))

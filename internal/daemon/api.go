@@ -397,6 +397,23 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		}
 		writeJSON(w, 200, res)
 	}))
+	mux.HandleFunc("GET /v1/questions", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		writeJSON(w, 200, d.Questions())
+	}))
+	mux.HandleFunc("POST /v1/questions/{id}/answer", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		var req struct {
+			Value string `json:"value"`
+		}
+		if err := readJSON(r, &req); err != nil {
+			writeErr(w, 400, "bad_request", err.Error())
+			return
+		}
+		if err := d.Answer(r.PathValue("id"), req.Value); err != nil {
+			writeErr(w, 404, "question", err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+	}))
 	mux.HandleFunc("GET /v1/vault", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		writeJSON(w, 200, d.Vault.Aliases())
 	}))
