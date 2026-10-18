@@ -26,7 +26,7 @@
 | `gate4ai/gate4ai` | ядро: daemon, политики, pipeline, журнал, Vault, подтверждения, MCP, Web UI, Egress Proxy, песочницы, WASM-хост и функции хоста, браузерный воркер, установка коннекторов из магазина, клиент relay. **Бинарник `gate4ai`** и трей `gate4ai-tray` (отдельный бинарник: на macOS трею нужен cgo, ядро собирается без него) | `github.com/gate4ai/gate4ai` | AGPL-3.0 + исключение для коннекторов |
 | `gate4ai/sdk-go` | контракт с коннекторами и auth-модулями: схема манифеста, типы ABI v1, обёртки функций хоста для Go (`GOOS=wasip1`), тестовые хосты для unit-тестов коннекторов и auth-модулей | `github.com/gate4ai/sdk-go` | Apache-2.0 |
 | `gate4ai/gate4ai-mail` | коннектор почты (WASM) | `github.com/gate4ai/gate4ai-mail` | AGPL-3.0 |
-| `gate4ai/gate4ai-files` | коннектор файлов (WASM) | `github.com/gate4ai/gate4ai-files` | AGPL-3.0 |
+| `gate4ai/gate4ai-files` | в архиве: с v0.6 файлы — встроенный коннектор ядра | — | AGPL-3.0 |
 | `gate4ai/gate4ai-browser` | тонкий коннектор поверх `browser_*` | `github.com/gate4ai/gate4ai-browser` | AGPL-3.0 |
 | `gate4ai/gate4ai-<сервис>` | сервисные коннекторы: `gate4ai-gosuslugi`, `gate4ai-tbank`, `gate4ai-mosenergosbyt` … | `github.com/gate4ai/gate4ai-<сервис>` | AGPL-3.0 |
 | `gate4ai/auth` | наши auth-модули ([secret-architecture.md](docs/secret-architecture.md)): `auth-imap`, `auth-smtp`, `auth-oauth2`, `auth-google-sa`, `auth-totp`, `auth-ssh`, `auth-sigv4`; каждый в своём каталоге со своим `go.mod`, общие тестовые фейки (IMAP / SMTP / SSH / OAuth-серверы) | `github.com/gate4ai/auth/<имя>` | AGPL-3.0 |
@@ -42,7 +42,7 @@
 ```
           sdk-go  (Apache-2.0: контракт — манифест, ABI v1)
           ▲     ▲
-          │     ├──────────────── gate4ai-mail / -files / -browser / -tbank …  (AGPL)
+          │     ├──────────────── gate4ai-mail / -browser / -<сервис> …     (AGPL)
           │     └──────────────── auth/auth-imap / -oauth2 / -ssh …            (AGPL)
           │                          ── собираются в .wasm, подписываются, попадают в registry
   gate4ai (AGPL) ── скачивает .wasm по registry, проверяет подпись, исполняет в wazero/Extism

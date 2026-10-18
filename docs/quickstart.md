@@ -8,7 +8,7 @@
 
 ```sh
 make bin             # bin/gate4ai, bin/gate4ai-relay
-make connectors      # bin/connectors/{mail,browser,tbank}.g4c — пакеты официальных коннекторов
+make connectors      # bin/connectors/{mail,browser}.g4c — пакеты официальных коннекторов
 ./scripts/ci.sh      # по всем модулям workspace: build / vet / test + кросс-сборка darwin и windows
 ```
 
@@ -42,9 +42,9 @@ gate4ai connectors list
 **Разработка коннектора — прямо из папки с исходниками** (без `pack` и `.g4c`):
 
 ```sh
-gate4ai connectors install ../connectors/tbank          # собрать в WASM и поставить (своя сборка, как --dev)
-gate4ai connectors update tbank                         # пересобрать из той же папки после правок
-gate4ai connectors install ../connectors/tbank --watch  # пересобирать и переставлять на каждое сохранение
+gate4ai connectors install ../connectors/mail          # собрать в WASM и поставить (своя сборка, как --dev)
+gate4ai connectors update email                        # пересобрать из той же папки после правок
+gate4ai connectors install ../connectors/mail --watch  # пересобирать и переставлять на каждое сохранение
 ```
 
 Сборку делает CLI в вашем окружении (ваш Go, `go.work`, `GOFLAGS`), ошибки компиляции видны сразу; daemon записывает папку источником установки (`dir:<путь>` в `gate4ai connectors list`). `--watch` следит за `.go`, `go.mod`, `go.sum` и `manifest.yaml`; ошибка сборки печатается, наблюдение продолжается. Если изменились возможности в манифесте — согласие спрашивается заново (`--yes` — согласиться без вопроса).

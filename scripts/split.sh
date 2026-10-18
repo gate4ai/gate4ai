@@ -25,7 +25,6 @@ COMPONENTS=(
   "relay:relay"
   "sdk-go:sdk-go"
   "connectors/mail:gate4ai-mail"
-  "connectors/files:gate4ai-files"
   "connectors/browser:gate4ai-browser"
   "registry:registry"
   "github-org:.github"
@@ -97,7 +96,6 @@ verify() {
   check sdk-go
   check relay
   check gate4ai-mail sdk-go
-  check gate4ai-files sdk-go
   check gate4ai-browser sdk-go
   check gate4ai sdk-go relay
   echo "split: ok — $OUT"
