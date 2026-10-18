@@ -147,4 +147,4 @@ gate4ai journal verify                 # целостность журнала
 
 ## Лицензия
 
-[AGPL-3.0-only](LICENSE) с [исключением](LICENSE-EXCEPTION): коннекторы и auth-модули, работающие через ABI, могут иметь любую лицензию. Коннекторы и relay — отдельные репозитории под AGPL-3.0, SDK — Apache-2.0. Подробности — в [NOTICE](NOTICE).
+[AGPL-3.0-only](LICENSE). Коннекторы и relay — отдельные репозитории под AGPL-3.0, SDK — Apache-2.0.

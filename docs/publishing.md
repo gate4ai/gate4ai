@@ -11,7 +11,7 @@
 
 | Каталог монорепозитория | Репозиторий | Лицензия |
 |---|---|---|
-| (корень без выделенных каталогов) | `gate4ai/gate4ai` | AGPL-3.0-only + исключение для коннекторов (`LICENSE-EXCEPTION`) |
+| (корень без выделенных каталогов) | `gate4ai/gate4ai` | AGPL-3.0-only |
 | `sdk-go/` | `gate4ai/sdk-go` | Apache-2.0 |
 | `connectors/mail/`, `files/`, `browser/` | `gate4ai/gate4ai-mail`, `gate4ai-files`, `gate4ai-browser` | AGPL-3.0-only |
 | `relay/` | `gate4ai/relay` | AGPL-3.0-only |
