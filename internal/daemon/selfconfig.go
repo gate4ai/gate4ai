@@ -6,12 +6,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/sdk-go/manifest"
 
 	"github.com/gate4ai/gate4ai/internal/config"
+	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 )
@@ -26,8 +29,8 @@ const SelfConnector = "gate4ai"
 type selfConnector struct{ d *Daemon }
 
 const changeSchema = `{ type: object, properties: {
-  op: { type: string, enum: [add_rule, remove_rule, add_list_items, remove_list_items, add_connector, connector_settings, install_connector],
-        description: "add_rule / remove_rule — a rule of a profile; add_list_items / remove_list_items — a policy list; add_connector — give a profile an installed connector; connector_settings — merge connector settings (no secrets); install_connector — install from the store and give the profile access" },
+  op: { type: string, enum: [add_rule, remove_rule, add_list_items, remove_list_items, add_connector, connector_settings, install_connector, install_dev_connector],
+        description: "add_rule / remove_rule — a rule of a profile; add_list_items / remove_list_items — a policy list; add_connector — give a profile an installed connector; connector_settings — merge connector settings (no secrets); install_connector — install from the store and give the profile access; install_dev_connector — build a WASM connector from your source folder, install it as the owner's own build and give the profile access" },
   profile: { type: string, description: "profile to change (add_rule, remove_rule, add_connector, install_connector); empty — your own profile" },
   rule_id: { type: string, description: "rule id as policy_summary shows it (remove_rule; optional for add_rule — the same id replaces the rule)" },
   id: { type: string, description: "the same as rule_id" },
@@ -38,7 +41,8 @@ const changeSchema = `{ type: object, properties: {
   list: { type: string, description: "list name (lists.<name> in conditions)" },
   items: { type: array, items: { type: string } },
   connector: { type: string },
-  settings_json: { type: string, description: "connector_settings: JSON object with non-secret settings, e.g. {\"roots\":[\"~/notes\"]}" } },
+  settings_json: { type: string, description: "connector_settings: JSON object with non-secret settings, e.g. {\"roots\":[\"~/notes\"]}" },
+  folder: { type: string, description: "install_dev_connector: absolute path of the folder with manifest.yaml and Go sources" } },
   required: [op] }`
 
 func (selfConnector) Manifest() manifest.Manifest {
@@ -50,7 +54,7 @@ func (selfConnector) Manifest() manifest.Manifest {
 				InputSchema: manifest.MustSchema(`{ type: object, properties: {
 				  summary: { type: string, description: "one line: what the change does" },
 				  reason: { type: string, description: "why the user needs it" },
-				  changes: { type: array, minItems: 1, maxItems: 20, description: "JSON array of changes, each {op, …}: add_rule {action, effect, when?, rule_id?, rule_reason?, profile?}; remove_rule {rule_id, profile?}; add_list_items / remove_list_items {list, items}; add_connector / install_connector {connector, profile?}; connector_settings {connector, settings_json}. A rule decides by precedence deny > ask > allow, not by order", items: ` + changeSchema + ` } },
+				  changes: { type: array, minItems: 1, maxItems: 20, description: "JSON array of changes, each {op, …}: add_rule {action, effect, when?, rule_id?, rule_reason?, profile?}; remove_rule {rule_id, profile?}; add_list_items / remove_list_items {list, items}; add_connector / install_connector {connector, profile?}; connector_settings {connector, settings_json}; install_dev_connector {folder}. A rule decides by precedence deny > ask > allow, not by order", items: ` + changeSchema + ` } },
 				  required: [summary, changes] }`),
 				Example: `gate4ai gate4ai change_policy --summary "Let me append to notes" --changes '[{"op":"add_rule","action":"files.append","when":"glob(path, \"~/notes/**\")","effect":"allow"}]'`},
 			{Name: "policy_summary", Class: "read", Description: "Your profile (connectors, rules, limits — what you may do without asking, what needs approval, what is denied), the other profiles and the lists",
@@ -110,6 +114,18 @@ func (d *Daemon) describeSelf(agent string, args map[string]any) (string, error)
 	if err != nil {
 		return "", err
 	}
+	devs := map[int]manifest.Manifest{}
+	for i := range changes {
+		if changes[i].Op != config.OpInstallDev {
+			continue
+		}
+		m, err := devManifest(changes[i].Folder)
+		if err != nil {
+			return "", err
+		}
+		devs[i] = m
+		changes[i].Connector = m.Connector
+	}
 	if _, _, err := d.Config.Preview(func(c *config.Config) error { return d.applyChanges(c, agent, changes, true) }); err != nil {
 		return "", fmt.Errorf("the change would not produce a valid policy: %v", err)
 	}
@@ -121,8 +137,12 @@ func (d *Daemon) describeSelf(agent string, args map[string]any) (string, error)
 		fmt.Fprintf(&b, "Why: %s\n", s)
 	}
 	b.WriteString("Changes to the gate4.ai policy:\n")
-	for _, ch := range changes {
+	for i, ch := range changes {
 		fmt.Fprintf(&b, "  • %s\n", ch.Describe())
+		if m, ok := devs[i]; ok {
+			fmt.Fprintf(&b, "    %s %s, own build (not reviewed), capabilities: %s\n", m.Connector, m.Version, strings.Join(m.Summary(), "; "))
+			continue
+		}
 		if ch.Op != config.OpInstallConnector {
 			continue
 		}
@@ -154,7 +174,15 @@ func (s selfConnector) Execute(ctx context.Context, r abi.ExecRequest) (abi.Exec
 		}
 		// Установка коннектора: решение по действию покрывает согласие на его
 		// возможности (они перечислены в запросе подтверждения).
-		for _, ch := range changes {
+		for i, ch := range changes {
+			if ch.Op == config.OpInstallDev {
+				name, err := d.installDevFolder(ctx, ch.Folder)
+				if err != nil {
+					return abi.ExecResult{}, fmt.Errorf("install %s: %w", ch.Folder, err)
+				}
+				changes[i].Connector = name
+				continue
+			}
 			if ch.Op != config.OpInstallConnector {
 				continue
 			}
@@ -211,4 +239,64 @@ func PolicySummary(cfg *config.Config, agent string) map[string]any {
 	}
 	return map[string]any{"agent": agent, "profile": a.Profile, "connectors": p.Connectors, "rules": rules, "limits": limits,
 		"lists": lists, "other_profiles": others, "defaults": "no rule matched: read → allow; write / external / money → ask; deny beats ask beats allow"}
+}
+
+// devManifest — манифест своей сборки в папке: только WASM (нативный код
+// без песочницы агент поставить не может).
+func devManifest(folder string) (manifest.Manifest, error) {
+	dir, ok := store.SourceFolder(expandHome(folder))
+	if !ok {
+		return manifest.Manifest{}, fmt.Errorf("install_dev_connector: no %s in %s", store.ManifestFile, folder)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, store.ManifestFile))
+	if err != nil {
+		return manifest.Manifest{}, err
+	}
+	m, err := manifest.Parse(raw)
+	if err != nil {
+		return manifest.Manifest{}, err
+	}
+	if m.Runtime != manifest.RuntimeWasm {
+		return manifest.Manifest{}, fmt.Errorf("install_dev_connector: only runtime wasm (%s is %s)", m.Connector, m.Runtime)
+	}
+	return m, nil
+}
+
+func expandHome(p string) string {
+	if strings.HasPrefix(p, "~/") {
+		if h, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(h, p[2:])
+		}
+	}
+	return p
+}
+
+// installDevFolder собирает коннектор из папки (как `gate4ai connectors
+// install <папка>`) и ставит его с согласием на объявленные возможности:
+// согласие дал владелец, подтвердив change_policy.
+func (d *Daemon) installDevFolder(ctx context.Context, folder string) (string, error) {
+	m, err := devManifest(folder)
+	if err != nil {
+		return "", err
+	}
+	dir, _ := store.SourceFolder(expandHome(folder))
+	opts := d.StoreOptions()
+	plan, err := opts.Prepare(ctx, dir, true)
+	if err != nil {
+		return "", err
+	}
+	if plan.Connector != m.Connector {
+		return "", fmt.Errorf("the folder changed while installing: %s, not %s", plan.Connector, m.Connector)
+	}
+	d.installMu.Lock()
+	defer d.installMu.Unlock()
+	info, err := opts.Install(plan, plan.Capabilities)
+	if err != nil {
+		return "", err
+	}
+	if err := d.reloadConnector(info.Connector, false); err != nil {
+		d.Log.Warn("connector reloaded with a warning", "connector", info.Connector, "err", err)
+	}
+	d.Log.Info("own build installed by an agent", "connector", info.Connector, "version", info.Version, "folder", dir)
+	return info.Connector, nil
 }

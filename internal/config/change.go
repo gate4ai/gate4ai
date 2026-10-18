@@ -26,6 +26,8 @@ type Change struct {
 	Items        []string `json:"items,omitempty"`
 	Connector    string   `json:"connector,omitempty"`
 	SettingsJSON string   `json:"settings_json,omitempty"`
+	// Folder — install_dev_connector: папка с исходниками своей сборки (WASM).
+	Folder string `json:"folder,omitempty"`
 }
 
 // Операции правок.
@@ -37,10 +39,14 @@ const (
 	OpAddConnector     = "add_connector"      // дать профилю установленный коннектор
 	OpConnectorSetting = "connector_settings" // объединить настройки коннектора
 	OpInstallConnector = "install_connector"  // установить коннектор из магазина (согласие — у владельца)
+	// OpInstallDev — собрать WASM-коннектор из папки и поставить как свою
+	// сборку (доверие local): агент, который пишет коннектор, ставит его без
+	// сокета владельца — под подтверждением change_policy.
+	OpInstallDev = "install_dev_connector"
 )
 
 // ChangeOps — допустимые операции.
-var ChangeOps = []string{OpAddRule, OpRemoveRule, OpAddListItems, OpRemoveListItems, OpAddConnector, OpConnectorSetting, OpInstallConnector}
+var ChangeOps = []string{OpAddRule, OpRemoveRule, OpAddListItems, OpRemoveListItems, OpAddConnector, OpConnectorSetting, OpInstallConnector, OpInstallDev}
 
 // CheckChange проверяет правку до решения политики: форму и запрет секретов.
 func CheckChange(ch Change) error {
@@ -88,6 +94,13 @@ func CheckChange(ch Change) error {
 		}
 	case OpAddConnector, OpInstallConnector:
 		return need("connector", ch.Connector)
+	case OpInstallDev:
+		if err := need("folder", ch.Folder); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(ch.Folder, "/") && !strings.HasPrefix(ch.Folder, "~") && !(len(ch.Folder) > 2 && ch.Folder[1] == ':') {
+			return errors.New("install_dev_connector: folder must be an absolute path")
+		}
 	case OpConnectorSetting:
 		if err := need("connector", ch.Connector); err != nil {
 			return err
@@ -158,7 +171,10 @@ func (c *Config) ApplyChange(profile string, ch Change) error {
 	case OpRemoveListItems:
 		items := slices.DeleteFunc(slices.Clone(c.Lists[ch.List]), func(s string) bool { return slices.Contains(ch.Items, s) })
 		return c.SetList(ch.List, items)
-	case OpAddConnector, OpInstallConnector:
+	case OpAddConnector, OpInstallConnector, OpInstallDev:
+		if ch.Connector == "" {
+			return nil // своя сборка ещё не собрана (предпросмотр): имя — из её манифеста
+		}
 		return c.SetProfileConnector(profile, ch.Connector, true)
 	case OpConnectorSetting:
 		var m map[string]any
@@ -206,6 +222,12 @@ func (ch Change) describe() string {
 		return "Дать доступ к коннектору " + ch.Connector
 	case OpInstallConnector:
 		return "Установить коннектор " + ch.Connector + " из магазина и дать к нему доступ"
+	case OpInstallDev:
+		s := "Собрать и поставить свою сборку из " + ch.Folder
+		if ch.Connector != "" {
+			s += " (коннектор " + ch.Connector + ")"
+		}
+		return s + " и дать к ней доступ"
 	case OpConnectorSetting:
 		return "Настройки коннектора " + ch.Connector + ": " + ch.SettingsJSON
 	}

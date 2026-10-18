@@ -104,3 +104,39 @@ func TestChangeRuleIDAlias(t *testing.T) {
 		t.Fatal("id is a known field of a change:", err)
 	}
 }
+
+// Агент, который пишет коннектор, ставит свою сборку из папки через
+// change_policy (подтверждение владельца) — без сокета владельца.
+func TestInstallDevConnectorByAgent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a WASM module")
+	}
+	c, _ := connectors.NewInProcess(&notes{})
+	d, err := New(Options{Home: filepath.Join(t.TempDir(), "d"), Keys: keys.NewMemory(), Connectors: []connectors.Client{c}, InitialConfig: []byte(cfg)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ctx := context.Background()
+	folder, _ := filepath.Abs("../connectors/wasm/testdata/probe")
+	r := d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "gate4ai.change_policy", Args: map[string]any{
+		"summary": "install my connector", "changes": []any{map[string]any{"op": "install_dev_connector", "folder": folder}}}})
+	if r.Status != pipeline.StatusPending {
+		t.Fatalf("%+v", r)
+	}
+	a, _ := d.State.GetApproval(r.ID)
+	if !strings.Contains(a.Preview, "own build") || !strings.Contains(a.Preview, "probe") || !strings.Contains(a.Preview, "127.0.0.1") {
+		t.Fatal(a.Preview)
+	}
+	res, err := d.Pipeline.Decide(ctx, r.ID, true, "webui", "owner")
+	if err != nil || res.Status != "ok" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if _, ok := d.Registry.Get("probe"); !ok || !d.Config.Current().Profiles["p"].HasConnector("probe") {
+		t.Fatal("installed and given to the agent's profile")
+	}
+	// Нативный код из папки агент поставить не может.
+	if _, err := devManifest("/nonexistent"); err == nil {
+		t.Fatal("no manifest")
+	}
+}
