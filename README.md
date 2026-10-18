@@ -143,7 +143,7 @@ gate4ai journal verify                 # целостность журнала
 - [Спецификация продукта](docs/specification.md)
 - [Подробный запуск: конфигурация, агенты, relay, свой relay](docs/quickstart.md)
 - [Устройство кода](docs/architecture.md) · [Коннекторы](docs/connector-architecture.md) · [Секреты и учётки](docs/secret-architecture.md)
-- [Разработка: сборка и тесты](docs/quickstart.md#сборка) · [Публикация](docs/publishing.md) · [План работ](PLAN.md)
+- [Разработка: сборка и тесты](docs/quickstart.md#сборка) · [Публикация](docs/publishing.md)
 
 ## Лицензия
 

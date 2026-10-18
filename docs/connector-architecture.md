@@ -243,7 +243,7 @@ SDK: `sdk-go/native` — `native.Serve(connector)` для тех же `connector
 
 ## Текущее состояние и переход
 
-Сделано (этапы 16–19, 23, 26–28 в PLAN.md): SDK `sdk-go` с манифестом и ABI v2 (формы данных MCP), WASM-хост на wazero, встроенный коннектор `files` (на PDK, `Engine.Builtin`), нативные пакеты (`internal/connectors/native`: процесс под надзором, JSON-RPC по stdio, `reveal`, перезапуск и отключение после частых падений; магазин — `.g4c` под платформу и список `.platforms.json`), `service_call` и контракты (`sdk-go/contract`, `gate4ai contract gen|diff`), коннектор `mail` — WASM-модуль (`tbank` удалён 2026-10-18, будет сделан заново), `browser` — нативный пакет, секреты в `Settings` не передаются, магазин с подписанными пакетами. `browser.act` — методы `click` / `fill` / `press` / `wait` по CSS-селектору и видимому тексту элемента (`text`, `value`, `timeout_ms`); после действия итоговый адрес снова проверяется по сайтам вызывающего.
+Сделано: SDK `sdk-go` с манифестом и ABI v2 (формы данных MCP), WASM-хост на wazero, встроенный коннектор `files` (на PDK, `Engine.Builtin`), нативные пакеты (`internal/connectors/native`: процесс под надзором, JSON-RPC по stdio, `reveal`, перезапуск и отключение после частых падений; магазин — `.g4c` под платформу и список `.platforms.json`), `service_call` и контракты (`sdk-go/contract`, `gate4ai contract gen|diff`), коннектор `mail` — WASM-модуль (`tbank` удалён 2026-10-18, будет сделан заново), `browser` — нативный пакет, секреты в `Settings` не передаются, магазин с подписанными пакетами. `browser.act` — методы `click` / `fill` / `press` / `wait` по CSS-селектору и видимому тексту элемента (`text`, `value`, `timeout_ms`); после действия итоговый адрес снова проверяется по сайтам вызывающего.
 
 Расходится с этим документом в браузере: проверка, что селектор `browser.act` взят из `observe`, и режим «секрет на странице» не делаются — вместе с `fill_secret` / `login` (этап 12). До них в банк человек входит сам в выделенном профиле Chrome.
 
@@ -254,4 +254,3 @@ SDK: `sdk-go/native` — `native.Serve(connector)` для тех же `connector
 
 Расходится с этим документом в проверке: `verify_after` хост принимает (статус `pending`, агенту — «отправлено, не подтверждено»), но отложенный вызов `verify` по расписанию, повторы при ошибке и `limits.verify_deadline_s` пока не делаются (решение человека 2026-10-15).
 
-Переход — этап 12 в PLAN.md.
