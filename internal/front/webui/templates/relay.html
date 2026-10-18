@@ -1,0 +1,47 @@
+{{define "relay_state"}}<p>Состояние: {{if eq .Phase "online"}}<b class="ok">онлайн</b>
+{{else if eq .Phase "issuing"}}<b class="warn">подключаемся</b> — выпускаем сертификат для адреса устройства (обычно до минуты)…
+{{else if eq .Phase "connecting"}}<b class="warn">подключаемся к relay…</b>
+{{else if eq .Phase "reconnecting"}}<b class="warn">нет связи с relay — переподключаемся</b>{{with .Error}}<br><span class="help">Последняя ошибка: {{.}}</span>{{end}}
+{{else}}<b class="bad">не удалось подключиться</b>{{with .Error}}: {{.}}{{end}}<br><span class="help">Проверьте адрес relay и журнал daemon.</span>{{end}}</p>{{end}}
+
+{{define "relay_direct"}}<p>Публичный адрес задан при запуске daemon (<code>--public</code>): <code>{{.Direct}}</code>. Relay не нужен.</p>
+<p>MCP для облачных агентов: <code id="mcp">{{.Direct}}/mcp</code> <button class="small" data-copy="#mcp">Копировать</button></p>
+<p class="help">Чтобы сменить адрес, перезапустите daemon с другими <code>--public</code> / <code>--public-url</code>.</p>{{end}}
+
+{{template "head" .}}
+{{$d := .Data}}
+<p><a href="{{.Base}}/settings#relay">← Настройки</a></p>
+<h2>Доступ из интернета</h2>
+
+{{if $d.Direct}}<div class="card">{{template "relay_direct" $d}}</div>
+{{else}}
+{{if $d.Relay.Configured}}
+<div class="card" id="current"{{if and (ne $d.Relay.Phase "online") (ne $d.Relay.Phase "failed")}} data-live-relay="{{$d.Relay.Phase}}"{{end}}><h3>Текущее подключение</h3>
+{{template "relay_state" $d.Relay}}
+<p>Relay: <code>{{$d.Relay.URL}}</code><br>Адрес устройства: <code>https://{{$d.Relay.Host}}</code><br>MCP для облачных агентов: <code>{{$d.Relay.MCPURL}}</code></p></div>
+
+<div class="card" id="again"><h3>Зарегистрировать заново</h3>
+<p class="warn">Повторная регистрация создаёт новое устройство:</p>
+<ul><li>текущий адрес <code>{{$d.Relay.MCPURL}}</code> перестанет работать — коннекторы в Claude.ai и ChatGPT придётся добавить заново;</li>
+<li>для нового адреса будет выпущен новый сертификат, а их число в неделю ограничено.</li></ul>
+<p class="help">Нужно только при переезде на другой relay или если relay забыл это устройство.</p>
+<form method="post" action="{{.Base}}/settings/relay"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="form" value="again">
+<label>Адрес relay</label><input name="url" value="{{$d.Relay.URL}}" size="40">
+<label class="inline"><input type="checkbox" name="confirm" value="1" required> Понимаю, что текущий адрес перестанет работать</label>
+<div><button class="danger">Зарегистрировать заново</button></div></form></div>
+{{else}}
+<div class="card" id="custom"><h3>Свой relay</h3>
+<p>Свой relay — сервер <code>gate4ai-relay</code>, который вы запускаете сами; на него нужно делегировать DNS-зону (relay отвечает за адреса устройств и выпуск их сертификатов). Как развернуть — в инструкции, раздел «Свой relay».</p>
+<form method="post" action="{{.Base}}/settings/relay" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="form" value="custom">
+<label class="inline">Адрес relay <input name="url" placeholder="https://relay.example.org" size="34" required></label>
+<button class="primary">Подключить</button></form>
+<p class="help">Или <a href="{{.Base}}/settings#relay">зарегистрируйтесь на {{$d.RelayDefaultHost}}</a> — свой сервер не нужен.</p></div>
+{{end}}
+
+<div class="card" id="public"><h3>Свой HTTPS-адрес без relay</h3>
+<p>Если у этого компьютера есть открытый порт или reverse proxy, relay не нужен: запустите daemon с публичным адресом.</p>
+<pre class="box">gate4ai daemon --public :8443 --public-url https://gate.example.com --public-cert gate.crt --public-key gate.key
+gate4ai daemon --public 127.0.0.1:8080 --public-url https://gate.example.com   # TLS снимает reverse proxy</pre>
+<p class="help">После перезапуска адрес появится в настройках. Цена — открытый порт; за reverse proxy трафик видит прокси.</p></div>
+{{end}}
+{{template "foot"}}

@@ -79,6 +79,19 @@
     }, 5000);
   }
 
+  // Relay подключается (сертификат, туннель): страница обновляется при смене этапа.
+  var relay = document.querySelector("[data-live-relay]");
+  if (relay) {
+    var phase = relay.getAttribute("data-live-relay");
+    setInterval(function () {
+      if (document.hidden) return;
+      fetch(location.href, { credentials: "same-origin" }).then(function (r) { return r.text(); }).then(function (t) {
+        var m = t.match(/data-live-relay="(\w+)"/);
+        if ((m ? m[1] : "") !== phase && !document.querySelector("form:focus-within")) location.reload();
+      }).catch(function () {});
+    }, 3000);
+  }
+
   // Браузерный push: <button data-push-key="…">.
   function b64u(s) {
     var p = "=".repeat((4 - (s.length % 4)) % 4), raw = atob((s + p).replace(/-/g, "+").replace(/_/g, "/"));

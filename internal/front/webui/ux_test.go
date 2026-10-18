@@ -16,6 +16,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
+	"github.com/gate4ai/gate4ai/internal/relayclient"
 )
 
 type fakeAutostart struct{ on bool }
@@ -79,7 +80,7 @@ func TestFirstRunPaths(t *testing.T) {
 	// Все страницы отрисовываются.
 	for _, path := range []string{"/approvals", "/approvals/telegram", "/agents", "/agents/new", "/agents/new?client=cursor", "/agents/bot",
 		"/agents/bot?client=cloud", "/agents/bot?client=codex", "/connectors", "/connectors/notes", "/policy", "/policy?sim=notes.append",
-		"/policy/rule", "/policy/rule?profile=p&action=notes.append", "/policy/templates", "/policy/yaml", "/journal", "/vault", "/settings", "/settings?link=1"} {
+		"/policy/rule", "/policy/rule?profile=p&action=notes.append", "/policy/templates", "/policy/yaml", "/journal", "/vault", "/settings", "/settings?link=1", "/settings/relay"} {
 		get(path)
 	}
 
@@ -291,5 +292,89 @@ func TestReferrerPolicyKeepsOrigin(t *testing.T) {
 	}
 	if p := r.Header.Get("Referrer-Policy"); p == "no-referrer" || p == "" {
 		t.Fatal(p)
+	}
+}
+
+// Блок relay: одна кнопка и ссылки; после подключения — состояние и MCP без формы;
+// повторная регистрация — только с подтверждением; с --public формы нет.
+func TestRelaySettings(t *testing.T) {
+	u, d, _, base := setup(t)
+	_, _, post, get := loginAs(t, u, base)
+
+	p := get("/settings")
+	for _, want := range []string{"Зарегистрироваться на relay.gate4.ai", `value="https://relay.gate4.ai"`, "/settings/relay#custom", "/settings/relay#public"} {
+		if !strings.Contains(p, want) {
+			t.Fatal(want, p)
+		}
+	}
+	if strings.Contains(p, "Зарегистрировать заново") || strings.Contains(p, "data-live-relay") {
+		t.Fatal("not configured", p)
+	}
+	if p := get("/settings/relay"); !strings.Contains(p, `id="custom"`) || !strings.Contains(p, "--public-url") || strings.Contains(p, `id="again"`) {
+		t.Fatal("relay page", p)
+	}
+
+	// Устройство зарегистрировано, сертификат выпускается: этап виден, страница обновляется сама.
+	st := relayclient.Status{Configured: true, Phase: relayclient.PhaseIssuing, URL: "https://relay.gate4.ai", DeviceID: "abc",
+		Host: "abc.relay.gate4.ai", MCPURL: "https://abc.relay.gate4.ai/mcp"}
+	u.Relay = func() relayclient.Status { return st }
+	p = get("/settings")
+	for _, want := range []string{`data-live-relay="issuing"`, "выпускаем сертификат", "https://abc.relay.gate4.ai/mcp", "Сменить relay или адрес устройства"} {
+		if !strings.Contains(p, want) {
+			t.Fatal(want, p)
+		}
+	}
+	for _, bad := range []string{"Relay: <code>", "Зарегистрировать заново", "Зарегистрироваться на", "нет связи"} {
+		if strings.Contains(p, bad) {
+			t.Fatal(bad, p)
+		}
+	}
+	st.Phase, st.Online = relayclient.PhaseOnline, true
+	if p := get("/settings"); !strings.Contains(p, "онлайн") || strings.Contains(p, "data-live-relay") {
+		t.Fatal("online", p)
+	}
+	st.Phase, st.Online, st.Error = relayclient.PhaseFailed, false, "acme: boom"
+	if p := get("/settings"); !strings.Contains(p, "не удалось подключиться") || !strings.Contains(p, "acme: boom") || strings.Contains(p, "data-live-relay") {
+		t.Fatal("failed", p)
+	}
+	if p := get("/settings/relay"); !strings.Contains(p, `id="again"`) || !strings.Contains(p, `name="confirm"`) || strings.Contains(p, `id="custom"`) {
+		t.Fatal("relay page configured", p)
+	}
+
+	// Повторная регистрация без подтверждения не уходит на relay.
+	if err := u.edit("relay", func(c *config.Config) error {
+		c.Relay.URL, c.Relay.DeviceID = "https://relay.gate4.ai", "abc"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if p := post("/settings/relay", url.Values{"url": {"https://relay.gate4.ai"}, "form": {"again"}}); !strings.Contains(p, "подтвердите") {
+		t.Fatal("re-register without confirm", p)
+	}
+	if d.Config.Current().Relay.DeviceID != "abc" {
+		t.Fatal("device changed")
+	}
+
+	// Daemon с --public: адрес и MCP, без формы регистрации.
+	d.AddPublicURL(func() string { return "https://gate.example.com" })
+	for _, path := range []string{"/settings", "/settings/relay"} {
+		p := get(path)
+		if !strings.Contains(p, "https://gate.example.com/mcp") || !strings.Contains(p, "Relay не нужен") ||
+			strings.Contains(p, `action="/settings/relay"`) || strings.Contains(p, "data-live-relay") {
+			t.Fatal(path, p)
+		}
+	}
+}
+
+// Сообщение после действия — в запросе, а не во фрагменте «#…».
+func TestRedirectKeepsFragment(t *testing.T) {
+	for to, want := range map[string]string{
+		"/settings#relay":    "/settings?flash=ok#relay",
+		"/settings?link=1#x": "/settings?link=1&flash=ok#x",
+		"/settings":          "/settings?flash=ok",
+	} {
+		if got := redirect(to, "ok")["redirect"]; got != want {
+			t.Errorf("%s: %v, want %s", to, got, want)
+		}
 	}
 }

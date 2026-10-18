@@ -41,22 +41,29 @@ import (
 
 // redirect — переход после действия формы с сообщением (flash) или ошибкой.
 func redirect(to, flash string) map[string]any {
-	sep := "?"
-	if strings.Contains(to, "?") {
-		sep = "&"
-	}
 	if flash == "" {
 		return map[string]any{"redirect": to}
 	}
-	return map[string]any{"redirect": to + sep + "flash=" + urlq(flash)}
+	return map[string]any{"redirect": withParam(to, "flash", flash)}
 }
 
 func redirectErr(to string, err error) map[string]any {
+	return map[string]any{"redirect": withParam(to, "error", err.Error())}
+}
+
+// withParam добавляет параметр запроса к адресу перехода — перед «#…», иначе
+// он попал бы во фрагмент и до сервера не дошёл.
+func withParam(to, k, v string) string {
+	path, frag, hasFrag := strings.Cut(to, "#")
 	sep := "?"
-	if strings.Contains(to, "?") {
+	if strings.Contains(path, "?") {
 		sep = "&"
 	}
-	return map[string]any{"redirect": to + sep + "error=" + urlq(err.Error())}
+	path += sep + k + "=" + urlq(v)
+	if hasFrag {
+		path += "#" + frag
+	}
+	return path
 }
 
 func (u *UI) edit(comment string, f func(c *config.Config) error) error {
@@ -1397,7 +1404,7 @@ func (systemAutostart) Disable() error {
 
 func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 	cfg := u.D.Config.Current()
-	data := map[string]any{"Relay": u.relay(), "RelayDefault": relayclient.DefaultURL, "PublicURL": u.D.PublicURL(), "Config": cfg,
+	data := map[string]any{"PublicURL": u.D.PublicURL(), "Config": cfg,
 		"Timeout": config.FormatDuration(cfg.Approvals.Timeout.D()), "Version": version.Version, "Home": u.D.Home, "Log": paths.DaemonLog(),
 		"Retention": map[string]string{"receipts": config.FormatDuration(cfg.Retention.Receipts.D()), "denied": config.FormatDuration(cfg.Retention.Denied.D()),
 			"evidence_other": config.FormatDuration(cfg.Retention.EvidenceOther.D()), "evidence_money": config.FormatDuration(cfg.Retention.EvidenceMoney.D())}}
@@ -1414,7 +1421,28 @@ func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 			data["RemoteLinkError"] = err.Error()
 		}
 	}
+	for k, v := range u.relayData() {
+		data[k] = v
+	}
 	return "settings", data, nil
+}
+
+// relayData — данные блока relay: состояние, relay по умолчанию и прямой адрес
+// (--public), если daemon запущен с ним.
+func (u *UI) relayData() map[string]any {
+	rs := u.relay()
+	pub := u.D.PublicURL()
+	direct := ""
+	if pub != "" && (!rs.Configured || pub != "https://"+rs.Host) {
+		direct = pub
+	}
+	def, _ := url.Parse(relayclient.DefaultURL)
+	return map[string]any{"Relay": rs, "RelayDefault": relayclient.DefaultURL, "RelayDefaultHost": def.Host, "Direct": direct}
+}
+
+// relayPage — свой relay, свой HTTPS-адрес без relay и повторная регистрация.
+func (u *UI) relayPage(r *http.Request) (string, map[string]any, error) {
+	return "relay", u.relayData(), nil
 }
 
 func (u *UI) registerRelay(w http.ResponseWriter, r *http.Request) map[string]any {
@@ -1422,13 +1450,22 @@ func (u *UI) registerRelay(w http.ResponseWriter, r *http.Request) map[string]an
 	if !strings.HasPrefix(addr, "https://") {
 		addr = "https://" + strings.TrimPrefix(addr, "http://")
 	}
+	// Повторная регистрация — новое устройство: прежний адрес перестаёт работать,
+	// выпускается новый сертификат. Только с явным подтверждением.
+	if u.D.Config.Current().Relay.DeviceID != "" && r.PostForm.Get("confirm") != "1" {
+		return redirectErr("/settings/relay#again", errors.New("устройство уже зарегистрировано: чтобы зарегистрировать его заново, подтвердите, что прежний адрес перестанет работать"))
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	res, err := relayclient.RegisterDevice(ctx, u.D, owner, addr, "", false)
 	if err != nil {
-		return redirectErr("/settings#relay", fmt.Errorf("relay %s: %v", addr, err))
+		back := "/settings#relay"
+		if f := r.PostForm.Get("form"); f == "custom" || f == "again" {
+			back = "/settings/relay#" + f
+		}
+		return redirectErr(back, fmt.Errorf("relay %s: %v", addr, err))
 	}
-	return redirect("/settings#relay", fmt.Sprintf("Устройство подключено к relay: %v. Адрес для облачных агентов: %v", res["host"], res["mcp_url"]))
+	return redirect("/settings#relay", fmt.Sprintf("Устройство зарегистрировано на relay, адрес — %v. Выпускаем сертификат и подключаемся: обычно это меньше минуты, страница обновится сама.", res["host"]))
 }
 
 func (u *UI) toggleAutostart(w http.ResponseWriter, r *http.Request) map[string]any {
