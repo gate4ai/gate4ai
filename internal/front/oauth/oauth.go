@@ -156,8 +156,10 @@ func (s *Server) asMetadata(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) prMetadata(w http.ResponseWriter, r *http.Request) {
 	iss := s.issuer(r)
+	// Ресурс — сам адрес устройства (MCP по корню); клиенты сверяют адрес
+	// сервера с resource по префиксу, так что подходит и старый …/mcp.
 	writeJSON(w, 200, map[string]any{
-		"resource":                 iss + "/mcp",
+		"resource":                 iss,
 		"authorization_servers":    []string{iss},
 		"bearer_methods_supported": []string{"header"},
 		"scopes_supported":         []string{"mcp"},

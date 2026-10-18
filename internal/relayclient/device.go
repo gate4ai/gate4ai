@@ -48,7 +48,8 @@ type Device struct {
 	// Dial — свой способ соединения с relay (тесты); nil — обычный.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 
-	online atomic.Bool
+	online  atomic.Bool
+	lastErr atomic.Pointer[string] // последняя ошибка туннеля (nil — туннель ещё не падал)
 }
 
 // TestDialer — подмена соединений с relay (только тесты); nil — обычный DNS.
@@ -56,6 +57,26 @@ var TestDialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
 // Online — туннель установлен.
 func (d *Device) Online() bool { return d.online.Load() }
+
+// phase — этап подключения работающего устройства и последняя ошибка туннеля.
+func (d *Device) phase() (string, string) {
+	switch err := d.LastError(); {
+	case d.Online():
+		return PhaseOnline, ""
+	case err == "":
+		return PhaseConnecting, ""
+	default:
+		return PhaseReconnecting, err
+	}
+}
+
+// LastError — последняя ошибка туннеля ("" — ещё не было).
+func (d *Device) LastError() string {
+	if e := d.lastErr.Load(); e != nil {
+		return *e
+	}
+	return ""
+}
 
 func (d *Device) httpClient() *http.Client {
 	dial := d.Dial
@@ -84,6 +105,11 @@ func (d *Device) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		msg := "tunnel closed"
+		if err != nil {
+			msg = err.Error()
+		}
+		d.lastErr.Store(&msg)
 		if time.Since(start) > 30*time.Second {
 			backoff = d.MinBackoff
 		}
@@ -241,13 +267,21 @@ func ACMETLS(ctx context.Context, c ACMEConfig) (*tls.Config, error) {
 	issuer := certmagic.NewACMEIssuer(cfg, certmagic.ACMEIssuer{CA: ca, Email: c.Email, Agreed: true,
 		DisableHTTPChallenge: true, DisableTLSALPNChallenge: true,
 		DNS01Solver: &certmagic.DNS01Solver{DNSManager: certmagic.DNSManager{DNSProvider: c.Provider, Resolvers: c.Resolvers}}})
-	cfg.Issuers = []certmagic.Issuer{issuer}
+	cfg.Issuers = []certmagic.Issuer{quietIssuer{issuer}}
 	if err := cfg.ManageSync(ctx, []string{c.Host}); err != nil {
 		return nil, err
 	}
 	t := cfg.TLSConfig()
 	t.NextProtos = []string{"http/1.1"}
 	return t, nil
+}
+
+// quietIssuer — ACME-эмитент без вопросов в stdin: ManageSync интерактивен, и без
+// email certmagic спрашивает его в терминале — daemon, запущенный в нём, ждал бы ответа.
+type quietIssuer struct{ *certmagic.ACMEIssuer }
+
+func (q quietIssuer) PreCheck(ctx context.Context, names []string, _ bool) error {
+	return q.ACMEIssuer.PreCheck(ctx, names, false)
 }
 
 // SelfSigned — самоподписанный сертификат (режим разработки и тесты).

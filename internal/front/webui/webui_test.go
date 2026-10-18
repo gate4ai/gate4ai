@@ -173,7 +173,7 @@ func TestWebUI(t *testing.T) {
 	}
 	// Секреты: значение не отображается.
 	r, _ = c.PostForm(base+"/vault", url.Values{"csrf": {csrf}, "alias": {"@mail.work"}, "value": {"S3CRET-VALUE"}})
-	if p := body(t, r); !strings.Contains(p, "@mail.work") || strings.Contains(p, "S3CRET") {
+	if p := body(t, r); !strings.Contains(p, "@mail.work") || strings.Contains(p, "S3CRET") || !strings.Contains(p, "не используется") {
 		t.Fatal("vault page")
 	}
 	// Выход.

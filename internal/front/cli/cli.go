@@ -1061,7 +1061,9 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 		return ExitUsage
 	}
 	var res struct {
-		URL string `json:"url"`
+		URL          string   `json:"url"`
+		Requires     []string `json:"requires"`
+		LinkRequired *bool    `json:"link_required"`
 	}
 	c := e.Client()
 	session := func() error {
@@ -1086,6 +1088,23 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 	}
 	e.say("One-time login link, valid for 2 minutes:")
 	fmt.Fprintln(e.Stdout, res.URL)
+	if len(res.Requires) > 0 {
+		need := map[string]string{"password": "the Web UI password", "telegram": "confirmation in your Telegram bot"}
+		var parts []string
+		for _, r := range res.Requires {
+			if need[r] == "" {
+				need[r] = r
+			}
+			parts = append(parts, need[r])
+		}
+		if res.LinkRequired != nil && !*res.LinkRequired {
+			if pu, err := url.Parse(res.URL); err == nil {
+				fmt.Fprintln(e.Stderr, "gate4ai: no link needed: open "+pu.Scheme+"://"+pu.Host+"/ and log in with "+strings.Join(parts, " and "))
+			}
+		} else {
+			fmt.Fprintln(e.Stderr, "gate4ai: login protection is on: the link alone does not log in, it also needs "+strings.Join(parts, " and "))
+		}
+	}
 	return ExitOK
 }
 

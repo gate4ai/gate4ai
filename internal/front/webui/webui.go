@@ -3,7 +3,9 @@
 // Package webui — Web UI владельца на localhost: подтверждения, агенты (токены,
 // коды подключения, отзыв), журнал, базовый редактор политик с симулятором и
 // откатом, алиасы Vault. Вход — одноразовая ссылка, которую выдаёт daemon по
-// сокету владельца (`gate4ai ui`, трей); дальше — сессия в HttpOnly-cookie.
+// сокету владельца (`gate4ai ui`, трей); дальше — сессия в HttpOnly-cookie. Если в
+// Настройках включена защита входа (protect.go), ссылка сама сессию не даёт: нужны
+// пароль и/или подтверждение входа в Telegram-боте.
 // Защита: проверка Host (DNS rebinding), SameSite=Strict, CSRF-токен в формах.
 //
 // Удалённо Web UI доступен на публичном адресе устройства под /ui/ (RemoteHandler):
@@ -17,6 +19,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net"
@@ -82,7 +85,7 @@ var tpl = template.Must(template.New("").Funcs(funcs).ParseFS(tplFS, "templates/
 
 var titles = map[string]string{"overview": "Обзор", "approvals": "Подтверждения", "telegram": "Telegram", "agents": "Агенты", "agent": "Агент",
 	"agent_new": "Новый агент", "connectors": "Коннекторы", "connector": "Коннектор", "policy": "Правила", "rule": "Правило", "templates": "Шаблоны",
-	"policy_yaml": "YAML", "journal": "Журнал", "receipt": "Квитанция", "vault": "Секреты", "settings": "Настройки",
+	"policy_yaml": "YAML", "journal": "Журнал", "receipt": "Квитанция", "vault": "Секреты", "settings": "Настройки", "relay": "Relay",
 	"remote_only": "Только на компьютере"}
 
 func or(a, b string) string {
@@ -127,10 +130,14 @@ type UI struct {
 	Bin string
 	// Autostart — включение автозапуска (подменяется в тестах).
 	Autostart Autostart
+	// Confirm — подтверждение входа на другом устройстве (nil — Telegram-бот из Channels).
+	Confirm LoginConfirmer
 
 	mu       sync.Mutex
 	logins   map[string]login // одноразовые токены входа
 	sessions map[string]session
+	attempts map[string]*attempt // попытки входа при включённой защите
+	limits   [2]limiter          // защита от перебора пароля: локально, удалённо
 }
 
 type login struct {
@@ -139,9 +146,10 @@ type login struct {
 }
 
 type session struct {
-	csrf    string
-	expires time.Time
-	remote  bool
+	csrf      string
+	expires   time.Time
+	remote    bool
+	protected bool // вход прошёл защиту (пароль и/или Telegram)
 }
 
 // mount — где обслуживается Web UI: локально (loopback) или удалённо (/ui/ на
@@ -162,7 +170,7 @@ func (m mount) cookie() string {
 
 // New создаёт Web UI.
 func New(d *daemon.Daemon) *UI {
-	return &UI{D: d, Now: time.Now, logins: map[string]login{}, sessions: map[string]session{},
+	return &UI{D: d, Now: time.Now, logins: map[string]login{}, sessions: map[string]session{}, attempts: map[string]*attempt{},
 		Clients: agentsetup.Default(), Autostart: systemAutostart{}}
 }
 
@@ -177,11 +185,21 @@ func (u *UI) LoginURL() string {
 	return "http://" + u.Addr + "/login?t=" + u.newLogin(false)
 }
 
+// errRelayOffline — адрес устройства на relay есть, но туннеля нет: ссылка не
+// откроется (relay подержит соединение и сбросит его, браузер покажет таймаут).
+var errRelayOffline = errors.New("the device is not connected to the relay, a link would not open")
+
 // RemoteLoginURL — одноразовая ссылка входа в удалённый Web UI (2 минуты).
 func (u *UI) RemoteLoginURL() (string, error) {
 	pub := u.D.PublicURL()
 	if pub == "" {
 		return "", fmt.Errorf("no public address: register the device on a relay or start the daemon with --public")
+	}
+	if st := u.relay(); st.Configured && !st.Online && pub == "https://"+st.Host {
+		if st.Error != "" {
+			return "", fmt.Errorf("%w: %s", errRelayOffline, st.Error)
+		}
+		return "", errRelayOffline
 	}
 	return pub + remote.base + "/login?t=" + u.newLogin(true), nil
 }
@@ -229,11 +247,18 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 			if link, err = u.RemoteLoginURL(); err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(409)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "no_public_address", "message": err.Error()}})
+				code := "no_public_address"
+				if errors.Is(err, errRelayOffline) {
+					code = "relay_offline"
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": err.Error()}})
 				return
 			}
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"url": link})
+		// requires — что ещё нужно для входа по ссылке (пароль, подтверждение в Telegram);
+		// link_required — нужна ли ссылка вообще (иначе вход и по постоянному адресу).
+		p := u.Protection()
+		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": p.Requires(), "link_required": !p.NoLink})
 	})
 	mux.HandleFunc("GET /v1/tray/state", func(w http.ResponseWriter, r *http.Request) {
 		if !daemon.PrincipalFrom(r.Context()).IsOwner() {
@@ -291,6 +316,7 @@ func (u *UI) handler(m mount) http.Handler {
 		post(path, localOnly(m, f))
 	}
 	mux.HandleFunc("GET "+b+"/login", u.login(m))
+	mux.HandleFunc("POST "+b+"/login", u.loginPost(m))
 	mux.Handle("GET "+b+"/static/", http.StripPrefix(b, http.FileServerFS(staticFS)))
 	mux.HandleFunc("GET "+b+"/sw.js", serviceWorker)
 
@@ -331,6 +357,7 @@ func (u *UI) handler(m mount) http.Handler {
 	localPage("/policy/yaml", u.yamlPage)
 	localPage("/vault", u.vaultPage)
 	localPage("/settings", u.settingsPage)
+	localPage("/settings/relay", u.relayPage)
 	localPage("/approvals/telegram", u.telegramPage)
 
 	change("/agents", u.createAgent)
@@ -366,6 +393,9 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/settings/autostart", u.toggleAutostart)
 	change("/settings/general", u.saveGeneral)
 	change("/settings/remote-link", u.remoteLink)
+	change("/settings/login/password", u.setLoginPassword)
+	change("/settings/login/telegram", u.setLoginTelegram)
+	change("/settings/login/link", u.setLoginLink)
 	return u.guard(m, mux)
 }
 
@@ -420,33 +450,43 @@ func (u *UI) guard(m mount, h http.Handler) http.Handler {
 	})
 }
 
+// login — одноразовая ссылка. Без защиты она сразу даёт сессию; с защитой —
+// попытку входа (cookie), которой нужны пароль и/или подтверждение в Telegram.
 func (u *UI) login(m mount) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		t := r.URL.Query().Get("t")
-		u.mu.Lock()
-		l, ok := u.logins[t]
-		if ok && l.remote == m.remote {
-			delete(u.logins, t)
+		if t := r.URL.Query().Get("t"); t != "" {
+			u.mu.Lock()
+			l, ok := u.logins[t]
+			if ok && l.remote == m.remote {
+				delete(u.logins, t)
+			}
+			valid := ok && l.remote == m.remote && !u.Now().After(l.expires)
+			u.mu.Unlock()
+			if valid {
+				p := u.Protection()
+				if !p.Extra() {
+					u.startSession(w, m, false)
+					http.Redirect(w, r, m.base+"/", http.StatusSeeOther)
+					return
+				}
+				u.mu.Lock()
+				id := u.newAttempt(m, p)
+				u.mu.Unlock()
+				u.setAttemptCookie(w, m, id)
+				// Без токена в адресе: дальше попытка живёт только в cookie этого браузера.
+				http.Redirect(w, r, m.base+"/login", http.StatusSeeOther)
+				return
+			}
 		}
+		u.mu.Lock()
+		id, a := u.attemptOf(m, r)
 		u.mu.Unlock()
-		if t == "" || !ok || l.remote != m.remote || u.Now().After(l.expires) {
-			loginPage(w, m)
+		if a != nil {
+			u.loginStep(w, r, m, id, "")
 			return
 		}
-		sid := random()
-		u.mu.Lock()
-		u.sessions[sid] = session{csrf: random(), expires: u.Now().Add(12 * time.Hour), remote: m.remote}
-		u.mu.Unlock()
-		http.SetCookie(w, &http.Cookie{Name: m.cookie(), Value: sid, Path: m.base + "/", HttpOnly: true, Secure: m.remote,
-			SameSite: http.SameSiteStrictMode, MaxAge: 12 * 3600})
-		http.Redirect(w, r, m.base+"/", http.StatusSeeOther)
+		u.loginPage(w, m)
 	}
-}
-
-func loginPage(w http.ResponseWriter, m mount) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(401)
-	_ = tpl.ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote})
 }
 
 type view struct {
@@ -469,7 +509,7 @@ func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, erro
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, s, ok := u.session(m, r)
 		if !ok {
-			loginPage(w, m)
+			u.loginPage(w, m)
 			return
 		}
 		name, data, err := f(r)
