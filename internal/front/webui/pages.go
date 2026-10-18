@@ -1422,6 +1422,7 @@ func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 			}
 		} else {
 			data["RemoteLinkError"] = err.Error()
+			data["RemoteLinkOffline"] = errors.Is(err, errRelayOffline)
 		}
 	}
 	for k, v := range u.relayData() {

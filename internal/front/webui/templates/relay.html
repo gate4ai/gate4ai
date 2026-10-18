@@ -1,5 +1,5 @@
 {{define "relay_state"}}<p>Состояние: {{if or .Online (eq .Phase "online")}}<b class="ok">подключён</b>
-{{else if eq .Phase "issuing"}}<b class="warn">подключаемся</b> — выпускаем сертификат для адреса устройства (обычно до минуты)…
+{{else if eq .Phase "issuing"}}<b class="warn">подключаемся</b> — выпускаем сертификат для адреса устройства (обычно до минуты)…{{with .Error}}<br><span class="help">Не получилось, повторим через несколько минут. Последняя ошибка: {{.}}</span>{{end}}
 {{else if eq .Phase "connecting"}}<b class="warn">подключаемся к relay…</b>
 {{else if eq .Phase "reconnecting"}}<b class="warn">нет связи с relay — переподключаемся</b>{{with .Error}}<br><span class="help">Последняя ошибка: {{.}}</span>{{end}}
 {{else}}<b class="bad">не удалось подключиться</b>{{with .Error}}: {{.}}{{end}}<br><span class="help">Проверьте адрес relay и журнал daemon.</span>{{end}}</p>{{end}}

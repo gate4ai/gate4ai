@@ -19,6 +19,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net"
@@ -184,11 +185,21 @@ func (u *UI) LoginURL() string {
 	return "http://" + u.Addr + "/login?t=" + u.newLogin(false)
 }
 
+// errRelayOffline — адрес устройства на relay есть, но туннеля нет: ссылка не
+// откроется (relay подержит соединение и сбросит его, браузер покажет таймаут).
+var errRelayOffline = errors.New("the device is not connected to the relay, a link would not open")
+
 // RemoteLoginURL — одноразовая ссылка входа в удалённый Web UI (2 минуты).
 func (u *UI) RemoteLoginURL() (string, error) {
 	pub := u.D.PublicURL()
 	if pub == "" {
 		return "", fmt.Errorf("no public address: register the device on a relay or start the daemon with --public")
+	}
+	if st := u.relay(); st.Configured && !st.Online && pub == "https://"+st.Host {
+		if st.Error != "" {
+			return "", fmt.Errorf("%w: %s", errRelayOffline, st.Error)
+		}
+		return "", errRelayOffline
 	}
 	return pub + remote.base + "/login?t=" + u.newLogin(true), nil
 }
@@ -236,7 +247,11 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 			if link, err = u.RemoteLoginURL(); err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(409)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "no_public_address", "message": err.Error()}})
+				code := "no_public_address"
+				if errors.Is(err, errRelayOffline) {
+					code = "relay_offline"
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": err.Error()}})
 				return
 			}
 		}

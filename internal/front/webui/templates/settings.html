@@ -22,7 +22,7 @@ MCP отвечает и по корню адреса, и по <code>{{$d.Relay.M
 {{with $d.RemoteLink}}<div class="row" style="align-items:flex-start">{{with $d.RemoteQR}}<img src="{{.}}" alt="QR-код ссылки входа" width="180" height="180" style="image-rendering:pixelated;background:#fff;padding:6px;border-radius:6px">{{end}}
 <div><p>Отсканируйте QR-код телефоном или откройте ссылку. Она одноразовая и действует 2 минуты.</p><pre class="box" id="rlink">{{.}}</pre><button class="small" data-copy="#rlink">Копировать</button>
 <p class="help">На телефоне откройте «Подтверждения» и нажмите «Включить в этом браузере» — запросы будут приходить push-уведомлением.</p></div></div>
-{{else}}{{with $d.RemoteLinkError}}<p class="warn">Нет публичного адреса: включите relay выше.</p>{{end}}
+{{else}}{{if $d.RemoteLinkOffline}}<p class="warn">Устройство не подключено к relay — ссылка не откроется. Дождитесь состояния «подключён» выше.</p>{{else if $d.RemoteLinkError}}<p class="warn">Нет публичного адреса: включите relay выше.</p>{{end}}
 <form method="post" action="{{.Base}}/settings/remote-link"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Показать ссылку и QR-код</button></form>{{end}}
 </div>
 

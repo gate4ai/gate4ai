@@ -404,3 +404,25 @@ func TestRedirectKeepsFragment(t *testing.T) {
 		}
 	}
 }
+
+// Relay настроен, но туннеля нет: ссылка не выдаётся (она бы зависла до таймаута),
+// вместо неё — причина; появилась связь — ссылка есть.
+func TestRemoteLinkRelayOffline(t *testing.T) {
+	u, d, _, base := setup(t)
+	st := relayclient.Status{Configured: true, Phase: relayclient.PhaseIssuing, Host: "abc.relay.test", MCPURL: "https://abc.relay.test",
+		Error: "obtaining certificate: no NS"}
+	u.Relay = func() relayclient.Status { return st }
+	d.AddPublicURL(func() string { return "https://abc.relay.test" })
+	if _, err := u.RemoteLoginURL(); !errors.Is(err, errRelayOffline) || !strings.Contains(err.Error(), "no NS") {
+		t.Fatal(err)
+	}
+	_, _, _, get := loginAs(t, u, base)
+	if p := get("/settings?link=1"); !strings.Contains(p, "не подключено к relay") || !strings.Contains(p, "Последняя ошибка: obtaining certificate: no NS") ||
+		strings.Contains(p, "/ui/login?t=") {
+		t.Fatal(p)
+	}
+	st.Online, st.Phase, st.Error = true, relayclient.PhaseOnline, ""
+	if l, err := u.RemoteLoginURL(); err != nil || !strings.HasPrefix(l, "https://abc.relay.test/ui/login?t=") {
+		t.Fatal(l, err)
+	}
+}
