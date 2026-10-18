@@ -1,6 +1,7 @@
 <!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>gate4.ai — вход</title>
 <style>body{font:15px/1.5 system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1rem}pre{background:#8881;padding:.6rem;border-radius:6px}</style></head>
 <body><h1>gate4.ai</h1>
+{{with .Error}}<p style="color:#b3261e" role="alert">{{.}}</p>{{end}}
 {{if .Remote}}<p>Нужен вход. Ссылку для этого устройства выдаёт компьютер с gate4.ai: <b>Настройки → Вход с телефона</b> (QR-код) или команда</p><pre>gate4ai ui --remote</pre>
 {{else}}<p>Нужен вход. Откройте Web UI из трея — значок gate4.ai → <b>Открыть Web UI</b>, — или выполните на этом компьютере:</p><pre>gate4ai ui</pre>{{end}}
-<p>Ссылка входа одноразовая и действует 2 минуты; сессия — 12 часов.</p></body></html>
+<p>Ссылка входа одноразовая и действует 2 минуты; сессия — 12 часов. Если в Настройках включена защита входа, после ссылки нужен пароль и/или подтверждение в Telegram.</p></body></html>

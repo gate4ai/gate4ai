@@ -26,6 +26,34 @@ MCP отвечает и по корню адреса, и по <code>{{$d.Relay.M
 <form method="post" action="{{.Base}}/settings/remote-link"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Показать ссылку и QR-код</button></form>{{end}}
 </div>
 
+<div class="card" id="login"><h3>Защита входа</h3>
+<p>Три способа входа в Web UI, их можно сочетать: нужно пройти все включённые, хотя бы один включён всегда. Ссылку (<code>gate4ai ui</code>, трей) может получить и агент, запущенный на этом компьютере, — пароль и подтверждение на другом устройстве (в вашем Telegram-боте) ему недоступны.</p>
+{{$p := $d.Protection}}
+<table><tbody>
+<tr><td><b>Одноразовая ссылка</b><br><span class="help">{{if $p.Link}}вход по ссылке из <code>gate4ai ui</code> или трея{{else}}не нужна: вход по постоянному адресу <code>http://{{$d.Addr}}/</code>{{with $d.PublicURL}}, с телефона — <code>{{.}}/ui/</code>{{end}}{{end}}</span></td>
+<td>{{if $p.Link}}<b class="ok">включена</b>{{else}}<b>выключена</b>{{end}}</td>
+<td><form method="post" action="{{.Base}}/settings/login/link" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="{{if $p.Link}}0{{else}}1{{end}}">
+{{if $p.Password}}<input type="password" name="current" autocomplete="current-password" size="12" placeholder="текущий пароль" aria-label="Текущий пароль">{{end}}
+<button>{{if $p.Link}}Выключить{{else}}Включить{{end}}</button></form></td></tr>
+<tr><td><b>Пароль</b><br><span class="help">хранится только хэшем (argon2id)</span></td>
+<td>{{if $p.Password}}<b class="ok">задан</b>{{else}}<b>не задан</b>{{end}}</td>
+<td>{{if $p.Password}}<form method="post" action="{{.Base}}/settings/login/password" class="row" data-confirm="Снять пароль со входа в Web UI?"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="remove" value="1">
+<input type="password" name="current" autocomplete="current-password" size="12" placeholder="текущий пароль" aria-label="Текущий пароль"><button>Снять</button></form>{{end}}</td></tr>
+<tr><td><b>Подтверждение в Telegram</b><br><span class="help">кнопка «Разрешить вход» в вашем боте, с кодом со страницы входа</span></td>
+<td>{{if $p.Telegram}}<b class="ok">включено</b>{{else}}<b>выключено</b>{{end}}</td>
+<td><form method="post" action="{{.Base}}/settings/login/telegram" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="{{if $p.Telegram}}0{{else}}1{{end}}">
+{{if $p.Password}}<input type="password" name="current" autocomplete="current-password" size="12" placeholder="текущий пароль" aria-label="Текущий пароль">{{end}}
+<button>{{if $p.Telegram}}Выключить{{else}}Включить{{end}}</button></form>
+{{if and (not $p.Telegram) (not $d.TelegramReady)}}<span class="help">сначала подключите бота: <a href="{{.Base}}/approvals/telegram">Подтверждения → Telegram</a></span>{{end}}</td></tr>
+</tbody></table>
+<form method="post" action="{{.Base}}/settings/login/password"><input type="hidden" name="csrf" value="{{.CSRF}}">
+{{if $p.Password}}<label>Текущий пароль</label><input type="password" name="current" autocomplete="current-password">{{end}}
+<label>{{if $p.Password}}Новый пароль{{else}}Пароль{{end}} (не короче 8 символов)</label><input type="password" name="password" autocomplete="new-password">
+<label>Повторите</label><input type="password" name="repeat" autocomplete="new-password">
+<button class="{{if not $p.Password}}primary{{end}}">{{if $p.Password}}Сменить пароль{{else}}Задать пароль{{end}}</button></form>
+<p class="help">Настройки защиты хранятся в State Store, а не в конфигурации: агент не снимет защиту правкой политики. Менять их можно только из сессии, открытой с текущей защитой, а если задан пароль — введя его. Изменение закрывает все остальные сессии. Те же способы действуют и для входа с телефона (<code>/ui/</code> на адресе устройства): без ссылки туда входят по закладке. От перебора пароля: после 5 неверных подряд каждая попытка ждёт вдвое дольше (до 15 минут), у входа с телефона свой счётчик — перебор из интернета не закрывает вход на компьютере. Забыли пароль или нет доступа к Telegram: остановите daemon и запустите <code>gate4ai daemon --reset-ui-login</code> (в Telegram придёт уведомление о сбросе).</p>
+</div>
+
 <div class="card" id="autostart"><h3>Автозапуск</h3>
 {{with $d.Autostart}}
 <p>{{if .installed}}<b class="ok">Включён</b>: gate4.ai запускается при входе в систему{{with .systemd}} (systemd: {{.}}){{end}}.{{else}}<b>Выключен</b>: после перезагрузки gate4.ai не запустится сам, и агенты получат «устройство офлайн».{{end}}</p>

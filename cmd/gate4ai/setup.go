@@ -22,6 +22,9 @@ import (
 // uiAddr — адрес Web UI (только loopback); "" — выключен.
 var uiAddr = "127.0.0.1:7431"
 
+// resetUILogin — снять защиту входа в Web UI при старте (забыт пароль, нет Telegram).
+var resetUILogin bool
+
 // telegramAPI — адрес Bot API (переопределяется для тестов и self-hosted Bot API).
 var telegramAPI = "https://api.telegram.org"
 
@@ -48,6 +51,16 @@ func setup(ctx context.Context, d *daemon.Daemon, log *slog.Logger) error {
 	d.AddRoutes(u.OwnerRoutes)
 	d.AddPublic("/ui/", u.RemoteHandler())
 	u.Channels = approval.Attach(ctx, d, approval.NewDesktop(), telegramAPI)
+	if resetUILogin {
+		if err := u.ResetProtection(); err != nil {
+			return err
+		}
+		log.Warn("web UI login protection removed (--reset-ui-login)")
+		// Сброс виден владельцу: если сбросил не он — это сигнал.
+		if tg := u.Channels.Telegram(); tg != nil {
+			go tg.Notice("⚠️ Защита входа в Web UI gate4.ai снята: daemon запущен с --reset-ui-login. Если это были не вы — задайте защиту заново в Настройках.")
+		}
+	}
 	if _, err := sandbox.Attach(ctx, d, paths.RunDir(), egressAddr); err != nil {
 		return err
 	}
