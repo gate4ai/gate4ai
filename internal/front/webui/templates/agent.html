@@ -44,7 +44,7 @@
 {{if eq $d.Client "cloud"}}
 <div class="card"><h3>Облачный агент: Claude.ai, ChatGPT</h3>
 {{if $d.PublicURL}}
-<ol><li>Адрес MCP этого компьютера: <code id="mcpurl">{{$d.PublicURL}}/mcp</code> <button class="small" data-copy="#mcpurl">Копировать</button></li>
+<ol><li>Адрес MCP этого компьютера: <code id="mcpurl">{{$d.PublicURL}}</code> <button class="small" data-copy="#mcpurl">Копировать</button></li>
 <li><b>Claude.ai:</b> Settings → Connectors → Add custom connector → вставьте адрес. <b>ChatGPT:</b> Settings → Connectors → Advanced → Developer mode → Create → адрес, аутентификация OAuth.</li>
 <li>Агент откроет страницу авторизации gate4.ai — введите код подключения:</li></ol>
 <form method="post" action="{{.Base}}/agents/{{$d.Name}}/connect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="primary">Получить код подключения</button></form>
