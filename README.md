@@ -82,7 +82,7 @@ gate4ai policy set config.yaml -m "первая политика"
 gate4ai doctor
 ```
 
-Свой коннектор ставится прямо из папки с исходниками: `gate4ai connectors install ./my-connector --watch` — собирает, ставит и пересобирает на каждое сохранение (подробнее — [docs/quickstart.md](docs/quickstart.md)).
+Свой коннектор ставится прямо из папки с исходниками: `gate4ai connectors install ./my-connector --watch` — собирает, ставит и пересобирает на каждое сохранение (подробнее — [docs/quickstart.md](docs/quickstart.md)). Коннектор к сайту можно начать с заготовки `gate4ai connectors new <имя> --site <домен>` и писать вместе с агентом: он открывает сайт в сеансе браузера (`gate4ai browser open`, `observe --elements`, `act`, `network`, `close`) и сразу видит ответы — [docs/connector-authoring.md](docs/connector-authoring.md).
 
 Если политика уже была задана без раздела `store`, сначала добавьте в неё `store` из примера выше (`gate4ai policy set`), затем ставьте коннекторы.
 

@@ -139,7 +139,7 @@ func TestNestedCall(t *testing.T) {
 	b.calls = []abi.ServiceCallRequest{
 		{Target: "web", Action: "open", Args: map[string]any{"url": "https://bank.example/"}}, // без правила — покрыт bank.pay
 		{Target: "web", Action: "open", Args: map[string]any{"url": "https://evil.example/"}}, // правило deny
-		{Target: "web", Action: "read"},                         // правило ask — не поддерживается во вложенном
+		{Target: "web", Action: "read"},                         // правило ask во вложенном не действует — покрыт bank.pay
 		{Target: "web", Action: "open", Args: map[string]any{}}, // нет обязательного url
 		{Target: "web", Action: "nope"},                         // нет действия
 		{Target: "bank", Action: "pay"},                         // цикл и не сервис
@@ -151,14 +151,17 @@ func TestNestedCall(t *testing.T) {
 	if b.got[0] != nil || b.res[0].Structured.(map[string]any)["url"] != "https://bank.example/" {
 		t.Fatal(b.got[0], b.res[0])
 	}
-	for i, want := range []string{"denied by policy", "not supported for nested calls", "url", "not installed", "cycle"} {
-		if b.got[i+1] == nil || !strings.Contains(b.got[i+1].Error(), want) {
-			t.Errorf("call %d: want %q, got %v", i+1, want, b.got[i+1])
+	if b.got[2] != nil {
+		t.Fatal("ask rule in a nested call:", b.got[2])
+	}
+	for i, want := range map[int]string{1: "denied by policy", 3: "url", 4: "not installed", 5: "cycle"} {
+		if b.got[i] == nil || !strings.Contains(b.got[i].Error(), want) {
+			t.Errorf("call %d: want %q, got %v", i, want, b.got[i])
 		}
 	}
 	// Поставщик получил вызывающего, корень и params.
-	if len(w.callers) != 1 || w.callers[0] == nil || w.callers[0].Connector != "bank" || w.callers[0].Call != res.ID ||
-		w.callers[0].Params["domains"] == nil {
+	if len(w.callers) != 2 || w.callers[0] == nil || w.callers[0].Connector != "bank" || w.callers[0].Call != res.ID ||
+		w.callers[0].Params["domains"] == nil || w.callers[1].Call != res.ID {
 		t.Fatalf("%+v", w.callers)
 	}
 	// Квитанции: вложенная ссылается на корневую; end_call — один раз, для корня.

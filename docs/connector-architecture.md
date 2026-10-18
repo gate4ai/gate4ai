@@ -1,6 +1,6 @@
 # Архитектура коннекторов gate4.ai
 
-> Версия 0.4, 2026-10-17. Дополняет раздел «Коннекторы» в [спецификации](specification.md). Секреты, учётки и auth-модули — в [secret-architecture.md](secret-architecture.md).
+> Версия 0.5, 2026-10-18. Дополняет раздел «Коннекторы» в [спецификации](specification.md). Секреты, учётки и auth-модули — в [secret-architecture.md](secret-architecture.md).
 
 > **Статус:** `runtime: wasm` — для любого кода, в том числе стороннего; `runtime: native` (этап 28) — только для пакетов проверенного издателя (сейчас — только gate4.ai), первый — браузер. Файлы — часть ядра (встроенный коннектор `files`).
 
@@ -186,7 +186,7 @@ platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64]
 | `conn_open_plain(host, port, tls)` | соединение без учётки | `capabilities.network` |
 | `conn_write_secret(conn, field, prompt)` | ввести пароль в интерактивный запрос (`sudo`) через auth-модуль — только если последний вывод совпал с `prompt` | слот соединения |
 | `fs_read` / `fs_write` / `fs_append` / `fs_list` / `fs_stat` | работа с файлами | `capabilities.files` + политика пользователя |
-| `service_call(target, action, input)` | действие другого коннектора: вход и выход сверяются со схемами поставщика, мажор контракта — с `capabilities.services`; вызов проходит Action Pipeline с политикой агента корневого действия: разрешение родительского действия покрывает объявленные у него подвызовы (`calls`), явное правило `deny` на действие поставщика отклоняет вызов, правило `ask` во вложенном вызове не поддерживается (спрашивают про родителя); квитанция — с `parent`; глубина вложенности — до 4, циклы запрещены, срок — остаток срока вызывающего | подвызов объявлен в `calls` вызывающего действия и в `capabilities.services`; класс не выше класса действия; `params` передаются поставщику (`ExecRequest.caller`) |
+| `service_call(target, action, input)` | действие другого коннектора: вход и выход сверяются со схемами поставщика, мажор контракта — с `capabilities.services`; вызов проходит Action Pipeline с политикой агента корневого действия: разрешение родительского действия покрывает объявленные у него подвызовы (`calls`), явное правило `deny` на действие поставщика отклоняет вызов, правило `ask` на него во вложенном вызове не действует (подвызов показан в подтверждении родителя); квитанция — с `parent`; глубина вложенности — до 4, циклы запрещены, срок — остаток срока вызывающего | подвызов объявлен в `calls` вызывающего действия и в `capabilities.services`; класс не выше класса действия; `params` передаются поставщику (`ExecRequest.caller`) |
 | `secret_info(slot)` / `secret_commit` / `secret_discard` | метаданные учётки слота (тип, публичные поля, версия), фиксация или отмена черновой версии (сгенерированный пароль) | только свои слоты |
 | `kv_get` / `kv_set` / `kv_delete` | собственное хранилище коннектора | `capabilities.storage.quota_mb` |
 | `evidence_add(name, mime, data)` | доказательство в журнал | маскирование по `sensitive` |
@@ -195,7 +195,7 @@ platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64]
 
 Секреты не передаются коннектору ни в `settings`, ни в ответах функций хоста. Исключение — `reveal` для нативных коннекторов с отдельным согласием пользователя (secret-architecture.md).
 
-Браузер — нативный пакет `browser`, а не функции хоста: прежние `browser_*` заменены действиями пакета через `service_call` (`open`, `observe`, `act`, `extract`, `screenshot`; страница — одна на корневой вызов, освобождается по `end_call`; сайты — `params.sites` вызывающего). Ввод учёток в формы (`fill_secret`, `login`, `capture_secret`) — тоже действия пакета; значение он получает от daemon только для origin привязки слота.
+Браузер — нативный пакет `browser`, а не функции хоста: прежние `browser_*` заменены действиями пакета через `service_call` (`open`, `observe`, `act`, `page_extract`, `page_screenshot`; страница — одна на корневой вызов, освобождается по `end_call`; сайты — `params.sites` вызывающего). Те же действия доступны агенту в сеансе (`session` из `open`, плюс `network` и `close`) — см. [connector-authoring.md](connector-authoring.md). Ввод учёток в формы (`fill_secret`, `login`, `capture_secret`) — тоже действия пакета; значение он получает от daemon только для origin привязки слота.
 
 ### Наши коннекторы
 
@@ -203,7 +203,7 @@ platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64]
 |---|---|
 | `files` | встроен в ядро (`runtime: builtin`) поверх файловой службы; корни — `connectors.files.roots` (по умолчанию `~`), в профиле `default` — правило `ask` на каждое действие |
 | `mail` | `conn_open` со слотом, аутентификация — auth-модули `gate4ai/auth-imap` / `gate4ai/auth-smtp`, разбор писем — в коннекторе |
-| `browser` | нативный пакет: браузерный воркер (выделенный профиль Chrome, CDP, Stagehand), действия агента `read` / `screenshot` / `extract`, действия для других коннекторов через `service_call` |
+| `browser` | нативный пакет: браузерный воркер (выделенный профиль Chrome, CDP, Stagehand), действия агента `read` / `screenshot` / `extract` и сеанс страницы (`open` → `observe` / `act` / `network` / `page_extract` / `page_screenshot` → `close`), те же действия со страницей для других коннекторов через `service_call` |
 | сервисы (ЖКХ, банк) | действия `browser` через `service_call` (вход — `browser.login`) + `http_request` со слотом; подпись банка — auth-модуль |
 
 ## runtime: native
@@ -243,7 +243,7 @@ SDK: `sdk-go/native` — `native.Serve(connector)` для тех же `connector
 
 ## Текущее состояние и переход
 
-Сделано: SDK `sdk-go` с манифестом и ABI v2 (формы данных MCP), WASM-хост на wazero, встроенный коннектор `files` (на PDK, `Engine.Builtin`), нативные пакеты (`internal/connectors/native`: процесс под надзором, JSON-RPC по stdio, `reveal`, перезапуск и отключение после частых падений; магазин — `.g4c` под платформу и список `.platforms.json`), `service_call` и контракты (`sdk-go/contract`, `gate4ai contract gen|diff`), коннектор `mail` — WASM-модуль (`tbank` удалён 2026-10-18, будет сделан заново), `browser` — нативный пакет, секреты в `Settings` не передаются, магазин с подписанными пакетами. `browser.act` — методы `click` / `fill` / `press` / `wait` по CSS-селектору и видимому тексту элемента (`text`, `value`, `timeout_ms`); после действия итоговый адрес снова проверяется по сайтам вызывающего.
+Сделано: SDK `sdk-go` с манифестом и ABI v2 (формы данных MCP), WASM-хост на wazero, встроенный коннектор `files` (на PDK, `Engine.Builtin`), нативные пакеты (`internal/connectors/native`: процесс под надзором, JSON-RPC по stdio, `reveal`, перезапуск и отключение после частых падений; магазин — `.g4c` под платформу и список `.platforms.json`), `service_call` и контракты (`sdk-go/contract`, `gate4ai contract gen|diff`), коннектор `mail` — WASM-модуль (`tbank` удалён 2026-10-18, будет сделан заново), `browser` — нативный пакет, секреты в `Settings` не передаются, магазин с подписанными пакетами. `browser.act` — методы `click` / `fill` / `press` / `wait` по CSS-селектору и видимому тексту элемента (`text`, `value`, `timeout_ms`); после действия итоговый адрес снова проверяется по сайтам вызывающего. Сеанс браузера для агента (с 2026-10-18): `observe` с `elements` (видимые интерактивные элементы с однозначным селектором), `network` (fetch / XHR страницы, токены и ответы входа скрыты), `close` с записанными шагами — фикстурой для `hosttest.Replay`; заготовка коннектора — `gate4ai connectors new`, лог своей сборки — в ответе (`log`) и `gate4ai connectors logs`.
 
 Расходится с этим документом в браузере: проверка, что селектор `browser.act` взят из `observe`, и режим «секрет на странице» не делаются — вместе с `fill_secret` / `login` (этап 12). До них в банк человек входит сам в выделенном профиле Chrome.
 

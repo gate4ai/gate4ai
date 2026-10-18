@@ -32,7 +32,7 @@ import (
 // files встроен в ядро, browser ставится из магазина.
 var defaultActions = map[string][]string{
 	"files":   {"read", "list", "append", "write"},
-	"browser": {"read", "screenshot", "extract"}, // + действия только для коннекторов (service_only)
+	"browser": {"read", "screenshot", "extract", "open", "observe", "act", "network", "page_extract", "page_screenshot", "close"},
 }
 
 var defaultManifests = map[string]string{
@@ -61,7 +61,13 @@ actions:
   - { name: read, class: read }
   - { name: screenshot, class: read }
   - { name: extract, class: read }
-  - { name: open, class: read, service_only: true }
+  - { name: open, class: read }
+  - { name: observe, class: read }
+  - { name: act, class: write }
+  - { name: network, class: read }
+  - { name: page_extract, class: read }
+  - { name: page_screenshot, class: read }
+  - { name: close, class: read }
 `,
 	// Не по умолчанию: ставит владелец.
 	"bank": `connector: bank

@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gate4ai/sdk-go/manifest"
 
@@ -275,6 +277,24 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			res["warning"] = "policy still references this connector: " + err.Error()
 		}
 		writeJSON(w, 200, res)
+	}))
+	mux.HandleFunc("GET /v1/connectors/logs", owner(func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			writeErr(w, 400, "bad_request", "name is required")
+			return
+		}
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		var since time.Time
+		if s := r.URL.Query().Get("since"); s != "" {
+			dur, err := time.ParseDuration(s)
+			if err != nil {
+				writeErr(w, 400, "bad_request", "since: "+err.Error())
+				return
+			}
+			since = time.Now().Add(-dur)
+		}
+		writeJSON(w, 200, map[string]any{"connector": name, "lines": d.ConnLogs.Lines(name, since, limit)})
 	}))
 	mux.HandleFunc("POST /v1/connectors/refresh", owner(func(w http.ResponseWriter, r *http.Request) {
 		ix, err := d.StoreOptions().RefreshIndex(r.Context())
