@@ -1339,14 +1339,8 @@ func (u *UI) receipt(r *http.Request) (string, map[string]any, error) {
 // ---- Секреты ----
 
 func (u *UI) vaultPage(r *http.Request) (string, map[string]any, error) {
-	raw, _ := u.D.Config.CurrentRaw()
-	used := map[string]bool{}
-	for _, a := range u.D.Vault.Aliases() {
-		if strings.Contains(string(raw), `"`+a+`"`) || strings.Contains(string(raw), " "+a+"\n") || strings.Contains(string(raw), " "+a+",") {
-			used[a] = true
-		}
-	}
-	return "vault", map[string]any{"Aliases": u.D.Vault.Aliases(), "Used": used}, nil
+	cfg := u.D.Config.Current()
+	return "vault", map[string]any{"Aliases": u.D.Vault.Aliases(), "Uses": secretUses(cfg, u.D.Registry.Manifests())}, nil
 }
 
 func (u *UI) setSecret(w http.ResponseWriter, r *http.Request) map[string]any {
