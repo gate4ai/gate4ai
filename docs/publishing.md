@@ -65,7 +65,7 @@ done
 | `connectors/mail/`, `connectors/browser/` | `gate4ai/gate4ai-mail`, `gate4ai-browser` |
 | — | `gate4ai/gate4ai-files` — в архиве, локальный клон удалён 2026-10-18: с v0.6 ядра файлы — встроенный коннектор (`internal/connectors/builtin/files`); запись в registry убрана 2026-10-18 |
 | — | `connectors/tbank/` (без репозитория) удалён 2026-10-18 по решению человека: коннектор будет сделан заново |
-| `www/` | `gate4ai/www` — сайт gate4.ai (Rust), **приватный**, создан 2026-10-14; деплой на сервер relay из CI |
+| `www/` | `gate4ai/www` — сайт gate4.ai (Go), **приватный**, создан 2026-10-14; 2026-10-18 переписан с Rust на Go, история начата заново одним коммитом. CI собирает образ `ghcr.io/gate4ai/www:<sha>` и выкладывает его на сервер relay (`docker compose pull && up -d` в `/opt/gate4ai-www`, откат по `https://gate4.ai/healthz`); TLS — Caddy стека наблюдаемости relay. Индекс registry сайт проверяет пакетом `sdk-go/registry`, как и ядро |
 | `e2e/` | `gate4ai/e2e` — сквозные тесты (AGPL-3.0-only), создан 2026-10-14, ещё не опубликован |
 | `connectors/auth/` | auth-модули (пока только README, вне git) |
 | `.secrets/keys/` | ключ издателя и ключ registry; вне git |

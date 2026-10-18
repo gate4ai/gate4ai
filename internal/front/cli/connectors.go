@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/sdk-go/registry"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/native"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
@@ -296,7 +297,7 @@ func (e *Env) keygen(rest []string) int {
 	if fs.Parse(rest) != nil {
 		return ExitUsage
 	}
-	pub, priv, err := store.GenerateKey()
+	pub, priv, err := registry.GenerateKey()
 	if err != nil {
 		return e.fail(err)
 	}
@@ -486,7 +487,7 @@ func packNativeWith(man, bin []byte, platform, key string) ([]byte, error) {
 	if key == "" {
 		return store.PackNative(man, bin, platform, nil)
 	}
-	k, err := store.ParsePrivateKey(key)
+	k, err := registry.ParsePrivateKey(key)
 	if err != nil {
 		return nil, err
 	}
@@ -604,7 +605,7 @@ func packWith(man, wb []byte, key string) ([]byte, error) {
 	if key == "" {
 		return store.Pack(man, wb, nil)
 	}
-	k, err := store.ParsePrivateKey(key)
+	k, err := registry.ParsePrivateKey(key)
 	if err != nil {
 		return nil, err
 	}
@@ -643,8 +644,8 @@ func (e *Env) registry(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	decode := func() (*store.Index, error) {
-		var ix store.Index
+	decode := func() (*registry.Index, error) {
+		var ix registry.Index
 		dec := json.NewDecoder(strings.NewReader(string(raw)))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&ix); err != nil {
@@ -664,13 +665,13 @@ func (e *Env) registry(ctx context.Context, args []string) int {
 			if err != nil {
 				return e.fail(err)
 			}
-			if _, err := store.ParseIndex(raw, strings.TrimSpace(string(sig)), []string{*key}); err != nil {
+			if _, err := registry.ParseIndex(raw, strings.TrimSpace(string(sig)), []string{*key}); err != nil {
 				return e.fail(err)
 			}
 			res["signature"] = "valid"
 		}
 		if *fetch {
-			n, errs := ix.VerifyPackages(ctx, pos[0])
+			n, errs := store.VerifyPackages(ctx, ix, pos[0])
 			if len(errs) > 0 {
 				return e.fail(errors.New("packages: " + strings.Join(errs, "; ")))
 			}
@@ -683,7 +684,7 @@ func (e *Env) registry(ctx context.Context, args []string) int {
 		if err != nil {
 			return e.fail(err)
 		}
-		sig, err := store.SignIndex(raw, string(kb))
+		sig, err := registry.SignIndex(raw, string(kb))
 		if err != nil {
 			return e.fail(err)
 		}
@@ -720,7 +721,7 @@ func (e *Env) registry(ctx context.Context, args []string) int {
 			}
 			u = strings.TrimSuffix(r, "/") + "/releases/download/v" + p.Version + "/" + file
 		}
-		if err := ix.AddRelease(*publisher, p, u, store.Entry{Repo: *repo, License: *license, Description: *description}); err != nil {
+		if err := store.AddRelease(ix, *publisher, p, u, registry.Entry{Repo: *repo, License: *license, Description: *description}); err != nil {
 			return e.fail(err)
 		}
 		out, _ := json.MarshalIndent(ix, "", "  ")

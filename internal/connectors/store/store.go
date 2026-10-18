@@ -19,6 +19,7 @@ import (
 	"sort"
 
 	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/sdk-go/registry"
 
 	"github.com/gate4ai/sdk-go/manifest"
 
@@ -141,7 +142,7 @@ func (o Options) Check(name string) error {
 	return fmt.Errorf("connector %s is not installed", name)
 }
 
-func (o Options) load(it Installed, ix *Index, e *wasm.Engine) (connectors.Client, error) {
+func (o Options) load(it Installed, ix *registry.Index, e *wasm.Engine) (connectors.Client, error) {
 	bin, err := o.check(it, ix)
 	if err != nil {
 		return nil, err
@@ -160,20 +161,20 @@ func (o Options) load(it Installed, ix *Index, e *wasm.Engine) (connectors.Clien
 	} else {
 		c = e.LoadLazy(bin, it.Manifest)
 	}
-	if it.Info.Trust == TrustCommunity {
+	if it.Info.Trust == registry.TrustCommunity {
 		c = readOnly(c)
 	}
 	return c, nil
 }
 
-func (o Options) check(it Installed, ix *Index) ([]byte, error) {
+func (o Options) check(it Installed, ix *registry.Index) ([]byte, error) {
 	if it.Info.Connector != it.Name {
 		return nil, errors.New("not installed with `gate4ai connectors install` (no install.json)")
 	}
 	if it.Manifest.Runtime != manifest.RuntimeWasm && it.Manifest.Runtime != manifest.RuntimeNative {
 		return nil, fmt.Errorf("runtime %q is not supported", it.Manifest.Runtime)
 	}
-	if it.Manifest.Runtime == manifest.RuntimeNative && it.Info.Trust != TrustVerified && it.Info.Trust != TrustLocal {
+	if it.Manifest.Runtime == manifest.RuntimeNative && it.Info.Trust != registry.TrustVerified && it.Info.Trust != TrustLocal {
 		return nil, ErrNativeThirdParty
 	}
 	mb, err := os.ReadFile(filepath.Join(it.Dir, ManifestFile))

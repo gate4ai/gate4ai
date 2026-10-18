@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/sdk-go/registry"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/native"
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
@@ -75,13 +76,13 @@ var ErrNativeThirdParty = errors.New("native packages are accepted only from gat
 func (o Options) indexKeysOK() bool { return o.Registry != "" && len(o.RegistryKeys) > 0 }
 
 // cachedIndex — индекс из последней проверенной загрузки (для отзыва без сети).
-func (o Options) cachedIndex() *Index {
+func (o Options) cachedIndex() *registry.Index {
 	raw, err := os.ReadFile(filepath.Join(o.Dir, "registry-index.json"))
 	if err != nil {
 		return nil
 	}
 	sig, _ := os.ReadFile(filepath.Join(o.Dir, "registry-index.json.sig"))
-	ix, err := ParseIndex(raw, strings.TrimSpace(string(sig)), o.RegistryKeys)
+	ix, err := registry.ParseIndex(raw, strings.TrimSpace(string(sig)), o.RegistryKeys)
 	if err != nil {
 		return nil
 	}
@@ -89,10 +90,10 @@ func (o Options) cachedIndex() *Index {
 }
 
 // CachedIndex — индекс registry из последней проверенной загрузки (nil — нет).
-func (o Options) CachedIndex() *Index { return o.cachedIndex() }
+func (o Options) CachedIndex() *registry.Index { return o.cachedIndex() }
 
 // RefreshIndex загружает индекс registry, проверяет подпись и кэширует его.
-func (o Options) RefreshIndex(ctx context.Context) (*Index, error) {
+func (o Options) RefreshIndex(ctx context.Context) (*registry.Index, error) {
 	if !o.indexKeysOK() {
 		return nil, errors.New("registry is not configured (store.registry and store.registry_keys)")
 	}
@@ -100,7 +101,7 @@ func (o Options) RefreshIndex(ctx context.Context) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	ix, err := ParseIndex(raw, sig, o.RegistryKeys)
+	ix, err := registry.ParseIndex(raw, sig, o.RegistryKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +172,7 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 		p.NeedsConsent = !slices.Equal(info.Capabilities, p.Capabilities)
 	}
 	if m.Runtime == manifest.RuntimeNative {
-		if p.Trust != TrustVerified && p.Trust != TrustLocal {
+		if p.Trust != registry.TrustVerified && p.Trust != TrustLocal {
 			return nil, fmt.Errorf("connector %s: %s", m.Connector, ErrNativeThirdParty)
 		}
 		if p.pkg.Sig.Platform != HostPlatform() {
@@ -180,7 +181,7 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 		p.Native = true
 		p.Warnings = append(p.Warnings, "native connector: runs as a separate program without a sandbox, with your user's rights")
 	}
-	if p.Trust == TrustCommunity {
+	if p.Trust == registry.TrustCommunity {
 		p.Warnings = append(p.Warnings, "community connector: not reviewed by gate4.ai; only read actions will be available")
 	}
 	if p.Trust == TrustLocal {
@@ -200,17 +201,17 @@ func (o Options) prepareFile(ctx context.Context, source string, dev bool) (*Pla
 	}
 	p := &Plan{Source: source, pkg: pkg, Trust: TrustLocal}
 	signedBy := func(keys []string) bool {
-		_, ok := VerifySig(keys, pkg.Sig.Digest, pkg.Sig.Signature)
+		_, ok := registry.VerifySig(keys, pkg.Sig.Digest, pkg.Sig.Signature)
 		return pkg.Sig.Signature != "" && ok
 	}
-	var ix *Index
+	var ix *registry.Index
 	if o.indexKeysOK() {
 		ix = o.cachedIndex()
 	}
 	switch {
 	case signedBy(o.TrustedKeys):
-		p.Trust = TrustPublisher
-	case ix != nil && ix.trustOf(pkg, signedBy, p):
+		p.Trust = registry.TrustPublisher
+	case ix != nil && trustOf(ix, pkg, signedBy, p):
 	case dev:
 	default:
 		return nil, errors.New("package is not signed by a trusted key (store.trusted_keys or registry publishers); use --dev to install a package you built yourself")
@@ -271,7 +272,7 @@ func (o Options) prepareDir(ctx context.Context, dir string, dev bool) (*Plan, e
 }
 
 // trustOf — доверие к пакету по ключам издателя из индекса.
-func (ix *Index) trustOf(pkg *Package, signedBy func([]string) bool, p *Plan) bool {
+func trustOf(ix *registry.Index, pkg *Package, signedBy func([]string) bool, p *Plan) bool {
 	e, ok := ix.Connectors[pkg.Manifest.Connector]
 	if !ok {
 		return false

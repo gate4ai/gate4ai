@@ -25,6 +25,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/sdk-go/registry"
 )
 
 // defaultActions — действия коннекторов по умолчанию (как в их манифестах):
@@ -108,11 +109,11 @@ func TestDefaultActionsMatchManifests(t *testing.T) {
 // localRegistry — подписанный индекс с коннекторами по умолчанию от проверенного издателя.
 func localRegistry(t *testing.T, dir string) (index, regPub string) {
 	t.Helper()
-	regPub, regPriv, _ := store.GenerateKey()
-	pubPub, pubPriv, _ := store.GenerateKey()
-	k, _ := store.ParsePrivateKey(pubPriv)
-	ix := store.Index{Version: 1, Publishers: map[string]store.Publisher{"gate4ai": {Keys: []string{pubPub}, Trust: store.TrustVerified}},
-		Connectors: map[string]store.Entry{}}
+	regPub, regPriv, _ := registry.GenerateKey()
+	pubPub, pubPriv, _ := registry.GenerateKey()
+	k, _ := registry.ParsePrivateKey(pubPriv)
+	ix := registry.Index{Version: 1, Publishers: map[string]registry.Publisher{"gate4ai": {Keys: []string{pubPub}, Trust: registry.TrustVerified}},
+		Connectors: map[string]registry.Entry{}}
 	os.MkdirAll(filepath.Join(dir, "packages"), 0o755)
 	for name, m := range defaultManifests {
 		mf, _ := manifest.Parse([]byte(m))
@@ -129,7 +130,7 @@ func localRegistry(t *testing.T, dir string) (index, regPub string) {
 		p, _ := store.Open(b)
 		file := name + "-" + p.Manifest.Version + ".g4c"
 		os.WriteFile(filepath.Join(dir, "packages", file), b, 0o644)
-		rel := store.Release{Version: p.Manifest.Version, URL: "packages/" + file, SHA256: store.SHA256(b),
+		rel := registry.Release{Version: p.Manifest.Version, URL: "packages/" + file, SHA256: store.SHA256(b),
 			Digest: p.Sig.Digest, Capabilities: p.Manifest.Capabilities.Summary()}
 		if p.Native() {
 			set := store.PlatformSet{Connector: name, Version: p.Manifest.Version,
@@ -139,11 +140,11 @@ func localRegistry(t *testing.T, dir string) (index, regPub string) {
 			os.WriteFile(filepath.Join(dir, "packages", setFile), sb, 0o644)
 			rel.URL, rel.SHA256, rel.Digest = "packages/"+setFile, store.SHA256(sb), store.SetDigest(set)
 		}
-		ix.Connectors[name] = store.Entry{Publisher: "gate4ai", Repo: "https://github.com/gate4ai/gate4ai-" + name, License: "AGPL-3.0-only",
-			Versions: []store.Release{rel}}
+		ix.Connectors[name] = registry.Entry{Publisher: "gate4ai", Repo: "https://github.com/gate4ai/gate4ai-" + name, License: "AGPL-3.0-only",
+			Versions: []registry.Release{rel}}
 	}
 	raw, _ := json.Marshal(ix)
-	sig, err := store.SignIndex(raw, regPriv)
+	sig, err := registry.SignIndex(raw, regPriv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +161,7 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 	dir := t.TempDir()
 	regDir := filepath.Join(dir, "registry")
 	index := filepath.Join(regDir, "index.json")
-	regPub, _, _ := store.GenerateKey()
+	regPub, _, _ := registry.GenerateKey()
 	cfg := regexp.MustCompile(`registry: \S+`).ReplaceAllString(emptyConfig, "registry: "+index)
 	home := filepath.Join(dir, "home")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -206,7 +207,7 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 		t.Fatal(list, err)
 	}
 	for _, it := range list {
-		if it.Info.Trust != store.TrustVerified || len(it.Info.Capabilities) == 0 {
+		if it.Info.Trust != registry.TrustVerified || len(it.Info.Capabilities) == 0 {
 			t.Fatal(it.Name, it.Info)
 		}
 	}
