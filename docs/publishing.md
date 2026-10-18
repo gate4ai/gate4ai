@@ -11,7 +11,7 @@
 
 | Каталог монорепозитория | Репозиторий | Лицензия |
 |---|---|---|
-| (корень без выделенных каталогов) | `gate4ai/gate4ai` | AGPL-3.0-only + исключение для коннекторов (`LICENSE-EXCEPTION`) |
+| (корень без выделенных каталогов) | `gate4ai/gate4ai` | AGPL-3.0-only |
 | `sdk-go/` | `gate4ai/sdk-go` | Apache-2.0 |
 | `connectors/mail/`, `files/`, `browser/` | `gate4ai/gate4ai-mail`, `gate4ai-files`, `gate4ai-browser` | AGPL-3.0-only |
 | `relay/` | `gate4ai/relay` | AGPL-3.0-only |
@@ -67,7 +67,7 @@ done
 | — | `connectors/tbank/` (без репозитория) удалён 2026-10-18 по решению человека: коннектор будет сделан заново |
 | `www/` | `gate4ai/www` — сайт gate4.ai (Go), **приватный**, создан 2026-10-14; 2026-10-18 переписан с Rust на Go, история начата заново одним коммитом. CI собирает образ `ghcr.io/gate4ai/www:<sha>` и выкладывает его на сервер relay (`docker compose pull && up -d` в `/opt/gate4ai-www`, откат по `https://gate4.ai/healthz`); TLS — Caddy стека наблюдаемости relay. Индекс registry сайт проверяет пакетом `sdk-go/registry`, как и ядро |
 | `e2e/` | `gate4ai/e2e` — сквозные тесты (AGPL-3.0-only), создан 2026-10-14, ещё не опубликован |
-| `connectors/auth/` | auth-модули (пока только [README](../../connectors/auth/README.md), вне git) |
+| `connectors/auth/` | auth-модули (пока только README, вне git) |
 | `.secrets/keys/` | ключ издателя и ключ registry; вне git |
 
 ## 6. Выпуск версии коннектора

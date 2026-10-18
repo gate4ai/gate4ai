@@ -37,7 +37,7 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
-    files: [LICENSE, LICENSE-EXCEPTION, NOTICE, README.md, docs/*]
+    files: [LICENSE, README.md, docs/*]
   - id: gate4ai-tray
     ids: [gate4ai-tray]
     name_template: "gate4ai-tray_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
@@ -45,7 +45,7 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
-    files: [LICENSE, LICENSE-EXCEPTION, NOTICE]
+    files: [LICENSE]
 checksum:
   name_template: checksums.txt
 signs:

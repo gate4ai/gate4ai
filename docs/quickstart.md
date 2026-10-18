@@ -12,7 +12,7 @@ make connectors      # bin/connectors/{mail,browser}.g4c — пакеты офи
 ./scripts/ci.sh      # по всем модулям workspace: build / vet / test + кросс-сборка darwin и windows
 ```
 
-Репозиторий — Go workspace (`go.work`): ядро и будущие отдельные репозитории (`relay/`, `sdk-go/`, `connectors/*`) — отдельные модули, см. [repo-structure.md](../repo-structure.md).
+Ядро — один Go-модуль; `sdk-go`, `relay` и коннекторы — отдельные репозитории github.com/gate4ai.
 
 Положите `gate4ai` в `PATH`.
 
@@ -202,14 +202,17 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 
 `go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из спецификации на собранных бинарниках и настоящих коннекторах — в репозитории [gate4ai/e2e](https://github.com/gate4ai/e2e).
 
-## Разработка из общего каталога репозиториев
+## Тестовый стенд
 
-Скрипты запускаются из каталога, где рядом лежат клоны `gate4ai/`, `sdk-go/`, `relay/`, `connectors/*`, `e2e/` (или из набора worktree задачи pitwall с той же раскладкой). Go-модули собираются вместе через временный `go.work` (`GOWORK`), так что правка `sdk-go` сразу видна ядру и коннекторам; в дереве ничего не остаётся.
+Отдельный daemon рядом с установленным, тем же `gate4ai`, со своими данными и сокетами: установленный экземпляр (его данные, сокеты, связка ключей, трей) он не трогает.
 
 ```sh
-PITWALL_REPOS="gate4ai connectors/mail" gate4ai/scripts/test-set.sh   # vet и тесты изменённых репозиториев; e2e — если изменились sdk-go или два Go-репозитория
-PORT=7531 gate4ai/scripts/stand.sh                                     # dev-стенд: daemon из исходников на 127.0.0.1:$PORT, данные в .stand/, коннекторы из папок с --watch
-STAND_PUBLIC=1 PORT=7531 gate4ai/scripts/stand.sh                      # то же, плюс адрес в relay.gate4.ai для claude.ai
+mkdir -p /tmp/g4stand
+export GATE4AI_HOME=$PWD/.stand GATE4AI_SOCKET=/tmp/g4stand/owner.sock GATE4AI_AGENT_SOCKET=/tmp/g4stand/agent.sock
+gate4ai daemon --ui 127.0.0.1:7531 --keystore file &       # ключи в файле, а не в связке ОС
+gate4ai connectors install connectors/mail --yes --watch   # коннектор из каталога исходников, пересобирается при правках
+gate4ai ui --print                                         # одноразовая ссылка на Web UI (2 минуты)
+gate4ai relay register --url https://relay.gate4.ai        # адрес для claude.ai: gate4ai relay status
 ```
 
-Стенд не трогает установленный `gate4ai`: свои данные, сокеты в `/tmp`, хранилище ключей в файле, без трея и автозапуска.
+Сокеты — в коротком пути: у unix-сокета ограничена длина. Прод-relay `relay.gate4.ai` можно использовать и для тестовых стендов. Каждая регистрация — новое устройство и новый сертификат на `*.relay.gate4.ai` (у Let's Encrypt лимит 50 в неделю), поэтому храните `GATE4AI_HOME` стенда между запусками, а не регистрируйтесь заново.
