@@ -174,6 +174,19 @@ func TestFirstRunPaths(t *testing.T) {
 	if p := post("/channels/telegram/toggle", url.Values{"on": {"1"}}); !strings.Contains(p, "@BotFather") {
 		t.Fatal("telegram without setup must open the wizard")
 	}
+	// Карточка Telegram: до настройки — инструкция и «Подключить», после — статус «подключён».
+	if p := get("/approvals"); !strings.Contains(p, "Подключить Telegram") || strings.Contains(p, "Telegram подключён") {
+		t.Fatal("telegram card before setup", p)
+	}
+	if err := u.edit("test", func(c *config.Config) error {
+		c.Approvals.Telegram = &config.Telegram{Token: "@telegram.bot", OwnerID: 42}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if p := get("/approvals"); strings.Contains(p, "Подключить Telegram") || strings.Contains(p, "@BotFather") || !strings.Contains(p, "Telegram подключён") {
+		t.Fatal("telegram card after setup", p)
+	}
 
 	// Настройки: автозапуск, таймаут, предложения выключены.
 	post("/settings/autostart", url.Values{"on": {"1"}})
@@ -186,6 +199,15 @@ func TestFirstRunPaths(t *testing.T) {
 	}
 	if p := get("/settings?link=1"); !strings.Contains(p, "Нет публичного адреса") {
 		t.Fatal("remote link without public address")
+	}
+	// Relay включён: один адрес для облачных агентов, детали relay — в раскрывающемся блоке.
+	u.Relay = func() relayclient.Status {
+		return relayclient.Status{Configured: true, Online: true, URL: "https://relay.test", DeviceID: "dev1", Host: "dev1.relay.test", MCPURL: "https://dev1.relay.test"}
+	}
+	p = get("/settings")
+	if !strings.Contains(p, `<code id="mcp">https://dev1.relay.test</code>`) || !strings.Contains(p, "custom connector") ||
+		!strings.Contains(p, "<summary>Технические детали</summary>") || strings.Contains(p, "Адрес устройства") {
+		t.Fatal("relay block", p)
 	}
 }
 
@@ -316,21 +338,25 @@ func TestRelaySettings(t *testing.T) {
 
 	// Устройство зарегистрировано, сертификат выпускается: этап виден, страница обновляется сама.
 	st := relayclient.Status{Configured: true, Phase: relayclient.PhaseIssuing, URL: "https://relay.gate4.ai", DeviceID: "abc",
-		Host: "abc.relay.gate4.ai", MCPURL: "https://abc.relay.gate4.ai/mcp"}
+		Host: "abc.relay.gate4.ai", MCPURL: "https://abc.relay.gate4.ai"}
 	u.Relay = func() relayclient.Status { return st }
 	p = get("/settings")
-	for _, want := range []string{`data-live-relay="issuing"`, "выпускаем сертификат", "https://abc.relay.gate4.ai/mcp", "Сменить relay или адрес устройства"} {
+	for _, want := range []string{`data-live-relay="issuing"`, "выпускаем сертификат", `<code id="mcp">https://abc.relay.gate4.ai</code>`, "Сменить relay или адрес устройства"} {
 		if !strings.Contains(p, want) {
 			t.Fatal(want, p)
 		}
 	}
-	for _, bad := range []string{"Relay: <code>", "Зарегистрировать заново", "Зарегистрироваться на", "нет связи"} {
+	for _, bad := range []string{"Зарегистрировать заново", "Зарегистрироваться на", "нет связи"} {
 		if strings.Contains(p, bad) {
 			t.Fatal(bad, p)
 		}
 	}
+	// Адрес relay — только в свёрнутых «Технических деталях».
+	if main, _, _ := strings.Cut(p, "<details>"); strings.Contains(main, "Relay: <code>") {
+		t.Fatal("relay url in main view", p)
+	}
 	st.Phase, st.Online = relayclient.PhaseOnline, true
-	if p := get("/settings"); !strings.Contains(p, "онлайн") || strings.Contains(p, "data-live-relay") {
+	if p := get("/settings"); !strings.Contains(p, "подключён") || strings.Contains(p, "data-live-relay") {
 		t.Fatal("online", p)
 	}
 	st.Phase, st.Online, st.Error = relayclient.PhaseFailed, false, "acme: boom"
@@ -359,7 +385,7 @@ func TestRelaySettings(t *testing.T) {
 	d.AddPublicURL(func() string { return "https://gate.example.com" })
 	for _, path := range []string{"/settings", "/settings/relay"} {
 		p := get(path)
-		if !strings.Contains(p, "https://gate.example.com/mcp") || !strings.Contains(p, "Relay не нужен") ||
+		if !strings.Contains(p, `<code id="mcp">https://gate.example.com</code>`) || !strings.Contains(p, "Relay не нужен") ||
 			strings.Contains(p, `action="/settings/relay"`) || strings.Contains(p, "data-live-relay") {
 			t.Fatal(path, p)
 		}

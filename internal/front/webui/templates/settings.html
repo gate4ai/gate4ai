@@ -2,11 +2,13 @@
 {{$d := .Data}}
 <h2>Настройки</h2>
 
-<div class="card" id="relay"{{with $d.Relay}}{{if and .Configured (not $d.Direct) (ne .Phase "online") (ne .Phase "failed")}} data-live-relay="{{.Phase}}"{{end}}{{end}}><h3>Доступ из интернета</h3>
-{{if $d.Direct}}{{template "relay_direct" $d}}
+<div class="card" id="relay"{{with $d.Relay}}{{if and .Configured (not $d.Direct) (not .Online) (ne .Phase "failed")}} data-live-relay="{{.Phase}}"{{end}}{{end}}><h3>Доступ из интернета</h3>
+{{if $d.Direct}}{{template "relay_direct" .}}
 {{else if $d.Relay.Configured}}{{template "relay_state" $d.Relay}}
-<p>MCP для облачных агентов: <code id="mcp">{{$d.Relay.MCPURL}}</code> <button class="small" data-copy="#mcp">Копировать</button></p>
-<p class="help">Добавьте этот адрес в Claude.ai или ChatGPT как custom connector.</p>
+{{template "cloud_addr" (dict "Addr" $d.Relay.MCPURL "Base" .Base)}}
+<details><summary>Технические детали</summary><p class="help">
+Relay: <code>{{$d.Relay.URL}}</code><br>ID устройства: <code>{{$d.Relay.DeviceID}}</code><br>
+MCP отвечает и по корню адреса, и по <code>{{$d.Relay.MCPURL}}/mcp</code> — коннекторы, добавленные раньше с <code>/mcp</code>, продолжают работать. Web UI для телефона — <code>{{$d.Relay.MCPURL}}/ui/</code>.</p></details>
 <p><a href="{{.Base}}/settings/relay">Сменить relay или адрес устройства…</a></p>
 {{else}}<p>Нужен только облачным агентам (Claude.ai, ChatGPT) и для входа с телефона. Локальные агенты работают и без него.</p>
 <form method="post" action="{{.Base}}/settings/relay"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="url" value="{{$d.RelayDefault}}">
@@ -53,7 +55,7 @@
 <label class="inline">Квитанции <input name="ret_receipts" value="{{index $d.Retention "receipts"}}" size="6"></label>
 <label class="inline">Отказы <input name="ret_denied" value="{{index $d.Retention "denied"}}" size="6"></label>
 <label class="inline">Доказательства <input name="ret_evidence_other" value="{{index $d.Retention "evidence_other"}}" size="6"></label>
-<label class="inline">Доказательства (деньги) <input name="ret_evidence_money" value="{{index $d.Retention "evidence_money"}}" size="6"></label>
+<label class="inline">Доказательства для правила деньги <input name="ret_evidence_money" value="{{index $d.Retention "evidence_money"}}" size="6"></label>
 <button>Сохранить</button></form><p class="help">0s — бессрочно; 90d, 1y, 3y.</p></div>
 
 <div class="card"><h3>О программе</h3>

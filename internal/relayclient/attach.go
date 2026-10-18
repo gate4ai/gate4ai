@@ -38,7 +38,7 @@ type Status struct {
 	URL        string `json:"url,omitempty"`   // адрес relay
 	DeviceID   string `json:"device_id,omitempty"`
 	Host       string `json:"host,omitempty"`    // <device-id>.<домен relay>
-	MCPURL     string `json:"mcp_url,omitempty"` // https://<host>/mcp
+	MCPURL     string `json:"mcp_url,omitempty"` // https://<host>: MCP по корню (и по /mcp)
 }
 
 // DefaultURL — relay gate4.ai по умолчанию.
@@ -119,7 +119,7 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 		st := Status{Configured: c.DeviceID != "", Online: dev != nil && dev.Online(), URL: c.URL, DeviceID: c.DeviceID}
 		if c.DeviceID != "" {
 			st.Host = deviceHost(c)
-			st.MCPURL = "https://" + st.Host + "/mcp"
+			st.MCPURL = "https://" + st.Host
 			st.Phase, st.Error = ph, fail
 			if dev != nil {
 				st.Phase, st.Error = dev.phase()
@@ -249,5 +249,5 @@ func RegisterDevice(ctx context.Context, d *daemon.Daemon, p auth.Principal, rel
 	if _, err := d.Config.Put(p, out, "relay registration"); err != nil {
 		return nil, err
 	}
-	return map[string]any{"device_id": id, "host": host, "mcp_url": "https://" + host + "/mcp"}, nil
+	return map[string]any{"device_id": id, "host": host, "mcp_url": "https://" + host}, nil
 }

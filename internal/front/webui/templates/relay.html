@@ -1,24 +1,29 @@
-{{define "relay_state"}}<p>Состояние: {{if eq .Phase "online"}}<b class="ok">онлайн</b>
+{{define "relay_state"}}<p>Состояние: {{if or .Online (eq .Phase "online")}}<b class="ok">подключён</b>
 {{else if eq .Phase "issuing"}}<b class="warn">подключаемся</b> — выпускаем сертификат для адреса устройства (обычно до минуты)…
 {{else if eq .Phase "connecting"}}<b class="warn">подключаемся к relay…</b>
 {{else if eq .Phase "reconnecting"}}<b class="warn">нет связи с relay — переподключаемся</b>{{with .Error}}<br><span class="help">Последняя ошибка: {{.}}</span>{{end}}
 {{else}}<b class="bad">не удалось подключиться</b>{{with .Error}}: {{.}}{{end}}<br><span class="help">Проверьте адрес relay и журнал daemon.</span>{{end}}</p>{{end}}
 
-{{define "relay_direct"}}<p>Публичный адрес задан при запуске daemon (<code>--public</code>): <code>{{.Direct}}</code>. Relay не нужен.</p>
-<p>MCP для облачных агентов: <code id="mcp">{{.Direct}}/mcp</code> <button class="small" data-copy="#mcp">Копировать</button></p>
-<p class="help">Чтобы сменить адрес, перезапустите daemon с другими <code>--public</code> / <code>--public-url</code>.</p>{{end}}
+{{define "cloud_addr"}}<p><b>Адрес для облачных агентов</b><br><code id="mcp">{{.Addr}}</code> <button class="small primary" data-copy="#mcp">Копировать</button><br>
+<span class="help">Вставьте его в Claude.ai или ChatGPT как custom connector.</span></p>
+<ol class="help"><li><b>Claude.ai:</b> Settings → Connectors → Add custom connector → вставьте адрес. <b>ChatGPT:</b> Settings → Connectors → Advanced → Developer mode → Create → адрес, аутентификация OAuth.</li>
+<li>Агент откроет страницу авторизации gate4.ai — введите код подключения. Код выдаётся на странице агента: <a href="{{.Base}}/agents">Агенты</a> → облачный агент → «Получить код подключения».</li></ol>{{end}}
+
+{{define "relay_direct"}}<p>Публичный адрес задан при запуске daemon (<code>--public</code>). Relay не нужен.</p>
+{{template "cloud_addr" (dict "Addr" .Data.Direct "Base" .Base)}}
+<p class="help">MCP отвечает и по корню адреса, и по <code>{{.Data.Direct}}/mcp</code>. Чтобы сменить адрес, перезапустите daemon с другими <code>--public</code> / <code>--public-url</code>.</p>{{end}}
 
 {{template "head" .}}
 {{$d := .Data}}
 <p><a href="{{.Base}}/settings#relay">← Настройки</a></p>
 <h2>Доступ из интернета</h2>
 
-{{if $d.Direct}}<div class="card">{{template "relay_direct" $d}}</div>
+{{if $d.Direct}}<div class="card">{{template "relay_direct" .}}</div>
 {{else}}
 {{if $d.Relay.Configured}}
-<div class="card" id="current"{{if and (ne $d.Relay.Phase "online") (ne $d.Relay.Phase "failed")}} data-live-relay="{{$d.Relay.Phase}}"{{end}}><h3>Текущее подключение</h3>
+<div class="card" id="current"{{if and (not $d.Relay.Online) (ne $d.Relay.Phase "failed")}} data-live-relay="{{$d.Relay.Phase}}"{{end}}><h3>Текущее подключение</h3>
 {{template "relay_state" $d.Relay}}
-<p>Relay: <code>{{$d.Relay.URL}}</code><br>Адрес устройства: <code>https://{{$d.Relay.Host}}</code><br>MCP для облачных агентов: <code>{{$d.Relay.MCPURL}}</code></p></div>
+<p>Relay: <code>{{$d.Relay.URL}}</code><br>Адрес устройства (он же — для облачных агентов): <code>{{$d.Relay.MCPURL}}</code></p></div>
 
 <div class="card" id="again"><h3>Зарегистрировать заново</h3>
 <p class="warn">Повторная регистрация создаёт новое устройство:</p>
