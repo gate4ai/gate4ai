@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -160,4 +161,79 @@ func getJSON(t *testing.T, u string, v any) {
 	}
 	defer resp.Body.Close()
 	json.NewDecoder(resp.Body).Decode(v)
+}
+
+// MCP отвечает и по корню адреса устройства (его вставляют в Claude.ai /
+// ChatGPT), и по /mcp (ранее добавленные коннекторы) — одинаково.
+func TestRemoteMCPAtRoot(t *testing.T) {
+	home := t.TempDir()
+	n1, _ := connectors.NewInProcess(&notes{})
+	d, err := New(Options{Home: filepath.Join(home, "d"), InitialConfig: []byte(cfg), Keys: keys.NewMemory(), Connectors: []connectors.Client{n1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ts := httptest.NewServer(d.PublicHandler())
+	defer ts.Close()
+	call := func(method, path, token, body string) (*http.Response, string) {
+		req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp, string(b)
+	}
+	list := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
+
+	// Без токена: 401 и метаданные ресурса; resource — адрес устройства
+	// (префикс и корня, и старого …/mcp).
+	for _, path := range []string{"/", "/mcp"} {
+		resp, _ := call("POST", path, "", list)
+		h := resp.Header.Get("WWW-Authenticate")
+		m := regexp.MustCompile(`resource_metadata="([^"]+)"`).FindStringSubmatch(h)
+		if resp.StatusCode != 401 || m == nil {
+			t.Fatal(path, resp.StatusCode, h)
+		}
+		var meta map[string]any
+		getJSON(t, m[1], &meta)
+		if meta["resource"] != ts.URL || meta["authorization_servers"].([]any)[0] != ts.URL {
+			t.Fatal(path, meta)
+		}
+	}
+
+	tok, err := d.State.IssueToken("bot", "test", "oauth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r1, root := call("POST", "/", tok, list)
+	r2, mcp := call("POST", "/mcp", tok, list)
+	if r1.StatusCode != 200 || root != mcp || !strings.Contains(root, "notes_read") {
+		t.Fatal(r1.StatusCode, r2.StatusCode, root, mcp)
+	}
+	if r, _ := call("POST", "/", tok, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`); r.Header.Get("Mcp-Session-Id") == "" {
+		t.Fatal("no session id at root")
+	}
+	if r, _ := call("POST", "/", tok, `{"jsonrpc":"2.0","method":"notifications/initialized"}`); r.StatusCode != 202 {
+		t.Fatal("notification", r.StatusCode)
+	}
+	if r, _ := call("DELETE", "/", tok, ""); r.StatusCode != 200 {
+		t.Fatal("delete", r.StatusCode)
+	}
+	// GET корня: SSE-потока нет (405), в браузере — подсказка.
+	if r, _ := call("GET", "/", tok, ""); r.StatusCode != 405 {
+		t.Fatal("sse", r.StatusCode)
+	}
+	if r, _ := call("GET", "/mcp", tok, ""); r.StatusCode != 405 {
+		t.Fatal("sse /mcp", r.StatusCode)
+	}
+	if r, err := http.Get(ts.URL + "/"); err != nil || r.StatusCode != 200 {
+		t.Fatal("root page", err)
+	}
 }

@@ -2,18 +2,20 @@
 {{$d := .Data}}
 <h2>Настройки</h2>
 
-<div class="card" id="relay"><h3>Relay — доступ из интернета</h3>
-<p>Relay даёт этому компьютеру публичный адрес <code>&lt;id&gt;.relay.gate4.ai</code> без открытых портов: через него к gate4.ai обращаются облачные агенты (Claude.ai, ChatGPT), а вы — с телефона. Трафик шифруется до этого компьютера: relay видит только шифротекст.</p>
-{{if $d.Relay.Configured}}
-<p>Состояние: {{if $d.Relay.Online}}<b class="ok">онлайн</b>{{else}}<b class="warn">нет связи — переподключается</b>{{end}}</p>
-<p>Relay: <code>{{$d.Relay.URL}}</code><br>Адрес устройства: <code>https://{{$d.Relay.Host}}</code><br>MCP для облачных агентов: <code id="mcp">{{$d.Relay.MCPURL}}</code> <button class="small" data-copy="#mcp">Копировать</button></p>
-{{else if $d.PublicURL}}<p>Daemon запущен со своим адресом (<code>--public</code>): <code>{{$d.PublicURL}}</code>. Relay не нужен.</p>
-{{else}}<p class="muted">Не включён.</p>{{end}}
-<form method="post" action="{{.Base}}/settings/relay" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<label class="inline">Адрес relay <input name="url" value="{{or $d.Relay.URL $d.RelayDefault}}" size="34"></label>
-<button class="{{if not $d.Relay.Configured}}primary{{end}}">{{if $d.Relay.Configured}}Зарегистрировать заново{{else}}Подключить устройство{{end}}</button></form>
-<p class="help">По умолчанию — relay gate4.ai (<code>{{$d.RelayDefault}}</code>). Свой relay: тот же бинарник <code>gate4ai-relay</code> на вашем сервере — укажите его адрес. Без relay: <code>gate4ai daemon --public …</code>.</p>
-</div>
+<div class="card" id="relay"{{with $d.Relay}}{{if and .Configured (not $d.Direct) (not .Online) (ne .Phase "failed")}} data-live-relay="{{.Phase}}"{{end}}{{end}}><h3>Доступ из интернета</h3>
+{{if $d.Direct}}{{template "relay_direct" .}}
+{{else if $d.Relay.Configured}}{{template "relay_state" $d.Relay}}
+{{template "cloud_addr" (dict "Addr" $d.Relay.MCPURL "Base" .Base)}}
+<details><summary>Технические детали</summary><p class="help">
+Relay: <code>{{$d.Relay.URL}}</code><br>ID устройства: <code>{{$d.Relay.DeviceID}}</code><br>
+MCP отвечает и по корню адреса, и по <code>{{$d.Relay.MCPURL}}/mcp</code> — коннекторы, добавленные раньше с <code>/mcp</code>, продолжают работать. Web UI для телефона — <code>{{$d.Relay.MCPURL}}/ui/</code>.</p></details>
+<p><a href="{{.Base}}/settings/relay">Сменить relay или адрес устройства…</a></p>
+{{else}}<p>Нужен только облачным агентам (Claude.ai, ChatGPT) и для входа с телефона. Локальные агенты работают и без него.</p>
+<form method="post" action="{{.Base}}/settings/relay"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="url" value="{{$d.RelayDefault}}">
+<button class="primary">Зарегистрироваться на {{$d.RelayDefaultHost}}</button></form>
+<p class="help">Компьютер получит адрес вида <code>&lt;id&gt;.{{$d.RelayDefaultHost}}</code>, открывать порты не нужно. Трафик шифруется до этого компьютера: relay видит только шифротекст.</p>
+<p><a href="{{.Base}}/settings/relay#custom">Свой relay</a> · <a href="{{.Base}}/settings/relay#public">Свой HTTPS-адрес без relay</a></p>
+{{end}}</div>
 
 <div class="card" id="remote"><h3>Вход с телефона</h3>
 <p>Подтверждения и журнал с телефона или другого компьютера — на адресе устройства, под <code>/ui/</code>. Правила, агенты и секреты оттуда не меняются.</p>
@@ -81,7 +83,7 @@
 <label class="inline">Квитанции <input name="ret_receipts" value="{{index $d.Retention "receipts"}}" size="6"></label>
 <label class="inline">Отказы <input name="ret_denied" value="{{index $d.Retention "denied"}}" size="6"></label>
 <label class="inline">Доказательства <input name="ret_evidence_other" value="{{index $d.Retention "evidence_other"}}" size="6"></label>
-<label class="inline">Доказательства (деньги) <input name="ret_evidence_money" value="{{index $d.Retention "evidence_money"}}" size="6"></label>
+<label class="inline">Доказательства для правила деньги <input name="ret_evidence_money" value="{{index $d.Retention "evidence_money"}}" size="6"></label>
 <button>Сохранить</button></form><p class="help">0s — бессрочно; 90d, 1y, 3y.</p></div>
 
 <div class="card"><h3>О программе</h3>

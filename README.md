@@ -124,7 +124,7 @@ gate4ai run claude-code --workspace ~/projects/app
 
 ```sh
 gate4ai relay register --url https://relay.gate4.ai
-gate4ai relay status                   # mcp_url: https://<device-id>.relay.gate4.ai/mcp
+gate4ai relay status                   # mcp_url: https://<device-id>.relay.gate4.ai
 gate4ai agents connect my-agent        # одноразовый код подключения
 ```
 

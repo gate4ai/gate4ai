@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
 	"os"
@@ -44,24 +45,26 @@ func redirect(to, flash string) map[string]any {
 	if flash == "" {
 		return map[string]any{"redirect": to}
 	}
-	return map[string]any{"redirect": withQuery(to, "flash", flash)}
+	return map[string]any{"redirect": withParam(to, "flash", flash)}
 }
 
 func redirectErr(to string, err error) map[string]any {
-	return map[string]any{"redirect": withQuery(to, "error", err.Error())}
+	return map[string]any{"redirect": withParam(to, "error", err.Error())}
 }
 
-// withQuery добавляет параметр к адресу; якорь (#…) остаётся в конце.
-func withQuery(to, k, v string) string {
-	frag := ""
-	if i := strings.IndexByte(to, '#'); i >= 0 {
-		to, frag = to[:i], to[i:]
-	}
+// withParam добавляет параметр запроса к адресу перехода — перед «#…», иначе
+// он попал бы во фрагмент и до сервера не дошёл.
+func withParam(to, k, v string) string {
+	path, frag, hasFrag := strings.Cut(to, "#")
 	sep := "?"
-	if strings.Contains(to, "?") {
+	if strings.Contains(path, "?") {
 		sep = "&"
 	}
-	return to + sep + k + "=" + urlq(v) + frag
+	path += sep + k + "=" + urlq(v)
+	if hasFrag {
+		path += "#" + frag
+	}
+	return path
 }
 
 func (u *UI) edit(comment string, f func(c *config.Config) error) error {
@@ -187,6 +190,8 @@ func (u *UI) approvalsPage(m mount) func(r *http.Request) (string, map[string]an
 			}
 		}
 		data["PushOn"] = cfg.ChannelOn("webpush")
+		// Бот настроен (токен и ID сохранены) — карточка Telegram без инструкции подключения.
+		data["TelegramSet"] = cfg.Approvals.Telegram != nil
 		return "approvals", data, err
 	}
 }
@@ -1342,14 +1347,8 @@ func (u *UI) receipt(r *http.Request) (string, map[string]any, error) {
 // ---- Секреты ----
 
 func (u *UI) vaultPage(r *http.Request) (string, map[string]any, error) {
-	raw, _ := u.D.Config.CurrentRaw()
-	used := map[string]bool{}
-	for _, a := range u.D.Vault.Aliases() {
-		if strings.Contains(string(raw), `"`+a+`"`) || strings.Contains(string(raw), " "+a+"\n") || strings.Contains(string(raw), " "+a+",") {
-			used[a] = true
-		}
-	}
-	return "vault", map[string]any{"Aliases": u.D.Vault.Aliases(), "Used": used}, nil
+	cfg := u.D.Config.Current()
+	return "vault", map[string]any{"Aliases": u.D.Vault.Aliases(), "Uses": secretUses(cfg, u.D.Registry.Manifests())}, nil
 }
 
 func (u *UI) setSecret(w http.ResponseWriter, r *http.Request) map[string]any {
@@ -1402,7 +1401,7 @@ func (systemAutostart) Disable() error {
 
 func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 	cfg := u.D.Config.Current()
-	data := map[string]any{"Relay": u.relay(), "RelayDefault": relayclient.DefaultURL, "PublicURL": u.D.PublicURL(), "Config": cfg,
+	data := map[string]any{"PublicURL": u.D.PublicURL(), "Config": cfg,
 		"Timeout": config.FormatDuration(cfg.Approvals.Timeout.D()), "Version": version.Version, "Home": u.D.Home, "Log": paths.DaemonLog(),
 		"Retention": map[string]string{"receipts": config.FormatDuration(cfg.Retention.Receipts.D()), "denied": config.FormatDuration(cfg.Retention.Denied.D()),
 			"evidence_other": config.FormatDuration(cfg.Retention.EvidenceOther.D()), "evidence_money": config.FormatDuration(cfg.Retention.EvidenceMoney.D())}}
@@ -1418,13 +1417,35 @@ func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 		if l, err := u.RemoteLoginURL(); err == nil {
 			data["RemoteLink"] = l
 			if code, err := qr.Encode(l, qr.M); err == nil {
-				data["RemoteQR"] = "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG())
+				// template.URL: иначе html/template не пускает data: в src и подставляет #ZgotmplZ
+				data["RemoteQR"] = template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()))
 			}
 		} else {
 			data["RemoteLinkError"] = err.Error()
 		}
 	}
+	for k, v := range u.relayData() {
+		data[k] = v
+	}
 	return "settings", data, nil
+}
+
+// relayData — данные блока relay: состояние, relay по умолчанию и прямой адрес
+// (--public), если daemon запущен с ним.
+func (u *UI) relayData() map[string]any {
+	rs := u.relay()
+	pub := u.D.PublicURL()
+	direct := ""
+	if pub != "" && (!rs.Configured || pub != "https://"+rs.Host) {
+		direct = pub
+	}
+	def, _ := url.Parse(relayclient.DefaultURL)
+	return map[string]any{"Relay": rs, "RelayDefault": relayclient.DefaultURL, "RelayDefaultHost": def.Host, "Direct": direct}
+}
+
+// relayPage — свой relay, свой HTTPS-адрес без relay и повторная регистрация.
+func (u *UI) relayPage(r *http.Request) (string, map[string]any, error) {
+	return "relay", u.relayData(), nil
 }
 
 func (u *UI) registerRelay(w http.ResponseWriter, r *http.Request) map[string]any {
@@ -1432,13 +1453,22 @@ func (u *UI) registerRelay(w http.ResponseWriter, r *http.Request) map[string]an
 	if !strings.HasPrefix(addr, "https://") {
 		addr = "https://" + strings.TrimPrefix(addr, "http://")
 	}
+	// Повторная регистрация — новое устройство: прежний адрес перестаёт работать,
+	// выпускается новый сертификат. Только с явным подтверждением.
+	if u.D.Config.Current().Relay.DeviceID != "" && r.PostForm.Get("confirm") != "1" {
+		return redirectErr("/settings/relay#again", errors.New("устройство уже зарегистрировано: чтобы зарегистрировать его заново, подтвердите, что прежний адрес перестанет работать"))
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	res, err := relayclient.RegisterDevice(ctx, u.D, owner, addr, "", false)
 	if err != nil {
-		return redirectErr("/settings#relay", fmt.Errorf("relay %s: %v", addr, err))
+		back := "/settings#relay"
+		if f := r.PostForm.Get("form"); f == "custom" || f == "again" {
+			back = "/settings/relay#" + f
+		}
+		return redirectErr(back, fmt.Errorf("relay %s: %v", addr, err))
 	}
-	return redirect("/settings#relay", fmt.Sprintf("Устройство подключено к relay: %v. Адрес для облачных агентов: %v", res["host"], res["mcp_url"]))
+	return redirect("/settings#relay", fmt.Sprintf("Устройство зарегистрировано на relay. Адрес для Claude.ai / ChatGPT: %v. Выпускаем сертификат и подключаемся: обычно это меньше минуты, страница обновится сама.", res["mcp_url"]))
 }
 
 func (u *UI) toggleAutostart(w http.ResponseWriter, r *http.Request) map[string]any {

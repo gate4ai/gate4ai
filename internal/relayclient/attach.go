@@ -20,14 +20,25 @@ import (
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 )
 
+// Этапы подключения устройства к relay (Status.Phase).
+const (
+	PhaseIssuing      = "issuing"      // выпуск сертификата устройства (ACME), до туннеля
+	PhaseConnecting   = "connecting"   // первое соединение с relay
+	PhaseOnline       = "online"       // туннель установлен
+	PhaseReconnecting = "reconnecting" // туннель упал, устройство переподключается
+	PhaseFailed       = "failed"       // подключение остановлено ошибкой (см. Error)
+)
+
 // Status — состояние подключения устройства к relay (для Web UI).
 type Status struct {
 	Configured bool   `json:"configured"`
 	Online     bool   `json:"online"`
-	URL        string `json:"url,omitempty"` // адрес relay
+	Phase      string `json:"phase,omitempty"` // Phase*; "" — relay не настроен
+	Error      string `json:"error,omitempty"` // последняя ошибка (failed, reconnecting)
+	URL        string `json:"url,omitempty"`   // адрес relay
 	DeviceID   string `json:"device_id,omitempty"`
 	Host       string `json:"host,omitempty"`    // <device-id>.<домен relay>
-	MCPURL     string `json:"mcp_url,omitempty"` // https://<host>/mcp
+	MCPURL     string `json:"mcp_url,omitempty"` // https://<host>: MCP по корню (и по /mcp)
 }
 
 // DefaultURL — relay gate4.ai по умолчанию.
@@ -41,6 +52,7 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 	var cur *Device
 	var stop context.CancelFunc
 	var key string
+	var phase, failure string // этап до появления Device; failure — причина PhaseFailed
 	d.AddPublicURL(func() string {
 		if c := d.Config.Current().Relay; c.URL != "" && c.DeviceID != "" {
 			return "https://" + deviceHost(c)
@@ -68,21 +80,28 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 			stop, cur = nil, nil
 			d.Journal.SetWitness(nil)
 		}
+		phase, failure = "", ""
 		if tok == "" {
+			if r.DeviceID != "" {
+				phase, failure = PhaseFailed, "relay token not found in the vault: register the device again"
+			}
 			return
 		}
+		phase = PhaseIssuing
 		dctx, cancel := context.WithCancel(ctx)
 		stop = cancel
 		// Выпуск сертификата (ACME) может занять время — не блокируем daemon.
 		go func() {
 			dev, err := deviceFor(dctx, d, r, tok)
-			if err != nil {
-				d.Log.Error("relay disabled", "err", err)
-				return
-			}
 			mu.Lock()
 			if dctx.Err() != nil {
 				mu.Unlock()
+				return
+			}
+			if err != nil {
+				phase, failure = PhaseFailed, err.Error()
+				mu.Unlock()
+				d.Log.Error("relay disabled", "err", err)
 				return
 			}
 			cur = dev
@@ -94,13 +113,20 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 	}
 	status := func() Status {
 		mu.Lock()
-		dev := cur
+		dev, ph, fail := cur, phase, failure
 		mu.Unlock()
 		c := d.Config.Current().Relay
 		st := Status{Configured: c.DeviceID != "", Online: dev != nil && dev.Online(), URL: c.URL, DeviceID: c.DeviceID}
 		if c.DeviceID != "" {
 			st.Host = deviceHost(c)
-			st.MCPURL = "https://" + st.Host + "/mcp"
+			st.MCPURL = "https://" + st.Host
+			st.Phase, st.Error = ph, fail
+			if dev != nil {
+				st.Phase, st.Error = dev.phase()
+			}
+			if st.Phase == "" { // конфигурация уже новая, apply ещё не отработал
+				st.Phase = PhaseIssuing
+			}
 		}
 		return st
 	}
@@ -223,5 +249,5 @@ func RegisterDevice(ctx context.Context, d *daemon.Daemon, p auth.Principal, rel
 	if _, err := d.Config.Put(p, out, "relay registration"); err != nil {
 		return nil, err
 	}
-	return map[string]any{"device_id": id, "host": host, "mcp_url": "https://" + host + "/mcp"}, nil
+	return map[string]any{"device_id": id, "host": host, "mcp_url": "https://" + host}, nil
 }
