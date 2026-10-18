@@ -29,7 +29,8 @@ const changeSchema = `{ type: object, properties: {
   op: { type: string, enum: [add_rule, remove_rule, add_list_items, remove_list_items, add_connector, connector_settings, install_connector],
         description: "add_rule / remove_rule — a rule of a profile; add_list_items / remove_list_items — a policy list; add_connector — give a profile an installed connector; connector_settings — merge connector settings (no secrets); install_connector — install from the store and give the profile access" },
   profile: { type: string, description: "profile to change (add_rule, remove_rule, add_connector, install_connector); empty — your own profile" },
-  rule_id: { type: string, description: "rule id (remove_rule; optional for add_rule)" },
+  rule_id: { type: string, description: "rule id as policy_summary shows it (remove_rule; optional for add_rule — the same id replaces the rule)" },
+  id: { type: string, description: "the same as rule_id" },
   action: { type: string, description: "add_rule: action name or glob, e.g. files.append or email.*" },
   when: { type: string, description: "add_rule: CEL condition over the action arguments, e.g. glob(path, \"~/notes/**\")" },
   effect: { type: string, enum: [allow, ask, deny] },
@@ -49,7 +50,7 @@ func (selfConnector) Manifest() manifest.Manifest {
 				InputSchema: manifest.MustSchema(`{ type: object, properties: {
 				  summary: { type: string, description: "one line: what the change does" },
 				  reason: { type: string, description: "why the user needs it" },
-				  changes: { type: array, minItems: 1, maxItems: 20, items: ` + changeSchema + ` } },
+				  changes: { type: array, minItems: 1, maxItems: 20, description: "JSON array of changes, each {op, …}: add_rule {action, effect, when?, rule_id?, rule_reason?, profile?}; remove_rule {rule_id, profile?}; add_list_items / remove_list_items {list, items}; add_connector / install_connector {connector, profile?}; connector_settings {connector, settings_json}. A rule decides by precedence deny > ask > allow, not by order", items: ` + changeSchema + ` } },
 				  required: [summary, changes] }`),
 				Example: `gate4ai gate4ai change_policy --summary "Let me append to notes" --changes '[{"op":"add_rule","action":"files.append","when":"glob(path, \"~/notes/**\")","effect":"allow"}]'`},
 			{Name: "policy_summary", Class: "read", Description: "Your profile (connectors, rules, limits — what you may do without asking, what needs approval, what is denied), the other profiles and the lists",
@@ -63,6 +64,15 @@ func changesOf(args map[string]any) ([]config.Change, error) {
 	var changes []config.Change
 	if err := json.Unmarshal(raw, &changes); err != nil || len(changes) == 0 {
 		return nil, fmt.Errorf("changes must be a non-empty array")
+	}
+	var ids []struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &ids)
+	for i := range changes {
+		if changes[i].RuleID == "" && i < len(ids) {
+			changes[i].RuleID = ids[i].ID // id — как в policy_summary
+		}
 	}
 	for i, ch := range changes {
 		if err := config.CheckChange(ch); err != nil {
@@ -183,7 +193,7 @@ func PolicySummary(cfg *config.Config, agent string) map[string]any {
 	p := cfg.Profiles[a.Profile]
 	rules := []map[string]any{}
 	for _, r := range p.Rules {
-		rules = append(rules, map[string]any{"id": r.ID, "action": r.Action, "when": r.When, "effect": r.Effect, "reason": r.Reason})
+		rules = append(rules, map[string]any{"rule_id": r.ID, "action": r.Action, "when": r.When, "effect": r.Effect, "reason": r.Reason})
 	}
 	limits := []map[string]any{}
 	for _, l := range p.Limits {

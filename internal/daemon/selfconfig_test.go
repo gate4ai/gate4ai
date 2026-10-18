@@ -91,3 +91,16 @@ func TestLastSeen(t *testing.T) {
 		t.Fatal(seen, toks)
 	}
 }
+
+// remove_rule принимает id в том же виде, как его показывает policy_summary.
+func TestChangeRuleIDAlias(t *testing.T) {
+	ch, err := changesOf(map[string]any{"changes": []any{map[string]any{"op": "remove_rule", "id": "agent-lk-all"}}})
+	if err != nil || ch[0].RuleID != "agent-lk-all" {
+		t.Fatal(ch, err)
+	}
+	m := (selfConnector{}).Manifest()
+	a, _ := m.Find("change_policy")
+	if _, err := a.Normalize(map[string]any{"summary": "x", "changes": []any{map[string]any{"op": "remove_rule", "id": "r1"}}}); err != nil {
+		t.Fatal("id is a known field of a change:", err)
+	}
+}
