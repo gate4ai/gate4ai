@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/sdk-go/registry"
@@ -61,7 +62,9 @@ func List(dir string) ([]Installed, error) {
 	}
 	var out []Installed
 	for _, e := range ents {
-		if !e.IsDir() || e.Name() == "data" {
+		// Точки в имени коннектора нет: ".install-<имя>-*" и "<имя>.old" — каталоги
+		// идущей установки (Install), их видно, пока ставится коннектор по умолчанию.
+		if !e.IsDir() || e.Name() == "data" || strings.Contains(e.Name(), ".") {
 			continue
 		}
 		d := filepath.Join(dir, e.Name())

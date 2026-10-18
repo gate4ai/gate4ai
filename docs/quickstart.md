@@ -9,7 +9,7 @@
 ```sh
 make bin             # bin/gate4ai, bin/gate4ai-relay
 make connectors      # bin/connectors/{mail,browser}.g4c — пакеты официальных коннекторов
-./scripts/ci.sh      # по всем модулям workspace: build / vet / test + кросс-сборка darwin и windows
+./scripts/ci.sh      # по всем модулям workspace: build / vet / test + кросс-сборка darwin и windows (в CI — матрицей build)
 ```
 
 Ядро — один Go-модуль; `sdk-go`, `relay` и коннекторы — отдельные репозитории github.com/gate4ai.

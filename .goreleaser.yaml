@@ -46,6 +46,10 @@ archives:
       - goos: windows
         formats: [zip]
     files: [LICENSE]
+# Черновик: релиз публикует release.yml (tray-darwin-upload), когда в нём есть и трей
+# под macOS, — до этого его не видят /latest и установщики.
+release:
+  draft: true
 checksum:
   name_template: checksums.txt
 signs:

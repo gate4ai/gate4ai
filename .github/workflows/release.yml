@@ -22,9 +22,9 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # Трей под macOS: systray использует Cocoa через cgo, поэтому собирается на macOS.
+  # Трей под macOS: systray использует Cocoa через cgo, поэтому собирается на macOS —
+  # параллельно с goreleaser; tray-darwin-upload кладёт его в черновик релиза и публикует релиз.
   tray-darwin:
-    needs: release
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,15 +34,30 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       - run: |
           set -euo pipefail
+          mkdir out
           for arch in amd64 arm64; do
             d="gate4ai-tray_${GITHUB_REF_NAME#v}_darwin_${arch}"
             mkdir "$d"
             CGO_ENABLED=1 GOARCH=$arch go build -trimpath -ldflags "-s -w" -o "$d/gate4ai-tray" ./cmd/gate4ai-tray
             cp LICENSE "$d/"
-            tar czf "$d.tar.gz" "$d"
-            shasum -a 256 "$d.tar.gz" >> tray-darwin-checksums.txt
+            tar czf "out/$d.tar.gz" "$d"
           done
+          cd out
+          shasum -a 256 gate4ai-tray_*_darwin_*.tar.gz > tray-darwin-checksums.txt
           cosign sign-blob --yes --output-signature=tray-darwin-checksums.txt.sig --output-certificate=tray-darwin-checksums.txt.pem tray-darwin-checksums.txt
-          gh release upload "$GITHUB_REF_NAME" gate4ai-tray_*_darwin_*.tar.gz tray-darwin-checksums.txt*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tray-darwin
+          path: out/
+  tray-darwin-upload:
+    needs: [release, tray-darwin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tray-darwin
+      - run: |
+          gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" gate4ai-tray_*_darwin_*.tar.gz tray-darwin-checksums.txt*
+          gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
