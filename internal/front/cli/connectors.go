@@ -10,7 +10,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,11 +29,13 @@ import (
 
 const connectorsUsage = `usage:
   gate4ai connectors list
+  gate4ai connectors new <name> --site <domain> [-o folder]   a WASM connector over the browser to start from
   gate4ai connectors install <file.g4c | name[@version]> [--dev] [--yes]
   gate4ai connectors install <source folder> [--yes] [--watch]   build from Go sources (your own build, like --dev)
   gate4ai connectors update <name> [--yes] [--watch]           a connector from a folder is rebuilt from it;
                                                                 --watch: rebuild on every change of the sources
   gate4ai connectors remove <name>
+  gate4ai connectors logs <name> [--limit 50] [--since 10m]   the connector's log: its log(), stderr, daemon messages
   gate4ai connectors refresh                       fetch the registry index (revocations)
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c]
                                                    runtime native: a package per manifest.platforms and
@@ -69,6 +73,8 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 		return e.keygen(rest)
 	case "verify":
 		return e.verifyPackage(ctx, rest)
+	case "new":
+		return e.scaffold(rest)
 	}
 	// Остальные команды — к daemon (сокет владельца).
 	c := e.Client()
@@ -143,6 +149,37 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 			return e.fail(err)
 		}
 		e.printJSON(res)
+		return ExitOK
+	case "logs":
+		pos, fl := splitFlags(rest, map[string]bool{"limit": true, "since": true})
+		fs := flag.NewFlagSet(sub, flag.ContinueOnError)
+		fs.SetOutput(e.Stderr)
+		limit := fs.Int("limit", 50, "the last N lines (0 — all kept)")
+		since := fs.String("since", "", "only lines newer than this, e.g. 10m")
+		if fs.Parse(fl) != nil || len(pos) != 1 {
+			fmt.Fprintln(e.Stderr, connectorsUsage)
+			return ExitUsage
+		}
+		q := url.Values{"name": {pos[0]}, "limit": {fmt.Sprint(*limit)}}
+		if *since != "" {
+			q.Set("since", *since)
+		}
+		var res struct {
+			Connector string `json:"connector"`
+			Lines     []struct {
+				Time  time.Time `json:"time"`
+				Level string    `json:"level"`
+				Msg   string    `json:"msg"`
+			} `json:"lines"`
+		}
+		if err := c.Do(ctx, "GET", "/v1/connectors/logs?"+q.Encode(), nil, &res); err != nil {
+			return e.fail(err)
+		}
+		e.out(res, func(w io.Writer) {
+			for _, l := range res.Lines {
+				fmt.Fprintf(w, "%s\t%s\t%s\n", l.Time.Local().Format("15:04:05"), l.Level, l.Msg)
+			}
+		})
 		return ExitOK
 	case "refresh":
 		var res any

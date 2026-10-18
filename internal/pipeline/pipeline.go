@@ -63,6 +63,9 @@ type Result struct {
 	RuleIDs      []string      `json:"rule_ids,omitempty"`
 	Message      string        `json:"message,omitempty"`
 	Provenance   *Provenance   `json:"provenance,omitempty"`
+	// Log — строки лога коннектора за время вызова (только своя сборка, --dev):
+	// агент, который пишет коннектор, видит, что тот делал.
+	Log []string `json:"log,omitempty"`
 	// connectorCode — код ошибки коннектора (abi) для вложенного вызова.
 	connectorCode string
 }
@@ -105,6 +108,9 @@ type Pipeline struct {
 	// EndCall — корневое действие агента закончилось (вместе с вложенными
 	// вызовами): поставщики освобождают его состояние.
 	EndCall func(root string)
+	// ConnectorLog — строки лога коннектора с момента since для ответа агенту
+	// (nil — не показывать); daemon отдаёт их только для своих сборок.
+	ConnectorLog func(conn string, since time.Time) []string
 
 	mu      sync.RWMutex
 	engine  *policy.Engine
@@ -241,8 +247,20 @@ func AgentFrom(ctx context.Context) string {
 	return a
 }
 
-// run — шаги 5–8 для разрешённого действия.
+// run — шаги 5–8 для разрешённого действия; ответ корневого вызова — со
+// строками лога коннектора своей сборки.
 func (p *Pipeline) run(ctx context.Context, agent, action string, cli connectors.Client, act manifest.Action, args map[string]any, dec policy.Decision, appr *audit.Approval) Result {
+	start := time.Now()
+	res := p.execute(ctx, agent, action, cli, act, args, dec, appr)
+	if _, nested := callFrom(ctx); !nested && p.ConnectorLog != nil {
+		for _, l := range p.ConnectorLog(strings.SplitN(action, ".", 2)[0], start) {
+			res.Log = append(res.Log, p.maskString(l))
+		}
+	}
+	return res
+}
+
+func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connectors.Client, act manifest.Action, args map[string]any, dec policy.Decision, appr *audit.Approval) Result {
 	res := Result{Action: action, Reason: dec.Reason, RuleIDs: dec.RuleIDs}
 	conn := strings.SplitN(action, ".", 2)[0]
 	// 5. Секреты: настройки экземпляра передаются как есть — с алиасами; значения

@@ -16,6 +16,8 @@
 | Встроенные коннекторы на PDK (`runtime: builtin`, тот же код и те же функции хоста, что у WASM): файлы | `internal/connectors/builtin/files`, адаптер — `internal/connectors/wasm/builtin.go` (`Engine.Builtin`) |
 | Коннекторы (AGPL-3.0): почта (WASM), браузер — нативный пакет (воркер: Chrome, CDP, Stagehand, Executor — `worker/`) | `connectors/mail`, `connectors/browser` (`github.com/gate4ai/gate4ai-mail`, `gate4ai-browser`) |
 | daemon, API на сокетах владельца и агентов | `internal/daemon`, `internal/platform/ipc` |
+| Лог по коннектору (кольцевой буфер записей slog с атрибутом `connector`), `gate4ai connectors logs`, поле `log` в ответе своей сборки | `internal/daemon/connlog.go`, `Pipeline.ConnectorLog` |
+| Заготовка коннектора к сайту (`gate4ai connectors new`) | `internal/front/cli/scaffold.go`; как писать — [connector-authoring.md](connector-authoring.md) |
 | Публичный адрес устройства: один обработчик для relay и прямого HTTPS (`--public`), разделение по путям — `/mcp` и OAuth, `/v1/{whoami,tools,call,status}` (удалённый CLI), `/ui/` (удалённый Web UI), `/telegram` (вебхук); у каждого пути своя аутентификация, API владельца нет | `internal/daemon` (`PublicHandler`, `AddPublic`, `ServePublic`), `cmd/gate4ai/setup.go`, тест изоляции `cmd/gate4ai/public_test.go` |
 | CLI, skill | `internal/front/cli`, `internal/front/skill`; ошибки для человека и агента (`hint`, `detail`) — `errors.go`; `gate4ai daemon start/stop/status` — `daemonctl.go`; автозапуск `gate4ai service` — `service.go` поверх `internal/platform/autostart`; UX путей пользователя — [cli-ux.md](cli-ux.md) |
 | MCP Front (stdio, Streamable HTTP), OAuth 2.1 | `internal/front/mcp`, `internal/front/mcpcli`, `internal/front/oauth` |

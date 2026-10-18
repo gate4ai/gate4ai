@@ -95,10 +95,6 @@ func (p *Pipeline) ExecuteNested(ctx context.Context, caller string, rule manife
 	case config.EffectDeny:
 		res := p.deny(parent.Agent, act, full, args, dec, nil)
 		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "service_call %s denied by policy: %s", full, res.Reason)
-	case config.EffectAsk:
-		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied,
-			"service_call %s: rule %s asks for approval, which is not supported for nested calls; put the ask rule on the calling action instead",
-			full, strings.Join(dec.RuleIDs, ", "))
 	}
 	ctx = context.WithValue(ctx, nestedKey{}, nestedCall{caller: caller, params: rule.Params})
 	res := p.run(ctx, parent.Agent, full, cli, act, args, dec, nil)

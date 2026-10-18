@@ -57,6 +57,11 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 				fired = b
 			}
 		}
+		if fired && req.Nested && c.rule.Effect == config.EffectAsk {
+			// Вложенный вызов не спрашивают отдельно: его покрывает подтверждение
+			// родительского действия, где подвызов показан (calls).
+			continue
+		}
 		if fired {
 			hits = append(hits, hit{c.rule.ID, c.rule.Effect, c.rule.Reason, c.rule.Obligations})
 		}

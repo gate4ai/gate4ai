@@ -66,6 +66,8 @@ type Daemon struct {
 	Pipeline *pipeline.Pipeline
 	Keys     keys.Store
 	Log      *slog.Logger
+	// ConnLogs — последние строки лога по коннектору (`gate4ai connectors logs`).
+	ConnLogs *ConnectorLogs
 	// Wasm — среда исполнения коннекторов; ConnectorsDir — установленные коннекторы.
 	Wasm          *wasm.Engine
 	ConnectorsDir string
@@ -90,6 +92,8 @@ func New(opt Options) (*Daemon, error) {
 	if opt.Log == nil {
 		opt.Log = slog.Default()
 	}
+	logs := &ConnectorLogs{}
+	opt.Log = slog.New(logs.Handler(opt.Log.Handler()))
 	if opt.Keys == nil {
 		return nil, errors.New("daemon: key store required")
 	}
@@ -97,7 +101,7 @@ func New(opt Options) (*Daemon, error) {
 		return nil, err
 	}
 	d := &Daemon{Home: opt.Home, Keys: opt.Keys, Log: opt.Log, Registry: connectors.NewRegistry(), notifiers: &MultiNotifier{},
-		ConnectorsDir: opt.ConnectorsDir}
+		ConnectorsDir: opt.ConnectorsDir, ConnLogs: logs}
 	if d.ConnectorsDir == "" {
 		d.ConnectorsDir = filepath.Join(opt.Home, "connectors")
 	}
@@ -164,6 +168,7 @@ func New(opt Options) (*Daemon, error) {
 	d.Pipeline.Log = opt.Log
 	d.Pipeline.Describe = map[string]func(string, map[string]any) (string, error){SelfConnector: d.describeSelf}
 	d.Pipeline.EndCall = d.endCall
+	d.Pipeline.ConnectorLog = d.devLog
 	if opt.Now != nil {
 		d.Pipeline.Now = opt.Now
 		d.State.Now = opt.Now
