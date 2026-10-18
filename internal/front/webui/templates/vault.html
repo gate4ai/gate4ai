@@ -9,4 +9,12 @@
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <input name="alias" placeholder="@mail.work" required><input name="value" type="password" placeholder="значение" required>
 <button class="primary">Сохранить</button></form>
+<h2 id="accounts">Учётки для входа на сайты</h2>
+<p class="muted">Браузер входит по ним сам (<code>browser.login</code>): значения секретов вводит gate4.ai, агент и коннекторы их не видят. Секрет вводится только в поле пароля, если у поля не указано <code>type: text</code>. Изменить учётки — в <a href="{{.Base}}/policy/yaml">YAML политики</a>, раздел <code>credentials</code>.</p>
+<table><tr><th>Учётка</th><th>Где вход</th><th>Что вводится</th><th>Кому доступна</th></tr>
+{{range .Data.Accounts}}<tr><td><code>{{.Alias}}</code>{{if .Missing}}<div class="bad help">нет в хранилище: {{range $i, $m := .Missing}}{{if $i}}, {{end}}<code>{{$m}}</code>{{end}}</div>{{end}}</td>
+<td>{{range $i, $b := .Bind}}{{if $i}}<br>{{end}}{{$b}}{{end}}</td>
+<td>{{if .Via}}коннектор входа <code>{{.Via}}</code>{{else}}{{range .Fields}}<code>{{.Selector}}</code> ← {{if .Secret}}секрет <code>{{.Secret}}</code>{{if .Type}} ({{.Type}}){{end}}{{else}}«{{.Value}}»{{end}}<br>{{end}}отправка: <code>{{.Submit}}</code>{{if .Success}}<br>успех: {{.Success}}…{{end}}{{end}}</td>
+<td>{{range .Use}}профиль <code>{{.}}</code><br>{{end}}{{range .Connectors}}коннектор <code>{{.}}</code><br>{{end}}{{if and (not .Use) (not .Connectors)}}<span class="muted">никому{{if .Via}} (кроме коннектора входа){{end}}</span>{{end}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">Учёток нет. Пример — в <code>credentials</code> политики: <code>"@site": { bind: ["https://login.example"], form: { fields: [{selector: "#login", value: "me"}, {selector: "#password", secret: "@site.password"}], submit: {selector: "button[type=submit]"} }, use: [default] }</code></td></tr>{{end}}</table>
 {{template "foot"}}

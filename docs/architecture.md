@@ -8,6 +8,7 @@
 | State Store (счётчики, очередь подтверждений, метки происхождения, токены) | `internal/state` |
 | Журнал: квитанции RFC 8785, цепочка, AEAD, доказательства age, чекпоинты, экспорт | `internal/audit` |
 | Vault (keychain, алиасы, маскирование) | `internal/secrets/vault`, `internal/secrets/keys` |
+| Учётки входа на сайты (`credentials`): доступ, форма и значения только для `browser.login` / `browser.fill_secret`, вход коннектором входа (`via`), события `secret.use`; вопросы человеку с вводом кода | `internal/config/credentials.go`, `internal/pipeline/credentials.go`, `internal/daemon/questions.go` |
 | Approval Service: desktop, Telegram | `internal/approval` |
 | Манифест, ABI v2, функции хоста, проверка возможностей, PDK и тестовый хост коннекторов | `sdk-go/` (`github.com/gate4ai/sdk-go`, Apache-2.0) |
 | Реестр коннекторов, WASM-хост (wazero), установленные коннекторы | `internal/connectors`, `internal/connectors/wasm`, `internal/connectors/store` |

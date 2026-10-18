@@ -77,6 +77,7 @@ type Daemon struct {
 	stop      chan struct{} // закрывается RequestStop
 	stopOnce  sync.Once
 	notifiers *MultiNotifier
+	questions questions
 	servers   []*http.Server
 	extra     []func(*http.ServeMux) // доп. маршруты владельца (MCP HTTP, Web UI)
 	oauth     *oauth.Server
@@ -169,6 +170,8 @@ func New(opt Options) (*Daemon, error) {
 	d.Pipeline.Describe = map[string]func(string, map[string]any) (string, error){SelfConnector: d.describeSelf}
 	d.Pipeline.EndCall = d.endCall
 	d.Pipeline.ConnectorLog = d.devLog
+	d.Pipeline.Vault = d.Vault
+	d.Pipeline.Ask = d.ask
 	if opt.Now != nil {
 		d.Pipeline.Now = opt.Now
 		d.State.Now = opt.Now

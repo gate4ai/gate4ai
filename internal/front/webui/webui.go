@@ -329,6 +329,7 @@ func (u *UI) handler(m mount) http.Handler {
 	get("/journal", u.journal)
 	get("/journal/{hash}", u.receipt)
 	post("/approvals/{id}", u.decide(m))
+	post("/questions/{id}", u.answer)
 	post("/push/subscribe", u.pushSubscribe(m))
 	post("/logout", func(w http.ResponseWriter, r *http.Request) map[string]any {
 		c, _ := r.Cookie(m.cookie())

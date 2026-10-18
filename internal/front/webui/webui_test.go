@@ -267,3 +267,51 @@ func TestTrayContract(t *testing.T) {
 		t.Fatal("tray state on the agent socket")
 	}
 }
+
+func TestAccountsAndQuestions(t *testing.T) {
+	u, d, _, base := setup(t)
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	r, _ := c.Get(u.LoginURL())
+	csrf := csrfRe.FindStringSubmatch(body(t, r))[1]
+	acc := cfg + `credentials:
+  "@site":
+    bind: ["https://login.example"]
+    form:
+      fields: [{ selector: "#login", value: "me" }, { selector: "#password", secret: "@site.password" }]
+      submit: { selector: "#go" }
+    use: [p]
+`
+	r, _ = c.PostForm(base+"/policy", url.Values{"csrf": {csrf}, "yaml": {acc}, "comment": {"account"}})
+	if p := body(t, r); !strings.Contains(p, "Сохранена версия 2") {
+		t.Fatal("save", p)
+	}
+	r, _ = c.Get(base + "/vault")
+	p := body(t, r)
+	for _, want := range []string{"Учётки для входа на сайты", "<code>@site</code>", "https://login.example", "секрет <code>@site.password</code>", "нет в хранилище", "профиль <code>p</code>"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("vault page: no %q", want)
+		}
+	}
+	got := make(chan string, 1)
+	go func() {
+		v, _ := d.Pipeline.Ask(context.Background(), pipeline.Question{Agent: "bot", Account: "@site", Bind: []string{"https://login.example"}, Text: "Код из SMS"})
+		got <- v
+	}()
+	var qs []daemon.Question
+	for i := 0; i < 100 && len(qs) == 0; i++ {
+		time.Sleep(10 * time.Millisecond)
+		qs = d.Questions()
+	}
+	r, _ = c.Get(base + "/approvals")
+	if p := body(t, r); !strings.Contains(p, "Нужен код") || !strings.Contains(p, "Код из SMS") {
+		t.Fatal("approvals page", p)
+	}
+	r, _ = c.PostForm(base+"/questions/"+qs[0].ID, url.Values{"csrf": {csrf}, "value": {"778899"}, "decision": {"answer"}})
+	if p := body(t, r); !strings.Contains(p, "Код передан") || strings.Contains(p, "778899") {
+		t.Fatal("answer", p)
+	}
+	if v := <-got; v != "778899" {
+		t.Fatal(v)
+	}
+}

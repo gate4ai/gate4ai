@@ -5,6 +5,7 @@ package vault
 import (
 	"regexp"
 	"strings"
+	"time"
 )
 
 var (
@@ -25,6 +26,12 @@ func (v *Vault) Mask(x any) any {
 	secrets := make([]string, 0, len(v.values))
 	for _, s := range v.values {
 		if len(s) >= 4 {
+			secrets = append(secrets, s)
+		}
+	}
+	now := time.Now()
+	for s, until := range v.transient {
+		if len(s) >= 4 && now.Before(until) {
 			secrets = append(secrets, s)
 		}
 	}

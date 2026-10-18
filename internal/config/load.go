@@ -227,6 +227,7 @@ func (c *Config) Validate() Errors {
 	if c.Store.Registry != "" && len(c.Store.RegistryKeys) == 0 {
 		add("store.registry_keys", "a registry needs the keys its index is signed with")
 	}
+	c.validateCredentials(add)
 	return es
 }
 

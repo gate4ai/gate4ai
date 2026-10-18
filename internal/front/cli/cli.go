@@ -106,7 +106,7 @@ Owner commands (local socket):
   gate4ai journal verify
   gate4ai agents list | token <agent> [--label l] | connect <agent> | revoke <agent>
   gate4ai policy show | set <file> [-m comment] | versions | rollback <n> | test --agent a --action x [--args json] [--file draft.yaml]
-  gate4ai approvals [list] [--table|--json] | approve <id> | reject <id>
+  gate4ai approvals [list] [--table|--json] | approve <id> | reject <id> | questions | answer <id> (value from stdin)
   gate4ai vault list | set <alias> (value from stdin) | rm <alias>
   gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
   gate4ai connectors list | install <file.g4c | name[@version] | source folder> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | logs <name> [--limit n] [--since 10m] | refresh
@@ -946,7 +946,34 @@ func (e *Env) approvals(ctx context.Context, args []string) int {
 		e.printJSON(res)
 		return ExitOK
 	}
-	fmt.Fprintln(e.Stderr, "usage: gate4ai approvals [list] | approve <id> | reject <id>")
+	switch sub {
+	case "questions":
+		// Вопросы с вводом: код из SMS для входа на сайт (browser.fill_secret, source: human).
+		var res []map[string]any
+		if err := c.Do(ctx, "GET", "/v1/questions", nil, &res); err != nil {
+			return e.fail(err)
+		}
+		if len(res) == 0 {
+			fmt.Fprintln(e.Stderr, "gate4ai: no questions are waiting")
+		}
+		e.printJSON(res)
+		return ExitOK
+	case "answer":
+		if len(args) != 1 {
+			fmt.Fprintln(e.Stderr, "usage: echo -n CODE | gate4ai approvals answer <id>   (empty — decline)")
+			return ExitUsage
+		}
+		b, err := io.ReadAll(io.LimitReader(e.Stdin, 4096))
+		if err != nil {
+			return e.fail(err)
+		}
+		if err := c.Do(ctx, "POST", "/v1/questions/"+args[0]+"/answer", map[string]string{"value": strings.TrimRight(string(b), "\r\n")}, nil); err != nil {
+			return e.fail(err)
+		}
+		e.printJSON(map[string]any{"status": "ok"})
+		return ExitOK
+	}
+	fmt.Fprintln(e.Stderr, "usage: gate4ai approvals [list] | approve <id> | reject <id> | questions | answer <id>")
 	return ExitUsage
 }
 

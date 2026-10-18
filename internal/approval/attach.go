@@ -41,6 +41,11 @@ func (s *switchable) Denied(ag, ac, r string) {
 		n.Denied(ag, ac, r)
 	}
 }
+func (s *switchable) Asked(id, text string) {
+	if a, ok := s.get().(daemon.Asker); ok {
+		a.Asked(id, text)
+	}
+}
 
 // Attach подключает каналы из approvals.channels и следит за изменениями
 // конфигурации: desktop — уведомления ОС, telegram — личный бот (токен из Vault;

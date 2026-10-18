@@ -30,6 +30,10 @@ func (p *Pipeline) requestApproval(agent, action string, act manifest.Action, ar
 			a.Preview = previewText(agent, action, text, dec)
 		}
 	}
+	if text := p.accountPreview(agent, action, act, args); text != "" {
+		// Учётки, которые использует действие: человек подтверждает и вход.
+		a.Preview += "\n" + text
+	}
 	if len(act.Calls) > 0 {
 		// Подвызовы покрываются этим подтверждением: человек должен их видеть.
 		a.Preview += "\nalso runs: " + strings.Join(act.Calls, ", ")

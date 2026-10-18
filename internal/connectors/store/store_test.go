@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -349,5 +350,36 @@ func TestInstallFromSourceFolder(t *testing.T) {
 	os.WriteFile(filepath.Join(src, "main.go"), []byte("package main\n\nfunc main() { syntax error }\n"), 0o644)
 	if _, err := o.Prepare(ctx, info.Source, true); err == nil || !strings.Contains(err.Error(), "go build") {
 		t.Fatal("build error must be reported:", err)
+	}
+}
+
+// Слоты учёток манифеста — в согласии; изменение слотов — согласие заново.
+func TestCredentialSlotsInConsent(t *testing.T) {
+	dir := t.TempDir()
+	o := Options{Dir: filepath.Join(dir, "connectors")}
+	ctx := context.Background()
+	m := func(v, bind string) []byte {
+		return []byte("connector: lk\nversion: \"" + v + "\"\nruntime: wasm\ncapabilities:\n  services: [{ target: browser, contract: 1, actions: [open, login] }]\n" +
+			"credentials:\n  - { slot: login, bind: [\"" + bind + "\"] }\nactions:\n  - { name: summary, class: write, calls: [browser.open, browser.login] }\n")
+	}
+	b, err := Pack(m("1", "https://login.mos.ru"), fakeWasm, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := o.Prepare(ctx, write(t, dir, "lk-1.g4c", b), true)
+	if err != nil || !slices.Contains(p.Capabilities, "signs in on https://login.mos.ru with your account (slot login)") {
+		t.Fatal(p, err)
+	}
+	if _, err := o.Install(p, p.Capabilities); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = Pack(m("2", "https://id.other.example"), fakeWasm, nil)
+	if p, err = o.Prepare(ctx, write(t, dir, "lk-2.g4c", b), true); err != nil || !p.NeedsConsent {
+		t.Fatal("changed credential slots without consent", p, err)
+	}
+	// Слот без bind манифест не принимает.
+	b, _ = Pack([]byte("connector: lk\nversion: \"3\"\nruntime: wasm\ncredentials: [{ slot: login, bind: [] }]\nactions: []\n"), fakeWasm, nil)
+	if _, err := o.Prepare(ctx, write(t, dir, "lk-3.g4c", b), true); err == nil {
+		t.Fatal("slot without bind")
 	}
 }

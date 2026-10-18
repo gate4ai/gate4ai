@@ -180,7 +180,7 @@ func (u *UI) approvalsPage(m mount) func(r *http.Request) (string, map[string]an
 		status := r.URL.Query().Get("status")
 		recent, _ := u.D.State.ListApprovals(status, 50)
 		recent = slices.DeleteFunc(recent, func(a *state.Approval) bool { return a.Status == state.Pending })
-		data := map[string]any{"Pending": pend, "Recent": recent, "Status": status}
+		data := map[string]any{"Pending": pend, "Recent": recent, "Status": status, "Questions": u.D.Questions()}
 		cfg := u.D.Config.Current()
 		data["Timeout"] = config.FormatDuration(cfg.Approvals.Timeout.D())
 		if u.Channels != nil {
@@ -227,6 +227,22 @@ func (u *UI) decide(m mount) func(w http.ResponseWriter, r *http.Request) map[st
 		}
 		return redirect(back, msg)
 	}
+}
+
+// answer — ответ на вопрос с вводом (код для входа на сайт): значение уходит
+// прямо в поле страницы, нигде не показывается и не пишется в журнал.
+func (u *UI) answer(w http.ResponseWriter, r *http.Request) map[string]any {
+	value := r.PostForm.Get("value")
+	if r.PostForm.Get("decision") == "decline" {
+		value = ""
+	}
+	if err := u.D.Answer(r.PathValue("id"), value); err != nil {
+		return redirectErr("/approvals", err)
+	}
+	if value == "" {
+		return redirect("/approvals", "Отказано: код не введён")
+	}
+	return redirect("/approvals", "Код передан в поле страницы")
 }
 
 // pushSubscribe — подписка браузера на push (JSON из app.js).
@@ -1348,7 +1364,12 @@ func (u *UI) receipt(r *http.Request) (string, map[string]any, error) {
 
 func (u *UI) vaultPage(r *http.Request) (string, map[string]any, error) {
 	cfg := u.D.Config.Current()
-	return "vault", map[string]any{"Aliases": u.D.Vault.Aliases(), "Uses": secretUses(cfg, u.D.Registry.Manifests())}, nil
+	set := map[string]bool{}
+	for _, a := range u.D.Vault.Aliases() {
+		set[a] = true
+	}
+	return "vault", map[string]any{"Aliases": u.D.Vault.Aliases(), "Uses": secretUses(cfg, u.D.Registry.Manifests()),
+		"Accounts": accountsView(cfg, set)}, nil
 }
 
 func (u *UI) setSecret(w http.ResponseWriter, r *http.Request) map[string]any {
