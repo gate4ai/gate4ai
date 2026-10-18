@@ -40,7 +40,7 @@ func TestVaultKeychain(t *testing.T) {
 
 func TestMask(t *testing.T) {
 	v, _ := Open(keys.NewMemory())
-	v.Set("tbank", "s3cr3t-token")
+	v.Set("amazon", "s3cr3t-token")
 	in := map[string]any{
 		"text":     "token s3cr3t-token card 4111 1111 1111 1111 order 1234567890123 passport 45 06 123456",
 		"password": "whatever",
