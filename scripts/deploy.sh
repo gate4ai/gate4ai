@@ -26,15 +26,16 @@ slug=$(git remote get-url origin | sed -E 's#.*github\.com[:/]##; s#\.git$##')
 say() { echo "deploy: $*"; }
 die() { echo "deploy: $*" >&2; exit 1; }
 
-# wait_run <workflow> <sha> — ждать запуск workflow на коммите и его успех.
+# wait_run <workflow> <sha> [ref] — ждать запуск workflow на коммите и его успех; ref — ветка
+# или тег запуска, когда у коммита их несколько (main и тег релиза — разные запуски ci.yml).
 wait_run() {
-  local workflow=$1 sha=$2 id="" i
+  local workflow=$1 sha=$2 ref=${3:-} id="" i
   for i in $(seq 1 60); do
-    id=$(writer gh run list -R "$slug" --workflow "$workflow" --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
+    id=$(writer gh run list -R "$slug" --workflow "$workflow" --commit "$sha" ${ref:+--branch "$ref"} --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
     [ -n "$id" ] && break
     sleep 5
   done
-  [ -n "$id" ] || die "no run of $workflow for ${sha:0:7} in $slug after 5 minutes"
+  [ -n "$id" ] || die "no run of $workflow for ${sha:0:7}${ref:+ ($ref)} in $slug after 5 minutes"
   say "waiting for $workflow run $id (https://github.com/$slug/actions/runs/$id)"
   writer gh run watch "$id" -R "$slug" --exit-status --interval 15 >/dev/null || {
     writer gh run view "$id" -R "$slug" --log-failed 2>/dev/null | tail -40 >&2 || true
@@ -90,7 +91,7 @@ connector() {
     git tag -a "v$version" -m "v$version" main
   fi
   gpush "$repo" origin "v$version"
-  wait_run ci.yml "$(git rev-list -n 1 "v$version")"
+  wait_run ci.yml "$(git rev-list -n 1 "v$version")" "v$version"
   writer gh release view "v$version" -R "$slug" >/dev/null || die "no release v$version in $slug"
 }
 
