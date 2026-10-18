@@ -159,9 +159,9 @@ type Telegram struct {
 	mu      sync.Mutex
 	msgs    map[string]int64 // approval id → message id
 	logins  map[string]loginReq
-	secret  string           // секрет вебхука (заголовок X-Telegram-Bot-Api-Secret-Token)
-	lastErr string           // последняя ошибка получения обновлений ("" — работает)
-	mode    string           // polling | webhook
+	secret  string // секрет вебхука (заголовок X-Telegram-Bot-Api-Secret-Token)
+	lastErr string // последняя ошибка получения обновлений ("" — работает)
+	mode    string // polling | webhook
 }
 
 // Status — режим получения обновлений и последняя ошибка ("" — работает).
