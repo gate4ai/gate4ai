@@ -291,6 +291,8 @@ func TestInstallFromSourceFolder(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds WASM")
 	}
+	// Временный модуль коннектора — вне общего go.work скриптов проекта (test-set.sh).
+	t.Setenv("GOWORK", "off")
 	dir := t.TempDir()
 	src := filepath.Join(dir, "bank-src")
 	os.MkdirAll(src, 0o755)
