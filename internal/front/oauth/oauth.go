@@ -109,15 +109,9 @@ func (s *Server) issuer(r *http.Request) string {
 	return scheme + "://" + r.Host
 }
 
-// ResourceMetadataURL — для заголовка WWW-Authenticate ресурса MCP. MCP
-// доступен по корню и по /mcp; для /mcp — метаданные с суффиксом пути
-// (RFC 9728), чтобы resource совпадал с адресом, который ввёл клиент.
+// ResourceMetadataURL — для заголовка WWW-Authenticate ресурса MCP.
 func (s *Server) ResourceMetadataURL(r *http.Request) string {
-	u := s.issuer(r) + "/.well-known/oauth-protected-resource"
-	if r.URL.Path == "/mcp" {
-		u += "/mcp"
-	}
-	return u
+	return s.issuer(r) + "/.well-known/oauth-protected-resource"
 }
 
 // Routes регистрирует эндпоинты.
@@ -162,14 +156,10 @@ func (s *Server) asMetadata(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) prMetadata(w http.ResponseWriter, r *http.Request) {
 	iss := s.issuer(r)
-	// Ресурс корня — сам адрес устройства: клиенты сверяют адрес сервера с
-	// resource по префиксу, так что он подходит и для корня, и для /mcp.
-	res := iss
-	if strings.HasSuffix(r.URL.Path, "/mcp") {
-		res = iss + "/mcp"
-	}
+	// Ресурс — сам адрес устройства (MCP по корню); клиенты сверяют адрес
+	// сервера с resource по префиксу, так что подходит и старый …/mcp.
 	writeJSON(w, 200, map[string]any{
-		"resource":                 res,
+		"resource":                 iss,
 		"authorization_servers":    []string{iss},
 		"bearer_methods_supported": []string{"header"},
 		"scopes_supported":         []string{"mcp"},

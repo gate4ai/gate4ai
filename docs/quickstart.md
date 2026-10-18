@@ -177,7 +177,7 @@ gate4ai daemon --public :8443 --public-url https://gate.example.com --public-cer
 gate4ai daemon --public 127.0.0.1:8080 --public-url https://gate.example.com   # TLS снимает reverse proxy
 ```
 
-Публичный адрес один на всё: сам адрес (`POST`/`DELETE` на корень) и `/mcp` — MCP, `/v1/…` — CLI агентов, `/ui/` — Web UI, `/telegram` — вебхук бота. В агента вписывается адрес без `/mcp`; коннекторы, добавленные раньше с `/mcp`, продолжают работать.
+Публичный адрес один на всё: сам адрес (`POST`/`DELETE` на корень) — MCP, `/v1/…` — CLI агентов, `/ui/` — Web UI, `/telegram` — вебхук бота. В агента вписывается адрес без `/mcp`; коннекторы, добавленные раньше с `/mcp`, продолжают работать.
 
 ## 4. Подтверждения, Web UI, журнал
 

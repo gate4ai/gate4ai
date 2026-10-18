@@ -192,8 +192,9 @@ func TestRemoteMCPAtRoot(t *testing.T) {
 	}
 	list := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
 
-	// Без токена: 401 и метаданные ресурса, чей resource совпадает с адресом клиента.
-	for path, res := range map[string]string{"/": ts.URL, "/mcp": ts.URL + "/mcp"} {
+	// Без токена: 401 и метаданные ресурса; resource — адрес устройства
+	// (префикс и корня, и старого …/mcp).
+	for _, path := range []string{"/", "/mcp"} {
 		resp, _ := call("POST", path, "", list)
 		h := resp.Header.Get("WWW-Authenticate")
 		m := regexp.MustCompile(`resource_metadata="([^"]+)"`).FindStringSubmatch(h)
@@ -202,7 +203,7 @@ func TestRemoteMCPAtRoot(t *testing.T) {
 		}
 		var meta map[string]any
 		getJSON(t, m[1], &meta)
-		if meta["resource"] != res || meta["authorization_servers"].([]any)[0] != ts.URL {
+		if meta["resource"] != ts.URL || meta["authorization_servers"].([]any)[0] != ts.URL {
 			t.Fatal(path, meta)
 		}
 	}
@@ -228,6 +229,9 @@ func TestRemoteMCPAtRoot(t *testing.T) {
 	// GET корня: SSE-потока нет (405), в браузере — подсказка.
 	if r, _ := call("GET", "/", tok, ""); r.StatusCode != 405 {
 		t.Fatal("sse", r.StatusCode)
+	}
+	if r, _ := call("GET", "/mcp", tok, ""); r.StatusCode != 405 {
+		t.Fatal("sse /mcp", r.StatusCode)
 	}
 	if r, err := http.Get(ts.URL + "/"); err != nil || r.StatusCode != 200 {
 		t.Fatal("root page", err)

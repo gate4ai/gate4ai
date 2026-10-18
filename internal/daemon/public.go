@@ -131,7 +131,7 @@ func externalURL(r *http.Request) string {
 
 // PublicHandler — то, что видно снаружи (relay, прямой HTTPS). Разделение по путям:
 //   - OAuth 2.1 (/.well-known/…, /authorize, /token, /register, /revoke) и MCP
-//     (POST/DELETE на корень или /mcp) — токен агента;
+//     (POST/DELETE на корень; /mcp — совместимость) — токен агента;
 //   - /v1/whoami, /v1/tools, /v1/call, /v1/status/{id} — API агента (удалённый CLI), токен агента;
 //   - маршруты AddPublic: /ui/ (Web UI, сессия), /telegram (вебхук, секрет бота).
 //
@@ -195,10 +195,9 @@ func (d *Daemon) buildPublic() http.Handler {
 	for _, rt := range extra {
 		mux.Handle(rt.pattern, rt.h)
 	}
-	// MCP (Streamable HTTP) — и по корню адреса устройства (его пользователь
-	// вставляет в Claude.ai / ChatGPT), и по /mcp (совместимость). Корень
-	// отличается от остального по методу: POST/DELETE — MCP, GET — страница
-	// (или 405 для SSE-потока, которого нет).
+	// MCP (Streamable HTTP) — по корню адреса устройства (его пользователь
+	// вставляет в Claude.ai / ChatGPT); GET корня — подсказка или 405 для
+	// SSE-потока, которого нет. /mcp — для коннекторов, добавленных раньше.
 	serveMCP := func(w http.ResponseWriter, r *http.Request) {
 		agent, err := d.publicAgent(r, "mcp-http")
 		if err != nil {
@@ -229,19 +228,15 @@ func (d *Daemon) buildPublic() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(out)
 	}
-	noStream := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Allow", "POST, DELETE")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
 	endSession := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }
-	mux.HandleFunc("POST /mcp", serveMCP)
-	mux.HandleFunc("GET /mcp", noStream)
-	mux.HandleFunc("DELETE /mcp", endSession)
 	mux.HandleFunc("POST /{$}", serveMCP)
 	mux.HandleFunc("DELETE /{$}", endSession)
+	mux.HandleFunc("POST /mcp", serveMCP)
+	mux.HandleFunc("DELETE /mcp", endSession)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
-			noStream(w, r)
+			w.Header().Set("Allow", "POST, DELETE")
+			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
