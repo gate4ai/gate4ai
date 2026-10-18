@@ -196,6 +196,8 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 
 Зона `relay.example.org` делегируется (NS) на этот сервер: relay отвечает A-записями для устройств и TXT для ACME DNS-01. Для разработки — `--self-signed` и в конфигурации устройства `relay: {ca_file: relay-ca.pem, self_signed: true}`.
 
+Метрики, логи и трейсы relay (`--metrics`, `--otlp`), стек Grafana + Prometheus + Loki + Tempo на сервере relay и дашборд — [relay/docs/observability.md](https://github.com/gate4ai/relay/blob/main/docs/observability.md).
+
 ## Тесты
 
 `go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из спецификации на собранных бинарниках и настоящих коннекторах — в репозитории [gate4ai/e2e](https://github.com/gate4ai/e2e).
