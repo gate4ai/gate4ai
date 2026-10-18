@@ -138,10 +138,8 @@ func (c *changing) Tools(ctx context.Context) ([]Tool, error) {
 }
 
 func TestStdioToolsListChanged(t *testing.T) {
-	old := ToolsPoll
-	ToolsPoll = 20 * time.Millisecond
-	defer func() { ToolsPoll = old }()
 	s := NewServer(&changing{})
+	s.Poll = 20 * time.Millisecond
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())

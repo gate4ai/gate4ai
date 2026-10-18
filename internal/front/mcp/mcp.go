@@ -49,6 +49,8 @@ type Server struct {
 	Backend Backend
 	mu      sync.Mutex
 	names   map[string]string // tool name → action
+	// Poll — интервал проверки каталога (0 — ToolsPoll).
+	Poll time.Duration
 	// notify — уведомления клиенту (stdio): список инструментов изменился.
 	notify rpc.Notify
 }
@@ -263,6 +265,10 @@ func (s *Server) ServeStdio(ctx context.Context, r io.Reader, w io.Writer) error
 
 // watchTools сравнивает каталог с прошлым и сообщает об изменении.
 func (s *Server) watchTools(ctx context.Context) {
+	poll := s.Poll
+	if poll <= 0 {
+		poll = ToolsPoll
+	}
 	last := ""
 	for {
 		if tools, err := s.Backend.Tools(ctx); err == nil {
@@ -274,7 +280,7 @@ func (s *Server) watchTools(ctx context.Context) {
 			last = sig
 		}
 		select {
-		case <-time.After(ToolsPoll):
+		case <-time.After(poll):
 		case <-ctx.Done():
 			return
 		}
