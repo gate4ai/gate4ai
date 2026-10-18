@@ -4,10 +4,17 @@
 
 <div class="card" id="relay"><h3>Relay — доступ из интернета</h3>
 <p>Relay даёт этому компьютеру публичный адрес <code>&lt;id&gt;.relay.gate4.ai</code> без открытых портов: через него к gate4.ai обращаются облачные агенты (Claude.ai, ChatGPT), а вы — с телефона. Трафик шифруется до этого компьютера: relay видит только шифротекст.</p>
-{{if $d.Relay.Configured}}
-<p>Состояние: {{if $d.Relay.Online}}<b class="ok">онлайн</b>{{else}}<b class="warn">нет связи — переподключается</b>{{with $d.Relay.Error}}<br><span class="muted">Причина: {{.}}</span>{{end}}{{end}}</p>
-<p>Relay: <code>{{$d.Relay.URL}}</code><br>Адрес устройства: <code>https://{{$d.Relay.Host}}</code><br>MCP для облачных агентов: <code id="mcp">{{$d.Relay.MCPURL}}</code> <button class="small" data-copy="#mcp">Копировать</button></p>
-{{else if $d.PublicURL}}<p>Daemon запущен со своим адресом (<code>--public</code>): <code>{{$d.PublicURL}}</code>. Relay не нужен.</p>
+{{$addr := ""}}{{if $d.Relay.Configured}}{{$addr = $d.Relay.MCPURL}}{{else if $d.PublicURL}}{{$addr = $d.PublicURL}}{{end}}
+{{if $addr}}
+{{if $d.Relay.Configured}}<p>Relay: {{if $d.Relay.Online}}<b class="ok">подключён</b>{{else}}<b class="warn">нет связи — переподключается</b>; пока связи нет, облачные агенты до компьютера не достучатся{{with $d.Relay.Error}}<br><span class="muted">Причина: {{.}}</span>{{end}}{{end}}</p>
+{{else}}<p>Daemon запущен со своим адресом (<code>--public</code>), relay не нужен.</p>{{end}}
+<p><b>Адрес для облачных агентов</b><br><code id="mcp">{{$addr}}</code> <button class="small primary" data-copy="#mcp">Копировать</button><br>
+<span class="help">Вставьте его в Claude.ai или ChatGPT как custom connector.</span></p>
+<ol class="help"><li><b>Claude.ai:</b> Settings → Connectors → Add custom connector → вставьте адрес. <b>ChatGPT:</b> Settings → Connectors → Advanced → Developer mode → Create → адрес, аутентификация OAuth.</li>
+<li>Агент откроет страницу авторизации gate4.ai — введите код подключения. Код выдаётся на странице агента: <a href="{{.Base}}/agents">Агенты</a> → облачный агент → «Получить код подключения».</li></ol>
+<details><summary>Технические детали</summary><p class="help">
+{{if $d.Relay.Configured}}Relay: <code>{{$d.Relay.URL}}</code><br>ID устройства: <code>{{$d.Relay.DeviceID}}</code><br>{{end}}
+MCP отвечает и по корню адреса, и по <code>{{$addr}}/mcp</code> — коннекторы, добавленные раньше с <code>/mcp</code>, продолжают работать. Web UI для телефона — <code>{{$addr}}/ui/</code>.</p></details>
 {{else}}<p class="muted">Не включён.</p>{{end}}
 <form method="post" action="{{.Base}}/settings/relay" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}">
 <label class="inline">Адрес relay <input name="url" value="{{or $d.Relay.URL $d.RelayDefault}}" size="34"></label>
@@ -53,7 +60,7 @@
 <label class="inline">Квитанции <input name="ret_receipts" value="{{index $d.Retention "receipts"}}" size="6"></label>
 <label class="inline">Отказы <input name="ret_denied" value="{{index $d.Retention "denied"}}" size="6"></label>
 <label class="inline">Доказательства <input name="ret_evidence_other" value="{{index $d.Retention "evidence_other"}}" size="6"></label>
-<label class="inline">Доказательства (деньги) <input name="ret_evidence_money" value="{{index $d.Retention "evidence_money"}}" size="6"></label>
+<label class="inline">Доказательства для правила деньги <input name="ret_evidence_money" value="{{index $d.Retention "evidence_money"}}" size="6"></label>
 <button>Сохранить</button></form><p class="help">0s — бессрочно; 90d, 1y, 3y.</p></div>
 
 <div class="card"><h3>О программе</h3>

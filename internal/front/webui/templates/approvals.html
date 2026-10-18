@@ -25,9 +25,12 @@
 
 <div class="grid" style="margin-top:1rem">
 <div class="card"><h3>Telegram</h3>
-<p>Подтверждения в личном боте: кнопки «Разрешить / Отклонить» прямо в чате. Бот ваш — содержимое запросов не проходит через серверы gate4.ai.</p>
+{{if $d.TelegramSet}}<p><span class="badge ok">Telegram подключён</span></p>
+<p>Бот уже настроен — подключать повторно не нужно. Запросы приходят в личный чат с кнопками «Разрешить / Отклонить»; состояние канала — в таблице выше.</p>
+{{if not .Remote}}<a class="btn small" href="{{.Base}}/approvals/telegram">Настроить</a>{{end}}</div>
+{{else}}<p>Подтверждения в личном боте: кнопки «Разрешить / Отклонить» прямо в чате. Бот ваш — содержимое запросов не проходит через серверы gate4.ai.</p>
 <ol class="help"><li>В Telegram откройте <b>@BotFather</b>, команда <code>/newbot</code>, придумайте имя.</li><li>Скопируйте токен бота.</li><li>Мастер ниже проверит токен и найдёт ваш Telegram ID.</li></ol>
-{{if not .Remote}}<a class="btn primary" href="{{.Base}}/approvals/telegram">Подключить Telegram</a>{{end}}</div>
+{{if not .Remote}}<a class="btn primary" href="{{.Base}}/approvals/telegram">Подключить Telegram</a>{{end}}</div>{{end}}
 
 <div class="card"><h3>Браузерный push</h3>
 <p>Уведомление в браузере — на этом компьютере или на телефоне. С телефона откройте Web UI по ссылке из <a href="{{.Base}}/settings#remote">Настройки → Вход с телефона</a> (нужен relay) и нажмите кнопку там.</p>

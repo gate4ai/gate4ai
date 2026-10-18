@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
 	"os"
@@ -182,6 +183,8 @@ func (u *UI) approvalsPage(m mount) func(r *http.Request) (string, map[string]an
 			}
 		}
 		data["PushOn"] = cfg.ChannelOn("webpush")
+		// Бот настроен (токен и ID сохранены) — карточка Telegram без инструкции подключения.
+		data["TelegramSet"] = cfg.Approvals.Telegram != nil
 		return "approvals", data, err
 	}
 }
@@ -1337,14 +1340,8 @@ func (u *UI) receipt(r *http.Request) (string, map[string]any, error) {
 // ---- Секреты ----
 
 func (u *UI) vaultPage(r *http.Request) (string, map[string]any, error) {
-	raw, _ := u.D.Config.CurrentRaw()
-	used := map[string]bool{}
-	for _, a := range u.D.Vault.Aliases() {
-		if strings.Contains(string(raw), `"`+a+`"`) || strings.Contains(string(raw), " "+a+"\n") || strings.Contains(string(raw), " "+a+",") {
-			used[a] = true
-		}
-	}
-	return "vault", map[string]any{"Aliases": u.D.Vault.Aliases(), "Used": used}, nil
+	cfg := u.D.Config.Current()
+	return "vault", map[string]any{"Aliases": u.D.Vault.Aliases(), "Uses": secretUses(cfg, u.D.Registry.Manifests())}, nil
 }
 
 func (u *UI) setSecret(w http.ResponseWriter, r *http.Request) map[string]any {
@@ -1408,7 +1405,8 @@ func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 		if l, err := u.RemoteLoginURL(); err == nil {
 			data["RemoteLink"] = l
 			if code, err := qr.Encode(l, qr.M); err == nil {
-				data["RemoteQR"] = "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG())
+				// template.URL: иначе html/template не пускает data: в src и подставляет #ZgotmplZ
+				data["RemoteQR"] = template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()))
 			}
 		} else {
 			data["RemoteLinkError"] = err.Error()
@@ -1429,7 +1427,7 @@ func (u *UI) registerRelay(w http.ResponseWriter, r *http.Request) map[string]an
 	if err != nil {
 		return redirectErr("/settings#relay", fmt.Errorf("relay %s: %v", addr, err))
 	}
-	return redirect("/settings#relay", fmt.Sprintf("Устройство подключено к relay: %v. Адрес для облачных агентов: %v", res["host"], res["mcp_url"]))
+	return redirect("/settings#relay", fmt.Sprintf("Устройство подключено к relay. Адрес для Claude.ai / ChatGPT: %v", res["mcp_url"]))
 }
 
 func (u *UI) toggleAutostart(w http.ResponseWriter, r *http.Request) map[string]any {

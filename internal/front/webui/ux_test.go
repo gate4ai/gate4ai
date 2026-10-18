@@ -174,6 +174,19 @@ func TestFirstRunPaths(t *testing.T) {
 	if p := post("/channels/telegram/toggle", url.Values{"on": {"1"}}); !strings.Contains(p, "@BotFather") {
 		t.Fatal("telegram without setup must open the wizard")
 	}
+	// Карточка Telegram: до настройки — инструкция и «Подключить», после — статус «подключён».
+	if p := get("/approvals"); !strings.Contains(p, "Подключить Telegram") || strings.Contains(p, "Telegram подключён") {
+		t.Fatal("telegram card before setup", p)
+	}
+	if err := u.edit("test", func(c *config.Config) error {
+		c.Approvals.Telegram = &config.Telegram{Token: "@telegram.bot", OwnerID: 42}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if p := get("/approvals"); strings.Contains(p, "Подключить Telegram") || strings.Contains(p, "@BotFather") || !strings.Contains(p, "Telegram подключён") {
+		t.Fatal("telegram card after setup", p)
+	}
 
 	// Настройки: автозапуск, таймаут, предложения выключены.
 	post("/settings/autostart", url.Values{"on": {"1"}})
@@ -186,6 +199,15 @@ func TestFirstRunPaths(t *testing.T) {
 	}
 	if p := get("/settings?link=1"); !strings.Contains(p, "Нет публичного адреса") {
 		t.Fatal("remote link without public address")
+	}
+	// Relay включён: один адрес для облачных агентов, детали relay — в раскрывающемся блоке.
+	u.Relay = func() relayclient.Status {
+		return relayclient.Status{Configured: true, Online: true, URL: "https://relay.test", DeviceID: "dev1", Host: "dev1.relay.test", MCPURL: "https://dev1.relay.test"}
+	}
+	p = get("/settings")
+	if !strings.Contains(p, `<code id="mcp">https://dev1.relay.test</code>`) || !strings.Contains(p, "custom connector") ||
+		!strings.Contains(p, "<summary>Технические детали</summary>") || strings.Contains(p, "Адрес устройства") {
+		t.Fatal("relay block", p)
 	}
 }
 
@@ -299,7 +321,7 @@ func TestReferrerPolicyKeepsOrigin(t *testing.T) {
 // вместо неё — причина; появилась связь — ссылка есть.
 func TestRemoteLinkRelayOffline(t *testing.T) {
 	u, d, _, base := setup(t)
-	st := relayclient.Status{Configured: true, Host: "abc.relay.test", Error: "obtaining certificate: no NS"}
+	st := relayclient.Status{Configured: true, Host: "abc.relay.test", MCPURL: "https://abc.relay.test", Error: "obtaining certificate: no NS"}
 	u.Relay = func() relayclient.Status { return st }
 	d.AddPublicURL(func() string { return "https://abc.relay.test" })
 	if _, err := u.RemoteLoginURL(); !errors.Is(err, errRelayOffline) || !strings.Contains(err.Error(), "no NS") {

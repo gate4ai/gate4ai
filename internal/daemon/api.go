@@ -352,7 +352,7 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"agent": r.PathValue("name"), "code": code, "expires": exp,
-			"hint": "add https://<device-id>.relay.gate4.ai/mcp as a custom connector and enter this code when asked"})
+			"hint": "add https://<device-id>.relay.gate4.ai as a custom connector and enter this code when asked"})
 	}))
 	mux.HandleFunc("POST /v1/agents/{name}/revoke", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		n, err := d.State.RevokeAgent(r.PathValue("name"))
