@@ -2,25 +2,20 @@
 {{$d := .Data}}
 <h2>Настройки</h2>
 
-<div class="card" id="relay"><h3>Relay — доступ из интернета</h3>
-<p>Relay даёт этому компьютеру публичный адрес <code>&lt;id&gt;.relay.gate4.ai</code> без открытых портов: через него к gate4.ai обращаются облачные агенты (Claude.ai, ChatGPT), а вы — с телефона. Трафик шифруется до этого компьютера: relay видит только шифротекст.</p>
-{{$addr := ""}}{{if $d.Relay.Configured}}{{$addr = $d.Relay.MCPURL}}{{else if $d.PublicURL}}{{$addr = $d.PublicURL}}{{end}}
-{{if $addr}}
-{{if $d.Relay.Configured}}<p>Relay: {{if $d.Relay.Online}}<b class="ok">подключён</b>{{else}}<b class="warn">нет связи — переподключается</b>; пока связи нет, облачные агенты до компьютера не достучатся{{end}}</p>
-{{else}}<p>Daemon запущен со своим адресом (<code>--public</code>), relay не нужен.</p>{{end}}
-<p><b>Адрес для облачных агентов</b><br><code id="mcp">{{$addr}}</code> <button class="small primary" data-copy="#mcp">Копировать</button><br>
-<span class="help">Вставьте его в Claude.ai или ChatGPT как custom connector.</span></p>
-<ol class="help"><li><b>Claude.ai:</b> Settings → Connectors → Add custom connector → вставьте адрес. <b>ChatGPT:</b> Settings → Connectors → Advanced → Developer mode → Create → адрес, аутентификация OAuth.</li>
-<li>Агент откроет страницу авторизации gate4.ai — введите код подключения. Код выдаётся на странице агента: <a href="{{.Base}}/agents">Агенты</a> → облачный агент → «Получить код подключения».</li></ol>
+<div class="card" id="relay"{{with $d.Relay}}{{if and .Configured (not $d.Direct) (not .Online) (ne .Phase "failed")}} data-live-relay="{{.Phase}}"{{end}}{{end}}><h3>Доступ из интернета</h3>
+{{if $d.Direct}}{{template "relay_direct" .}}
+{{else if $d.Relay.Configured}}{{template "relay_state" $d.Relay}}
+{{template "cloud_addr" (dict "Addr" $d.Relay.MCPURL "Base" .Base)}}
 <details><summary>Технические детали</summary><p class="help">
-{{if $d.Relay.Configured}}Relay: <code>{{$d.Relay.URL}}</code><br>ID устройства: <code>{{$d.Relay.DeviceID}}</code><br>{{end}}
-MCP отвечает и по корню адреса, и по <code>{{$addr}}/mcp</code> — коннекторы, добавленные раньше с <code>/mcp</code>, продолжают работать. Web UI для телефона — <code>{{$addr}}/ui/</code>.</p></details>
-{{else}}<p class="muted">Не включён.</p>{{end}}
-<form method="post" action="{{.Base}}/settings/relay" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<label class="inline">Адрес relay <input name="url" value="{{or $d.Relay.URL $d.RelayDefault}}" size="34"></label>
-<button class="{{if not $d.Relay.Configured}}primary{{end}}">{{if $d.Relay.Configured}}Зарегистрировать заново{{else}}Подключить устройство{{end}}</button></form>
-<p class="help">По умолчанию — relay gate4.ai (<code>{{$d.RelayDefault}}</code>). Свой relay: тот же бинарник <code>gate4ai-relay</code> на вашем сервере — укажите его адрес. Без relay: <code>gate4ai daemon --public …</code>.</p>
-</div>
+Relay: <code>{{$d.Relay.URL}}</code><br>ID устройства: <code>{{$d.Relay.DeviceID}}</code><br>
+MCP отвечает и по корню адреса, и по <code>{{$d.Relay.MCPURL}}/mcp</code> — коннекторы, добавленные раньше с <code>/mcp</code>, продолжают работать. Web UI для телефона — <code>{{$d.Relay.MCPURL}}/ui/</code>.</p></details>
+<p><a href="{{.Base}}/settings/relay">Сменить relay или адрес устройства…</a></p>
+{{else}}<p>Нужен только облачным агентам (Claude.ai, ChatGPT) и для входа с телефона. Локальные агенты работают и без него.</p>
+<form method="post" action="{{.Base}}/settings/relay"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="url" value="{{$d.RelayDefault}}">
+<button class="primary">Зарегистрироваться на {{$d.RelayDefaultHost}}</button></form>
+<p class="help">Компьютер получит адрес вида <code>&lt;id&gt;.{{$d.RelayDefaultHost}}</code>, открывать порты не нужно. Трафик шифруется до этого компьютера: relay видит только шифротекст.</p>
+<p><a href="{{.Base}}/settings/relay#custom">Свой relay</a> · <a href="{{.Base}}/settings/relay#public">Свой HTTPS-адрес без relay</a></p>
+{{end}}</div>
 
 <div class="card" id="remote"><h3>Вход с телефона</h3>
 <p>Подтверждения и журнал с телефона или другого компьютера — на адресе устройства, под <code>/ui/</code>. Правила, агенты и секреты оттуда не меняются.</p>

@@ -82,7 +82,7 @@ var tpl = template.Must(template.New("").Funcs(funcs).ParseFS(tplFS, "templates/
 
 var titles = map[string]string{"overview": "Обзор", "approvals": "Подтверждения", "telegram": "Telegram", "agents": "Агенты", "agent": "Агент",
 	"agent_new": "Новый агент", "connectors": "Коннекторы", "connector": "Коннектор", "policy": "Правила", "rule": "Правило", "templates": "Шаблоны",
-	"policy_yaml": "YAML", "journal": "Журнал", "receipt": "Квитанция", "vault": "Секреты", "settings": "Настройки",
+	"policy_yaml": "YAML", "journal": "Журнал", "receipt": "Квитанция", "vault": "Секреты", "settings": "Настройки", "relay": "Relay",
 	"remote_only": "Только на компьютере"}
 
 func or(a, b string) string {
@@ -331,6 +331,7 @@ func (u *UI) handler(m mount) http.Handler {
 	localPage("/policy/yaml", u.yamlPage)
 	localPage("/vault", u.vaultPage)
 	localPage("/settings", u.settingsPage)
+	localPage("/settings/relay", u.relayPage)
 	localPage("/approvals/telegram", u.telegramPage)
 
 	change("/agents", u.createAgent)

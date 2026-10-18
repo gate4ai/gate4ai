@@ -48,7 +48,8 @@ type Device struct {
 	// Dial — свой способ соединения с relay (тесты); nil — обычный.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 
-	online atomic.Bool
+	online  atomic.Bool
+	lastErr atomic.Pointer[string] // последняя ошибка туннеля (nil — туннель ещё не падал)
 }
 
 // TestDialer — подмена соединений с relay (только тесты); nil — обычный DNS.
@@ -56,6 +57,26 @@ var TestDialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
 // Online — туннель установлен.
 func (d *Device) Online() bool { return d.online.Load() }
+
+// phase — этап подключения работающего устройства и последняя ошибка туннеля.
+func (d *Device) phase() (string, string) {
+	switch err := d.LastError(); {
+	case d.Online():
+		return PhaseOnline, ""
+	case err == "":
+		return PhaseConnecting, ""
+	default:
+		return PhaseReconnecting, err
+	}
+}
+
+// LastError — последняя ошибка туннеля ("" — ещё не было).
+func (d *Device) LastError() string {
+	if e := d.lastErr.Load(); e != nil {
+		return *e
+	}
+	return ""
+}
 
 func (d *Device) httpClient() *http.Client {
 	dial := d.Dial
@@ -84,6 +105,11 @@ func (d *Device) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		msg := "tunnel closed"
+		if err != nil {
+			msg = err.Error()
+		}
+		d.lastErr.Store(&msg)
 		if time.Since(start) > 30*time.Second {
 			backoff = d.MinBackoff
 		}
