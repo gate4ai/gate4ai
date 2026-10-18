@@ -235,3 +235,36 @@ func TestAttachFromConfig(t *testing.T) {
 }
 
 var ownerP = auth.OwnerVia("test")
+
+func TestTelegramLoginConfirmation(t *testing.T) {
+	fake := &fakeTelegram{token: "1:T"}
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+	const owner = 42
+	tg := NewTelegram(&BotAPI{Base: srv.URL, Token: "1:T"}, owner, nil, nil)
+	got := make(chan bool, 2)
+	if err := tg.ConfirmLogin("abc", "Вход в Web UI, код 123456", func(ok bool) { got <- ok }); err != nil {
+		t.Fatal(err)
+	}
+	kb := fake.sent[0]["reply_markup"].(map[string]any)["inline_keyboard"].([]any)[0].([]any)
+	yes := kb[0].(map[string]any)["callback_data"].(string)
+	// Чужой не подтверждает вход.
+	tg.Handle(context.Background(), cbUpdate(1, 7, yes))
+	if len(got) != 0 || fake.answers[0] != "Нет доступа" {
+		t.Fatal("stranger confirmed login", fake.answers)
+	}
+	tg.Handle(context.Background(), cbUpdate(2, owner, yes))
+	if ok := <-got; !ok || len(fake.edits) != 1 || !strings.Contains(fake.edits[0]["text"].(string), "Вход разрешён") {
+		t.Fatal("login not confirmed", fake.edits)
+	}
+	// Повторное нажатие ничего не делает.
+	tg.Handle(context.Background(), cbUpdate(3, owner, yes))
+	if len(got) != 0 || fake.answers[len(fake.answers)-1] != "Вход не найден или уже завершён" {
+		t.Fatal("second press accepted", fake.answers)
+	}
+	_ = tg.ConfirmLogin("def", "x", func(ok bool) { got <- ok })
+	tg.Handle(context.Background(), cbUpdate(4, owner, "lr:def"))
+	if ok := <-got; ok {
+		t.Fatal("rejection confirmed login")
+	}
+}

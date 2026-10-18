@@ -1408,6 +1408,11 @@ func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 	if u.Autostart != nil {
 		data["Autostart"] = u.Autostart.State()
 	}
+	// Хэш пароля на страницу не попадает — только «задан / не задан».
+	p := u.Protection()
+	data["Protection"] = map[string]bool{"Link": !p.NoLink, "Password": p.Password != "", "Telegram": p.Telegram}
+	data["Addr"] = u.Addr
+	data["TelegramReady"] = u.confirmer() != nil
 	if link := r.URL.Query().Get("link"); link == "1" {
 		if l, err := u.RemoteLoginURL(); err == nil {
 			data["RemoteLink"] = l

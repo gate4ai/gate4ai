@@ -158,9 +158,10 @@ type Telegram struct {
 
 	mu      sync.Mutex
 	msgs    map[string]int64 // approval id → message id
-	secret  string           // секрет вебхука (заголовок X-Telegram-Bot-Api-Secret-Token)
-	lastErr string           // последняя ошибка получения обновлений ("" — работает)
-	mode    string           // polling | webhook
+	logins  map[string]loginReq
+	secret  string // секрет вебхука (заголовок X-Telegram-Bot-Api-Secret-Token)
+	lastErr string // последняя ошибка получения обновлений ("" — работает)
+	mode    string // polling | webhook
 }
 
 // Status — режим получения обновлений и последняя ошибка ("" — работает).
@@ -178,7 +179,49 @@ func (t *Telegram) setStatus(mode, err string) {
 
 // NewTelegram создаёт канал.
 func NewTelegram(api TelegramAPI, owner int64, d Decider, st *state.Store) *Telegram {
-	return &Telegram{API: api, OwnerID: owner, Decider: d, State: st, Log: slog.Default(), msgs: map[string]int64{}}
+	return &Telegram{API: api, OwnerID: owner, Decider: d, State: st, Log: slog.Default(), msgs: map[string]int64{}, logins: map[string]loginReq{}}
+}
+
+// loginReq — запрос подтверждения входа в Web UI.
+type loginReq struct {
+	msg  int64
+	text string
+	done func(ok bool)
+}
+
+// ConfirmLogin просит владельца подтвердить вход в Web UI (id — случайный
+// идентификатор попытки входа, text — где и с каким кодом). done вызывается один
+// раз — по нажатию «Разрешить вход» или «Отклонить».
+func (t *Telegram) ConfirmLogin(id, text string, done func(ok bool)) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	kb := [][]Button{{{Text: "Разрешить вход", Data: "la:" + id}, {Text: "Отклонить", Data: "lr:" + id}}}
+	msg, err := t.API.SendMessage(ctx, t.OwnerID, text, kb)
+	if err != nil {
+		t.Log.Warn("telegram login confirmation", "err", err)
+		return err
+	}
+	t.mu.Lock()
+	t.logins[id] = loginReq{msg: msg, text: text, done: done}
+	t.mu.Unlock()
+	return nil
+}
+
+// loginCallback — нажатие кнопки подтверждения входа.
+func (t *Telegram) loginCallback(ctx context.Context, cbID, data string) {
+	ok, id := strings.HasPrefix(data, "la:"), data[3:]
+	t.mu.Lock()
+	req, found := t.logins[id]
+	delete(t.logins, id)
+	t.mu.Unlock()
+	if !found {
+		_ = t.API.AnswerCallback(ctx, cbID, "Вход не найден или уже завершён")
+		return
+	}
+	req.done(ok)
+	res := map[bool]string{true: "✅ Вход разрешён", false: "❌ Вход отклонён"}[ok]
+	_ = t.API.AnswerCallback(ctx, cbID, res)
+	_ = t.API.EditMessage(ctx, t.OwnerID, req.msg, req.text+"\n"+res)
 }
 
 func sig(a *state.Approval) string {
@@ -246,6 +289,15 @@ func (t *Telegram) Denied(agent, action, reason string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_, _ = t.API.SendMessage(ctx, t.OwnerID, fmt.Sprintf("⛔ %s: %s запрещено — %s", agent, action, reason), nil)
+}
+
+// Notice — служебное сообщение владельцу.
+func (t *Telegram) Notice(text string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if _, err := t.API.SendMessage(ctx, t.OwnerID, text, nil); err != nil {
+		t.Log.Warn("telegram notice", "err", err)
+	}
 }
 
 // Run получает обновления до отмены ctx: вебхуком, если задан Webhook и Telegram
@@ -364,6 +416,10 @@ func (t *Telegram) Handle(ctx context.Context, u Update) {
 }
 
 func (t *Telegram) callback(ctx context.Context, cbID, data string) {
+	if strings.HasPrefix(data, "la:") || strings.HasPrefix(data, "lr:") {
+		t.loginCallback(ctx, cbID, data)
+		return
+	}
 	parts := strings.Split(data, ":")
 	if len(parts) != 3 {
 		_ = t.API.AnswerCallback(ctx, cbID, "Неверный запрос")
