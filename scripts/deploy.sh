@@ -18,7 +18,7 @@ set -euo pipefail
 root=${PITWALL_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 repo=$(git rev-parse --show-toplevel)
 cd "$repo"
-# Токен аккаунта с правом push (gh-push.sh): для git push и записи через gh.
+# Токен аккаунта с правом push (gh-push.sh): для git push/fetch и записи через gh.
 # shellcheck source=gh-push.sh
 . "$(dirname "$0")/gh-push.sh"
 writer() { GH_TOKEN=$T "$@"; }
@@ -48,7 +48,7 @@ has_workflow() { [ -f ".github/workflows/$1" ]; }
 
 push() {
   local branch=${1:-$(git branch --show-current)}
-  git fetch -q origin "$branch"
+  gfetch "$repo" -q origin "$branch"
   if [ "$(git rev-list --count "origin/$branch..$branch")" = 0 ]; then
     say "$branch is pushed already"
   else
@@ -115,7 +115,7 @@ registry() {
   name=$(connector_name)
   version=$(git describe --tags --abbrev=0 main | sed 's/^v//')
   reg=$root/registry
-  git -C "$reg" fetch -q origin main
+  gfetch "$reg" -q origin main
   if listed "$name" "$version"; then
     say "$name $version is in the registry already"
     return 0
@@ -141,7 +141,7 @@ registry() {
   done
   writer gh pr checks "$pr" -R gate4ai/registry --watch --interval 15 >/dev/null || die "registry PR #$pr: checks failed"
   writer gh pr merge "$pr" -R gate4ai/registry --merge --delete-branch
-  git -C "$reg" fetch -q origin main
+  gfetch "$reg" -q origin main
   say "$name $version is in the registry"
 }
 
