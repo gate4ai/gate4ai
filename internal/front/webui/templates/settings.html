@@ -24,6 +24,24 @@
 <form method="post" action="{{.Base}}/settings/remote-link"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Показать ссылку и QR-код</button></form>{{end}}
 </div>
 
+<div class="card" id="login"><h3>Защита входа</h3>
+<p>Ссылку входа (<code>gate4ai ui</code>, трей) может получить и агент, запущенный на этом компьютере. Защита делает так, что одной ссылки мало: нужен пароль и/или подтверждение входа на другом устройстве — в вашем Telegram-боте. Можно включить одно или оба. Действует и для входа с телефона.</p>
+{{$p := $d.Protection}}
+<p>Пароль: {{if $p.Password}}<b class="ok">задан</b>{{else}}<b>не задан</b>{{end}} · Подтверждение в Telegram: {{if $p.Telegram}}<b class="ok">включено</b>{{else}}<b>выключено</b>{{end}}</p>
+<form method="post" action="{{.Base}}/settings/login/password"><input type="hidden" name="csrf" value="{{.CSRF}}">
+{{if $p.Password}}<label>Текущий пароль</label><input type="password" name="current" autocomplete="current-password">{{end}}
+<label>{{if $p.Password}}Новый пароль{{else}}Пароль{{end}} (не короче 8 символов)</label><input type="password" name="password" autocomplete="new-password">
+<label>Повторите</label><input type="password" name="repeat" autocomplete="new-password">
+<button class="{{if not $p.Password}}primary{{end}}">{{if $p.Password}}Сменить пароль{{else}}Задать пароль{{end}}</button></form>
+{{if $p.Password}}<form method="post" action="{{.Base}}/settings/login/password" class="row" data-confirm="Снять пароль со входа в Web UI?"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="remove" value="1">
+<label class="inline">Текущий пароль <input type="password" name="current" autocomplete="current-password" size="14"></label><button>Снять пароль</button></form>{{end}}
+<form method="post" action="{{.Base}}/settings/login/telegram" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="{{if $p.Telegram}}0{{else}}1{{end}}">
+{{if $p.Password}}<label class="inline">Текущий пароль <input type="password" name="current" autocomplete="current-password" size="14"></label>{{end}}
+<button>{{if $p.Telegram}}Выключить подтверждение в Telegram{{else}}Подтверждать вход в Telegram{{end}}</button></form>
+{{if and (not $p.Telegram) (not $d.TelegramReady)}}<p class="help">Сначала подключите бота: <a href="{{.Base}}/approvals/telegram">Подтверждения → Telegram</a>.</p>{{end}}
+<p class="help">Пароль хранится только хэшем (argon2id) в State Store, не в конфигурации — агент не может снять защиту правкой политики. Изменение защиты закрывает все остальные сессии. Если и пароль задан — менять защиту можно, только введя текущий пароль. Забыли пароль или нет доступа к Telegram: остановите daemon и запустите <code>gate4ai daemon --reset-ui-login</code> (в Telegram придёт уведомление о сбросе).</p>
+</div>
+
 <div class="card" id="autostart"><h3>Автозапуск</h3>
 {{with $d.Autostart}}
 <p>{{if .installed}}<b class="ok">Включён</b>: gate4.ai запускается при входе в систему{{with .systemd}} (systemd: {{.}}){{end}}.{{else}}<b>Выключен</b>: после перезагрузки gate4.ai не запустится сам, и агенты получат «устройство офлайн».{{end}}</p>

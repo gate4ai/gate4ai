@@ -41,22 +41,27 @@ import (
 
 // redirect — переход после действия формы с сообщением (flash) или ошибкой.
 func redirect(to, flash string) map[string]any {
-	sep := "?"
-	if strings.Contains(to, "?") {
-		sep = "&"
-	}
 	if flash == "" {
 		return map[string]any{"redirect": to}
 	}
-	return map[string]any{"redirect": to + sep + "flash=" + urlq(flash)}
+	return map[string]any{"redirect": withQuery(to, "flash", flash)}
 }
 
 func redirectErr(to string, err error) map[string]any {
+	return map[string]any{"redirect": withQuery(to, "error", err.Error())}
+}
+
+// withQuery добавляет параметр к адресу; якорь (#…) остаётся в конце.
+func withQuery(to, k, v string) string {
+	frag := ""
+	if i := strings.IndexByte(to, '#'); i >= 0 {
+		to, frag = to[:i], to[i:]
+	}
 	sep := "?"
 	if strings.Contains(to, "?") {
 		sep = "&"
 	}
-	return map[string]any{"redirect": to + sep + "error=" + urlq(err.Error())}
+	return to + sep + k + "=" + urlq(v) + frag
 }
 
 func (u *UI) edit(comment string, f func(c *config.Config) error) error {
@@ -1404,6 +1409,10 @@ func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 	if u.Autostart != nil {
 		data["Autostart"] = u.Autostart.State()
 	}
+	// Хэш пароля на страницу не попадает — только «задан / не задан».
+	p := u.Protection()
+	data["Protection"] = map[string]bool{"Password": p.Password != "", "Telegram": p.Telegram}
+	data["TelegramReady"] = u.confirmer() != nil
 	if link := r.URL.Query().Get("link"); link == "1" {
 		if l, err := u.RemoteLoginURL(); err == nil {
 			data["RemoteLink"] = l

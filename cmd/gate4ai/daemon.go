@@ -70,6 +70,7 @@ func daemonMain(args []string, tty bool) error {
 	connDir := flag.String("connectors", "", "installed connectors directory (default <home>/connectors)")
 	showVersion := flag.Bool("version", false, "print version")
 	flag.StringVar(&uiAddr, "ui", uiAddr, "web UI address (loopback only; empty disables)")
+	flag.BoolVar(&resetUILogin, "reset-ui-login", false, "remove the Web UI login protection (password, Telegram confirmation) if you are locked out")
 	flag.StringVar(&telegramAPI, "telegram-api", telegramAPI, "Telegram Bot API base URL")
 	flag.StringVar(&public.addr, "public", "", "public address without relay: listen here (HTTPS with --public-cert/--public-key, or loopback HTTP behind a reverse proxy)")
 	flag.StringVar(&public.url, "public-url", "", "external URL of --public, e.g. https://gate.example.com")
