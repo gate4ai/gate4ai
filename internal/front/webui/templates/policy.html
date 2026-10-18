@@ -15,14 +15,15 @@
 {{if $d.Connectors}}<button class="small">Сохранить</button>{{end}}</form></div>
 
 <div class="row between"><h3>Правила профиля</h3><a class="btn primary" href="{{.Base}}/policy/rule?profile={{$d.Profile}}">+ Правило</a></div>
+<p class="help">Порядок правил на решение не влияет: если сработало несколько, запрет сильнее вопроса, а вопрос сильнее разрешения. Стрелки — только для удобства чтения.</p>
 <table><tr><th>Действие</th><th>Решение</th><th>Условие</th><th>Причина</th><th></th></tr>
 {{range $p.Rules}}<tr id="rule-{{.ID}}"><td><code>{{.Action}}</code><div class="help">{{.ID}}</div></td>
 <td class="{{.Effect}}"><b>{{effectRu .Effect}}</b></td>
 <td>{{if isCode .When}}<code>{{.When}}</code>{{else}}{{describe .When}}{{end}}</td><td>{{.Reason}}</td>
 <td><div class="row">
 <a class="btn small" href="{{$.Base}}/policy/rule?profile={{$d.Profile}}&id={{.ID}}">Изменить</a>
-<form method="post" action="{{$.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="-1"><button class="small" title="выше">↑</button></form>
-<form method="post" action="{{$.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="1"><button class="small" title="ниже">↓</button></form>
+<form method="post" action="{{$.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="-1"><button class="small" title="выше (на решение не влияет)">↑</button></form>
+<form method="post" action="{{$.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="1"><button class="small" title="ниже (на решение не влияет)">↓</button></form>
 <form method="post" action="{{$.Base}}/policy/rule/delete" class="inline" data-confirm="Удалить правило {{.ID}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><button class="small danger">Удалить</button></form>
 </div></td></tr>
 {{else}}<tr><td colspan="5" class="muted">Правил нет — действуют значения по умолчанию. Начните с <a href="{{$.Base}}/policy/templates?profile={{$d.Profile}}">шаблона</a>.</td></tr>{{end}}

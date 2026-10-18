@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -1104,8 +1105,10 @@ func (u *UI) rulePage(r *http.Request) (string, map[string]any, error) {
 	// На основе запроса подтверждения или квитанции журнала.
 	var agent string
 	var args map[string]any
+	approvalID := ""
 	if id := q.Get("approval"); id != "" {
 		if a, err := u.D.State.GetApproval(id); err == nil {
+			approvalID = a.ID
 			agent, f.Action, args = a.Agent, a.Action, a.Args
 			note = "Правило на основе запроса " + a.Agent + " → " + a.Action + ". Уточните условия, чтобы не разрешить лишнего."
 		}
@@ -1138,12 +1141,15 @@ func (u *UI) rulePage(r *http.Request) (string, map[string]any, error) {
 		profiles = append(profiles, p)
 	}
 	sort.Strings(profiles)
-	data := map[string]any{"F": f, "Tools": tools, "Profiles": profiles, "Kinds": condKinds, "Lists": cfg.Lists, "Note": note}
+	data := map[string]any{"F": f, "Tools": tools, "Profiles": profiles, "Kinds": condKinds, "Lists": cfg.Lists, "Note": note, "Approval": approvalID}
 	if hasTool {
 		data["Tool"], data["Args"] = t, actionArgs(t)
 	}
 	return "rule", data, nil
 }
+
+// amountArg — числовые аргументы, для которых «не больше значения» осмысленно.
+var amountArg = regexp.MustCompile(`(?i)amount|sum|total|price|cost|qty|quantity|count|limit`)
 
 // suggestConds — условия по аргументам конкретного вызова.
 func suggestConds(t daemon.Tool, args map[string]any) []Cond {
@@ -1163,7 +1169,9 @@ func suggestConds(t daemon.Tool, args map[string]any) []Cond {
 			}
 		case a.Array && a.Format == "email":
 			out = append(out, Cond{Kind: "in_list", Arg: a.Name, Value: "contacts_trusted"})
-		case a.Type == "number" || a.Type == "integer":
+		case (a.Type == "number" || a.Type == "integer") && amountArg.MatchString(a.Name):
+			// «не больше» — для сумм и количеств; у технических чисел
+			// (timeout_ms, max_chars) условие ничего не значит.
 			out = append(out, Cond{Kind: "lte", Arg: a.Name, Value: s})
 		}
 	}
@@ -1220,6 +1228,12 @@ func (u *UI) saveRule(w http.ResponseWriter, r *http.Request) map[string]any {
 		}
 		id := form.ID
 		if id == "" {
+			// Такое же правило уже есть — второе ничего не изменит.
+			for _, r := range c.Profiles[form.Profile].Rules {
+				if r.Action == form.Action && r.When == when && r.Effect == form.Effect {
+					return &duplicateRule{id: r.ID}
+				}
+			}
 			id = c.Profiles[form.Profile].UniqueRuleID(strings.NewReplacer(".", "-", "*", "all").Replace(form.Action) + "-" + form.Effect)
 		}
 		// Действие могло ещё не быть доступно профилю.
@@ -1228,10 +1242,54 @@ func (u *UI) saveRule(w http.ResponseWriter, r *http.Request) map[string]any {
 		}
 		return c.PutRule(form.Profile, config.Rule{ID: id, Action: form.Action, When: when, Effect: form.Effect, Reason: form.Reason})
 	})
+	var dup *duplicateRule
+	if errors.As(err, &dup) {
+		return redirect("/policy?profile="+url.QueryEscape(form.Profile)+"#rule-"+dup.id, "Такое правило уже есть: "+dup.id+". Новое не добавлено.")
+	}
 	if err != nil {
 		return redirectErr(back, err)
 	}
+	if warn := u.overridden(form.Profile, form.Action, form.Effect, f.Get("approval")); warn != "" {
+		return redirectErr("/policy?profile="+url.QueryEscape(form.Profile), errors.New("Правило сохранено, но не сработает: "+warn))
+	}
 	return redirect("/policy?profile="+url.QueryEscape(form.Profile), "Правило сохранено")
+}
+
+type duplicateRule struct{ id string }
+
+func (d *duplicateRule) Error() string { return "duplicate of rule " + d.id }
+
+// overridden — почему правило с эффектом effect не изменит решение: по
+// исходному запросу (approval) — решение симулятора по новой политике, без
+// него — правило сильнее (deny > ask > allow) на то же действие без условия.
+func (u *UI) overridden(profile, action, effect, approval string) string {
+	rank := map[string]int{config.EffectAllow: 0, config.EffectAsk: 1, config.EffectDeny: 2}
+	cfg := u.D.Config.Current()
+	if approval != "" {
+		if a, err := u.D.State.GetApproval(approval); err == nil && a.Action == action {
+			eng, err := policy.New(cfg, policy.Catalog(u.D.Registry.Catalog()))
+			if err == nil {
+				_, act, _ := u.D.Registry.Lookup(action)
+				dec := eng.Decide(policy.Request{Agent: a.Agent, Action: action, Class: act.Class, Args: a.Args, Now: time.Now()}, u.D.State.Counters())
+				if dec.Effect != effect && rank[dec.Effect] > rank[effect] {
+					return fmt.Sprintf("для этого запроса решение по-прежнему «%s» по правилу %s — %s сильнее, порядок правил не важен. Удалите или сузьте %s.",
+						effectWord(dec.Effect), strings.Join(dec.RuleIDs, ", "), effectWord(dec.Effect), strings.Join(dec.RuleIDs, ", "))
+				}
+				return ""
+			}
+		}
+	}
+	for _, r := range cfg.Profiles[profile].Rules {
+		if r.When == "" && rank[r.Effect] > rank[effect] && policy.ActionMatches(r.Action, action) {
+			return fmt.Sprintf("правило %s (%s, без условия) на %s сильнее — порядок правил не важен. Удалите или сузьте %s.",
+				r.ID, effectWord(r.Effect), r.Action, r.ID)
+		}
+	}
+	return ""
+}
+
+func effectWord(e string) string {
+	return map[string]string{config.EffectAllow: "разрешать", config.EffectAsk: "спрашивать", config.EffectDeny: "запрещать"}[e]
 }
 
 func (u *UI) deleteRule(w http.ResponseWriter, r *http.Request) map[string]any {

@@ -10,7 +10,7 @@
 
 {{if $f.Action}}
 <form method="post" action="{{.Base}}/policy/rule" class="card"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<input type="hidden" name="profile" value="{{$f.Profile}}"><input type="hidden" name="action" value="{{$f.Action}}"><input type="hidden" name="id" value="{{$f.ID}}">
+<input type="hidden" name="profile" value="{{$f.Profile}}"><input type="hidden" name="action" value="{{$f.Action}}"><input type="hidden" name="id" value="{{$f.ID}}"><input type="hidden" name="approval" value="{{$d.Approval}}">
 {{with $d.Tool}}<p class="muted"><code>{{.Name}}</code> — {{.Description}}</p>{{end}}
 <label>2. Решение</label>
 <label class="inline"><input type="radio" name="effect" value="allow" {{if eq $f.Effect "allow"}}checked{{end}}> <span class="allow">разрешать без вопроса</span></label>

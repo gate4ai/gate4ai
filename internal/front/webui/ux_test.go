@@ -13,7 +13,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gate4ai/sdk-go/manifest"
+
 	"github.com/gate4ai/gate4ai/internal/config"
+	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/relayclient"
@@ -424,5 +427,42 @@ func TestRemoteLinkRelayOffline(t *testing.T) {
 	st.Online, st.Phase, st.Error = true, relayclient.PhaseOnline, ""
 	if l, err := u.RemoteLoginURL(); err != nil || !strings.HasPrefix(l, "https://abc.relay.test/ui/login?t=") {
 		t.Fatal(l, err)
+	}
+}
+
+// «Разрешать всегда» не создаёт мёртвых правил: правило, которое перебьёт
+// более сильное, сохраняется с предупреждением, дубль не добавляется.
+func TestRuleOverriddenAndDuplicate(t *testing.T) {
+	u, d, _, base := setup(t)
+	_, _, post, _ := loginAs(t, u, base)
+	ask := url.Values{"profile": {"p"}, "action": {"notes.append"}, "effect": {"ask"}}
+	if p := post("/policy/rule", ask); !strings.Contains(p, "Правило сохранено") {
+		t.Fatal(p)
+	}
+	if p := post("/policy/rule", ask); !strings.Contains(p, "Такое правило уже есть") {
+		t.Fatal("duplicate:", p)
+	}
+	if n := len(d.Config.Current().Profiles["p"].Rules); n != 1 {
+		t.Fatal("rules:", n)
+	}
+	// Запрос подтверждения → правило allow по нему: ask всё равно сильнее.
+	res := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "notes.append", Args: map[string]any{"text": "x"}})
+	p := post("/policy/rule", url.Values{"profile": {"p"}, "action": {"notes.append"}, "effect": {"allow"}, "approval": {res.ID}})
+	if !strings.Contains(p, "не сработает") || !strings.Contains(p, "notes-append-ask") {
+		t.Fatal("overridden by ask:", p[strings.Index(p, "<main>"):][:800])
+	}
+	// Без запроса — по правилам профиля.
+	p = post("/policy/rule", url.Values{"profile": {"p"}, "action": {"notes.append"}, "effect": {"allow"},
+		"cond_kind": {"contains"}, "cond_arg": {"text"}, "cond_value": {"hello"}})
+	if !strings.Contains(p, "не сработает") {
+		t.Fatal(p[strings.Index(p, "<main>"):][:800])
+	}
+}
+
+func TestSuggestCondsOnlyForAmounts(t *testing.T) {
+	tool := daemon.Tool{Schema: manifest.MustSchema(`{ type: object, properties: { amount: { type: number }, timeout_ms: { type: integer } } }`)}
+	conds := suggestConds(tool, map[string]any{"amount": 10.0, "timeout_ms": 0.0})
+	if len(conds) != 1 || conds[0].Arg != "amount" {
+		t.Fatalf("%+v", conds)
 	}
 }
