@@ -60,7 +60,7 @@ func (d *Daemon) Tools(p auth.Principal) []Tool {
 			}
 			desc := a.Description
 			if len(a.Calls) > 0 {
-				desc = strings.TrimSuffix(desc, ".") + ". Also runs: " + strings.Join(a.Calls, ", ") + " (covered by approving this action)."
+				desc = strings.TrimSuffix(desc, ".") + ". Also runs: " + a.CallsText() + " (covered by approving this action)."
 			}
 			t := Tool{Name: m.Full(a), Connector: m.Connector, Action: a.Name, Description: desc, Calls: a.Calls,
 				Class: a.Class, Schema: a.InputSchema, InputSchema: a.JSONSchema(), Example: a.Example}
@@ -226,10 +226,29 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 				f.Since = time.Now().Add(-dur)
 			}
 		}
+		parent := q.Get("parent")
+		if parent != "" {
+			// Подвызовы действия: родитель — по id или хэшу квитанции.
+			if pe, err := d.Journal.Find(strings.TrimPrefix(parent, "#")); err == nil {
+				parent = pe.Receipt.ID
+			}
+			f.Limit = 5000
+		}
 		es, err := d.Journal.List(f)
 		if err != nil {
 			writeErr(w, 500, "journal", err.Error())
 			return
+		}
+		if parent != "" {
+			kept := es[:0]
+			for _, e := range es {
+				if e.Receipt.Parent == parent {
+					kept = append(kept, e)
+				}
+			}
+			if es = kept; len(es) > limit {
+				es = es[:limit]
+			}
 		}
 		if es == nil {
 			es = []audit.Entry{}

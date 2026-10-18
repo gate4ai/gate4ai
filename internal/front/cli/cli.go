@@ -99,7 +99,7 @@ Daemon:
   gate4ai service install [--no-tray] [-- daemon flags] | uninstall | status   autostart at login
 
 Owner commands (local socket):
-  gate4ai log [--agent a] [--action x] [--effect allow|ask|deny] [--since 24h] [--limit 50] [--json]
+  gate4ai log [--agent a] [--action x] [--effect allow|ask|deny] [--since 24h] [--parent #hash] [--limit 50] [--json]
   gate4ai show <#hash|id>                 one receipt
   gate4ai export -o file.tar.gz [--passphrase-env VAR]
   gate4ai verify file.tar.gz [--pubkey hex] [--passphrase-env VAR]   (offline)
@@ -614,6 +614,10 @@ func (e *Env) status(ctx context.Context, args []string) int {
 		fmt.Fprintln(e.Stderr, "usage: gate4ai status <id> [--wait 10m]")
 		return ExitUsage
 	}
+	if strings.HasPrefix(id, "#") {
+		// #хэш — квитанция журнала, а не id ожидающего действия.
+		return e.fail(fmt.Errorf("%s is a journal receipt, not an action id: gate4ai show '%s' (owner), its calls: gate4ai log --parent '%s'", id, id, id))
+	}
 	path := "/v1/status/" + id
 	if *wait != "" {
 		path += "?wait=" + *wait
@@ -649,17 +653,19 @@ func (e *Env) log(ctx context.Context, args []string) int {
 	effect := fs.String("effect", "", "allow | ask | deny")
 	since := fs.String("since", "", "e.g. 24h, 7d")
 	limit := fs.Int("limit", 50, "")
-	asJSON := fs.Bool("json", false, "")
+	parent := fs.String("parent", "", "only the calls (service_call) of this action: receipt #hash or id")
+	asJSON := fs.Bool("json", false, "an array of {receipt: {id, ts, agent, action, parent, args, decision, execution, verification}, hash}")
 	if fs.Parse(args) != nil {
 		return ExitUsage
 	}
-	q := fmt.Sprintf("/v1/log?agent=%s&action=%s&effect=%s&since=%s&limit=%d", *agent, *action, *effect, *since, *limit)
+	q := "/v1/log?" + url.Values{"agent": {*agent}, "action": {*action}, "effect": {*effect}, "since": {*since},
+		"limit": {fmt.Sprint(*limit)}, "parent": {*parent}}.Encode()
 	var es []audit.Entry
 	if err := e.Client().Do(ctx, "GET", q, nil, &es); err != nil {
 		return e.fail(err)
 	}
 	if len(es) == 0 {
-		if *agent+*action+*effect+*since == "" {
+		if *agent+*action+*effect+*since+*parent == "" {
 			fmt.Fprintln(e.Stderr, "gate4ai: the journal is empty: no agent actions yet")
 		} else {
 			fmt.Fprintln(e.Stderr, "gate4ai: no journal entries match the filters")

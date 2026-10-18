@@ -13,5 +13,6 @@ actions:
   - { name: settings, class: read }
   - { name: kv, class: write }
   - { name: spin, class: read }
+  - { name: sleep, class: read }
   - { name: hog, class: read }
   - { name: crash, class: read }

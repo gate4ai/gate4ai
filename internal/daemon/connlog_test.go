@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/sdk-go/manifest"
 
+	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/connectors"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
@@ -89,7 +91,8 @@ func TestConnectorLogInResultAndAPI(t *testing.T) {
 		os.WriteFile(filepath.Join(d.ConnectorsDir, name, store.InfoFile), b, 0o600)
 	}
 	res := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "site.read"})
-	if res.Status != pipeline.StatusError || len(res.Log) != 1 || res.Log[0] != "info: selector #debt not found, using the table" {
+	if res.Status != pipeline.StatusError || len(res.Log) != 2 || res.Log[0] != "info: selector #debt not found, using the table" ||
+		!strings.HasPrefix(res.Log[1], "warn: site.read failed") || !strings.Contains(res.Log[1], "no debt on the page") {
 		t.Fatalf("own build: the agent sees the connector's log: %+v", res)
 	}
 	if res := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "shop.read"}); len(res.Log) != 0 {
@@ -110,7 +113,8 @@ func TestConnectorLogInResultAndAPI(t *testing.T) {
 	var out struct {
 		Lines []LogLine `json:"lines"`
 	}
-	if code := owner.do(t, "GET", "/v1/connectors/logs?name=shop&since=1h", nil, &out); code != 200 || len(out.Lines) != 1 {
+	// Лог владельца — и ошибка исполнения (раньше после падения в нём было только «installed»).
+	if code := owner.do(t, "GET", "/v1/connectors/logs?name=shop&since=1h", nil, &out); code != 200 || len(out.Lines) != 2 || !strings.Contains(out.Lines[1].Msg, "no debt on the page") {
 		t.Fatal(code, out)
 	}
 	if code := owner.do(t, "GET", "/v1/connectors/logs", nil, nil); code != 400 {
@@ -121,5 +125,42 @@ func TestConnectorLogInResultAndAPI(t *testing.T) {
 	agent := client{c: ipc.HTTPClient(agentSock), token: tok.Token}
 	if code := agent.do(t, "GET", "/v1/connectors/logs?name=shop", nil, nil); code == 200 {
 		t.Fatal("logs are for the owner", code)
+	}
+}
+
+// Подвызовы действия ищутся по его квитанции: gate4ai log --parent '#…'.
+func TestLogByParent(t *testing.T) {
+	home := t.TempDir()
+	d, err := New(Options{Home: filepath.Join(home, "data"), Keys: keys.NewMemory(), InitialConfig: []byte("agents:\n  bot: { profile: p }\nprofiles:\n  p: { connectors: [] }\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	root := &audit.Receipt{ID: audit.NewID(), Agent: "bot", Action: "lk.visits"}
+	hash, err := d.Journal.Append(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []string{"browser.open", "browser.observe"} {
+		d.Journal.Append(&audit.Receipt{ID: audit.NewID(), Agent: "bot", Action: a, Parent: root.ID})
+	}
+	d.Journal.Append(&audit.Receipt{ID: audit.NewID(), Agent: "bot", Action: "browser.read"})
+	ownerSock, agentSock := filepath.Join(home, "run", "o.sock"), filepath.Join(home, "run", "a.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Serve(ctx, ownerSock, agentSock)
+	for i := 0; i < 100; i++ {
+		if _, err := os.Stat(agentSock); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	owner := client{c: ipc.HTTPClient(ownerSock)}
+	for _, p := range []string{audit.Short(hash), root.ID} {
+		var es []audit.Entry
+		owner.do(t, "GET", "/v1/log?parent="+url.QueryEscape(p), nil, &es)
+		if len(es) != 2 || es[0].Receipt.Parent != root.ID {
+			t.Fatalf("%s: %+v", p, es)
+		}
 	}
 }

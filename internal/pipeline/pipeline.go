@@ -308,11 +308,17 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 			res.Code = CodeOffline
 		}
 		res.ID, res.Receipt, res.Message = receipt.ID, audit.Short(hash), p.maskString(err.Error())
+		// Ошибка — и строкой лога коннектора (`gate4ai connectors logs`, поле log
+		// своей сборки); ошибка подвызова — и в логе корневого коннектора.
+		p.Log.Warn(action+" failed", "connector", conn, "receipt", res.Receipt, "err", res.Message)
+		if root := info.Chain[0]; root != conn {
+			p.Log.Warn("call "+action+" failed", "connector", root, "receipt", res.Receipt, "err", res.Message)
+		}
 		return res
 	}
 	// Коннектору не доверяют: результат сверяется с манифестом.
 	if err := abi.CheckResult(ex, act.OutputSchema); err != nil {
-		receipt.Execution = audit.Execution{Status: "invalid_result", ResultRef: ex.ResultRef, Error: p.maskString(err.Error())}
+		receipt.Execution = audit.Execution{Status: "invalid_result", ResultRef: p.maskString(ex.ResultRef), Error: p.maskString(err.Error())}
 		receipt.Verification = audit.Verification{Status: "not_applicable"}
 		hash, _ := p.Journal.Append(receipt)
 		res.Status, res.Code = StatusError, CodeInvalidResult
@@ -320,7 +326,7 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 		res.Message = "the connector returned a malformed result (" + p.maskString(err.Error()) + "); the action may have run: report it to the user as NOT confirmed"
 		return res
 	}
-	receipt.Execution = audit.Execution{Status: "ok", ResultRef: ex.ResultRef}
+	receipt.Execution = audit.Execution{Status: "ok", ResultRef: p.maskString(ex.ResultRef)}
 	var evRefs []string
 	for _, e := range ex.Evidence {
 		if ref, err := p.Journal.Evidence.Put(e.Data); err == nil {
@@ -378,7 +384,7 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 		res.Status = StatusOK
 	}
 	res.ID, res.Receipt = receipt.ID, audit.Short(hash)
-	res.Result = p.Secrets.Mask(ex.Structured)
+	res.Result = p.mask(ex.Structured)
 	res.Content = p.maskContent(ex.Content)
 	if act.Untrusted {
 		res.Provenance = &Provenance{Label: "untrusted_content", Source: ex.Source,
@@ -545,14 +551,14 @@ func (p *Pipeline) maskArgs(act manifest.Action, args map[string]any) map[string
 			out[k] = v
 		}
 	}
-	if m, ok := p.Secrets.Mask(out).(map[string]any); ok {
+	if m, ok := p.mask(out).(map[string]any); ok {
 		return m
 	}
 	return out
 }
 
 func (p *Pipeline) maskString(s string) string {
-	if m, ok := p.Secrets.Mask(s).(string); ok {
+	if m, ok := p.mask(s).(string); ok {
 		return m
 	}
 	return s

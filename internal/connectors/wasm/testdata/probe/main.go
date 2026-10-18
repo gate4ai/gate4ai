@@ -10,6 +10,7 @@ import (
 	_ "embed"
 	"errors"
 	"io"
+	"time"
 
 	"github.com/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/sdk-go/connector"
@@ -89,6 +90,10 @@ func (probe) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 	case "spin":
 		for {
 		}
+	case "sleep": // пауза в коннекторе (ленивые списки сайтов): time.Sleep через WASI
+		start := time.Now()
+		time.Sleep(1200 * time.Millisecond)
+		return abi.ExecResult{Structured: map[string]any{"slept_ms": time.Since(start).Milliseconds()}}, nil
 	case "hog":
 		for {
 			sink = append(sink, make([]byte, 8<<20))

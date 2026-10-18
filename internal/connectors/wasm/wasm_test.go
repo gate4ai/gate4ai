@@ -210,6 +210,18 @@ func TestKVEvidenceAndVerify(t *testing.T) {
 	}
 }
 
+// time.Sleep в коннекторе работает (WASI nanosleep) и не роняет модуль.
+func TestSleep(t *testing.T) {
+	c := load(t, io.Discard)
+	res, err := run(t, c, "sleep", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ms, _ := res.Structured.(map[string]any)["slept_ms"].(float64); ms < 1100 {
+		t.Fatal(res.Structured)
+	}
+}
+
 func TestLimits(t *testing.T) {
 	c := load(t, io.Discard)
 	_, err := run(t, c, "spin", nil)
