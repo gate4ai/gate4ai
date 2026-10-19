@@ -5,6 +5,7 @@ package approval
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -32,6 +33,7 @@ type fakeTelegram struct {
 	sent    []map[string]any
 	edits   []map[string]any
 	answers []string
+	deleted []any
 	updates []Update
 	nextID  int64
 }
@@ -56,6 +58,8 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		result = map[string]any{"message_id": f.nextID}
 	case "editMessageText":
 		f.edits = append(f.edits, req)
+	case "deleteMessage":
+		f.deleted = append(f.deleted, req["message_id"])
 	case "answerCallbackQuery":
 		f.answers = append(f.answers, req["text"].(string))
 	case "getUpdates":
@@ -266,5 +270,45 @@ func TestTelegramLoginConfirmation(t *testing.T) {
 	tg.Handle(context.Background(), cbUpdate(4, owner, "lr:def"))
 	if ok := <-got; ok {
 		t.Fatal("rejection confirmed login")
+	}
+}
+
+// Вопрос с вводом кода (SMS для входа на сайт) приходит в Telegram; ответ —
+// следующим сообщением владельца, сообщение с кодом бот удаляет.
+func TestTelegramQuestion(t *testing.T) {
+	fake := &fakeTelegram{token: "1:Q"}
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+	const owner = int64(77)
+	got := map[string]string{}
+	tg := NewTelegram(&BotAPI{Base: srv.URL, Token: "1:Q"}, owner, nil, nil)
+	tg.Answer = func(id, v string) error { got[id] = v; return nil }
+	ctx := context.Background()
+	tg.Asked("q_1", "lk_emias signs in on https://login.mos.ru with @emias and asks: код из SMS")
+	if len(fake.sent) != 1 || !strings.Contains(fake.sent[0]["text"].(string), "код из SMS") {
+		t.Fatal(fake.sent)
+	}
+	msg := func(from int64, id int64, text string) Update {
+		var u Update
+		json.Unmarshal([]byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d},"text":%q}}`, id, id, from, from, text)), &u)
+		return u
+	}
+	tg.Handle(ctx, msg(666, 10, "1234")) // посторонний
+	if len(got) != 0 {
+		t.Fatal("foreign answer")
+	}
+	tg.Handle(ctx, msg(owner, 11, " 4821 "))
+	if got["q_1"] != "4821" || len(fake.deleted) != 1 || fake.deleted[0].(float64) != 11 || len(fake.edits) != 1 {
+		t.Fatal(got, fake.deleted, fake.edits)
+	}
+	// Вопроса больше нет: следующее сообщение — обычное.
+	tg.Handle(ctx, msg(owner, 12, "5555"))
+	if len(got) != 1 {
+		t.Fatal("answered twice")
+	}
+	tg.Asked("q_2", "x")
+	tg.Handle(ctx, msg(owner, 13, "/cancel"))
+	if v, ok := got["q_2"]; !ok || v != "" {
+		t.Fatal("cancel:", got)
 	}
 }

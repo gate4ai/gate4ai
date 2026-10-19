@@ -42,9 +42,10 @@ type Button struct {
 type Update struct {
 	UpdateID int64 `json:"update_id"`
 	Message  *struct {
-		From *User  `json:"from"`
-		Chat *Chat  `json:"chat"`
-		Text string `json:"text"`
+		MessageID int64  `json:"message_id"`
+		From      *User  `json:"from"`
+		Chat      *Chat  `json:"chat"`
+		Text      string `json:"text"`
 	} `json:"message"`
 	CallbackQuery *struct {
 		ID      string `json:"id"`
@@ -155,13 +156,18 @@ type Telegram struct {
 	Log     *slog.Logger
 	// Webhook — адрес вебхука (<публичный адрес>/telegram); "" — long polling.
 	Webhook string
+	// Answer — ответ владельца на вопрос с вводом (код из SMS для входа на
+	// сайт); значение идёт сразу в поле страницы.
+	Answer func(id, value string) error
 
-	mu      sync.Mutex
-	msgs    map[string]int64 // approval id → message id
-	logins  map[string]loginReq
-	secret  string // секрет вебхука (заголовок X-Telegram-Bot-Api-Secret-Token)
-	lastErr string // последняя ошибка получения обновлений ("" — работает)
-	mode    string // polling | webhook
+	mu       sync.Mutex
+	question string           // вопрос с вводом, ждущий ответа (последний)
+	qmsg     int64            // его сообщение
+	msgs     map[string]int64 // approval id → message id
+	logins   map[string]loginReq
+	secret   string // секрет вебхука (заголовок X-Telegram-Bot-Api-Secret-Token)
+	lastErr  string // последняя ошибка получения обновлений ("" — работает)
+	mode     string // polling | webhook
 }
 
 // Status — режим получения обновлений и последняя ошибка ("" — работает).
@@ -291,6 +297,60 @@ func (t *Telegram) Denied(agent, action, reason string) {
 	_, _ = t.API.SendMessage(ctx, t.OwnerID, fmt.Sprintf("⛔ %s: %s запрещено — %s", agent, action, reason), nil)
 }
 
+// Asked — вопрос с вводом значения (код для входа на сайт): ответ — следующим
+// сообщением владельца; сообщение с кодом бот удаляет из чата.
+func (t *Telegram) Asked(id, text string) {
+	if t.Answer == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	msg, err := t.API.SendMessage(ctx, t.OwnerID, "🔑 "+text+"\n\nОтветьте одним сообщением с кодом (/cancel — отказаться). Сообщение с кодом я удалю.", nil)
+	if err != nil {
+		t.Log.Warn("telegram question", "err", err)
+		return
+	}
+	t.mu.Lock()
+	t.question, t.qmsg = id, msg
+	t.mu.Unlock()
+}
+
+// messageDeleter — Bot API умеет удалять сообщения (необязательно для фейков).
+type messageDeleter interface {
+	DeleteMessage(ctx context.Context, chatID, msgID int64) error
+}
+
+// DeleteMessage удаляет сообщение (ответ с кодом не остаётся в чате).
+func (b *BotAPI) DeleteMessage(ctx context.Context, chatID, msgID int64) error {
+	return b.call(ctx, "deleteMessage", map[string]any{"chat_id": chatID, "message_id": msgID}, nil)
+}
+
+// answer — сообщение владельца как ответ на ждущий вопрос; false — вопроса нет.
+func (t *Telegram) answer(ctx context.Context, msgID int64, text string) bool {
+	t.mu.Lock()
+	id, qmsg := t.question, t.qmsg
+	t.question, t.qmsg = "", 0
+	t.mu.Unlock()
+	if id == "" || t.Answer == nil {
+		return false
+	}
+	value := strings.TrimSpace(text)
+	if value == "/cancel" {
+		value = ""
+	}
+	if d, ok := t.API.(messageDeleter); ok && msgID != 0 {
+		_ = d.DeleteMessage(ctx, t.OwnerID, msgID)
+	}
+	note := "✅ Код передан."
+	if err := t.Answer(id, value); err != nil {
+		note = "Вопрос уже закрыт: " + err.Error()
+	} else if value == "" {
+		note = "Отказ передан."
+	}
+	_ = t.API.EditMessage(ctx, t.OwnerID, qmsg, note)
+	return true
+}
+
 // Notice — служебное сообщение владельцу.
 func (t *Telegram) Notice(text string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -399,6 +459,9 @@ func (t *Telegram) Handle(ctx context.Context, u Update) {
 	if m := u.Message; m != nil {
 		if m.From == nil || m.From.ID != t.OwnerID {
 			return // посторонним бот не отвечает
+		}
+		if f := strings.Fields(m.Text + " ")[0]; (!strings.HasPrefix(f, "/") || f == "/cancel") && t.answer(ctx, m.MessageID, m.Text) {
+			return
 		}
 		switch strings.Fields(m.Text + " ")[0] {
 		case "/start", "/help":

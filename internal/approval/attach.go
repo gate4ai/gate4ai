@@ -123,6 +123,7 @@ func Attach(ctx context.Context, d *daemon.Daemon, desktop *Desktop, telegramBas
 		}
 		tg := NewTelegram(&BotAPI{Base: telegramBase, Token: token}, c.Approvals.Telegram.OwnerID, d.Pipeline, d.State)
 		tg.Log = d.Log
+		tg.Answer = d.Answer
 		tg.Webhook = hook
 		tctx, cancel := context.WithCancel(ctx)
 		stopTG = cancel
