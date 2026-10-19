@@ -113,6 +113,7 @@ Owner commands (local socket):
   gate4ai connectors new <name> --site <domain> [-o folder]   a connector over the browser to start from (offline)
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c] | verify <dir> <file.g4c> | keygen [-o key]   (publisher / registry review, offline)
   gate4ai registry check <index.json> [--key ed25519:…] [--fetch] | sign <index.json> --key file | add <index.json> <pack.json> --publisher name …   (registry)
+  gate4ai fixture scrub <file.json> [-o out] [--replace "real=fake"]... [--auto]   personal data out of a recorded browser session
   gate4ai contract gen <manifest.yaml> [-o client.go] [--package name] | diff <old manifest> <new manifest>   (calls between connectors)
   gate4ai run <agent> [--workspace dir] [--container|--microvm] [--image img] [--engine docker|podman] [--dry-run] [-- cmd]   isolated agent
   gate4ai doctor                          look for ways around gate4ai
@@ -196,6 +197,8 @@ func Run(ctx context.Context, e *Env, args []string) int {
 		return e.registry(ctx, rest)
 	case "contract":
 		return e.contract(rest)
+	case "fixture":
+		return e.fixture(rest)
 	case "ui":
 		return e.ui(ctx, rest)
 	case "run":
