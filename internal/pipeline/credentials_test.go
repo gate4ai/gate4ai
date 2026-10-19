@@ -315,6 +315,13 @@ func TestLoginAccess(t *testing.T) {
 		!strings.Contains(e.stranger.got[0].Error(), abi.CodeSecretDenied) {
 		t.Fatal(r, e.stranger.got)
 	}
+	// Слот ждёт коннектор входа (via), а у учётки форма — доступа нет.
+	e.slotted.creds[0].Types = []string{manifest.SlotVia}
+	if r := e.p.Execute(ctx, Call{Agent: "dev", Action: "slotted.login"}); r.Status != StatusOK || e.slotted.got[0] == nil ||
+		!strings.Contains(e.slotted.got[0].Error(), abi.CodeSecretDenied) {
+		t.Fatal("slot type does not match the account:", e.slotted.got)
+	}
+	e.slotted.creds[0].Types = nil
 	// Слот, привязанный шире манифеста, доступа не даёт.
 	e.slotted.creds[0].Bind = []string{"https://other.example"}
 	if r := e.p.Execute(ctx, Call{Agent: "dev", Action: "slotted.login"}); r.Status != StatusOK || e.slotted.got[0] == nil {

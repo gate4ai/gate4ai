@@ -83,9 +83,13 @@ func (p *Pipeline) allowed(cfg *config.Config, alias string, cr config.Credentia
 		return false
 	}
 	m := cli.Manifest()
+	kind := manifest.SlotForm
+	if cr.Via != nil {
+		kind = manifest.SlotVia
+	}
 	for _, s := range m.Credentials {
-		if cfg.SlotAccount(a.connector, s.Slot) != alias {
-			continue
+		if cfg.SlotAccount(a.connector, s.Slot) != alias || !s.Accepts(kind) {
+			continue // учётка другого вида, чем ждёт слот (форма / коннектор входа)
 		}
 		slot := s.Origins(cfg.Connectors[a.connector])
 		if len(slot) > 0 && !slices.ContainsFunc(cr.Origins(), func(o string) bool { return !slices.Contains(slot, o) }) {
