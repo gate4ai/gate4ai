@@ -208,7 +208,17 @@ func (u *UI) decide(m mount) func(w http.ResponseWriter, r *http.Request) map[st
 		a, _ := u.D.State.GetApproval(r.PathValue("id"))
 		res, err := u.D.Pipeline.Decide(r.Context(), r.PathValue("id"), approve, channel, "owner")
 		back := or(r.PostForm.Get("back"), "/approvals")
-		if err != nil {
+		switch {
+		case errors.Is(err, state.ErrAlreadyDecided) && a != nil:
+			// Устаревшая страница, повторное нажатие или решение в другом канале:
+			// это не ошибка — сообщаем, кто и как уже решил.
+			if a, gerr := u.D.State.GetApproval(a.ID); gerr == nil {
+				return redirect(back, "Запрос уже решён: "+resolvedText(a))
+			}
+			return redirect(back, "Запрос уже решён")
+		case errors.Is(err, state.ErrNoApproval):
+			return redirectErr(back, errors.New("запрос не найден"))
+		case err != nil:
 			return redirectErr(back, err)
 		}
 		verb := "Отклонено"
@@ -227,6 +237,94 @@ func (u *UI) decide(m mount) func(w http.ResponseWriter, r *http.Request) map[st
 			return redirect("/policy/rule?approval="+url.QueryEscape(a.ID), msg+". Теперь можно создать правило, чтобы не спрашивать в следующий раз.")
 		}
 		return redirect(back, msg)
+	}
+}
+
+// decidedVia — где принято решение по запросу (канал в квитанции).
+var decidedVia = map[string]string{"telegram": "в Telegram", "tray": "в трее", "webui": "в Web UI",
+	"webui-remote": "в Web UI с телефона", "cli": "в CLI"}
+
+// resolvedText — кто и как решил запрос: «bot → notes.append: разрешено в Telegram, только что».
+func resolvedText(a *state.Approval) string {
+	s := a.Agent + " → " + a.Action + ": "
+	switch a.Status {
+	case state.Pending:
+		return s + "ещё ждёт решения"
+	case state.Timeout:
+		return s + "никто не ответил вовремя, действие отклонено"
+	case state.Approved, state.Done:
+		s += "разрешено"
+	default:
+		s += "отклонено"
+	}
+	if a.Channel != "" {
+		s += " " + or(decidedVia[a.Channel], "через "+a.Channel)
+	}
+	if !a.DecidedAt.IsZero() {
+		s += ", " + ago(a.DecidedAt)
+	}
+	return s
+}
+
+// livePending — очередь подтверждений для живого обновления страницы (app.js):
+// карточки ожидающих запросов и итог тех из known, что уже не ждут решения.
+func (u *UI) livePending(m mount) http.HandlerFunc {
+	type card struct {
+		ID   string `json:"id"`
+		HTML string `json:"html"`
+	}
+	type gone struct {
+		ID   string `json:"id"`
+		Text string `json:"text"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, s, ok := u.session(m, r)
+		if !ok {
+			http.Error(w, "login required", 401)
+			return
+		}
+		pend, err := u.D.State.ListApprovals(state.Pending, 50)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		back := "/approvals"
+		if r.URL.Query().Get("back") == "/" {
+			back = "/"
+		}
+		v := view{Base: m.base, Remote: m.remote, CSRF: s.csrf}
+		out := struct {
+			Pending  []card `json:"pending"`
+			Resolved []gone `json:"resolved"`
+		}{Pending: []card{}, Resolved: []gone{}}
+		shown := map[string]bool{}
+		for _, a := range pend {
+			var b strings.Builder
+			if err := tpl.ExecuteTemplate(&b, "approval_card", map[string]any{"V": v, "A": a, "Back": back}); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			shown[a.ID] = true
+			out.Pending = append(out.Pending, card{ID: a.ID, HTML: b.String()})
+		}
+		known := strings.Split(r.URL.Query().Get("known"), ",")
+		if len(known) > 100 {
+			known = known[:100]
+		}
+		for _, id := range known {
+			if id == "" || shown[id] {
+				continue
+			}
+			a, err := u.D.State.GetApproval(id)
+			switch {
+			case err != nil:
+				out.Resolved = append(out.Resolved, gone{ID: id, Text: "Запрос больше не ждёт решения."})
+			case a.Status != state.Pending: // ожидающие сверх первых 50 остаются как есть
+				out.Resolved = append(out.Resolved, gone{ID: id, Text: "Уже решено: " + resolvedText(a)})
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
 	}
 }
 

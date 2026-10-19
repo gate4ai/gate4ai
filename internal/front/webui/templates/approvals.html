@@ -1,7 +1,7 @@
 {{template "head" .}}
 {{$d := .Data}}
 <h2>Ждут решения</h2>
-<div data-live-pending="{{len $d.Pending}}">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/approvals")}}</div>
+<div data-live-pending data-back="/approvals">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/approvals")}}</div>
 
 {{if $d.Questions}}<h2 id="questions">Нужен код</h2>
 {{range $d.Questions}}<div class="card"><p><b>{{if .Caller}}{{.Caller}} ({{.Agent}}){{else}}{{.Agent}}{{end}}</b> входит на {{range $i, $b := .Bind}}{{if $i}}, {{end}}{{$b}}{{end}} с учёткой <code>{{.Account}}</code> и спрашивает: {{.Text}}</p>
