@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gate4ai/gate4ai/internal/platform/version"
 	"github.com/gate4ai/sdk-go/hosttest"
 	"github.com/gate4ai/sdk-go/manifest"
 )
@@ -66,4 +67,15 @@ func must[T any](v T, err error) T {
 		panic(err)
 	}
 	return v
+}
+
+func TestStaleDaemon(t *testing.T) {
+	if w := staleDaemon(map[string]any{"version": version.Version}); w != "" {
+		t.Fatal(w)
+	}
+	for _, h := range []map[string]any{{"version": "0.0.1"}, {}} {
+		if w := staleDaemon(h); !strings.Contains(w, "gate4ai daemon restart") {
+			t.Fatal(h, w)
+		}
+	}
 }

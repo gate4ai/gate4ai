@@ -40,7 +40,8 @@ func TestServiceLinux(t *testing.T) {
 	if !strings.Contains(string(tray), `Exec="/opt/my apps/gate4ai-tray"`) {
 		t.Fatal(string(tray))
 	}
-	if !strings.Contains(strings.Join(calls, "\n"), "systemctl --user enable --now gate4ai.service") {
+	// restart, а не enable --now: уже работающая служба (обновление) получает новый бинарник.
+	if j := strings.Join(calls, "\n"); !strings.Contains(j, "systemctl --user enable gate4ai.service") || !strings.Contains(j, "systemctl --user restart gate4ai.service") {
 		t.Fatal(calls)
 	}
 	if st := State(home); st["installed"] != true || st["systemd"] != "active" {
@@ -76,5 +77,27 @@ func TestServiceLinux(t *testing.T) {
 	d, _ := os.ReadFile(filepath.Join(home, ".config/autostart/gate4ai.desktop"))
 	if !strings.Contains(string(d), `Exec="/opt/my apps/gate4ai" daemon start --keystore file`) {
 		t.Fatal(string(d))
+	}
+}
+
+func TestRestartLinux(t *testing.T) {
+	var calls []string
+	old := runCmd
+	t.Cleanup(func() { runCmd = old })
+	state := "active\n"
+	runCmd = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		if len(args) > 1 && args[1] == "is-active" {
+			return []byte(state), nil
+		}
+		return nil, nil
+	}
+	if ok, err := Restart(); !ok || err != nil || !strings.Contains(strings.Join(calls, "\n"), "systemctl --user restart gate4ai.service") {
+		t.Fatal(ok, err, calls)
+	}
+	// Служба не активна (daemon запущен руками) — перезапускает вызывающий.
+	state, calls = "inactive\n", nil
+	if ok, err := Restart(); ok || err != nil || strings.Contains(strings.Join(calls, "\n"), "restart") {
+		t.Fatal(ok, err, calls)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
+	"github.com/gate4ai/gate4ai/internal/platform/version"
 	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/internal/state"
 	"github.com/gate4ai/sdk-go/manifest"
@@ -204,7 +205,10 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 	}
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		_, n := d.Config.CurrentRaw()
-		writeJSON(w, 200, map[string]any{"ok": true, "config_version": n, "connectors": len(d.Registry.Manifests()), "pid": os.Getpid()})
+		// version и args — для `gate4ai daemon status` (старый бинарник после
+		// обновления) и `gate4ai daemon restart` (запуск с теми же флагами).
+		writeJSON(w, 200, map[string]any{"ok": true, "config_version": n, "connectors": len(d.Registry.Manifests()), "pid": os.Getpid(),
+			"version": version.Version, "args": daemonArgs()})
 	})
 	// Остановка по просьбе владельца (`gate4ai daemon stop`): Serve завершается штатно.
 	mux.HandleFunc("POST /v1/shutdown", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -551,4 +555,14 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 		res, _ := d.Pipeline.Status(id)
 		writeJSON(w, 200, res)
 	}))
+}
+
+// daemonArgs — флаги, с которыми запущен daemon (после «gate4ai daemon»).
+func daemonArgs() []string {
+	for i, a := range os.Args {
+		if a == "daemon" {
+			return append([]string{}, os.Args[i+1:]...)
+		}
+	}
+	return []string{}
 }

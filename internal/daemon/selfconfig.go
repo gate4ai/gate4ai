@@ -300,3 +300,18 @@ func (d *Daemon) installDevFolder(ctx context.Context, folder string) (string, e
 	d.Log.Info("own build installed by an agent", "connector", info.Connector, "version", info.Version, "folder", dir)
 	return info.Connector, nil
 }
+
+// alwaysAskSelf — установка своей сборки (новый код в daemon) подтверждается
+// человеком всегда: правило allow на change_policy её не разрешает.
+func alwaysAskSelf(args map[string]any) string {
+	changes, err := changesOf(args)
+	if err != nil {
+		return ""
+	}
+	for _, ch := range changes {
+		if ch.Op == config.OpInstallDev {
+			return "installing an own build (new code in gate4ai) always needs the owner's approval"
+		}
+	}
+	return ""
+}

@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gate4ai/gate4ai/internal/platform/autostart"
 	"github.com/gate4ai/gate4ai/internal/platform/paths"
+	"github.com/gate4ai/gate4ai/internal/platform/version"
 )
 
 // DaemonUsage — `gate4ai daemon --help`.
@@ -22,6 +24,7 @@ const DaemonUsage = `usage:
   gate4ai daemon [flags]           run the daemon in this terminal (Ctrl+C stops it)
   gate4ai daemon start [flags]     run it in the background (log: ` + "<data dir>/daemon.log" + `)
   gate4ai daemon stop              stop a running daemon
+  gate4ai daemon restart           restart it with the same flags (after an update: the new binary)
   gate4ai daemon status            is it running: socket, policy version, connectors, pending approvals
   gate4ai service install          start the daemon (and the tray) at every login
 
@@ -75,6 +78,8 @@ func DaemonCtl(ctx context.Context, e *Env, sub string, args []string) int {
 		return e.daemonStart(ctx, args)
 	case "stop":
 		return e.daemonStop(ctx)
+	case "restart":
+		return e.daemonRestart(ctx)
 	case "status":
 		return e.daemonStatus(ctx)
 	}
@@ -205,9 +210,13 @@ func (e *Env) daemonStatus(ctx context.Context) int {
 	}
 	res := map[string]any{"status": "ok", "running": true}
 	for k, v := range h {
-		if k != "ok" {
+		if k != "ok" && k != "args" {
 			res[k] = v
 		}
+	}
+	if w := staleDaemon(h); w != "" {
+		res["warning"] = w
+		fmt.Fprintln(e.Stderr, "gate4ai: "+w)
 	}
 	if c.Addr != nil {
 		res["socket"] = c.Addr()
@@ -241,4 +250,55 @@ func StartBackground(ctx context.Context, bin string) error {
 	e := DefaultEnv()
 	e.Stdout, e.Stderr, e.StderrTTY, e.StartBinary = discard{}, discard{}, false, bin
 	return e.startDaemon(ctx, nil)
+}
+
+// staleDaemon — предупреждение, если daemon запущен другой версией (бинарник
+// обновили, а работает прежний процесс).
+func staleDaemon(h map[string]any) string {
+	v, _ := h["version"].(string)
+	if v == "" {
+		v = "older than 0.6.6"
+	}
+	if v == version.Version {
+		return ""
+	}
+	return fmt.Sprintf("the daemon runs version %s, this gate4ai is %s: restart it — gate4ai daemon restart", v, version.Version)
+}
+
+// daemonRestart — остановить и запустить daemon с теми же флагами; если он
+// работает службой автозапуска — перезапуск службы.
+func (e *Env) daemonRestart(ctx context.Context) int {
+	h, err := e.health(ctx)
+	if err != nil && !errors.Is(err, ErrUnavailable) {
+		return e.fail(err)
+	}
+	var args []string
+	if raw, ok := h["args"].([]any); ok {
+		for _, a := range raw {
+			if s, ok := a.(string); ok && s != "start" {
+				args = append(args, s)
+			}
+		}
+	}
+	if restarted, err := autostart.Restart(); restarted || err != nil {
+		if err != nil {
+			return e.fail(err)
+		}
+		if err := e.waitStarted(ctx, paths.DaemonLog()); err != nil {
+			return e.fail(err)
+		}
+	} else {
+		if err == nil && h != nil {
+			if code := e.quiet().daemonStop(ctx); code != ExitOK {
+				return code
+			}
+		}
+		if err := e.startDaemon(ctx, args); err != nil {
+			return e.fail(err)
+		}
+	}
+	nh, _ := e.health(ctx)
+	e.say("gate4ai daemon restarted: version " + fmt.Sprint(nh["version"]))
+	e.out(map[string]any{"status": "ok", "running": true, "restarted": true, "version": nh["version"]}, nil)
+	return ExitOK
 }

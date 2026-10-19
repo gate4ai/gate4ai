@@ -69,3 +69,6 @@ func State(string) map[string]any {
 	}
 	return map[string]any{"installed": len(files) > 0, "files": files}
 }
+
+// Restart — служба автозапуска здесь daemon не перезапускает: это делает вызывающий.
+func Restart() (bool, error) { return false, nil }

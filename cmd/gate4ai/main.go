@@ -19,7 +19,7 @@ func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "daemon" {
 		args := os.Args[2:]
 		switch {
-		case len(args) > 0 && (args[0] == "start" || args[0] == "stop" || args[0] == "status"):
+		case len(args) > 0 && (args[0] == "start" || args[0] == "stop" || args[0] == "restart" || args[0] == "status"):
 			code := cli.DaemonCtl(ctx, env, args[0], args[1:])
 			cancel()
 			os.Exit(code)

@@ -113,6 +113,11 @@ func TestDaemonSockets(t *testing.T) {
 	owner := client{c: ipc.HTTPClient(ownerSock)}
 	anon := client{c: ipc.HTTPClient(agentSock)}
 
+	// Версия и флаги daemon — для status (старый бинарник) и restart.
+	var h map[string]any
+	if owner.do(t, "GET", "/v1/health", nil, &h); h["version"] == "" || h["args"] == nil {
+		t.Fatal("health:", h)
+	}
 	// Агентский сокет без токена — отказ.
 	if code := anon.do(t, "GET", "/v1/tools", nil, nil); code != 401 {
 		t.Fatal("agent socket without token", code)

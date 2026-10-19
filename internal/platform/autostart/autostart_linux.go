@@ -78,12 +78,16 @@ func Install(s Spec) (Result, error) {
 		if out, err := runCmd("systemctl", "--user", "daemon-reload"); err != nil {
 			return r, cmdErr("systemctl --user daemon-reload", out, err)
 		}
-		enable := []string{"--user", "enable", "--now", systemdUnit}
-		if s.NoStart {
-			enable = []string{"--user", "enable", systemdUnit}
-		}
+		enable := []string{"--user", "enable", systemdUnit}
 		if out, err := runCmd("systemctl", enable...); err != nil {
 			return r, cmdErr("systemctl "+strings.Join(enable, " "), out, err)
+		}
+		if !s.NoStart {
+			// restart, а не enable --now: уже работающая служба (обновление)
+			// иначе осталась бы со старым бинарником.
+			if out, err := runCmd("systemctl", "--user", "restart", systemdUnit); err != nil {
+				return r, cmdErr("systemctl --user restart "+systemdUnit, out, err)
+			}
 		}
 		r.Started = !s.NoStart
 		if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
@@ -138,4 +142,19 @@ func State(home string) map[string]any {
 		res["systemd"] = strings.TrimSpace(string(out))
 	}
 	return res
+}
+
+// Restart перезапускает daemon, если он работает службой systemd --user
+// (false — не служба: перезапускает вызывающий).
+func Restart() (bool, error) {
+	if !systemdUser() {
+		return false, nil
+	}
+	if out, _ := runCmd("systemctl", "--user", "is-active", systemdUnit); strings.TrimSpace(string(out)) != "active" {
+		return false, nil
+	}
+	if out, err := runCmd("systemctl", "--user", "restart", systemdUnit); err != nil {
+		return false, cmdErr("systemctl --user restart "+systemdUnit, out, err)
+	}
+	return true, nil
 }

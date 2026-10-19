@@ -108,6 +108,10 @@ type Pipeline struct {
 	// EndCall — корневое действие агента закончилось (вместе с вложенными
 	// вызовами): поставщики освобождают его состояние.
 	EndCall func(root string)
+	// AlwaysAsk — действия встроенного коннектора, которые разрешает только
+	// человек, какими бы ни были правила allow (ключ — коннектор): непустая
+	// причина — запрос подтверждения.
+	AlwaysAsk map[string]func(args map[string]any) string
 	// ConnectorLog — строки лога коннектора с момента since для ответа агенту
 	// (nil — не показывать); daemon отдаёт их только для своих сборок.
 	ConnectorLog func(conn string, since time.Time) []string
@@ -193,6 +197,12 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 	req := policy.Request{Agent: c.Agent, Action: c.Action, Class: act.Class, Args: args, Provenance: prov, Now: p.Now()}
 	// 3. PDP.
 	dec := p.Engine().Decide(req, p.State.Counters())
+	if f := p.AlwaysAsk[conn]; f != nil && dec.Effect == config.EffectAllow {
+		// Правило allow такое действие не разрешает без человека (deny — по-прежнему).
+		if reason := f(args); reason != "" {
+			dec = policy.Decision{Effect: config.EffectAsk, RuleIDs: []string{"always-ask"}, Reason: reason}
+		}
+	}
 	switch dec.Effect {
 	case config.EffectDeny:
 		return p.deny(c.Agent, act, c.Action, args, dec, nil)

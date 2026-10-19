@@ -140,3 +140,27 @@ func TestInstallDevConnectorByAgent(t *testing.T) {
 		t.Fatal("no manifest")
 	}
 }
+
+// Своя сборка — новый код в daemon: даже при правиле allow на change_policy
+// её ставит только человек; обычные правки allow пропускает.
+func TestInstallDevAlwaysAsks(t *testing.T) {
+	c, _ := connectors.NewInProcess(&notes{})
+	conf := cfg + "      - { id: self-allow, action: gate4ai.change_policy, effect: allow }\n"
+	d, err := New(Options{Home: filepath.Join(t.TempDir(), "d"), Keys: keys.NewMemory(), Connectors: []connectors.Client{c}, InitialConfig: []byte(conf)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ctx := context.Background()
+	folder, _ := filepath.Abs("../connectors/wasm/testdata/probe")
+	r := d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "gate4ai.change_policy", Args: map[string]any{
+		"summary": "install", "changes": []any{map[string]any{"op": "install_dev_connector", "folder": folder}}}})
+	if r.Status != pipeline.StatusPending || !strings.Contains(r.Reason, "always needs the owner") {
+		t.Fatalf("%+v", r)
+	}
+	r = d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "gate4ai.change_policy", Args: map[string]any{
+		"summary": "list", "changes": []any{map[string]any{"op": "add_list_items", "list": "x", "items": []any{"a"}}}}})
+	if r.Status != pipeline.StatusOK {
+		t.Fatalf("allow still allows ordinary changes: %+v", r)
+	}
+}

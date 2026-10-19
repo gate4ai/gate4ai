@@ -93,3 +93,14 @@ func State(home string) map[string]any {
 	}
 	return map[string]any{"installed": len(files) > 0, "files": files}
 }
+
+// Restart перезапускает daemon, если он загружен в launchd (false — не служба).
+func Restart() (bool, error) {
+	if _, err := runCmd("launchctl", "print", gui()+"/"+launchDaemon); err != nil {
+		return false, nil
+	}
+	if out, err := runCmd("launchctl", "kickstart", "-k", gui()+"/"+launchDaemon); err != nil {
+		return false, cmdErr("launchctl kickstart -k "+gui()+"/"+launchDaemon, out, err)
+	}
+	return true, nil
+}
