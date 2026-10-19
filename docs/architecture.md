@@ -19,6 +19,9 @@
 | daemon, API на сокетах владельца и агентов | `internal/daemon`, `internal/platform/ipc` |
 | Лог по коннектору (кольцевой буфер записей slog с атрибутом `connector`), `gate4ai connectors logs`, поле `log` в ответе своей сборки | `internal/daemon/connlog.go`, `Pipeline.ConnectorLog` |
 | Заготовка коннектора к сайту (`gate4ai connectors new`) | `internal/front/cli/scaffold.go`; как писать — [connector-authoring.md](connector-authoring.md) |
+| Обезличивание фикстур (`gate4ai fixture scrub`) | `internal/front/cli/fixture.go` |
+| Маскирование одноразовых кодов и токенов в адресах (результаты, журнал) | `internal/pipeline/urlmask.go` |
+| Отмена вызова нативного пакета (`cancel`, срок вызова в процессе) | `sdk-go/native/serve.go`, `internal/connectors/native/native.go` |
 | Публичный адрес устройства: один обработчик для relay и прямого HTTPS (`--public`), разделение по путям — MCP (`POST`/`DELETE` на корень; `/mcp` — совместимость) и OAuth (`resource` — адрес устройства), `/v1/{whoami,tools,call,status}` (удалённый CLI), `/ui/` (удалённый Web UI), `/telegram` (вебхук); у каждого пути своя аутентификация, API владельца нет | `internal/daemon` (`PublicHandler`, `AddPublic`, `ServePublic`), `cmd/gate4ai/setup.go`, тест изоляции `cmd/gate4ai/public_test.go` |
 | CLI, skill | `internal/front/cli`, `internal/front/skill`; ошибки для человека и агента (`hint`, `detail`) — `errors.go`; `gate4ai daemon start/stop/status` — `daemonctl.go`; автозапуск `gate4ai service` — `service.go` поверх `internal/platform/autostart`; UX путей пользователя — [cli-ux.md](cli-ux.md) |
 | MCP Front (stdio, Streamable HTTP), OAuth 2.1 | `internal/front/mcp`, `internal/front/mcpcli`, `internal/front/oauth` |

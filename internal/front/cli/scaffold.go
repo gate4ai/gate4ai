@@ -59,7 +59,7 @@ func (e *Env) scaffold(args []string) int {
 	}
 	data := map[string]string{"Name": name, "Site": host, "Type": goType(name), "SDK": scaffoldSDK()}
 	files := map[string]string{"go.mod": tplGoMod, "manifest.yaml": tplManifest, "main.go": tplMain, "connector.go": tplConnector,
-		"connector_test.go": tplTest, "testdata/session.json": tplFixture, "README.md": tplReadme}
+		"connector_test.go": tplTest, "testdata/session.json": tplFixture, "README.md": tplReadme, ".gitignore": tplGitignore}
 	var written []string
 	for path, src := range files {
 		var b strings.Builder
@@ -79,8 +79,9 @@ func (e *Env) scaffold(args []string) int {
 		"next": []string{
 			"cd " + dir + " && go mod tidy && go test ./...",
 			"explore the site: gate4ai browser open --url https://" + host + "/ (then observe --elements, act, network, close)",
-			"save the result of browser.close as testdata/session.json and write the action in connector.go",
-			"gate4ai connectors install . --watch   (and call it: gate4ai " + name + " summary)",
+			"save browser.close to .explore/session.json, then: gate4ai fixture scrub .explore/session.json -o testdata/session.json --auto --replace \"real=fake\"",
+			"write the action in connector.go (wait with wait_for_*/expect_*, explain clicks in call_reasons)",
+			"gate4ai connectors install . --watch (owner) or change_policy install_dev_connector (agent); call: gate4ai " + name + " summary",
 		}})
 	return ExitOK
 }
@@ -107,6 +108,10 @@ func goType(n string) string {
 	}
 	return b.String()
 }
+
+const tplGitignore = `# сырые записи сеансов браузера: в них настоящие личные данные
+.explore/
+`
 
 const tplGoMod = `module gate4ai-{{.Name}}
 
@@ -263,9 +268,9 @@ WASM-коннектор поверх браузера пользователя: 
 ## Как писать
 
 1. Исследуйте сайт в сеансе браузера: ` + "`gate4ai browser open --url https://{{.Site}}/`" + ` (вернёт ` + "`session`" + `), затем ` + "`observe --session … --elements`" + ` (селекторы), ` + "`act`" + ` (клики, ввод), ` + "`network`" + ` (запросы страницы к API). Войти на сайт человек может сам в окне выделенного профиля Chrome.
-2. ` + "`gate4ai browser close --session …`" + ` возвращает записанные шаги: сохраните их в ` + "`testdata/`" + ` (уберите личные данные) — это фикстура для ` + "`hosttest.Replay`" + `.
+2. ` + "`gate4ai browser close --session …`" + ` возвращает записанные шаги: сохраните их в ` + "`.explore/`" + ` (не в git), обезличьте ` + "`gate4ai fixture scrub .explore/x.json -o testdata/x.json --auto --replace \"настоящее=вымышленное\"`" + ` и проверьте глазами — это фикстура для ` + "`hosttest.Replay`" + `.
 3. Опишите действия в ` + "`manifest.yaml`" + ` (класс, схемы, ` + "`calls`" + ` — подвызовы браузера) и реализуйте их в ` + "`connector.go`" + `; ` + "`go test ./...`" + `.
-4. ` + "`gate4ai connectors install . --watch`" + ` — поставить в свой daemon и пересобирать на каждое сохранение; вызов — ` + "`gate4ai {{.Name}} summary`" + `. Ошибки своей сборки приходят вместе с её логом (поле ` + "`log`" + `), весь лог — ` + "`gate4ai connectors logs {{.Name}}`" + `.
+4. ` + "`gate4ai connectors install . --watch`" + ` — поставить в свой daemon и пересобирать на каждое сохранение (агент без сокета владельца — ` + "`gate4ai gate4ai change_policy`" + ` с ` + "`install_dev_connector`" + `); вызов — ` + "`gate4ai {{.Name}} summary`" + `. Ошибки своей сборки приходят вместе с её логом (поле ` + "`log`" + `), весь лог — ` + "`gate4ai connectors logs {{.Name}}`" + `.
 
 Селекторы вида ` + "`div:nth-of-type(2) > button`" + ` ломаются от вёрстки: в ` + "`act`" + ` надёжнее общий селектор и видимый текст (` + "`selector: button, text: Оплатить`" + `).
 `
