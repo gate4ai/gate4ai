@@ -66,17 +66,86 @@
     last.parentNode.insertBefore(n, last.nextSibling);
   });
 
-  // Очередь подтверждений обновляется сама, пока страница открыта.
+  // Решение по запросу отправляется один раз: повторное нажатие (или второй
+  // клик, пока действие исполняется) давало «запрос уже решён».
+  document.addEventListener("submit", function (e) {
+    var f = e.target;
+    if (!f.matches("form[data-decide]") || e.defaultPrevented) return;
+    if (f.getAttribute("data-sent")) { e.preventDefault(); return; }
+    f.setAttribute("data-sent", "1");
+    var s = e.submitter;
+    if (s && s.name) {
+      // Выключенная кнопка не уходит с формой — её значение передаём скрытым полем.
+      var h = document.createElement("input");
+      h.type = "hidden"; h.name = s.name; h.value = s.value;
+      f.appendChild(h);
+      s.textContent = "Отправляю…";
+    }
+    f.querySelectorAll("button").forEach(function (b) { b.disabled = true; });
+  });
+  window.addEventListener("pageshow", function (e) {
+    if (!e.persisted) return; // страница из кэша «назад»: кнопки снова доступны
+    if (document.querySelector("form[data-decide][data-sent]")) location.reload();
+  });
+
+  // Очередь подтверждений обновляется сама, пока страница открыта: новые
+  // запросы появляются, решённые в другом канале или истёкшие — исчезают
+  // с пояснением, кто и как решил.
   var live = document.querySelector("[data-live-pending]");
   if (live) {
-    var known = live.getAttribute("data-live-pending");
-    setInterval(function () {
+    var back = live.getAttribute("data-back") || "/approvals";
+    var cardOf = function (id) {
+      var found = null;
+      live.querySelectorAll("[data-approval]").forEach(function (c) { if (c.getAttribute("data-approval") === id) found = c; });
+      return found;
+    };
+    var setCount = function (n) {
+      var c = document.querySelector("[data-pending-count]");
+      if (!c) return;
+      c.textContent = n;
+      c.hidden = n === 0;
+    };
+    var apply = function (j) {
+      j.resolved.forEach(function (g) {
+        var c = cardOf(g.id);
+        if (!c || c.querySelector("form[data-sent]")) return; // решаем здесь — ждём ответа формы
+        c.removeAttribute("data-approval");
+        c.classList.add("gone");
+        c.textContent = "";
+        var p = document.createElement("p");
+        p.className = "muted";
+        p.style.margin = "0";
+        p.textContent = g.text;
+        c.appendChild(p);
+        setTimeout(function () { c.remove(); }, 10000);
+      });
+      var prev = null;
+      j.pending.forEach(function (a) {
+        var c = cardOf(a.id);
+        if (!c) {
+          var t = document.createElement("template");
+          t.innerHTML = a.html.trim();
+          c = t.content.firstElementChild;
+          if (prev) prev.after(c); else live.prepend(c);
+        }
+        prev = c;
+      });
+      var empty = live.querySelector("[data-live-empty]");
+      if (empty) empty.hidden = j.pending.length > 0;
+      setCount(j.pending.length);
+    };
+    var poll = function () {
       if (document.hidden) return;
-      fetch(location.href, { credentials: "same-origin" }).then(function (r) { return r.text(); }).then(function (t) {
-        var m = t.match(/data-live-pending="(\d+)"/);
-        if (m && m[1] !== known && !document.querySelector("form:focus-within")) location.reload();
-      }).catch(function () {});
-    }, 5000);
+      var known = [];
+      live.querySelectorAll("[data-approval]").forEach(function (c) { known.push(c.getAttribute("data-approval")); });
+      fetch(base + "/approvals/live?back=" + encodeURIComponent(back) + "&known=" + encodeURIComponent(known.join(",")),
+        { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) { if (j) apply(j); })
+        .catch(function () {});
+    };
+    setInterval(poll, 3000);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });
   }
 
   // Relay подключается (сертификат, туннель): страница обновляется при смене этапа.

@@ -326,6 +326,7 @@ func (u *UI) handler(m mount) http.Handler {
 	// Удалённо: обзор, подтверждения, журнал (и подписка на push).
 	get("/{$}", u.overview(m))
 	get("/approvals", u.approvalsPage(m))
+	mux.HandleFunc("GET "+b+"/approvals/live", u.livePending(m))
 	get("/journal", u.journal)
 	get("/journal/{hash}", u.receipt)
 	post("/approvals/{id}", u.decide(m))

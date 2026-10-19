@@ -5,7 +5,7 @@
 <style>
 :root{--bg:#fafafa;--fg:#1d1d1f;--muted:#6e6e73;--line:#e3e3e8;--accent:#0a58ca;--ok:#1a7f37;--bad:#b42318;--warn:#9a6700;--card:#fff}
 @media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f4;--muted:#a1a1a8;--line:#2c2c31;--accent:#6ea8fe;--ok:#4ac26b;--bad:#ff7b72;--warn:#d29922;--card:#1c1c1f}}
-*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
 header{display:flex;gap:1.1rem;align-items:center;padding:.7rem 1.2rem;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
 header b{margin-right:.6rem}header a{color:var(--muted);text-decoration:none;white-space:nowrap}header a.on{color:var(--fg);font-weight:600}
 .count{display:inline-block;min-width:1.3em;padding:0 .35em;margin-left:.25em;border-radius:1em;background:var(--accent);color:#fff;font-size:.75rem;text-align:center;font-weight:600}
@@ -43,13 +43,14 @@ details{margin:.5rem 0}summary{cursor:pointer;color:var(--accent)}
 .diff .add{background:color-mix(in srgb,var(--ok) 15%,transparent)}.diff .del{background:color-mix(in srgb,var(--bad) 15%,transparent)}
 .cond{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.3rem 0}
 form.inline{display:inline}
+.card.gone{opacity:.75}
 @media (max-width:640px){main{padding:.8rem}td,th{padding:.35rem .3rem}}
 </style>
 <script src="{{.Base}}/static/app.js" defer></script>
 </head><body>
 <header><b>gate4.ai</b>
 <a href="{{.Base}}/" class="{{if eq .Nav "overview"}}on{{end}}">Обзор</a>
-<a href="{{.Base}}/approvals" class="{{if or (eq .Nav "approvals") (eq .Nav "telegram")}}on{{end}}">Подтверждения{{if .Pending}}<span class="count">{{.Pending}}</span>{{end}}</a>
+<a href="{{.Base}}/approvals" class="{{if or (eq .Nav "approvals") (eq .Nav "telegram")}}on{{end}}">Подтверждения<span class="count" data-pending-count{{if not .Pending}} hidden{{end}}>{{.Pending}}</span></a>
 {{if not .Remote}}<a href="{{.Base}}/agents" class="{{if or (eq .Nav "agents") (eq .Nav "agent") (eq .Nav "agent_new")}}on{{end}}">Агенты</a>
 <a href="{{.Base}}/connectors" class="{{if or (eq .Nav "connectors") (eq .Nav "connector")}}on{{end}}">Коннекторы</a>
 <a href="{{.Base}}/policy" class="{{if or (eq .Nav "policy") (eq .Nav "rule") (eq .Nav "templates") (eq .Nav "policy_yaml")}}on{{end}}">Правила</a>{{end}}
@@ -64,19 +65,22 @@ form.inline{display:inline}
 {{end}}
 {{define "foot"}}</main></body></html>{{end}}
 
-{{define "pending"}}{{$v := .V}}
-{{range .List}}
-<div class="card">
+{{define "pending"}}{{$v := .V}}{{$back := .Back}}
+{{range .List}}{{template "approval_card" (dict "V" $v "A" . "Back" $back)}}{{end}}
+<p class="muted" data-live-empty{{if .List}} hidden{{end}}>Нет запросов, ожидающих решения.</p>
+{{end}}
+{{/* approval_card — карточка запроса; её же отдаёт /approvals/live для живого обновления. */}}
+{{define "approval_card"}}{{$v := .V}}{{with .A}}
+<div class="card" data-approval="{{.ID}}">
   <div class="row between"><div><b>{{.Agent}}</b> хочет <code>{{.Action}}</code> <span class="badge">{{classRu .Class}}</span></div>
   <span class="muted">#{{short .PreviewHash}} · до {{ts .Expires}}</span></div>
   <p style="margin:.4rem 0">Почему спрашиваем: {{.Decision.Reason}}{{if .Decision.RuleIDs}} <span class="muted">(правило {{join .Decision.RuleIDs ", "}})</span>{{end}}</p>
   <pre class="box">{{.Preview}}</pre>
-  <form method="post" action="{{$v.Base}}/approvals/{{.ID}}" class="row" style="margin-top:.6rem">
+  <form method="post" action="{{$v.Base}}/approvals/{{.ID}}" class="row" style="margin-top:.6rem" data-decide>
     <input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}">
     <button class="primary" name="decision" value="approve">Разрешить</button>
     <button class="danger" name="decision" value="reject">Отклонить</button>
     {{if not $v.Remote}}<button name="decision" value="approve_rule" title="Разрешить и перейти к созданию правила">Разрешить и не спрашивать впредь…</button>{{end}}
   </form>
 </div>
-{{else}}<p class="muted">Нет запросов, ожидающих решения.</p>{{end}}
-{{end}}
+{{end}}{{end}}

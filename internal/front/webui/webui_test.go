@@ -315,3 +315,62 @@ func TestAccountsAndQuestions(t *testing.T) {
 		t.Fatal(v)
 	}
 }
+
+// Живая очередь подтверждений и гонка с другим каналом.
+func TestLiveApprovals(t *testing.T) {
+	u, d, _, base := setup(t)
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	if r, _ := c.Get(base + "/approvals/live"); r.StatusCode != 401 {
+		t.Fatal("live without session", r.StatusCode)
+	}
+	r, _ := c.Get(u.LoginURL())
+	csrf := csrfRe.FindStringSubmatch(body(t, r))[1]
+	live := func(known ...string) string {
+		r, _ := c.Get(base + "/approvals/live?back=/approvals&known=" + url.QueryEscape(strings.Join(known, ",")))
+		if r.StatusCode != 200 {
+			t.Fatal("live", r.StatusCode)
+		}
+		return body(t, r)
+	}
+	if p := live(); !strings.Contains(p, `"pending":[]`) {
+		t.Fatal("empty queue", p)
+	}
+	// Новый запрос появляется карточкой с кнопками.
+	a := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "notes.append", Args: map[string]any{"text": "one"}})
+	p := live()
+	if !strings.Contains(p, `"id":"`+a.ID+`"`) || !strings.Contains(p, `data-approval=\"`+a.ID+`\"`) || !strings.Contains(p, "Разрешить") {
+		t.Fatal("new approval not live", p)
+	}
+	// Решён в Telegram — уходит из очереди с пояснением.
+	if _, err := d.Pipeline.Decide(context.Background(), a.ID, true, "telegram", "tg:1"); err != nil {
+		t.Fatal(err)
+	}
+	p = live(a.ID)
+	if strings.Contains(p, `data-approval`) || !strings.Contains(p, "разрешено в Telegram") {
+		t.Fatal("decided approval stays live", p)
+	}
+	// Нажатие на устаревшей странице — понятное сообщение, а не сырая ошибка.
+	r, _ = c.PostForm(base+"/approvals/"+a.ID, url.Values{"decision": {"reject"}, "csrf": {csrf}})
+	p = body(t, r)
+	if strings.Contains(p, "already decided") || !strings.Contains(p, "Запрос уже решён") || !strings.Contains(p, "разрешено в Telegram") {
+		t.Fatal("race with another channel", p)
+	}
+	// Повторная отправка той же формы.
+	b := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "notes.append", Args: map[string]any{"text": "two"}})
+	c.PostForm(base+"/approvals/"+b.ID, url.Values{"decision": {"reject"}, "csrf": {csrf}})
+	r, _ = c.PostForm(base+"/approvals/"+b.ID, url.Values{"decision": {"reject"}, "csrf": {csrf}})
+	if p := body(t, r); strings.Contains(p, "already decided") || !strings.Contains(p, "отклонено в Web UI") {
+		t.Fatal("double submit", p)
+	}
+	// Истёк срок ожидания.
+	e := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "notes.append", Args: map[string]any{"text": "three"}})
+	d.State.Now = func() time.Time { return time.Now().Add(24 * time.Hour) }
+	d.Pipeline.ExpireDue(context.Background())
+	if p := live(e.ID); !strings.Contains(p, "никто не ответил вовремя") {
+		t.Fatal("timeout not explained", p)
+	}
+	if p := live("missing"); !strings.Contains(p, "больше не ждёт решения") {
+		t.Fatal("unknown id", p)
+	}
+}

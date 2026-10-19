@@ -19,7 +19,7 @@
 {{end}}
 {{end}}
 <h2>Ждут решения</h2>
-<div data-live-pending="{{len $d.Pending}}">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/")}}</div>
+<div data-live-pending data-back="/">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/")}}</div>
 
 {{if not .Remote}}{{if $d.Agents}}
 <h2>Агенты</h2>
