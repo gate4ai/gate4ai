@@ -145,7 +145,9 @@ func TestStdioToolsListChanged(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.ServeStdio(ctx, inR, outW)
-	go func() { inW.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}` + "\n")) }()
+	go func() {
+		inW.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}` + "\n"))
+	}()
 	sc := bufio.NewScanner(outR)
 	gotInit, gotChanged := false, false
 	deadline := time.After(3 * time.Second)
