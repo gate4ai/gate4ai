@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/sdk-go/manifest"
@@ -258,5 +259,16 @@ func TestApprovalShowsCalls(t *testing.T) {
 	a, err := p.requestApproval("bot", "bank.look", act, map[string]any{}, nil, policy.Decision{Effect: config.EffectAsk})
 	if err != nil || !strings.Contains(a.Preview, "also runs: web.open, web.act (раскрыть список)") {
 		t.Fatal(a, err)
+	}
+}
+
+// Ответ своей сборки — со строками лога и коннекторов, вызванных ради неё.
+func TestNestedConnectorLogInResult(t *testing.T) {
+	p, b, _, _, _ := nestedEnv(t)
+	p.ConnectorLog = func(conn string, _ time.Time) []string { return []string{"line of " + conn} }
+	b.calls = []abi.ServiceCallRequest{{Target: "web", Action: "open", Args: map[string]any{"url": "https://bank.example/"}}}
+	res := p.Execute(context.Background(), Call{Agent: "bot", Action: "bank.pay"})
+	if res.Status != StatusOK || len(res.Log) != 2 || res.Log[0] != "line of bank" || res.Log[1] != "web: line of web" {
+		t.Fatalf("%+v", res.Log)
 	}
 }

@@ -24,6 +24,17 @@ type Credential struct {
 	Connectors []string `yaml:"connectors,omitempty" json:"connectors,omitempty"`
 	// Prompts — вопросы человеку для кодов (browser.fill_secret с source: human): поле → вопрос.
 	Prompts map[string]string `yaml:"prompts,omitempty" json:"prompts,omitempty"`
+	// LoginPage — признак страницы входа (элемент или начало адреса): без него
+	// login_required ставится на любой странице сайтов bind; с ним — только там,
+	// где сайт действительно просит войти (код из SMS на сайте кабинета).
+	LoginPage *LoginPage `yaml:"login_page,omitempty" json:"login_page,omitempty"`
+}
+
+// LoginPage — признак страницы входа: видимый элемент по Selector или адрес,
+// начинающийся с URLPrefix (достаточно одного).
+type LoginPage struct {
+	Selector  string `yaml:"selector,omitempty" json:"selector,omitempty"`
+	URLPrefix string `yaml:"url_prefix,omitempty" json:"url_prefix,omitempty"`
 }
 
 // LoginForm — простой вход: поля, отправка, признак успеха.
@@ -60,6 +71,10 @@ type LoginSuccess struct {
 type LoginVia struct {
 	Connector string `yaml:"connector" json:"connector"`
 	Action    string `yaml:"action" json:"action"`
+	// Fields — поля, которые коннектор входа вводит browser.fill_secret {field}
+	// (логин, пароль): константа или секрет Vault; селектор передаёт коннектор
+	// (здесь — необязательно, по умолчанию).
+	Fields []FormField `yaml:"fields,omitempty" json:"fields,omitempty"`
 }
 
 // Full — "<коннектор>.<действие>" коннектора входа.
@@ -68,14 +83,23 @@ func (v LoginVia) Full() string { return v.Connector + "." + v.Action }
 // Secrets — алиасы секретов формы учётки.
 func (c Credential) Secrets() []string {
 	var out []string
-	if c.Form != nil {
-		for _, f := range c.Form.Fields {
-			if f.Secret != "" {
-				out = append(out, f.Secret)
-			}
+	for _, f := range c.AllFields() {
+		if f.Secret != "" {
+			out = append(out, f.Secret)
 		}
 	}
 	return out
+}
+
+// AllFields — поля учётки: формы или коннектора входа.
+func (c Credential) AllFields() []FormField {
+	switch {
+	case c.Form != nil:
+		return c.Form.Fields
+	case c.Via != nil:
+		return c.Via.Fields
+	}
+	return nil
 }
 
 // Origins — bind в каноническом виде (domain.OriginOf).
@@ -116,14 +140,11 @@ func (c *Config) validateCredentials(add func(path, format string, a ...any)) {
 		case cr.Form != nil && cr.Via != nil:
 			add(p, "form and via are exclusive")
 		}
-		if f := cr.Form; f != nil {
-			if len(f.Fields) == 0 {
-				add(p+".form.fields", "at least one field is required")
-			}
+		checkFields := func(base string, fields []FormField, needSelector bool) {
 			names := map[string]bool{}
-			for i, fl := range f.Fields {
-				fp := fmt.Sprintf("%s.form.fields[%d]", p, i)
-				if strings.TrimSpace(fl.Selector) == "" {
+			for i, fl := range fields {
+				fp := fmt.Sprintf("%s[%d]", base, i)
+				if needSelector && strings.TrimSpace(fl.Selector) == "" {
 					add(fp+".selector", "selector is required")
 				}
 				switch {
@@ -141,11 +162,20 @@ func (c *Config) validateCredentials(add func(path, format string, a ...any)) {
 				if name == "" {
 					name = fl.Secret
 				}
+				if !needSelector && name == "" {
+					add(fp+".name", "name is required (the sign-in connector asks for the field by it)")
+				}
 				if name != "" && names[name] {
 					add(fp+".name", "duplicate field name %q", name)
 				}
 				names[name] = true
 			}
+		}
+		if f := cr.Form; f != nil {
+			if len(f.Fields) == 0 {
+				add(p+".form.fields", "at least one field is required")
+			}
+			checkFields(p+".form.fields", f.Fields, true)
 			switch {
 			case f.Submit.Selector == "" && f.Submit.Press == "":
 				add(p+".form.submit", "submit is required: { selector: \"#login-button\" } or { press: Enter }")
@@ -158,8 +188,19 @@ func (c *Config) validateCredentials(add func(path, format string, a ...any)) {
 				add(p+".form.success.url_prefix", "must be an http(s) address prefix like https://lk.example/")
 			}
 		}
-		if v := cr.Via; v != nil && (!connNameRe.MatchString(v.Connector) || !connNameRe.MatchString(v.Action)) {
-			add(p+".via", "connector and action are required (a sign-in connector and its action, e.g. login)")
+		if v := cr.Via; v != nil {
+			if !connNameRe.MatchString(v.Connector) || !connNameRe.MatchString(v.Action) {
+				add(p+".via", "connector and action are required (a sign-in connector and its action, e.g. login)")
+			}
+			checkFields(p+".via.fields", v.Fields, false)
+		}
+		if lp := cr.LoginPage; lp != nil {
+			switch {
+			case lp.Selector == "" && lp.URLPrefix == "":
+				add(p+".login_page", "set selector (an element of the sign-in page) or url_prefix")
+			case lp.URLPrefix != "" && domain.OriginOf(lp.URLPrefix) == "":
+				add(p+".login_page.url_prefix", "must be an http(s) address prefix like https://login.example/")
+			}
 		}
 		for i, u := range cr.Use {
 			if _, ok := c.Profiles[u]; !ok {

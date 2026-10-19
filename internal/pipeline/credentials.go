@@ -113,7 +113,7 @@ func (p *Pipeline) accountsFor(cfg *config.Config, a accessor) []abi.Account {
 		if !p.allowed(cfg, alias, cr, a) {
 			continue
 		}
-		acc := abi.Account{Alias: alias, Bind: cr.Origins()}
+		acc := abi.Account{Alias: alias, Bind: cr.Origins(), LoginPage: pageOf(cr)}
 		if cr.Via != nil {
 			acc.Via = cr.Via.Full()
 		}
@@ -135,20 +135,29 @@ func resolveAccount(cfg *config.Config, a accessor, arg string) string {
 	return "@" + arg
 }
 
-// formOf — учётка с формой для browser (без значений).
+// pageOf — признак страницы входа учётки.
+func pageOf(cr config.Credential) *abi.AccountPage {
+	if cr.LoginPage == nil {
+		return nil
+	}
+	return &abi.AccountPage{Selector: cr.LoginPage.Selector, URLPrefix: cr.LoginPage.URLPrefix}
+}
+
+// formOf — учётка с формой для browser (без значений): поля формы или
+// коннектора входа (via).
 func formOf(alias string, cr config.Credential) *abi.Account {
-	acc := &abi.Account{Alias: alias, Bind: cr.Origins()}
+	acc := &abi.Account{Alias: alias, Bind: cr.Origins(), LoginPage: pageOf(cr)}
 	if cr.Via != nil {
 		acc.Via = cr.Via.Full()
 	}
-	if f := cr.Form; f != nil {
-		for _, fl := range f.Fields {
-			name := fl.Name
-			if name == "" {
-				name = fl.Secret
-			}
-			acc.Fields = append(acc.Fields, abi.AccountField{Name: name, Selector: fl.Selector, Value: fl.Value, Secret: fl.Secret, Type: fl.Type})
+	for _, fl := range cr.AllFields() {
+		name := fl.Name
+		if name == "" {
+			name = fl.Secret
 		}
+		acc.Fields = append(acc.Fields, abi.AccountField{Name: name, Selector: fl.Selector, Value: fl.Value, Secret: fl.Secret, Type: fl.Type})
+	}
+	if f := cr.Form; f != nil {
 		acc.Submit = &abi.AccountSubmit{Selector: f.Submit.Selector, Press: f.Submit.Press}
 		if f.Success != nil {
 			acc.Success = f.Success.URLPrefix
@@ -176,7 +185,17 @@ type loginPrep struct {
 	via   *config.LoginVia
 	uses  []secretUse
 	who   accessor
+	human func() error // fill_secret с source: human — спросить после проверки браузером
 }
+
+// ArgPrecheck — служебный аргумент browser.fill_secret: только проверки
+// (страница на сайте входа, поле подходит), без ввода. Его ставит хост; агент
+// и коннектор передать его не могут — аргументы проверяются по схеме.
+const ArgPrecheck = "precheck"
+
+// ArgRecordOnly — служебный аргумент browser.login: записать в сеанс агента
+// шаг входа через коннектор входа (результат — в result) без самого входа.
+const ArgRecordOnly = "record_only"
 
 func denied(f string, a ...any) error { return abi.Errorf(abi.CodeSecretDenied, f, a...) }
 
@@ -242,16 +261,21 @@ func (p *Pipeline) prepareBrowser(ctx context.Context, agent string, act manifes
 	}
 	field, _ := args["field"].(string)
 	if src, _ := args["source"].(string); src == "human" {
-		v, err := p.askHuman(ctx, who, alias, cr, field, args)
-		if err != nil {
-			return nil, err
+		// Спрашивает invoke после проверки браузером (сайт входа, поле): иначе
+		// человек вводит код, а браузер отказывает — код из SMS пропадает.
+		prep.human = func() error {
+			v, err := p.askHuman(ctx, who, alias, cr, field, args)
+			if err != nil {
+				return err
+			}
+			req.Revealed = map[string]string{abi.HumanValue: v}
+			name := field
+			if name == "" {
+				name = "code"
+			}
+			prep.uses = append(prep.uses, secretUse{account: alias, field: "human:" + name, bind: req.Login.Bind})
+			return nil
 		}
-		req.Revealed = map[string]string{abi.HumanValue: v}
-		name := field
-		if name == "" {
-			name = "code"
-		}
-		prep.uses = append(prep.uses, secretUse{account: alias, field: "human:" + name, bind: req.Login.Bind})
 		return prep, nil
 	}
 	for _, f := range req.Login.Fields {

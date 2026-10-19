@@ -62,6 +62,9 @@ func (b *fakeBrowser) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecRes
 		}
 		return abi.ExecResult{Structured: map[string]any{"url": "https://lk.example/", "status": "logged_in", "origin": "https://login.example"}, ResultRef: "logged_in"}, nil
 	case "fill_secret":
+		if r.Args["selector"] == "#elsewhere" {
+			return abi.ExecResult{}, abi.Errorf("wrong_origin", "the page is not at the sign-in site")
+		}
 		return abi.ExecResult{Structured: map[string]any{"url": "https://login.example/", "origin": "https://login.example"}}, nil
 	}
 	return abi.ExecResult{Structured: map[string]any{"url": "https://login.example/"}}, nil
@@ -160,7 +163,10 @@ credentials:
     use: [connector-dev]
   "@bank":
     bind: ["https://id.bank.example"]
-    via: { connector: bank_login, action: login }
+    via:
+      connector: bank_login
+      action: login
+      fields: [{ name: password, secret: "@emias.password" }]
     use: [connector-dev]
 `
 
@@ -345,9 +351,17 @@ func TestLoginViaConnector(t *testing.T) {
 	if e.via.got[0] != nil {
 		t.Fatal(e.via.got)
 	}
-	q := e.br.last()
+	// Порядок у браузера: проверка без значения → (вопрос человеку) → ввод → шаг login в записи сеанса.
+	n := len(e.br.reqs)
+	pre, q, rec := e.br.reqs[n-3], e.br.reqs[n-2], e.br.reqs[n-1]
+	if pre.Action != "fill_secret" || pre.Args[ArgPrecheck] != true || pre.Revealed[abi.HumanValue] != "" {
+		t.Fatalf("precheck: %+v", pre)
+	}
 	if q.Action != "fill_secret" || q.Caller.Connector != "bank_login" || q.Caller.Session != "s-7" || q.Revealed[abi.HumanValue] != "135790" {
 		t.Fatalf("%+v %+v", q, q.Caller)
+	}
+	if rec.Action != "login" || rec.Args[ArgRecordOnly] != true || rec.Args["result"].(map[string]any)["status"] != "submitted" {
+		t.Fatalf("record_only: %+v", rec)
 	}
 	if len(e.asked) != 1 || e.asked[0].Caller != "bank_login" || e.asked[0].Account != "@bank" || e.asked[0].Text != "a one-time code" {
 		t.Fatalf("%+v", e.asked)
@@ -399,5 +413,32 @@ func TestApprovalShowsAccount(t *testing.T) {
 	sl, _ := sm.Find("login")
 	if s := e.p.accountPreview("dev", "slotted.login", sl, nil); !strings.Contains(s, "account @emias (slot login)") {
 		t.Fatal(s, cfg.Connectors)
+	}
+}
+
+// Учётка с коннектором входа: он вводит её поля по имени; браузер проверяет
+// страницу до вопроса человеку — при отказе человека не спрашивают.
+func TestViaFieldsAndPrecheck(t *testing.T) {
+	e := newCredEnv(t, manifest.RuntimeNative)
+	ctx := context.Background()
+	e.via.calls = []abi.ServiceCallRequest{{Target: "browser", Action: "fill_secret", Args: map[string]any{"account": "@bank", "field": "password", "selector": "#pw"}}}
+	e.via.out = map[string]any{"status": "logged_in"}
+	if r := e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.login", Args: map[string]any{"account": "@bank"}}); r.Status != StatusOK || e.via.got[0] != nil {
+		t.Fatal(r, e.via.got)
+	}
+	var fill abi.ExecRequest
+	for _, q := range e.br.reqs {
+		if q.Action == "fill_secret" {
+			fill = q
+		}
+	}
+	if fill.Revealed["@emias.password"] != fakePassword || fill.Login == nil || len(fill.Login.Fields) != 1 || fill.Login.Fields[0].Name != "password" {
+		t.Fatalf("the sign-in connector gets its account's field: %+v", fill)
+	}
+	asked := len(e.asked)
+	e.via.calls = []abi.ServiceCallRequest{{Target: "browser", Action: "fill_secret", Args: map[string]any{"account": "@bank", "selector": "#elsewhere", "source": "human"}}}
+	e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.login", Args: map[string]any{"account": "@bank"}})
+	if e.via.got[0] == nil || !strings.Contains(e.via.got[0].Error(), "wrong_origin") || len(e.asked) != asked {
+		t.Fatal("the browser refused before the question: nobody is asked for a code", e.via.got, e.asked)
 	}
 }

@@ -265,13 +265,49 @@ func AgentFrom(ctx context.Context) string {
 // строками лога коннектора своей сборки.
 func (p *Pipeline) run(ctx context.Context, agent, action string, cli connectors.Client, act manifest.Action, args map[string]any, dec policy.Decision, appr *audit.Approval) Result {
 	start := time.Now()
+	conn := strings.SplitN(action, ".", 2)[0]
+	set, _ := ctx.Value(logConnsKey{}).(*logConns)
+	root := set == nil
+	if root {
+		set = &logConns{}
+		ctx = context.WithValue(ctx, logConnsKey{}, set)
+	}
+	set.add(conn)
 	res := p.execute(ctx, agent, action, cli, act, args, dec, appr)
-	if _, nested := callFrom(ctx); !nested && p.ConnectorLog != nil {
-		for _, l := range p.ConnectorLog(strings.SplitN(action, ".", 2)[0], start) {
-			res.Log = append(res.Log, p.maskString(l))
+	if _, nested := callFrom(ctx); root && !nested && p.ConnectorLog != nil {
+		// Строки своей сборки и коннекторов, вызванных ради неё (коннектор входа).
+		for _, c := range set.list() {
+			for _, l := range p.ConnectorLog(c, start) {
+				if c != conn {
+					l = c + ": " + l
+				}
+				res.Log = append(res.Log, p.maskString(l))
+			}
 		}
 	}
 	return res
+}
+
+type logConnsKey struct{}
+
+// logConns — коннекторы, исполненные в корневом вызове (порядок первого вызова).
+type logConns struct {
+	mu    sync.Mutex
+	names []string
+}
+
+func (l *logConns) add(n string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !slices.Contains(l.names, n) {
+		l.names = append(l.names, n)
+	}
+}
+
+func (l *logConns) list() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.names)
 }
 
 func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connectors.Client, act manifest.Action, args map[string]any, dec policy.Decision, appr *audit.Approval) Result {
@@ -418,9 +454,33 @@ func (p *Pipeline) invoke(ctx context.Context, agent, action string, cli connect
 	}
 	var ex abi.ExecResult
 	var err error
+	if prep != nil && prep.human != nil {
+		// Сначала браузер проверяет страницу и поле, потом вопрос человеку.
+		check := req
+		check.Args = map[string]any{ArgPrecheck: true}
+		for k, v := range req.Args {
+			check.Args[k] = v
+		}
+		if _, err := cli.Execute(WithAgent(ctx, agent), check); err != nil {
+			return abi.ExecResult{}, err
+		}
+		if err := prep.human(); err != nil {
+			return abi.ExecResult{}, err
+		}
+	}
 	if prep != nil && prep.via != nil {
 		session, _ := req.Args["session"].(string)
 		ex, err = p.loginVia(ctx, agent, info, prep, session)
+		if err == nil && session != "" {
+			// Сеанс агента записывает вход одним шагом — шаги коннектора входа
+			// не заменяют его в фикстуре вызывающего.
+			rec := req
+			rec.Args = map[string]any{ArgRecordOnly: true, "result": ex.Structured}
+			for k, v := range req.Args {
+				rec.Args[k] = v
+			}
+			_, _ = cli.Execute(WithAgent(ctx, agent), rec)
+		}
 	} else {
 		ex, err = cli.Execute(WithAgent(ctx, agent), req)
 	}
