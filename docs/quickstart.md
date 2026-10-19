@@ -120,10 +120,13 @@ gate4ai policy set config.yaml -m "первая политика"
 Секреты (значение — из stdin, в историю shell не попадает):
 
 ```sh
-printf %s 'пароль-приложения' | gate4ai vault set mail.work
+gate4ai vault set mail.work                               # спросит значение (ввод скрыт, Enter — готово)
+printf %s 'пароль-приложения' | gate4ai vault set mail.work # или из stdin (скрипты); --from-env VAR — из переменной
 printf %s '123456:ABC…'       | gate4ai vault set telegram.bot
 gate4ai policy set config.yaml -m "секреты добавлены"   # перечитать каналы
 ```
+
+Сайты, которые агенты открывают в браузере: `gate4ai sites` — список, `gate4ai sites allow login.example.org` — добавить, `gate4ai sites remove …` — убрать.
 
 Проверка: `gate4ai doctor`.
 

@@ -28,6 +28,12 @@ type Change struct {
 	SettingsJSON string   `json:"settings_json,omitempty"`
 	// Folder — install_dev_connector: папка с исходниками своей сборки (WASM).
 	Folder string `json:"folder,omitempty"`
+	// Key — add_setting_items / remove_setting_items: настройка-список коннектора.
+	Key string `json:"key,omitempty"`
+	// Account, CredentialJSON — add_credential: учётка (без значений секретов,
+	// только алиасы Vault) в JSON, как в credentials политики.
+	Account        string `json:"account,omitempty"`
+	CredentialJSON string `json:"credential_json,omitempty"`
 }
 
 // Операции правок.
@@ -43,10 +49,18 @@ const (
 	// сборку (доверие local): агент, который пишет коннектор, ставит его без
 	// сокета владельца — под подтверждением change_policy.
 	OpInstallDev = "install_dev_connector"
+	// OpAddSettingItems / OpRemoveSettingItems — дополнить или сократить
+	// настройку-список коннектора (сайты браузера), не заменяя её целиком.
+	OpAddSettingItems    = "add_setting_items"
+	OpRemoveSettingItems = "remove_setting_items"
+	// OpAddCredential — учётка входа на сайт (метаданные; значения секретов
+	// кладёт владелец в Vault). Подтверждается человеком всегда.
+	OpAddCredential = "add_credential"
 )
 
 // ChangeOps — допустимые операции.
-var ChangeOps = []string{OpAddRule, OpRemoveRule, OpAddListItems, OpRemoveListItems, OpAddConnector, OpConnectorSetting, OpInstallConnector, OpInstallDev}
+var ChangeOps = []string{OpAddRule, OpRemoveRule, OpAddListItems, OpRemoveListItems, OpAddConnector, OpConnectorSetting, OpInstallConnector, OpInstallDev,
+	OpAddSettingItems, OpRemoveSettingItems, OpAddCredential}
 
 // CheckChange проверяет правку до решения политики: форму и запрет секретов.
 func CheckChange(ch Change) error {
@@ -100,6 +114,31 @@ func CheckChange(ch Change) error {
 		}
 		if !strings.HasPrefix(ch.Folder, "/") && !strings.HasPrefix(ch.Folder, "~") && !(len(ch.Folder) > 2 && ch.Folder[1] == ':') {
 			return errors.New("install_dev_connector: folder must be an absolute path")
+		}
+	case OpAddSettingItems, OpRemoveSettingItems:
+		if err := errors.Join(need("connector", ch.Connector), need("key", ch.Key)); err != nil {
+			return err
+		}
+		if len(ch.Items) == 0 {
+			return fmt.Errorf("%s: items are required", ch.Op)
+		}
+		items := make([]any, len(ch.Items))
+		for i, it := range ch.Items {
+			items[i] = it
+		}
+		if hasAlias(items) || strings.Contains(strings.ToLower(ch.Key), "key") || strings.Contains(strings.ToLower(ch.Key), "password") {
+			return fmt.Errorf("%s: secrets and vault aliases cannot be set by agents", ch.Op)
+		}
+	case OpAddCredential:
+		if err := errors.Join(need("account", ch.Account), need("credential_json", ch.CredentialJSON)); err != nil {
+			return err
+		}
+		if !credAliasRe.MatchString(ch.Account) {
+			return fmt.Errorf("add_credential: account must be an alias like @site")
+		}
+		var cr Credential
+		if err := json.Unmarshal([]byte(ch.CredentialJSON), &cr); err != nil {
+			return fmt.Errorf("add_credential: credential_json: %v", err)
 		}
 	case OpConnectorSetting:
 		if err := need("connector", ch.Connector); err != nil {
@@ -176,6 +215,17 @@ func (c *Config) ApplyChange(profile string, ch Change) error {
 			return nil // своя сборка ещё не собрана (предпросмотр): имя — из её манифеста
 		}
 		return c.SetProfileConnector(profile, ch.Connector, true)
+	case OpAddSettingItems:
+		c.AddSettingItems(ch.Connector, ch.Key, ch.Items)
+	case OpRemoveSettingItems:
+		c.RemoveSettingItems(ch.Connector, ch.Key, ch.Items)
+	case OpAddCredential:
+		var cr Credential
+		_ = json.Unmarshal([]byte(ch.CredentialJSON), &cr)
+		if c.Credentials == nil {
+			c.Credentials = map[string]Credential{}
+		}
+		c.Credentials[ch.Account] = cr // проверка всей политики — при сохранении
 	case OpConnectorSetting:
 		var m map[string]any
 		_ = json.Unmarshal([]byte(ch.SettingsJSON), &m)
@@ -230,6 +280,12 @@ func (ch Change) describe() string {
 		return s + " и дать к ней доступ"
 	case OpConnectorSetting:
 		return "Настройки коннектора " + ch.Connector + ": " + ch.SettingsJSON
+	case OpAddSettingItems:
+		return fmt.Sprintf("Добавить в настройку %s.%s: %s", ch.Connector, ch.Key, strings.Join(ch.Items, ", "))
+	case OpRemoveSettingItems:
+		return fmt.Sprintf("Убрать из настройки %s.%s: %s", ch.Connector, ch.Key, strings.Join(ch.Items, ", "))
+	case OpAddCredential:
+		return "Учётка " + ch.Account + " (значения секретов — в хранилище, их задаёте вы): " + ch.CredentialJSON
 	}
 	return ch.Op
 }

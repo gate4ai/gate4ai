@@ -240,7 +240,7 @@ func (p *Pipeline) prepareBrowser(ctx context.Context, agent string, act manifes
 		}
 		v, err := p.Vault.Get(secret)
 		if err != nil || v == "" {
-			return denied("secret %s of account %s is not set: gate4ai vault set %s", secret, alias, secret)
+			return denied("secret %s of account %s is not set: the owner sets it — gate4ai vault set %s (asks with hidden input) or Web UI → Secrets", secret, alias, secret)
 		}
 		if req.Revealed == nil {
 			req.Revealed = map[string]string{}

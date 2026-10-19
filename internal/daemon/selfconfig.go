@@ -29,8 +29,8 @@ const SelfConnector = "gate4ai"
 type selfConnector struct{ d *Daemon }
 
 const changeSchema = `{ type: object, properties: {
-  op: { type: string, enum: [add_rule, remove_rule, add_list_items, remove_list_items, add_connector, connector_settings, install_connector, install_dev_connector],
-        description: "add_rule / remove_rule — a rule of a profile; add_list_items / remove_list_items — a policy list; add_connector — give a profile an installed connector; connector_settings — merge connector settings (no secrets); install_connector — install from the store and give the profile access; install_dev_connector — build a WASM connector from your source folder, install it as the owner's own build and give the profile access" },
+  op: { type: string, enum: [add_rule, remove_rule, add_list_items, remove_list_items, add_connector, connector_settings, install_connector, install_dev_connector, add_setting_items, remove_setting_items, add_credential],
+        description: "add_rule / remove_rule — a rule of a profile; add_list_items / remove_list_items — a policy list; add_connector — give a profile an installed connector; connector_settings — merge connector settings (no secrets); install_connector — install from the store and give the profile access; install_dev_connector — build a WASM connector from your source folder, install it as the owner's own build and give the profile access; add_setting_items / remove_setting_items — add or remove items of a list setting of a connector (sites of the browser: connector browser, key allowed_domains); add_credential — an account to sign in on a site (no secret values: the owner puts them into the vault)" },
   profile: { type: string, description: "profile to change (add_rule, remove_rule, add_connector, install_connector); empty — your own profile" },
   rule_id: { type: string, description: "rule id as policy_summary shows it (remove_rule; optional for add_rule — the same id replaces the rule)" },
   id: { type: string, description: "the same as rule_id" },
@@ -42,7 +42,10 @@ const changeSchema = `{ type: object, properties: {
   items: { type: array, items: { type: string } },
   connector: { type: string },
   settings_json: { type: string, description: "connector_settings: JSON object with non-secret settings, e.g. {\"roots\":[\"~/notes\"]}" },
-  folder: { type: string, description: "install_dev_connector: absolute path of the folder with manifest.yaml and Go sources" } },
+  folder: { type: string, description: "install_dev_connector: absolute path of the folder with manifest.yaml and Go sources" },
+  key: { type: string, description: "add_setting_items / remove_setting_items: the list setting, e.g. allowed_domains" },
+  account: { type: string, description: "add_credential: the account alias, e.g. @emias" },
+  credential_json: { type: string, description: "add_credential: the account as in credentials of the policy, JSON: {bind, form | via, login_page, prompts, use, connectors}; secrets only as vault aliases" } },
   required: [op] }`
 
 func (selfConnector) Manifest() manifest.Manifest {
@@ -54,7 +57,7 @@ func (selfConnector) Manifest() manifest.Manifest {
 				InputSchema: manifest.MustSchema(`{ type: object, properties: {
 				  summary: { type: string, description: "one line: what the change does" },
 				  reason: { type: string, description: "why the user needs it" },
-				  changes: { type: array, minItems: 1, maxItems: 20, description: "JSON array of changes, each {op, …}: add_rule {action, effect, when?, rule_id?, rule_reason?, profile?}; remove_rule {rule_id, profile?}; add_list_items / remove_list_items {list, items}; add_connector / install_connector {connector, profile?}; connector_settings {connector, settings_json}; install_dev_connector {folder}. A rule decides by precedence deny > ask > allow, not by order", items: ` + changeSchema + ` } },
+				  changes: { type: array, minItems: 1, maxItems: 20, description: "JSON array of changes, each {op, …}: add_rule {action, effect, when?, rule_id?, rule_reason?, profile?}; remove_rule {rule_id, profile?}; add_list_items / remove_list_items {list, items}; add_connector / install_connector {connector, profile?}; connector_settings {connector, settings_json}; install_dev_connector {folder}; add_setting_items / remove_setting_items {connector, key, items}; add_credential {account, credential_json}. A rule decides by precedence deny > ask > allow, not by order", items: ` + changeSchema + ` } },
 				  required: [summary, changes] }`),
 				Example: `gate4ai gate4ai change_policy --summary "Let me append to notes" --changes '[{"op":"add_rule","action":"files.append","when":"glob(path, \"~/notes/**\")","effect":"allow"}]'`},
 			{Name: "policy_summary", Class: "read", Description: "Your profile (connectors, rules, limits — what you may do without asking, what needs approval, what is denied), the other profiles and the lists",
@@ -237,7 +240,21 @@ func PolicySummary(cfg *config.Config, agent string) map[string]any {
 			others[n] = op.Connectors
 		}
 	}
-	return map[string]any{"agent": agent, "profile": a.Profile, "connectors": p.Connectors, "rules": rules, "limits": limits,
+	// Несекретные настройки коннекторов профиля: агент видит, например, свои
+	// сайты браузера, прежде чем просить добавить сайт (add_setting_items).
+	settings := map[string]map[string]any{}
+	for _, conn := range p.Connectors {
+		for k, v := range cfg.Connectors[conn] {
+			if secretSetting(k, v) {
+				continue
+			}
+			if settings[conn] == nil {
+				settings[conn] = map[string]any{}
+			}
+			settings[conn][k] = v
+		}
+	}
+	return map[string]any{"agent": agent, "profile": a.Profile, "connectors": p.Connectors, "rules": rules, "limits": limits, "settings": settings,
 		"lists": lists, "other_profiles": others, "defaults": "no rule matched: read → allow; write / external / money → ask; deny beats ask beats allow"}
 }
 
@@ -309,9 +326,22 @@ func alwaysAskSelf(args map[string]any) string {
 		return ""
 	}
 	for _, ch := range changes {
-		if ch.Op == config.OpInstallDev {
+		switch ch.Op {
+		case config.OpInstallDev:
 			return "installing an own build (new code in gate4ai) always needs the owner's approval"
+		case config.OpAddCredential:
+			return "an account decides where your secrets are entered: it always needs the owner's approval"
 		}
 	}
 	return ""
+}
+
+// secretSetting — настройка со значением-алиасом Vault или о секрете (ключ модели, пароль).
+func secretSetting(k string, v any) bool {
+	lk := strings.ToLower(k)
+	if strings.Contains(lk, "key") || strings.Contains(lk, "password") || strings.Contains(lk, "token") || strings.Contains(lk, "secret") || k == "credentials" {
+		return true
+	}
+	s, ok := v.(string)
+	return ok && strings.HasPrefix(strings.TrimSpace(s), "@")
 }

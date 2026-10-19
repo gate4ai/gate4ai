@@ -146,8 +146,8 @@ type AccountView struct {
 
 // AccountFieldView — поле формы: константа или алиас секрета.
 type AccountFieldView struct {
-	Selector, Value, Secret, Type string
-	Set                           bool
+	Selector, Name, Value, Secret, Type string
+	Set                                 bool
 }
 
 // accountsView — учётки из конфигурации; set — алиасы, заданные в хранилище.
@@ -159,14 +159,15 @@ func accountsView(cfg *config.Config, set map[string]bool) []AccountView {
 		if cr.Via != nil {
 			v.Via = cr.Via.Full()
 		}
-		if f := cr.Form; f != nil {
-			for _, fl := range f.Fields {
-				fv := AccountFieldView{Selector: fl.Selector, Value: fl.Value, Secret: fl.Secret, Type: fl.Type, Set: set[fl.Secret]}
-				if fl.Secret != "" && !fv.Set {
-					v.Missing = append(v.Missing, fl.Secret)
-				}
-				v.Fields = append(v.Fields, fv)
+		// Поля формы или коннектора входа: у незаданного секрета — форма «задать».
+		for _, fl := range cr.AllFields() {
+			fv := AccountFieldView{Selector: fl.Selector, Name: fl.Name, Value: fl.Value, Secret: fl.Secret, Type: fl.Type, Set: set[fl.Secret]}
+			if fl.Secret != "" && !fv.Set {
+				v.Missing = append(v.Missing, fl.Secret)
 			}
+			v.Fields = append(v.Fields, fv)
+		}
+		if f := cr.Form; f != nil {
 			v.Submit = f.Submit.Selector
 			if f.Submit.Press != "" {
 				v.Submit = "клавиша " + f.Submit.Press

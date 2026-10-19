@@ -42,6 +42,8 @@ type Env struct {
 	// StdoutTTY — stdout — терминал: списки таблицей, ошибки текстом (output.go);
 	// ForceJSON — --json у табличной команды.
 	StdoutTTY, ForceJSON bool
+	// cmdline — аргументы команды (подсказка owner_only — готовая команда).
+	cmdline []string
 	// ForceTable — таблица и вне терминала (--table у approvals list).
 	ForceTable bool
 	// StartBinary — бинарник gate4ai для запуска daemon в фоне ("" — этот же).
@@ -107,7 +109,8 @@ Owner commands (local socket):
   gate4ai agents list | token <agent> [--label l] | connect <agent> | revoke <agent>
   gate4ai policy show | set <file> [-m comment] | versions | rollback <n> | test --agent a --action x [--args json] [--file draft.yaml]
   gate4ai approvals [list] [--table|--json] | approve <id> | reject <id> | questions | answer <id> (value from stdin)
-  gate4ai vault list | set <alias> (value from stdin) | rm <alias>
+  gate4ai vault list | set <alias> [--from-env VAR] (asks with hidden input; or the value from stdin) | rm <alias>
+  gate4ai sites [allow | remove <site>...]   sites agents may open in the browser
   gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
   gate4ai connectors list | install <file.g4c | name[@version] | source folder> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | logs <name> [--limit n] [--since 10m] | refresh
   gate4ai connectors new <name> --site <domain> [-o folder]   a connector over the browser to start from (offline)
@@ -126,10 +129,11 @@ Exit codes: 0 ok, 1 error, 2 denied by policy, 3 pending approval, 4 verificatio
 
 // commands — встроенные команды (остальное первое слово — имя коннектора).
 var commands = []string{"help", "version", "tools", "status", "skill", "mcp", "daemon", "service", "log", "show", "export",
-	"verify", "journal", "agents", "policy", "approvals", "vault", "relay", "connectors", "registry", "ui", "run", "doctor", "egress"}
+	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "relay", "connectors", "registry", "ui", "run", "doctor", "egress"}
 
 // Run — точка входа CLI.
 func Run(ctx context.Context, e *Env, args []string) int {
+	e.cmdline = args
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		if len(args) > 1 && isCommand(args[1]) {
 			return e.commandHelp(args[1])
@@ -199,6 +203,8 @@ func Run(ctx context.Context, e *Env, args []string) int {
 		return e.contract(rest)
 	case "fixture":
 		return e.fixture(rest)
+	case "sites":
+		return e.sites(ctx, rest)
 	case "ui":
 		return e.ui(ctx, rest)
 	case "run":
@@ -353,6 +359,10 @@ func (e *Env) skill(ctx context.Context) int {
 	return ExitOK
 }
 
+// knownConnectors — коннекторы ядра и магазина по умолчанию: их имена — не
+// опечатки встроенных команд (files ≠ sites), даже когда daemon не отвечает.
+var knownConnectors = map[string]bool{"files": true, "browser": true, "email": true, "gate4ai": true}
+
 // connectorAliases — привычные имена коннекторов в CLI.
 var connectorAliases = map[string]string{"mail": "email"}
 
@@ -365,7 +375,7 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 	if err != nil {
 		if errors.Is(err, ErrUnavailable) {
 			// Опечатку во встроенной команде видно и без daemon.
-			if s := suggest(conn, commands); s != "" {
+			if s := suggest(conn, commands); s != "" && !knownConnectors[conn] {
 				e.problem(Problem{Code: "unknown_command", Message: fmt.Sprintf("unknown command %q", conn), Hint: "did you mean gate4ai " + s + "?"})
 				return ExitUsage
 			}
@@ -1009,15 +1019,19 @@ func (e *Env) vault(ctx context.Context, args []string) int {
 		})
 		return ExitOK
 	case "set":
-		if len(args) != 1 {
-			fmt.Fprintln(e.Stderr, "usage: echo -n SECRET | gate4ai vault set <alias>")
+		pos, fl := splitFlags(args, map[string]bool{"from-env": true})
+		fs := flag.NewFlagSet("vault set", flag.ContinueOnError)
+		fs.SetOutput(e.Stderr)
+		fromEnv := fs.String("from-env", "", "take the value from this environment variable (scripts)")
+		if fs.Parse(fl) != nil || len(pos) != 1 {
+			_, _ = io.WriteString(e.Stderr, vaultSetUsage+"\n")
 			return ExitUsage
 		}
-		b, err := io.ReadAll(io.LimitReader(e.Stdin, 1<<20))
+		val, err := e.readSecret(pos[0], *fromEnv)
 		if err != nil {
 			return e.fail(err)
 		}
-		val := strings.TrimRight(string(b), "\r\n")
+		args = pos
 		if err := c.Do(ctx, "PUT", "/v1/vault/"+args[0], map[string]string{"value": val}, nil); err != nil {
 			return e.fail(err)
 		}

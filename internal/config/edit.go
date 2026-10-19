@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -294,4 +295,64 @@ func (c *Config) ChannelOn(name string) bool {
 		return name == "desktop"
 	}
 	return slices.Contains(c.Approvals.Channels, name)
+}
+
+// AddSettingItems дополняет список key в настройках коннектора conn (без
+// повторов, порядок сохраняется): сайты браузера, корни файлов.
+func (c *Config) AddSettingItems(conn, key string, items []string) {
+	cur := map[string]any{}
+	for k, v := range c.Connectors[conn] {
+		cur[k] = v
+	}
+	list := settingList(cur[key])
+	for _, it := range items {
+		if it = strings.TrimSpace(it); it != "" && !slices.Contains(list, it) {
+			list = append(list, it)
+		}
+	}
+	vals := make([]any, len(list))
+	for i, v := range list {
+		vals[i] = v
+	}
+	cur[key] = vals
+	c.SetConnectorSettings(conn, cur)
+}
+
+// RemoveSettingItems убирает элементы из списка key в настройках коннектора.
+func (c *Config) RemoveSettingItems(conn, key string, items []string) {
+	cur := map[string]any{}
+	for k, v := range c.Connectors[conn] {
+		cur[k] = v
+	}
+	list := slices.DeleteFunc(settingList(cur[key]), func(s string) bool { return slices.Contains(items, s) })
+	vals := make([]any, len(list))
+	for i, v := range list {
+		vals[i] = v
+	}
+	cur[key] = vals
+	c.SetConnectorSettings(conn, cur)
+}
+
+// SettingList — значение настройки-списка строк (строка — список из неё).
+func (c *Config) SettingList(conn, key string) []string { return settingList(c.Connectors[conn][key]) }
+
+func settingList(v any) []string {
+	switch t := v.(type) {
+	case string:
+		if t == "" {
+			return nil
+		}
+		return []string{t}
+	case []any:
+		var out []string
+		for _, x := range t {
+			if s, ok := x.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []string:
+		return slices.Clone(t)
+	}
+	return nil
 }

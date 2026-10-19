@@ -164,3 +164,38 @@ func TestLogByParent(t *testing.T) {
 		}
 	}
 }
+
+func TestSitesAPI(t *testing.T) {
+	home := t.TempDir()
+	d, err := New(Options{Home: filepath.Join(home, "data"), Keys: keys.NewMemory(), InitialConfig: []byte("agents:\n  bot: { profile: p }\nprofiles:\n  p: { connectors: [] }\nconnectors:\n  browser: { allowed_domains: [lk.example] }\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ownerSock, agentSock := filepath.Join(home, "run", "o.sock"), filepath.Join(home, "run", "a.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Serve(ctx, ownerSock, agentSock)
+	for i := 0; i < 100; i++ {
+		if _, err := os.Stat(agentSock); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	owner := client{c: ipc.HTTPClient(ownerSock)}
+	var res struct {
+		Allowed []string `json:"allowed_domains"`
+	}
+	if code := owner.do(t, "POST", "/v1/sites", map[string]any{"add": []string{"login.mos.ru", "lk.example"}}, &res); code != 200 || len(res.Allowed) != 2 || res.Allowed[1] != "login.mos.ru" {
+		t.Fatal(code, res)
+	}
+	if code := owner.do(t, "POST", "/v1/sites", map[string]any{"remove": []string{"lk.example"}}, &res); code != 200 || len(res.Allowed) != 1 {
+		t.Fatal(code, res)
+	}
+	if code := owner.do(t, "POST", "/v1/sites", map[string]any{"add": []string{"https://x/y"}}, nil); code != 400 {
+		t.Fatal("not a site:", code)
+	}
+	if code := owner.do(t, "GET", "/v1/sites", nil, &res); code != 200 || res.Allowed[0] != "login.mos.ru" {
+		t.Fatal(code, res)
+	}
+}

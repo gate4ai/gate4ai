@@ -164,3 +164,48 @@ func TestInstallDevAlwaysAsks(t *testing.T) {
 		t.Fatalf("allow still allows ordinary changes: %+v", r)
 	}
 }
+
+// Сайты агента и учётки — без правки YAML: владелец — gate4ai sites, агент —
+// add_setting_items (под политикой) и add_credential (всегда с подтверждением).
+func TestSitesAndCredentialChanges(t *testing.T) {
+	c, _ := connectors.NewInProcess(&notes{})
+	conf := cfg + "      - { id: self-allow, action: gate4ai.change_policy, effect: allow }\nconnectors:\n  browser: { allowed_domains: [lk.example], model_key: \"@llm.key\" }\n  notes: { root: \"~/n\" }\n"
+	d, err := New(Options{Home: filepath.Join(t.TempDir(), "d"), Keys: keys.NewMemory(), Connectors: []connectors.Client{c}, InitialConfig: []byte(conf)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ctx := context.Background()
+	call := func(changes ...map[string]any) pipeline.Result {
+		ch := make([]any, len(changes))
+		for i, x := range changes {
+			ch[i] = x
+		}
+		return d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "gate4ai.change_policy", Args: map[string]any{"summary": "x", "changes": ch}})
+	}
+	// Сводка показывает несекретные настройки коннекторов профиля.
+	sum := PolicySummary(d.Config.Current(), "bot")
+	if st := sum["settings"].(map[string]map[string]any); st["notes"]["root"] != "~/n" {
+		t.Fatalf("%+v", sum["settings"])
+	}
+	if r := call(map[string]any{"op": "add_setting_items", "connector": "browser", "key": "allowed_domains", "items": []any{"login.example", "lk.example"}}); r.Status != pipeline.StatusOK {
+		t.Fatalf("%+v", r)
+	}
+	if got := d.Config.Current().SettingList("browser", "allowed_domains"); len(got) != 2 || got[1] != "login.example" {
+		t.Fatal(got)
+	}
+	if r := call(map[string]any{"op": "add_setting_items", "connector": "browser", "key": "model_key", "items": []any{"@x"}}); r.Code != pipeline.CodeInvalidArgs {
+		t.Fatalf("secrets via settings: %+v", r)
+	}
+	cred := `{"bind":["https://login.example"],"form":{"fields":[{"selector":"#p","secret":"@site.password"}],"submit":{"press":"Enter"}},"use":["p"]}`
+	r := call(map[string]any{"op": "add_credential", "account": "@site", "credential_json": cred})
+	if r.Status != pipeline.StatusPending || !strings.Contains(r.Reason, "always needs the owner") {
+		t.Fatalf("add_credential always asks: %+v", r)
+	}
+	if res, err := d.Pipeline.Decide(ctx, r.ID, true, "webui", "owner"); err != nil || res.Status != "ok" {
+		t.Fatal(res, err)
+	}
+	if cr, ok := d.Config.Current().Credentials["@site"]; !ok || cr.Form == nil || cr.Form.Fields[0].Secret != "@site.password" {
+		t.Fatalf("%+v", d.Config.Current().Credentials)
+	}
+}

@@ -120,6 +120,10 @@ func (e *Env) fail(err error) int {
 		}
 	}
 	p := Explain(err, e.Getenv("GATE4AI_TOKEN") != "")
+	if p.Code == "owner_only" && len(e.cmdline) > 0 {
+		// Готовая команда для владельца: агент передаёт её человеку как есть.
+		p.Hint = "this command is for the owner: ask the owner to run it in their own terminal: env -u GATE4AI_TOKEN gate4ai " + shellJoin(e.cmdline)
+	}
 	e.problem(p)
 	return code
 }
@@ -175,4 +179,16 @@ func sentence(s string) string {
 		return s
 	}
 	return s + "."
+}
+
+// shellJoin — аргументы для копирования в shell (кавычки там, где нужны).
+func shellJoin(args []string) string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if a == "" || strings.ContainsAny(a, " \t'\"$`\\|&;<>()*?#~") {
+			a = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+		}
+		out[i] = a
+	}
+	return strings.Join(out, " ")
 }

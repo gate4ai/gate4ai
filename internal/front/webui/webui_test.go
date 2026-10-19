@@ -288,7 +288,7 @@ func TestAccountsAndQuestions(t *testing.T) {
 	}
 	r, _ = c.Get(base + "/vault")
 	p := body(t, r)
-	for _, want := range []string{"Учётки для входа на сайты", "<code>@site</code>", "https://login.example", "секрет <code>@site.password</code>", "нет в хранилище", "профиль <code>p</code>"} {
+	for _, want := range []string{"Учётки для входа на сайты", "<code>@site</code>", "https://login.example", "секрет <code>@site.password</code>", "нет <code>@site.password</code>", `name="alias" value="@site.password"`, "Задать", "профиль <code>p</code>"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("vault page: no %q", want)
 		}

@@ -40,3 +40,34 @@ func TestFixtureScrub(t *testing.T) {
 		t.Fatal("bad --replace")
 	}
 }
+
+func TestReadSecret(t *testing.T) {
+	e := &Env{Stdin: strings.NewReader("s3cret\n"), Stderr: &bytes.Buffer{}, Getenv: func(k string) string {
+		if k == "PW" {
+			return "from-env"
+		}
+		return ""
+	}}
+	if v, err := e.readSecret("@a", ""); err != nil || v != "s3cret" {
+		t.Fatal(v, err)
+	}
+	if v, err := e.readSecret("@a", "PW"); err != nil || v != "from-env" {
+		t.Fatal(v, err)
+	}
+	if _, err := e.readSecret("@a", "NOPE"); err == nil {
+		t.Fatal("empty variable")
+	}
+	e.Stdin = strings.NewReader("")
+	if _, err := e.readSecret("@a", ""); err == nil || !strings.Contains(err.Error(), "own terminal") || !strings.Contains(err.Error(), "Web UI") {
+		t.Fatal(err)
+	}
+}
+
+func TestShellJoin(t *testing.T) {
+	if got := shellJoin([]string{"vault", "set", "@mosru.password"}); got != "vault set @mosru.password" {
+		t.Fatal(got)
+	}
+	if got := shellJoin([]string{"policy", "set", "my file.yaml", "-m", "it's"}); got != `policy set 'my file.yaml' -m 'it'\''s'` {
+		t.Fatal(got)
+	}
+}

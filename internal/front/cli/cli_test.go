@@ -124,6 +124,10 @@ func TestCLIFlow(t *testing.T) {
 	_, out = h.run(t, "", "agents", "token", "drafts")
 	dtok := jsonOf(t, out)["token"].(string)
 
+	// Команда владельца с токеном агента: в подсказке — готовая команда для человека.
+	if code, out := h.run(t, tok, "vault", "set", "@site.password"); code == 0 || !strings.Contains(out, "env -u GATE4AI_TOKEN gate4ai vault set @site.password") {
+		t.Fatal("owner_only hint:", code, out)
+	}
 	// Каталог и skill.
 	code, out = h.run(t, tok, "tools", "--json")
 	if code != 0 || !strings.Contains(out, `"email.send"`) {

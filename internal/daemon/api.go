@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -279,6 +281,40 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write(buf.Bytes())
+	}))
+	// Сайты агентов в браузере (connectors.browser.allowed_domains): владелец
+	// добавляет сайт одной командой, без правки YAML.
+	mux.HandleFunc("GET /v1/sites", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		c := d.Config.Current()
+		writeJSON(w, 200, map[string]any{"allowed_domains": orEmpty(c.SettingList("browser", "allowed_domains")),
+			"blocked": orEmpty(c.SettingList("browser", "blocked")), "mode": c.Connectors["browser"]["mode"]})
+	}))
+	mux.HandleFunc("POST /v1/sites", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		var req struct {
+			Add    []string `json:"add"`
+			Remove []string `json:"remove"`
+		}
+		if err := readJSON(r, &req); err != nil || len(req.Add)+len(req.Remove) == 0 {
+			writeErr(w, 400, "bad_request", "add or remove sites: {\"add\": [\"login.example.org\"]}")
+			return
+		}
+		for _, s := range append(slices.Clone(req.Add), req.Remove...) {
+			if !siteRe.MatchString(s) {
+				writeErr(w, 400, "bad_request", fmt.Sprintf("%q is not a site: a host like login.example.org or *.example.org", s))
+				return
+			}
+		}
+		comment := "sites: +" + strings.Join(req.Add, " +") + " -" + strings.Join(req.Remove, " -")
+		v, err := d.Config.Edit(p, comment, func(c *config.Config) error {
+			c.AddSettingItems("browser", "allowed_domains", req.Add)
+			c.RemoveSettingItems("browser", "allowed_domains", req.Remove)
+			return nil
+		})
+		if err != nil {
+			writeErr(w, 400, "policy", err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"status": "ok", "version": v.N, "allowed_domains": orEmpty(d.Config.Current().SettingList("browser", "allowed_domains"))})
 	}))
 	mux.HandleFunc("POST /v1/journal/verify", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		if err := d.Journal.VerifyChain(); err != nil {
@@ -565,4 +601,14 @@ func daemonArgs() []string {
 		}
 	}
 	return []string{}
+}
+
+// siteRe — сайт для списка браузера: хост или *.хост.
+var siteRe = regexp.MustCompile(`^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
