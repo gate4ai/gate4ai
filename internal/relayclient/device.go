@@ -3,7 +3,7 @@
 // Package relayclient — сторона устройства для relay gate4.ai: регистрация,
 // исходящий туннель (WebSocket + yamux), TLS с сертификатом устройства
 // (ACME DNS-01 через API relay), отправка чекпоинтов свидетелю. Сервер relay —
-// отдельный модуль github.com/gate4ai/relay; протокол — его docs/protocol.md.
+// пакет github.com/gate4ai/gate4ai/relay; протокол — relay/docs/protocol.md.
 package relayclient
 
 import (

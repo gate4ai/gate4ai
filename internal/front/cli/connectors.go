@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gate4ai/sdk-go/manifest"
-	"github.com/gate4ai/sdk-go/registry"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/registry"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/native"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
@@ -652,20 +652,21 @@ func packWith(man, wb []byte, key string) ([]byte, error) {
 const registryUsage = `usage:
   gate4ai registry check <index.json> [--key ed25519:…] [--fetch]   structure, signature; --fetch: download and verify every package
   gate4ai registry sign <index.json> --key file                      sign the index (registry owner)
-  gate4ai registry add <index.json> <pack.json> --publisher name [--repo https://…] [--license id] [--description text] [--url package-url]`
+  gate4ai registry add <index.json> <pack.json> --publisher name [--repo https://…] [--path dir] [--license id] [--description text] [--url package-url]`
 
 func (e *Env) registry(ctx context.Context, args []string) int {
 	if len(args) == 0 {
 		args = []string{"help"}
 	}
 	sub := args[0]
-	pos, fl := splitFlags(args[1:], map[string]bool{"key": true, "publisher": true, "repo": true, "license": true, "description": true, "url": true})
+	pos, fl := splitFlags(args[1:], map[string]bool{"key": true, "publisher": true, "repo": true, "path": true, "license": true, "description": true, "url": true})
 	fs := flag.NewFlagSet("registry", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	key := fs.String("key", "", "check: registry public key (ed25519:…); sign: registry private key file")
 	fetch := fs.Bool("fetch", false, "check: download every package and verify it against its entry")
 	publisher := fs.String("publisher", "", "add: publisher name in the index")
 	repo := fs.String("repo", "", "add: source repository (required for a new connector)")
+	path := fs.String("path", "", "add: the connector's folder in --repo (new connector; default: the repo root)")
 	license := fs.String("license", "", "add: SPDX license (required for a new connector)")
 	description := fs.String("description", "", "add: short description (new connector)")
 	pkgURL := fs.String("url", "", "add: package URL (default: GitHub release v<version> of --repo or of the existing entry)")
@@ -758,7 +759,7 @@ func (e *Env) registry(ctx context.Context, args []string) int {
 			}
 			u = strings.TrimSuffix(r, "/") + "/releases/download/v" + p.Version + "/" + file
 		}
-		if err := store.AddRelease(ix, *publisher, p, u, registry.Entry{Repo: *repo, License: *license, Description: *description}); err != nil {
+		if err := store.AddRelease(ix, *publisher, p, u, registry.Entry{Repo: *repo, Path: *path, License: *license, Description: *description}); err != nil {
 			return e.fail(err)
 		}
 		out, _ := json.MarshalIndent(ix, "", "  ")

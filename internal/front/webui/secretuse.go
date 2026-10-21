@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/secrets/vault"

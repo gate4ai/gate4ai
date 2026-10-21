@@ -36,7 +36,7 @@
 <div><button class="danger">Зарегистрировать заново</button></div></form></div>
 {{else}}
 <div class="card" id="custom"><h3>Свой relay</h3>
-<p>Свой relay — сервер <a href="https://github.com/gate4ai/relay/tree/main/cmd/gate4ai-relay" target="_blank" rel="noopener"><code>gate4ai-relay</code></a>, который вы запускаете сами; на него нужно делегировать DNS-зону (relay отвечает за адреса устройств и выпуск их сертификатов). Как развернуть — в <a href="https://github.com/gate4ai/relay#readme" target="_blank" rel="noopener">инструкции relay</a>.</p>
+<p>Свой relay — сервер <a href="https://github.com/gate4ai/gate4ai/tree/main/relay/cmd/gate4ai-relay" target="_blank" rel="noopener"><code>gate4ai-relay</code></a>, который вы запускаете сами; на него нужно делегировать DNS-зону (relay отвечает за адреса устройств и выпуск их сертификатов). Как развернуть — в <a href="https://github.com/gate4ai/gate4ai/tree/main/relay#readme" target="_blank" rel="noopener">инструкции relay</a>.</p>
 <form method="post" action="{{.Base}}/settings/relay" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="form" value="custom">
 <label class="inline">Адрес relay <input name="url" placeholder="https://relay.example.org" size="34" required></label>
 <button class="primary">Подключить</button></form>

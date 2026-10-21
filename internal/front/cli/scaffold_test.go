@@ -14,8 +14,8 @@ import (
 	"testing"
 
 	"github.com/gate4ai/gate4ai/internal/platform/version"
-	"github.com/gate4ai/sdk-go/hosttest"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/hosttest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 func TestConnectorsNew(t *testing.T) {
@@ -49,7 +49,7 @@ func TestConnectorsNew(t *testing.T) {
 	if _, err := hosttest.LoadFixture(filepath.Join(dir, "testdata", "session.json")); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(must(os.ReadFile(filepath.Join(dir, "go.mod"))), []byte("github.com/gate4ai/sdk-go v")) {
+	if !bytes.Contains(must(os.ReadFile(filepath.Join(dir, "go.mod"))), []byte("github.com/gate4ai/gate4ai v")) {
 		t.Fatal("go.mod")
 	}
 	if code, out := run("connectors", "new", "my_lk", "--site", "lk.example.org", "-o", dir); code == ExitOK || !strings.Contains(out, "already exists") {

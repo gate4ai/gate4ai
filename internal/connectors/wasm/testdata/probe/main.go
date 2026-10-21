@@ -12,8 +12,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/gate4ai/sdk-go/abi"
-	"github.com/gate4ai/sdk-go/connector"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/connector"
 )
 
 //go:embed manifest.yaml

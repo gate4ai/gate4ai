@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gate4ai/sdk-go/abi"
-	"github.com/gate4ai/sdk-go/connector"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/connector"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 // Builtin — коннектор ядра (runtime: builtin), написанный на PDK коннекторов:

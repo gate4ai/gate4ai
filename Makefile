@@ -1,26 +1,26 @@
 GO ?= go
-# Модули workspace (go.work): ядро и будущие отдельные репозитории.
-MODULES := $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: all build vet test ci bin connectors
+.PHONY: all build vet test e2e ci bin connectors
 all: ci
 
 build:
-	@for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
+	$(GO) build ./...
 
 vet:
-	@for m in $(MODULES); do (cd $$m && $(GO) vet ./...) || exit 1; done
+	$(GO) vet ./...
 
 test:
-	@for m in $(MODULES); do (cd $$m && $(GO) test ./...) || exit 1; done
+	$(GO) test $$($(GO) list ./... | grep -v '/e2e$$')
+
+e2e:
+	./scripts/ci.sh e2e
 
 ci:
 	./scripts/ci.sh
 
 bin:
 	mkdir -p bin
-	$(GO) build -o bin/ ./cmd/...
-	cd relay && $(GO) build -o ../bin/ ./cmd/...
+	$(GO) build -o bin/ ./cmd/... ./relay/cmd/...
 
 # Пакеты официальных коннекторов для локальной установки:
 #   gate4ai connectors install bin/connectors/<коннектор>.g4c --dev

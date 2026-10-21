@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -10,20 +11,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # contract: манифесты прошлого тега
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: false
-      # Кэш Go с запасным ключом: после смены go.sum (обновление sdk-go при деплое)
-      # сборка начинается с прошлого кэша, а не с нуля, как у кэша setup-go.
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-${{ runner.os }}-test-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-test-
+      # SPDX, направление зависимостей (scripts/deps-check.sh), сборка, vet, тесты, WASM.
       - run: ./scripts/ci.sh
+      # Действия для других коннекторов: несовместимое изменение — только с новым contract.
+      - name: contract
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
+          [ -n "$prev" ] || exit 0
+          go build -o "$RUNNER_TEMP/gate4ai" ./cmd/gate4ai
+          for m in connectors/*/manifest.yaml; do
+            git show "$prev:$m" > "$RUNNER_TEMP/prev.yaml" 2>/dev/null || continue
+            grep -q '^services:' "$RUNNER_TEMP/prev.yaml" || continue
+            echo "== $m against $prev"
+            "$RUNNER_TEMP/gate4ai" contract diff "$RUNNER_TEMP/prev.yaml" "$m"
+          done
   build:
     strategy:
       matrix:
@@ -35,8 +41,12 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go build ./... && go vet ./...
+  # Сквозные тесты: хост, relay и коннекторы из этого же коммита.
   e2e:
-    uses: gate4ai/e2e/.github/workflows/e2e.yml@main
-    with:
-      repo: ${{ github.repository }}
-      ref: ${{ github.sha }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: ./scripts/ci.sh e2e

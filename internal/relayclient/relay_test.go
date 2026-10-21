@@ -16,7 +16,7 @@ import (
 	"github.com/libdns/libdns"
 	"github.com/miekg/dns"
 
-	"github.com/gate4ai/relay"
+	"github.com/gate4ai/gate4ai/relay"
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 )

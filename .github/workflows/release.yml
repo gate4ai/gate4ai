@@ -1,13 +1,22 @@
+# Релиз по тегу v*: один на всё — gate4ai и трей, gate4ai-relay, пакеты коннекторов
+# (версия коннектора в manifest.yaml = версия тега без «v»). Сначала те же проверки,
+# что в ci.yml; черновик релиза публикуется, только когда в нём есть всё, — до этого
+# его не видят https://gate4.ai/latest и установщики. Потом relay выкатывается на сервер.
 name: release
 on:
   push:
     tags: ["v*"]
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
   release:
+    needs: [ci]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,10 +31,13 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # Трей под macOS: systray использует Cocoa через cgo, поэтому собирается на macOS —
-  # параллельно с goreleaser; tray-darwin-upload кладёт его в черновик релиза и публикует релиз.
+  # Трей под macOS: systray использует Cocoa через cgo, поэтому собирается на macOS.
   tray-darwin:
+    needs: [release]
     runs-on: macos-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -45,19 +57,81 @@ jobs:
           cd out
           shasum -a 256 gate4ai-tray_*_darwin_*.tar.gz > tray-darwin-checksums.txt
           cosign sign-blob --yes --output-signature=tray-darwin-checksums.txt.sig --output-certificate=tray-darwin-checksums.txt.pem tray-darwin-checksums.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tray-darwin
-          path: out/
-  tray-darwin-upload:
-    needs: [release, tray-darwin]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: tray-darwin
-      - run: |
           gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" gate4ai-tray_*_darwin_*.tar.gz tray-darwin-checksums.txt*
-          gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Пакеты коннекторов: воспроизводимая сборка, подпись ключом издателя; <коннектор>.pack.json —
+  # для записи в gate4ai/registry (dev/scripts/deploy.sh registry).
+  connectors:
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: pack
+        env:
+          PUBLISHER_KEY: ${{ secrets.GATE4AI_PUBLISHER_KEY }}
+        run: |
+          set -euo pipefail
+          go build -o "$RUNNER_TEMP/gate4ai" ./cmd/gate4ai
+          umask 077
+          printf '%s\n' "$PUBLISHER_KEY" > "$RUNNER_TEMP/publisher.key"
+          mkdir out
+          for m in connectors/*/manifest.yaml; do
+            dir=${m%/manifest.yaml}
+            name=$(sed -nE 's/^connector: *"?([a-z0-9-]+)"?.*/\1/p' "$m")
+            version=$(sed -nE 's/^version: *"?([^"]+)"?.*/\1/p' "$m")
+            [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "$m: version $version, tag $GITHUB_REF_NAME" >&2; exit 1; }
+            (cd out && "$RUNNER_TEMP/gate4ai" connectors pack "../$dir" --key "$RUNNER_TEMP/publisher.key") | tee "out/$name.pack.json"
+          done
+          rm "$RUNNER_TEMP/publisher.key"
+      - run: gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" out/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  publish:
+    needs: [tray-darwin, connectors]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # gate4ai-relay из релиза — на сервер relay.gate4.ai (vars.DEPLOY_HOST, secrets
+  # DEPLOY_SSH_KEY и DEPLOY_KNOWN_HOSTS в окружении production; без них шаг пропускается).
+  deploy-relay:
+    needs: [publish]
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-relay
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download
+        if: vars.DEPLOY_HOST != ''
+        run: |
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p "gate4ai-relay_*_linux_amd64.tar.gz" -O relay.tar.gz
+          mkdir dist && tar xzf relay.tar.gz -C dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload and install
+        if: vars.DEPLOY_HOST != ''
+        env:
+          HOST: ${{ vars.DEPLOY_HOST }}
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh_opts="-i $HOME/.ssh/id_deploy -o StrictHostKeyChecking=yes -o BatchMode=yes"
+          scp $ssh_opts dist/gate4ai-relay "root@$HOST:/tmp/gate4ai-relay.new"
+          ssh $ssh_opts "root@$HOST" 'sh -s' < relay/deploy/remote-install.sh
+      - name: Public check
+        if: vars.DEPLOY_HOST != ''
+        run: curl -fsS --max-time 10 https://relay.gate4.ai/api/health

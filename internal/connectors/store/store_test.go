@@ -16,7 +16,7 @@ import (
 	"testing"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
-	"github.com/gate4ai/sdk-go/registry"
+	"github.com/gate4ai/gate4ai/sdk-go/registry"
 )
 
 // Модуль-заглушка: для упаковки и установки достаточно заголовка WASM;

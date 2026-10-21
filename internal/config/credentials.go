@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gate4ai/sdk-go/domain"
+	"github.com/gate4ai/gate4ai/sdk-go/domain"
 )
 
 // Credential — учётка входа на сайт: метаданные в конфигурации (версии,

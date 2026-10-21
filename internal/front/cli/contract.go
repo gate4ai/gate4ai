@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gate4ai/sdk-go/contract"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/contract"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 const contractUsage = `usage:

@@ -18,14 +18,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/connectors"
 	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/internal/state"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 // Статусы и коды результата для агента.

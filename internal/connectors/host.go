@@ -4,7 +4,7 @@
 // execute/verify. Коннекторы из магазина — WASM-модули (пакет wasm), их
 // установка — пакет store; внутренние коннекторы ядра (например, egress) —
 // Go-код в том же процессе (Builtin). Манифест и типы запросов — контракт из
-// github.com/gate4ai/sdk-go.
+// github.com/gate4ai/gate4ai/sdk-go.
 package connectors
 
 import (
@@ -13,8 +13,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/gate4ai/sdk-go/abi"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 // Client — то, чем daemon пользуется для вызова коннектора.

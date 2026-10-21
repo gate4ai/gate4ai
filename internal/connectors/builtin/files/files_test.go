@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gate4ai/sdk-go/abi"
-	"github.com/gate4ai/sdk-go/connector"
-	"github.com/gate4ai/sdk-go/hosttest"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/connector"
+	"github.com/gate4ai/gate4ai/sdk-go/hosttest"
 )
 
 func setup(t *testing.T) (*hosttest.Host, connector.Connector, string) {

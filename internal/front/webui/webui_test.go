@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
 
 	"github.com/gate4ai/gate4ai/internal/connectors"
 	"github.com/gate4ai/gate4ai/internal/daemon"
@@ -24,7 +24,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 type notes struct{ n int }

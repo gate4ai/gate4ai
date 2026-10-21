@@ -30,7 +30,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 	"github.com/gate4ai/gate4ai/internal/secrets/vault"
 	"github.com/gate4ai/gate4ai/internal/state"
-	"github.com/gate4ai/sdk-go/hostfuncs"
+	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs"
 )
 
 // Options — параметры daemon.

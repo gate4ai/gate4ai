@@ -149,4 +149,4 @@ gate4ai journal verify                 # целостность журнала
 
 ## Лицензия
 
-[AGPL-3.0-only](LICENSE). Коннекторы и relay — отдельные репозитории под AGPL-3.0, SDK — Apache-2.0.
+[AGPL-3.0-only](LICENSE): ядро, relay и коннекторы; SDK (`sdk-go/`) — [Apache-2.0](sdk-go/LICENSE).

@@ -1,36 +1,27 @@
 #!/usr/bin/env bash
-# CI: SPDX-заголовки, затем для каждого модуля из go.work — сборка, vet и тесты
-# (плюс -race и кросс-сборка под macOS и Windows — локально; в CI её делает матрица build).
+# CI: SPDX-заголовки, направление зависимостей, сборка, vet и тесты всего модуля
+# (e2e — отдельно: scripts/ci.sh e2e); локально ещё и кросс-сборка под macOS и
+# Windows, в GitHub Actions (CI=true) её делает матрица build в ci.yml.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+export GOWORK=off
+if [ "${1:-}" = e2e ]; then
+  go test -count=1 ./e2e/...
+  echo "ci e2e: ok"
+  exit 0
+fi
 ./scripts/spdx.sh --check
-# build — сборка без бинарников в дереве: go build ./... сохраняет бинарник,
-# только если пакет один и это main (коннекторы) — тогда -o во временный каталог.
-build() {
-  if [ "$(go list ./... | wc -l)" -eq 1 ]; then
-    go build -o "$(mktemp -d)" ./...
-  else
-    go build ./...
-  fi
-}
-for dir in $(go list -m -f '{{.Dir}}'); do
-  echo "== $dir"
-  (
-    cd "$dir"
-    build
-    go vet ./...
-    go test ./...
-    go test -race -short ./...
-    # В GitHub Actions (CI=true) под macOS и Windows собирает матрица build в ci.yml.
-    if [ -z "${CI:-}" ]; then
-      for os in darwin windows; do
-        GOOS=$os GOARCH=amd64 build
-      done
-    fi
-    # SDK и коннекторы собираются и в WASM (сторона модуля).
-    case "$dir" in
-      */sdk-go|*/connectors/*) GOOS=wasip1 GOARCH=wasm go vet ./... ;;
-    esac
-  )
-done
+./scripts/deps-check.sh
+pkgs=$(go list ./... | grep -v '/e2e$')
+go build ./...
+go vet ./...
+go test $pkgs
+go test -race -short $pkgs
+if [ -z "${CI:-}" ]; then
+  for os in darwin windows; do
+    GOOS=$os GOARCH=amd64 go build ./...
+  done
+fi
+# SDK и WASM-коннекторы собираются и в WASM (сторона модуля).
+GOOS=wasip1 GOARCH=wasm go vet ./sdk-go/... ./connectors/mail/...
 echo "ci: ok"

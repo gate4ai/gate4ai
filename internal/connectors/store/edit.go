@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gate4ai/sdk-go/registry"
+	"github.com/gate4ai/gate4ai/sdk-go/registry"
 )
 
 // CheckRelease проверяет скачанный пакет против записи индекса: sha256,
@@ -95,7 +95,7 @@ func AddRelease(ix *registry.Index, publisher string, p PackInfo, url string, me
 	}
 	e, ok := ix.Connectors[p.Connector]
 	if !ok {
-		e = registry.Entry{Publisher: publisher, Repo: meta.Repo, License: meta.License, Description: meta.Description}
+		e = registry.Entry{Publisher: publisher, Repo: meta.Repo, Path: meta.Path, License: meta.License, Description: meta.Description}
 		if !strings.HasPrefix(e.Repo, "https://") || e.License == "" {
 			return fmt.Errorf("new connector %s: repo (https://…) and license are required", p.Connector)
 		}

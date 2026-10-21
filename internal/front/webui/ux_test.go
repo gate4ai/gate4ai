@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/daemon"

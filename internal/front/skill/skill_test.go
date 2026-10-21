@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 func TestGenerate(t *testing.T) {

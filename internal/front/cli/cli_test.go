@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
 
 	"github.com/gate4ai/gate4ai/internal/connectors"
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 type mailFake struct{}

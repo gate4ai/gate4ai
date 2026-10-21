@@ -1,0 +1,42 @@
+connector: pagereader
+description: e2e — reads a page title through the browser connector (service_call), signing in with an account when the site asks
+version: "1"
+runtime: wasm
+capabilities:
+  services:
+    - target: browser
+      contract: 1
+      actions: [open, observe, login]
+      params: { domains: ["${setting:sites}"] }
+credentials:
+  - { slot: site, bind: ["${setting:login_site}"] }
+actions:
+  - name: title
+    class: read
+    calls: [browser.open, browser.observe]
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: url }
+      required: [url]
+    output_schema:
+      type: object
+      properties:
+        title: { type: string }
+        text: { type: string }
+      required: [title]
+  - name: cabinet
+    class: write
+    calls: [browser.open, browser.login, browser.observe]
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: url }
+      required: [url]
+    output_schema:
+      type: object
+      properties:
+        status: { type: string }
+        title: { type: string }
+        text: { type: string }
+      required: [title]

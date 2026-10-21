@@ -1,0 +1,263 @@
+connector: browser
+description: Pages in the user's dedicated Chrome profile; browser sessions for agents and page actions for other connectors
+version: "0.7.0"
+runtime: native
+platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64]
+contract: 1
+services: [open, observe, act, page_extract, page_screenshot, login, fill_secret]
+capabilities:
+  reveal: ["${setting:model_key}"]
+limits: { timeout_s: 120 }
+actions:
+  - name: read
+    class: read
+    untrusted: true
+    description: Open a page on an allowed site and return its text
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: url }
+      required: [url]
+    output_schema:
+      type: object
+      properties:
+        url: { type: string }
+        title: { type: string }
+        truncated: { type: boolean }
+      required: [url, title]
+    example: gate4ai browser read --url https://app.example.org/
+  - name: screenshot
+    class: read
+    evidence: png
+    description: Screenshot of one element (CSS selector); the image is returned and stored as evidence
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: url }
+        selector: { type: string, description: CSS selector }
+      required: [url, selector]
+    output_schema:
+      type: object
+      properties:
+        url: { type: string }
+        selector: { type: string }
+      required: [url, selector]
+  - name: extract
+    class: read
+    untrusted: true
+    description: Extract data from a page by instruction (uses the model configured by the user)
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: url }
+        instruction: { type: string }
+      required: [url, instruction]
+  # Действия со страницей: агенту — в сеансе (open без session начинает его,
+  # close заканчивает и отдаёт записанные шаги; сайты — из настроек), другим
+  # коннекторам через service_call — страница одна на корневое действие агента,
+  # сайты — params.sites вызывающего ({mode, domains, blocked}).
+  - name: open
+    class: read
+    description: "Open a page. Agent: without session starts a browser session (the page stays open between calls until browser.close) and returns its id; with session navigates in it. Connectors: the page of the root call"
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: url }
+        session: { type: string, description: "agents: the session from a previous browser.open" }
+        wait_for_selector: { type: string, description: "wait until a visible element matches (SPA content loads after the page)" }
+        wait_for_text: { type: string, description: "wait until a visible element (of wait_for_selector, or any) contains this text" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s)" }
+      required: [url]
+    output_schema:
+      type: object
+      properties:
+        url: { type: string, description: address after redirects }
+        title: { type: string }
+        session: { type: string, description: "agents: pass it to the next page actions and to browser.close" }
+        login_required:
+          type: object
+          description: "the page is at the sign-in site of an account available to you: call browser.login with it"
+          properties: { account: { type: string } }
+          required: [account]
+      required: [url, title]
+    example: gate4ai browser open --url https://app.example.org/
+  - name: observe
+    class: read
+    untrusted: true
+    description: "Address, title and text of the open page (or of one element: selector); elements: true adds the interactive elements with CSS selectors for act, outline: true — the page structure (containers with id, role, data-testid)"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "agents: the session from browser.open" }
+        max_chars: { type: integer, minimum: 0, description: "0 — the browser's limit" }
+        selector: { type: string, description: "only inside this element: a dialog, a card, a list" }
+        elements: { type: boolean, description: "add visible links, buttons and fields with a unique CSS selector each (up to 300)" }
+        outline: { type: boolean, description: "add the structure: visible containers with a selector (dialogs, lists, sections), up to 300" }
+        wait_for_selector: { type: string, description: "wait until a visible element matches (SPA content loads after the page)" }
+        wait_for_text: { type: string, description: "wait until a visible element (of wait_for_selector, or any) contains this text" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s)" }
+    output_schema:
+      type: object
+      properties:
+        url: { type: string }
+        title: { type: string }
+        text: { type: string }
+        truncated: { type: boolean }
+        elements:
+          type: array
+          items:
+            type: object
+            properties:
+              selector: { type: string, description: "CSS selector for act" }
+              tag: { type: string }
+              type: { type: string }
+              role: { type: string }
+              text: { type: string, description: "visible text, label, placeholder or aria-label" }
+              href: { type: string }
+              disabled: { type: boolean }
+            required: [selector, tag]
+        outline:
+          type: array
+          items:
+            type: object
+            properties:
+              depth: { type: integer }
+              selector: { type: string, description: "unique selector, empty when the container has none" }
+              tag: { type: string }
+              role: { type: string }
+              text: { type: string, description: "the start of its visible text (200 characters)" }
+              truncated: { type: boolean, description: "the text is longer: read it with observe --selector" }
+              children: { type: integer }
+            required: [depth, selector, tag, children]
+        login_required:
+          type: object
+          description: "the page is at the sign-in site of an account available to you: call browser.login with it"
+          properties: { account: { type: string } }
+          required: [account]
+      required: [url, title]
+  - name: act
+    class: write
+    description: Click, fill, press a key or wait for an element by CSS selector and its visible text on the open page
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "agents: the session from browser.open" }
+        selector: { type: string, description: CSS selector }
+        method: { type: string, enum: [click, fill, press, wait] }
+        text: { type: string, description: "the first visible element whose text, label, placeholder or aria-label contains it" }
+        value: { type: string, maxLength: 4096, description: "fill: the value; press: Enter, Tab, Escape, Backspace, ArrowDown, ArrowUp" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait for the element (0 — 10 s)" }
+        expect_selector: { type: string, description: "the action must make a visible element match it (a dialog, the next list), else not_found: no effect" }
+        expect_text: { type: string, description: "the action must make visible text appear (in expect_selector, or anywhere)" }
+        expect_url_change: { type: boolean, description: "the action must change the page address" }
+        expect_timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait for the effect (0 — 5 s)" }
+      required: [selector, method]
+    output_schema:
+      type: object
+      properties:
+        url: { type: string, description: address after the action }
+        text: { type: string, description: text of the element (up to 2000 characters) }
+      required: [url]
+  - name: network
+    class: read
+    untrusted: true
+    description: "Requests the open page made to the allowed sites (fetch / XHR): method, address, status and the start of JSON or text responses — to find the site's API. Tokens, passwords, sign-in responses and the owner's redact_params are hidden"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "the session from browser.open" }
+        url_contains: { type: string, description: "only requests whose address contains it" }
+        all_sites: { type: boolean, description: "also requests to other sites (analytics, CDN)" }
+      required: [session]
+    output_schema:
+      type: object
+      properties:
+        requests:
+          type: array
+          items:
+            type: object
+            properties:
+              method: { type: string }
+              url: { type: string }
+              status: { type: integer }
+              kind: { type: string, description: fetch or xhr }
+              mime: { type: string }
+              body: { type: string, description: "the start of the response (2000 characters)" }
+              truncated: { type: boolean }
+            required: [url, kind]
+        hint: { type: string, description: "the addresses contain identifiers that may be personal data: ask the owner to hide them (redact_params)" }
+        login_required:
+          type: object
+          description: "the page is at the sign-in site of an account available to you: call browser.login with it"
+          properties: { account: { type: string } }
+          required: [account]
+      required: [requests]
+  # Вход по учётке владельца (credentials в конфигурации gate4ai): значения
+  # секретов хост передаёт пакету только для этих двух действий, агенту и
+  # коннектору они не видны. После ввода секрета страницу нельзя читать
+  # (secret_on_page) до перехода верхнего документа.
+  - name: login
+    class: write
+    description: "Sign in on the open sign-in page with an account the owner configured in gate4ai (credentials): its fields (constants and secrets from the vault) are entered and the form is submitted; the values are never shown. Status: logged_in, submitted or still_on_login (captcha, SMS code or a wrong password: tell the user to finish in the gate4ai Chrome window)"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "agents: the session from browser.open" }
+        account: { type: string, description: "the account alias (@name); connectors: also the slot from their credentials" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait for leaving the sign-in page (0 — 15 s)" }
+      required: [account]
+    output_schema:
+      type: object
+      properties:
+        url: { type: string, description: address after sign-in }
+        status: { type: string, enum: [logged_in, submitted, still_on_login] }
+        origin: { type: string, description: origin of the page the account was entered on }
+      required: [status]
+    example: gate4ai browser login --session s-… --account @example
+  - name: fill_secret
+    class: write
+    description: "Enter one field of an account into a field of the open sign-in page without submitting (for multi-step sign-in); source: human asks the user for a code and types the answer in — it is not returned"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "agents: the session from browser.open" }
+        account: { type: string, description: "the account alias (@name); connectors: also the slot from their credentials" }
+        field: { type: string, description: "the account field: its name or secret alias (password, @example.password)" }
+        selector: { type: string, description: "CSS selector of the page field (default: the field's selector in the account)" }
+        source: { type: string, enum: [account, human], description: "account (default) — the account field; human — a code the user types in" }
+        prompt: { type: string, maxLength: 200, description: "source: human — the question for the user (the owner's question in the account wins)" }
+      required: [account]
+    output_schema:
+      type: object
+      properties:
+        url: { type: string }
+        origin: { type: string }
+      required: [url]
+  - name: page_extract
+    class: read
+    untrusted: true
+    description: Extract data from the open page by instruction (uses the model configured by the user)
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "agents: the session from browser.open" }
+        instruction: { type: string }
+      required: [instruction]
+  - name: page_screenshot
+    class: read
+    description: Screenshot of one element of the open page (PNG in content)
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "agents: the session from browser.open" }
+        selector: { type: string, description: CSS selector }
+      required: [selector]
+  - name: close
+    class: read
+    untrusted: true
+    description: "End the browser session and free the page. Returns the recorded steps (action, args, result or error): save them as a test fixture for a connector (hosttest.Replay). all: true closes every agent session (a lost id, a stuck session)"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "the session from browser.open" }
+        all: { type: boolean, description: "close all agent sessions instead" }

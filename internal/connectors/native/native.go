@@ -2,7 +2,7 @@
 
 // Package native — среда исполнения коннекторов runtime: native: бинарник
 // пакета запускается дочерним процессом при первом вызове и остаётся
-// запущенным; обмен — JSON-RPC по stdio (github.com/gate4ai/sdk-go/native).
+// запущенным; обмен — JSON-RPC по stdio (github.com/gate4ai/gate4ai/sdk-go/native).
 // Функции хоста процесс вызывает в рамках своего вызова — с той же проверкой
 // возможностей манифеста, что у WASM. Процесс работает без песочницы, с
 // правами пользователя: такие пакеты ставятся только от проверенного издателя.
@@ -24,10 +24,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/sdk-go/abi"
-	"github.com/gate4ai/sdk-go/hostfuncs"
-	"github.com/gate4ai/sdk-go/manifest"
-	sdknative "github.com/gate4ai/sdk-go/native"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
+	sdknative "github.com/gate4ai/gate4ai/sdk-go/native"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 )

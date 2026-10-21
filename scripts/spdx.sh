@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 check=${1:-}
 license_for() {
   case "$1" in
-    sdk-go/*|registry/*) echo "Apache-2.0" ;;
+    sdk-go/*) echo "Apache-2.0" ;;
     *) echo "AGPL-3.0-only" ;;
   esac
 }

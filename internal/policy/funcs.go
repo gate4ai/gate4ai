@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gate4ai/sdk-go/domain"
+	"github.com/gate4ai/gate4ai/sdk-go/domain"
 )
 
 // homeDir — домашний каталог для раскрытия "~" (подменяется в тестах).

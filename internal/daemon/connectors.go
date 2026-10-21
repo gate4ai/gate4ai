@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/builtin/files"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"

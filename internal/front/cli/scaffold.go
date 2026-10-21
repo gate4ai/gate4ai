@@ -11,20 +11,19 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/gate4ai/sdk-go/domain"
+	"github.com/gate4ai/gate4ai/sdk-go/domain"
 )
 
 const newUsage = `usage:
   gate4ai connectors new <name> --site <domain> [-o folder]   a WASM connector over the browser: manifest,
                                                                code, a test on a recorded browser session`
 
-// scaffoldSDK — версия sdk-go для go.mod заготовки: та, с которой собран CLI.
+// scaffoldSDK — версия модуля gate4ai (в нём sdk-go) для go.mod заготовки: та, из
+// которой собран CLI; у сборки из рабочей копии (devel, +dirty) — запасная.
 func scaffoldSDK() string {
 	if bi, ok := debug.ReadBuildInfo(); ok {
-		for _, m := range bi.Deps {
-			if m.Path == "github.com/gate4ai/sdk-go" && strings.HasPrefix(m.Version, "v") {
-				return m.Version
-			}
+		if v := bi.Main.Version; strings.HasPrefix(v, "v") && !strings.Contains(v, "+") {
+			return v
 		}
 	}
 	return "v0.7.0"
@@ -117,7 +116,7 @@ const tplGoMod = `module gate4ai-{{.Name}}
 
 go 1.27.1
 
-require github.com/gate4ai/sdk-go {{.SDK}}
+require github.com/gate4ai/gate4ai {{.SDK}}
 `
 
 const tplManifest = `connector: {{.Name}}
@@ -155,7 +154,7 @@ package main
 import (
 	_ "embed"
 
-	"github.com/gate4ai/sdk-go/connector"
+	"github.com/gate4ai/gate4ai/sdk-go/connector"
 )
 
 //go:embed manifest.yaml
@@ -173,7 +172,7 @@ package main
 import (
 	"context"
 
-	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
 )
 
 // Home — главная страница сайта.
@@ -220,8 +219,8 @@ package main
 import (
 	"testing"
 
-	"github.com/gate4ai/sdk-go/hosttest"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/hosttest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 // host — тестовый хост: браузер отвечает шагами, записанными в сеансе агента

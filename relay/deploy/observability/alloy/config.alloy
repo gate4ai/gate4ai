@@ -1,0 +1,59 @@
+// Журнал systemd (relay, сайт, система, контейнеры стека) → Loki.
+
+loki.relabel "journal" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+  rule {
+    source_labels = ["__journal__systemd_user_unit"]
+    target_label  = "unit"
+    regex         = "(.+)"
+  }
+  rule {
+    source_labels = ["__journal_container_name"]
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+  rule {
+    source_labels = ["__journal__hostname"]
+    target_label  = "host"
+  }
+}
+
+loki.source.journal "system" {
+  max_age       = "12h"
+  relabel_rules = loki.relabel.journal.rules
+  labels        = {job = "journal"}
+  forward_to    = [loki.process.relay.receiver]
+}
+
+// Relay пишет logfmt (slog): уровень берётся из строки, а не из приоритета journald.
+loki.process "relay" {
+  stage.match {
+    selector = "{unit=\"gate4ai-relay.service\"}"
+
+    stage.logfmt {
+      mapping = {relay_level = "level"}
+    }
+    stage.template {
+      source   = "relay_level"
+      template = "{{ ToLower .Value }}"
+    }
+    stage.labels {
+      values = {level = "relay_level"}
+    }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://127.0.0.1:3100/loki/api/v1/push"
+  }
+}

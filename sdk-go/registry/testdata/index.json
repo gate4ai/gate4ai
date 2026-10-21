@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "updated": "2026-10-14",
+  "publishers": {
+    "gate4ai": {
+      "keys": [
+        "ed25519:jDMGJWFzQif0EgifZGdqGlW1P0IvOy6RaHwpg6frxcA="
+      ],
+      "trust": "verified"
+    }
+  },
+  "connectors": {
+    "browser": {
+      "publisher": "gate4ai",
+      "repo": "https://github.com/gate4ai/gate4ai-browser",
+      "license": "AGPL-3.0-only WITH gate4ai host exception",
+      "description": "Read pages in the user's dedicated Chrome profile",
+      "versions": [
+        {
+          "version": "2",
+          "url": "https://github.com/gate4ai/gate4ai-browser/releases/download/v2/browser-2.g4c",
+          "sha256": "14698938e484e859b0015e99d4660e53dacf9c728bb6e894aaef733913cb3dc4",
+          "digest": "0c0a04f8d7292b1729ad5df745a79fa691323cca6116c1965c3dabfbba286918",
+          "capabilities": [
+            "browser on ${setting:allowed_domains}"
+          ]
+        },
+        {
+          "version": "3",
+          "url": "https://github.com/gate4ai/gate4ai-browser/releases/download/v3/browser-3.g4c",
+          "sha256": "c5fc6ef976870d618af0edffa6902acad5a25be6ab8452cbd8025ab7c710deea",
+          "digest": "f606b960a84e2246cf835865b70afe8f0baf4f7c5a6fced25b0920577679b75f",
+          "capabilities": [
+            "browser on ${setting:allowed_domains}"
+          ]
+        }
+      ]
+    },
+    "email": {
+      "publisher": "gate4ai",
+      "repo": "https://github.com/gate4ai/gate4ai-mail",
+      "license": "AGPL-3.0-only WITH gate4ai host exception",
+      "description": "Email over IMAP/SMTP",
+      "versions": [
+        {
+          "version": "2",
+          "url": "https://github.com/gate4ai/gate4ai-mail/releases/download/v2/email-2.g4c",
+          "sha256": "f744b29c674937468f8c4a76f14db6f5de18c2c89ab949489f1c3929fd5b1116",
+          "digest": "b7341883bce6ea245d4a158248e042cd799ba2cdb386ea1e960b912042c33865",
+          "capabilities": [
+            "network tcp://${setting:imap.host}:${setting:imap.port}",
+            "network tcp://${setting:smtp.host}:${setting:smtp.port}",
+            "network tls://${setting:imap.host}:${setting:imap.port}",
+            "network tls://${setting:smtp.host}:${setting:smtp.port}",
+            "secret ${setting:imap.password} for ${setting:imap.host}",
+            "secret ${setting:imap.password} for ${setting:smtp.host}",
+            "secret ${setting:smtp.password} for ${setting:smtp.host}"
+          ]
+        },
+        {
+          "version": "3",
+          "url": "https://github.com/gate4ai/gate4ai-mail/releases/download/v3/email-3.g4c",
+          "sha256": "4ff3ce98cbfb158ae9c1f9ac0e240413e0983b927592eb23b8d5615e7be44c57",
+          "digest": "d11bfa2df62e605e9ae5c3c67c89d705b1902c25e7043bf4dd1e6e858bd1df8c",
+          "capabilities": [
+            "network tcp://${setting:imap.host}:${setting:imap.port}",
+            "network tcp://${setting:smtp.host}:${setting:smtp.port}",
+            "network tls://${setting:imap.host}:${setting:imap.port}",
+            "network tls://${setting:smtp.host}:${setting:smtp.port}",
+            "secret ${setting:imap.password} for ${setting:imap.host}",
+            "secret ${setting:imap.password} for ${setting:smtp.host}",
+            "secret ${setting:smtp.password} for ${setting:smtp.host}"
+          ]
+        }
+      ]
+    },
+    "files": {
+      "publisher": "gate4ai",
+      "repo": "https://github.com/gate4ai/gate4ai-files",
+      "license": "AGPL-3.0-only WITH gate4ai host exception",
+      "description": "Files in allowed folders",
+      "versions": [
+        {
+          "version": "2",
+          "url": "https://github.com/gate4ai/gate4ai-files/releases/download/v2/files-2.g4c",
+          "sha256": "b2ee432c3207a1dd3d513f22228d7000cc7eda5b6239dcbbc6eb20fc75db18c8",
+          "digest": "e6bded6bfd15f938c18fc9cc31954a5b1a6e102b43b19c4826261ebd7c40d0c4",
+          "capabilities": [
+            "files ${setting:roots}/**"
+          ]
+        },
+        {
+          "version": "3",
+          "url": "https://github.com/gate4ai/gate4ai-files/releases/download/v3/files-3.g4c",
+          "sha256": "6cf0c7ee3f922af34edc1e07130f331fa7dbade79ec5827932b32274c023cdce",
+          "digest": "7f01f59c09f0e51378ac66512c08f2ec185f3f12c232d32e1966d56269096746",
+          "capabilities": [
+            "files ${setting:roots}/**"
+          ]
+        }
+      ]
+    }
+  }
+}

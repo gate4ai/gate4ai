@@ -25,7 +25,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/platform/version"
 	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/internal/state"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 // Tool — действие в каталоге агента.

@@ -1,0 +1,9 @@
+apiVersion: 1
+
+providers:
+  - name: gate4ai
+    folder: gate4ai
+    type: file
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana-dashboards

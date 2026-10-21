@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gate4ai/sdk-go/registry"
+	"github.com/gate4ai/gate4ai/sdk-go/registry"
 )
 
 // TrustLocal — пакет владельца из файла (--dev). Уровни доверия издателей

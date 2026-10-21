@@ -1,5 +1,6 @@
-# Сборка и подпись релизов gate4ai: ядро и трей (трей под macOS собирает
-# отдельная задача release.yml на macOS-раннере — там нужен cgo).
+# Сборка и подпись релизов gate4ai: ядро, трей и relay (трей под macOS собирает
+# отдельная задача release.yml на macOS-раннере — там нужен cgo; пакеты коннекторов —
+# задача connectors).
 version: 2
 project_name: gate4ai
 builds:
@@ -28,6 +29,15 @@ builds:
         goarch: arm64
         ldflags: ["-s -w -H windowsgui"]
     mod_timestamp: "{{ .CommitTimestamp }}"
+  - id: gate4ai-relay
+    main: ./relay/cmd/gate4ai-relay
+    binary: gate4ai-relay
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
 # Ядро и трей — отдельные архивы: трея под darwin здесь нет (его собирает
 # release.yml на macOS), а в одном архиве число бинарников по ОС разное.
 archives:
@@ -46,8 +56,13 @@ archives:
       - goos: windows
         formats: [zip]
     files: [LICENSE]
-# Черновик: релиз публикует release.yml (tray-darwin-upload), когда в нём есть и трей
-# под macOS, — до этого его не видят /latest и установщики.
+  - id: gate4ai-relay
+    ids: [gate4ai-relay]
+    name_template: "gate4ai-relay_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    files: [LICENSE, relay/README.md, relay/docs/*]
+# Черновик: релиз публикует release.yml (publish), когда в нём есть трей под macOS
+# и пакеты коннекторов, — до этого его не видят /latest и установщики.
 release:
   draft: true
 checksum:

@@ -1,0 +1,47 @@
+# Caddy слушает только 127.0.0.1:8444; снаружи до него доходят через relay
+# (--route {$GRAFANA_DOMAIN}=127.0.0.1:8444, --route gate4.ai=…, --route
+# www.gate4.ai=…; TLS-passthrough по SNI). Caddy завершает TLS для Grafana и
+# сайта gate4.ai (Compose-проект gate4ai-www, HTTP на 127.0.0.1:8080).
+{
+	admin off
+	http_port 8088
+	https_port 8444
+	default_bind 127.0.0.1
+	auto_https disable_redirects
+	servers {
+		protocols h1 h2
+	}
+}
+
+# Let's Encrypt через TLS-ALPN-01 (порт 80 не нужен).
+(tls-acme) {
+	tls {
+		issuer acme {
+			disable_http_challenge
+			alt_tlsalpn_port 8444
+		}
+	}
+}
+
+# Локальная проверка: собственный CA Caddy.
+(tls-internal) {
+	tls internal
+}
+
+{$GRAFANA_DOMAIN} {
+	import tls-{$GRAFANA_TLS}
+
+	header Strict-Transport-Security "max-age=31536000"
+	# Метрики Grafana — только для Prometheus на localhost.
+	@metrics path /metrics /metrics/*
+	respond @metrics 404
+	reverse_proxy 127.0.0.1:3000
+}
+
+# Сайт gate4.ai: www и прочие имена сайт сам перенаправляет на gate4.ai (308).
+{$WWW_DOMAIN}, www.{$WWW_DOMAIN} {
+	import tls-{$WWW_TLS}
+
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+}

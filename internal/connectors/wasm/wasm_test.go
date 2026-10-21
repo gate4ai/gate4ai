@@ -18,9 +18,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/gate4ai/sdk-go/abi"
-	"github.com/gate4ai/sdk-go/hostfuncs"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 var (

@@ -24,7 +24,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/platform/paths"
 	"github.com/gate4ai/gate4ai/internal/platform/version"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 // Env — окружение CLI (подменяется в тестах).

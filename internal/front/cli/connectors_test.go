@@ -197,9 +197,12 @@ func TestRegistryAddAndFetch(t *testing.T) {
 		t.Fatal("new connector without repo/license accepted:", out)
 	}
 	code, r, out := run("registry", "add", ix, pj, "--publisher", "acme", "--repo", "https://github.com/acme/gate4ai-hello",
-		"--license", "AGPL-3.0-only", "--url", "hello-1.g4c")
+		"--path", "connectors/hello", "--license", "AGPL-3.0-only", "--url", "hello-1.g4c")
 	if code != 0 || r["trust"] != "community" {
 		t.Fatal(code, out)
+	}
+	if b, _ := os.ReadFile(ix); !strings.Contains(string(b), `"path": "connectors/hello"`) {
+		t.Fatalf("path is not in the index: %s", b)
 	}
 	if code, r, out := run("registry", "check", ix, "--fetch"); code != 0 || r["packages_verified"] != 1.0 {
 		t.Fatal(code, out)

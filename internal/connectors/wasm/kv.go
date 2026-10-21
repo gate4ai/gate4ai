@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
 )
 
 // FileKV — хранилище коннектора в JSON-файле (kv_*): у каждого коннектора свой

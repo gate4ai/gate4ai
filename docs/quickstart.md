@@ -9,10 +9,11 @@
 ```sh
 make bin             # bin/gate4ai, bin/gate4ai-relay
 make connectors      # bin/connectors/{mail,browser}.g4c — пакеты официальных коннекторов
-./scripts/ci.sh      # по всем модулям workspace: build / vet / test + кросс-сборка darwin и windows (в CI — матрицей build)
+./scripts/ci.sh      # SPDX, направление зависимостей, build / vet / test, WASM + кросс-сборка darwin и windows (в CI — матрицей build)
+./scripts/ci.sh e2e  # сквозные тесты e2e/
 ```
 
-Ядро — один Go-модуль; `sdk-go`, `relay` и коннекторы — отдельные репозитории github.com/gate4ai.
+Всё — один репозиторий и один Go-модуль: ядро, `sdk-go/`, `relay/`, коннекторы (`connectors/`) и сквозные тесты (`e2e/`).
 
 Положите `gate4ai` в `PATH`.
 
@@ -42,14 +43,14 @@ gate4ai connectors list
 **Разработка коннектора — прямо из папки с исходниками** (без `pack` и `.g4c`):
 
 ```sh
-gate4ai connectors install ../connectors/mail          # собрать в WASM и поставить (своя сборка, как --dev)
+gate4ai connectors install ./connectors/mail           # собрать в WASM и поставить (своя сборка, как --dev)
 gate4ai connectors update email                        # пересобрать из той же папки после правок
-gate4ai connectors install ../connectors/mail --watch  # пересобирать и переставлять на каждое сохранение
+gate4ai connectors install ./connectors/mail --watch   # пересобирать и переставлять на каждое сохранение
 ```
 
 Заготовка коннектора к сайту поверх браузера — `gate4ai connectors new <имя> --site <домен>`; как исследовать сайт в сеансе браузера и писать коннектор вместе с агентом — [connector-authoring.md](connector-authoring.md). Лог коннектора — `gate4ai connectors logs <имя>` (вместе с ошибками действий); у своей сборки строки лога за вызов приходят и в ответе (поле `log`). Подвызовы действия — `gate4ai log --parent '#хэш'`. Агент ставит свою сборку без сокета владельца — `gate4ai.change_policy` с `install_dev_connector {folder}` (подтверждает владелец). Личные данные из записанного сеанса браузера перед фикстурой — `gate4ai fixture scrub`.
 
-Сборку делает CLI в вашем окружении (ваш Go, `go.work`, `GOFLAGS`), ошибки компиляции видны сразу; daemon записывает папку источником установки (`dir:<путь>` в `gate4ai connectors list`). `--watch` следит за `.go`, `go.mod`, `go.sum` и `manifest.yaml`; ошибка сборки печатается, наблюдение продолжается. Если изменились возможности в манифесте — согласие спрашивается заново (`--yes` — согласиться без вопроса).
+Сборку делает CLI в вашем окружении (ваш Go, `go.mod` папки или выше, `GOFLAGS`), ошибки компиляции видны сразу; daemon записывает папку источником установки (`dir:<путь>` в `gate4ai connectors list`). `--watch` следит за `.go`, `go.mod`, `go.sum` и `manifest.yaml`; ошибка сборки печатается, наблюдение продолжается. Если изменились возможности в манифесте — согласие спрашивается заново (`--yes` — согласиться без вопроса).
 
 ## 2. Конфигурация
 
@@ -226,11 +227,11 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 
 Зона `relay.example.org` делегируется (NS) на этот сервер: relay отвечает A-записями для устройств и TXT для ACME DNS-01. Для разработки — `--self-signed` и в конфигурации устройства `relay: {ca_file: relay-ca.pem, self_signed: true}`.
 
-Метрики, логи и трейсы relay (`--metrics`, `--otlp`), стек Grafana + Prometheus + Loki + Tempo на сервере relay и дашборд — [relay/docs/observability.md](https://github.com/gate4ai/relay/blob/main/docs/observability.md).
+Метрики, логи и трейсы relay (`--metrics`, `--otlp`), стек Grafana + Prometheus + Loki + Tempo на сервере relay и дашборд — [relay/docs/observability.md](../relay/docs/observability.md).
 
 ## Тесты
 
-`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из спецификации на собранных бинарниках и настоящих коннекторах — в репозитории [gate4ai/e2e](https://github.com/gate4ai/e2e).
+`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из спецификации на собранных бинарниках и настоящих коннекторах — `e2e/` (`./scripts/ci.sh e2e`).
 
 ## Тестовый стенд
 

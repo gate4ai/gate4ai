@@ -1,0 +1,156 @@
+# Стек наблюдаемости relay (docs/observability.md): Prometheus, Loki, Tempo,
+# Alloy (журнал systemd → Loki), node exporter, Grafana за Caddy.
+# Все службы — в сети хоста и слушают только 127.0.0.1; снаружи Grafana
+# доступна через relay: --route grafana.<домен>=127.0.0.1:8444 → Caddy (TLS);
+# так же — сайт gate4.ai (--route gate4.ai и www.gate4.ai → Caddy → 127.0.0.1:8080).
+# Лимиты памяти и ретенция — переменные из .env (см. .env.example).
+name: gate4ai-observability
+
+x-common: &common
+  network_mode: host
+  restart: unless-stopped
+  logging:
+    driver: journald
+
+services:
+  prometheus:
+    <<: *common
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${METRICS_RETENTION:-15d}
+      - --storage.tsdb.retention.size=${METRICS_RETENTION_SIZE:-2GB}
+      - --web.listen-address=127.0.0.1:9090
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus:/prometheus
+    mem_limit: ${PROMETHEUS_MEM:-256m}
+
+  node-exporter:
+    <<: *common
+    image: prom/node-exporter:v1.9.1
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address=127.0.0.1:9100
+      - --collector.systemd
+      - --collector.systemd.unit-include=(gate4ai-.*|docker|ssh)\.service
+    volumes:
+      - /:/host:ro,rslave
+      - /run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket:ro
+    mem_limit: ${NODE_EXPORTER_MEM:-48m}
+
+  loki:
+    <<: *common
+    image: grafana/loki:3.5.3
+    command:
+      - -config.file=/etc/loki/loki.yaml
+      - -config.expand-env=true
+    environment:
+      LOGS_RETENTION: ${LOGS_RETENTION:-168h}
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki:/loki
+    mem_limit: ${LOKI_MEM:-256m}
+
+  tempo:
+    <<: *common
+    image: grafana/tempo:2.8.2
+    command:
+      - -config.file=/etc/tempo/tempo.yaml
+      - -config.expand-env=true
+    environment:
+      TRACES_RETENTION: ${TRACES_RETENTION:-72h}
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo:/var/tempo
+    mem_limit: ${TEMPO_MEM:-256m}
+    depends_on: [tempo-init]
+
+  # Образ Tempo работает под uid 10001; том создаётся root.
+  tempo-init:
+    image: grafana/tempo:2.8.2
+    user: root
+    entrypoint: [chown, "10001:10001", /var/tempo]
+    volumes:
+      - tempo:/var/tempo
+    network_mode: none
+    restart: "no"
+
+  alloy:
+    <<: *common
+    image: grafana/alloy:v1.10.2
+    command:
+      - run
+      - --server.http.listen-addr=127.0.0.1:12345
+      - --storage.path=/var/lib/alloy
+      - --disable-reporting
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - alloy:/var/lib/alloy
+    mem_limit: ${ALLOY_MEM:-192m}
+
+  grafana:
+    <<: *common
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_SERVER_HTTP_ADDR: 127.0.0.1
+      GF_SERVER_HTTP_PORT: "3000"
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN:?set GRAFANA_DOMAIN in .env}
+      GF_SERVER_ROOT_URL: https://${GRAFANA_DOMAIN}/
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      # Пароль — только из файла secrets/grafana_admin_password (не в репозитории).
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_ALLOW_ORG_CREATE: "false"
+      GF_SNAPSHOTS_EXTERNAL_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_LOG_LEVEL: warn
+    secrets:
+      - grafana_admin_password
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana-dashboards:ro
+      - grafana:/var/lib/grafana
+    mem_limit: ${GRAFANA_MEM:-320m}
+
+  # TLS для Grafana и сайта gate4.ai (www/deploy/compose.yaml): сертификаты
+  # Let's Encrypt через TLS-ALPN-01 — проверка приходит на 443 relay и по SNI
+  # пробрасывается сюда без расшифровки.
+  caddy:
+    <<: *common
+    image: caddy:2.10.2
+    environment:
+      GRAFANA_DOMAIN: ${GRAFANA_DOMAIN}
+      GRAFANA_TLS: ${GRAFANA_TLS:-acme}
+      WWW_DOMAIN: ${WWW_DOMAIN:-gate4.ai}
+      WWW_TLS: ${WWW_TLS:-acme}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    mem_limit: ${CADDY_MEM:-64m}
+
+secrets:
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password
+
+volumes:
+  prometheus:
+  loki:
+  tempo:
+  alloy:
+  grafana:
+  caddy:

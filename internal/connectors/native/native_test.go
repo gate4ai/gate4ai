@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gate4ai/sdk-go/abi"
-	"github.com/gate4ai/sdk-go/manifest"
-	sdknative "github.com/gate4ai/sdk-go/native"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
+	sdknative "github.com/gate4ai/gate4ai/sdk-go/native"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 )

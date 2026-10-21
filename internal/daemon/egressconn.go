@@ -5,9 +5,9 @@ package daemon
 import (
 	"context"
 
-	"github.com/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
 
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 // egressConnector — внутренний коннектор: решение «пустить ли агента из песочницы

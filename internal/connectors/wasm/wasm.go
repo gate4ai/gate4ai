@@ -2,7 +2,7 @@
 
 // Package wasm — среда исполнения коннекторов runtime: wasm. Модуль работает
 // в wazero внутри daemon: у него нет файлов, сети, процессов и окружения
-// хоста — только функции хоста ABI v1 (github.com/gate4ai/sdk-go/abi), каждая
+// хоста — только функции хоста ABI v1 (github.com/gate4ai/gate4ai/sdk-go/abi), каждая
 // из которых проверяется по возможностям манифеста. Один экземпляр модуля —
 // один вызов; память и время ограничены limits манифеста.
 package wasm
@@ -24,10 +24,10 @@ import (
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
-	"github.com/gate4ai/sdk-go/abi"
-	"github.com/gate4ai/sdk-go/capability"
-	"github.com/gate4ai/sdk-go/hostfuncs"
-	"github.com/gate4ai/sdk-go/manifest"
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/capability"
+	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 // Services — службы хоста, которые получают коннекторы через функции хоста.
