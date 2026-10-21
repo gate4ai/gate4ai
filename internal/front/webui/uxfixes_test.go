@@ -135,3 +135,61 @@ func TestErrView(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestSplitAnd(t *testing.T) {
+	got := splitAnd(`glob(path, "~/a/**") && (x || y) && !text.contains("a && b")`)
+	if len(got) != 3 || got[1] != "(x || y)" || got[2] != `!text.contains("a && b")` {
+		t.Fatalf("%q", got)
+	}
+	if joinAnd([]string{"a || b", "c", ""}) != "(a || b) && c" {
+		t.Fatal(joinAnd([]string{"a || b", "c"}))
+	}
+}
+
+// Форма правила одной фразой: условия добавляются и убираются без сохранения,
+// прежнее условие правила сохраняется как было.
+func TestRuleSentenceForm(t *testing.T) {
+	u, d, _, base := setup(t)
+	_, _, post, get := loginAs(t, u, base)
+	p := get("/policy/rule?profile=p&action=notes.append")
+	if !strings.Contains(p, "когда агент вызывает") || !strings.Contains(p, `<span class="muted">всегда</span>`) || strings.Contains(p, `name="cond_kind"`) {
+		t.Fatal("new rule: no sentence or empty condition rows", p)
+	}
+	form := url.Values{"profile": {"p"}, "action": {"notes.append"}, "effect": {"allow"}, "reason": {"r"}}
+	add := func(v url.Values, kv ...string) url.Values {
+		w := url.Values{}
+		for k, x := range v {
+			w[k] = x
+		}
+		for i := 0; i+1 < len(kv); i += 2 {
+			w.Set(kv[i], kv[i+1])
+		}
+		return w
+	}
+	p = post("/policy/rule", add(form, "add_cond", "1", "new_arg", "text", "new_kind", "contains", "new_value", "hello"))
+	if !strings.Contains(p, "если text содержит hello") || !strings.Contains(p, `name="cond_kind" value="contains"`) || len(d.Config.Current().Profiles["p"].Rules) != 0 {
+		t.Fatal("condition not added (or rule saved early)", p)
+	}
+	if p := post("/policy/rule", add(form, "add_cond", "1", "new_kind", "lte")); !strings.Contains(p, "выберите аргумент") || !strings.Contains(p, `value="lte" selected`) {
+		t.Fatal("bad condition must keep the new-condition fields with an error", p)
+	}
+	withCond := add(form, "cond_kind", "contains", "cond_arg", "text", "cond_value", "hello")
+	if p := post("/policy/rule", add(withCond, "drop", "c0")); strings.Contains(p, "text содержит hello") {
+		t.Fatal("condition not dropped")
+	}
+	post("/policy/rule", add(withCond, "when", `text.size() < 100`))
+	rs := d.Config.Current().Profiles["p"].Rules
+	if len(rs) != 1 || rs[0].When != `text.size() < 100 && text.contains("hello")` || rs[0].Effect != "allow" {
+		t.Fatal("saved rule", rs)
+	}
+	// Правка: условия правила — чипами, сохраняются без изменений.
+	p = get("/policy/rule?profile=p&id=" + rs[0].ID)
+	if !strings.Contains(p, `<code>text.size() &lt; 100</code>`) || !strings.Contains(p, `name="when_part"`) {
+		t.Fatal("existing condition not shown as chips", p)
+	}
+	post("/policy/rule", url.Values{"profile": {"p"}, "action": {"notes.append"}, "id": {rs[0].ID}, "effect": {"deny"},
+		"when_part": {`text.size() < 100`, `text.contains("hello")`}})
+	if r := d.Config.Current().Profiles["p"].Rules[0]; r.When != rs[0].When || r.Effect != "deny" {
+		t.Fatal("edit changed the condition", r)
+	}
+}

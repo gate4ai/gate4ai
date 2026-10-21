@@ -58,6 +58,12 @@ tr.hl>td,tr:target>td{animation:hl 2.5s ease-out;background:color-mix(in srgb,va
 .chip{display:inline-block;margin:.1rem .2rem .1rem 0}.chip>summary{list-style:none;display:inline-block;padding:0 .55em;border:1px solid var(--line);border-radius:1em;font:12.5px/1.6 ui-monospace,Menlo,monospace;color:var(--fg);background:var(--bg)}
 .chip>summary::-webkit-details-marker{display:none}.chip[open]>summary{border-color:var(--accent);color:var(--accent)}
 .chip>div{position:absolute;z-index:5;max-width:26rem;margin-top:.3rem;padding:.7rem .8rem;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.15);font-size:.9rem}
+.sentence{font-size:1.12rem;line-height:2.5;margin:.2rem 0 .6rem}.sentence select{font-size:1rem}
+.pill{display:inline-block;padding:.05rem .65rem;border:1px dashed var(--accent);border-radius:1em;color:var(--accent);text-decoration:none;line-height:1.9;font-size:1rem}
+.pill.solid{border-style:solid;background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--fg)}
+button.link{border:0;background:none;padding:0 .1rem;color:var(--muted);font-size:1rem;cursor:pointer}button.link:hover{color:var(--bad)}
+.cond2{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;padding:.6rem;border:1px solid var(--line);border-radius:8px;margin:.4rem 0;background:var(--bg)}
+[data-collapsed]:not(:target){display:none}
 tr.more>td{padding-top:0;border-bottom:1px solid var(--line)}tr.more details{margin:0 0 .3rem}tr.has-more>td{border-bottom:0}
 @media (max-width:640px){main{padding:.8rem}td,th{padding:.35rem .3rem}}
 </style>

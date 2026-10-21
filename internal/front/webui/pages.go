@@ -1237,7 +1237,9 @@ func (u *UI) simulate(w http.ResponseWriter, r *http.Request) map[string]any {
 // ruleForm — данные формы правила.
 type ruleForm struct {
 	Profile, ID, Action, Effect, Reason, When string
-	Conds                                     []Cond
+	WhenParts                                 []string // условие CEL по частям «&&» (чипы)
+	Conds                                     []Cond   // блоки условия (чипы)
+	New                                       Cond     // недобавленное условие с ошибкой
 }
 
 func (u *UI) rulePage(r *http.Request) (string, map[string]any, error) {
@@ -1245,14 +1247,16 @@ func (u *UI) rulePage(r *http.Request) (string, map[string]any, error) {
 	cfg := u.D.Config.Current()
 	f := ruleForm{Profile: q.Get("profile"), ID: q.Get("id"), Action: q.Get("action"), Effect: or(q.Get("effect"), "allow")}
 	var note string
-	// Правка существующего правила.
+	// Правка существующего правила (если в форме не выбрано другое действие —
+	// тогда условия прежнего действия к нему не относятся).
 	if f.ID != "" {
 		for _, rl := range cfg.Profiles[f.Profile].Rules {
-			if rl.ID == f.ID {
+			if rl.ID == f.ID && (f.Action == "" || f.Action == rl.Action) {
 				f.Action, f.Effect, f.Reason, f.When = rl.Action, rl.Effect, rl.Reason, rl.When
 			}
 		}
 	}
+	f.WhenParts = splitAnd(f.When)
 	// На основе запроса подтверждения или квитанции журнала.
 	var agent string
 	var args map[string]any
@@ -1279,24 +1283,28 @@ func (u *UI) rulePage(r *http.Request) (string, map[string]any, error) {
 			break
 		}
 	}
-	tools := u.tools()
-	t, hasTool := toolSchema(tools, f.Action)
-	if args != nil && hasTool {
+	if t, ok := toolSchema(u.tools(), f.Action); args != nil && ok {
 		f.Conds = suggestConds(t, args)
 	}
-	for len(f.Conds) < 3 {
-		f.Conds = append(f.Conds, Cond{})
-	}
+	return "rule", u.ruleData(f, note, approvalID), nil
+}
+
+// ruleData — данные страницы правила для формы f.
+func (u *UI) ruleData(f ruleForm, note, approvalID string) map[string]any {
+	cfg := u.D.Config.Current()
+	tools := u.tools()
+	t, hasTool := toolSchema(tools, f.Action)
 	profiles := make([]string, 0, len(cfg.Profiles))
 	for p := range cfg.Profiles {
 		profiles = append(profiles, p)
 	}
 	sort.Strings(profiles)
-	data := map[string]any{"F": f, "Tools": tools, "Profiles": profiles, "Kinds": condKinds, "Lists": cfg.Lists, "Note": note, "Approval": approvalID}
+	data := map[string]any{"F": f, "Chips": ruleChips(f), "Tools": tools, "Profiles": profiles, "Kinds": condKinds, "Lists": cfg.Lists,
+		"Note": note, "Approval": approvalID}
 	if hasTool {
 		data["Tool"], data["Args"] = t, actionArgs(t)
 	}
-	return "rule", data, nil
+	return data
 }
 
 // amountArg — числовые аргументы, для которых «не больше значения» осмысленно.
@@ -1331,46 +1339,42 @@ func suggestConds(t daemon.Tool, args map[string]any) []Cond {
 
 func (u *UI) saveRule(w http.ResponseWriter, r *http.Request) map[string]any {
 	f := r.PostForm
-	form := ruleForm{Profile: f.Get("profile"), ID: strings.TrimSpace(f.Get("id")), Action: f.Get("action"), Effect: f.Get("effect"), Reason: strings.TrimSpace(f.Get("reason"))}
+	form := parseRuleForm(f)
 	back := "/policy/rule?" + url.Values{"profile": {form.Profile}, "action": {form.Action}, "id": {form.ID}, "effect": {form.Effect}}.Encode()
 	t, ok := toolSchema(u.tools(), form.Action)
 	var args []argInfo
 	if ok {
 		args = actionArgs(t)
 	}
-	var conds []Cond
-	kinds, argsF, vals := f["cond_kind"], f["cond_arg"], f["cond_value"]
-	for i := range kinds {
-		c := Cond{Kind: kinds[i]}
-		if i < len(argsF) {
-			c.Arg = argsF[i]
+	// «+ условие» и «×» — та же страница с изменёнными условиями, без сохранения.
+	if f.Has("add_cond") || f.Get("drop") != "" {
+		err := editRuleForm(&form, f, args)
+		data := u.ruleData(form, "", f.Get("approval"))
+		data["page"] = "rule"
+		if err != nil {
+			data["error"] = err.Error()
 		}
-		if i < len(vals) {
-			c.Value = vals[i]
-		}
-		c.Not = f.Get(fmt.Sprintf("cond_not_%d", i)) == "1"
-		conds = append(conds, c)
+		return data
 	}
+	conds := form.Conds
 	when, err := BuildWhen(conds, args)
 	if err != nil {
 		return redirectErr(back, err)
 	}
 	// Новые списки из блоков «из списка»: элементы — в поле list_items_<i>.
 	newLists := map[string][]string{}
-	for i, c := range conds {
+	for _, c := range conds {
 		if c.Kind == "in_list" {
-			if items := splitItems(f.Get(fmt.Sprintf("list_items_%d", i))); len(items) > 0 {
+			if items := splitItems(c.Items); len(items) > 0 {
 				newLists[c.Value] = items
 			}
 		}
 	}
+	parts := append([]string{}, form.WhenParts...)
 	if raw := strings.TrimSpace(f.Get("when")); raw != "" {
-		if when != "" {
-			when = "(" + raw + ") && " + when
-		} else {
-			when = raw
-		}
+		parts = append(parts, raw)
 	}
+	when = joinAnd(append(parts, when))
 	err = u.edit("rule in "+form.Profile, func(c *config.Config) error {
 		for name, items := range newLists {
 			if err := c.SetList(name, append(c.Lists[name], items...)); err != nil {

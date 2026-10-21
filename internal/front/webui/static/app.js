@@ -111,22 +111,32 @@
     if (e.target.form && e.target.form.querySelector("[data-show-when]")) showWhen();
   });
 
-  // Ещё одно условие правила.
+  // Форма правила: смена профиля или действия перезагружает страницу (GET,
+  // без csrf); «+ условие» и «CEL» раскрывают блок; Enter в новом условии — «Добавить».
+  document.addEventListener("change", function (e) {
+    if (e.target.matches("#rule-form select[name=effect]")) e.target.className = e.target.value; // цвет решения
+    var s = e.target.closest("[data-reload]");
+    if (!s) return;
+    var f = s.form, q = new URLSearchParams();
+    ["profile", "action", "id", "effect"].forEach(function (k) { if (f.elements[k] && f.elements[k].value) q.set(k, f.elements[k].value); });
+    location.href = base + "/policy/rule?" + q.toString();
+  });
   document.addEventListener("click", function (e) {
-    var b = e.target.closest("[data-add-cond]");
-    if (!b) return;
+    var t = e.target.closest("[data-toggle]");
+    if (!t) return;
     e.preventDefault();
-    var rows = document.querySelectorAll(".cond");
-    var last = rows[rows.length - 1];
-    if (!last) return;
-    var n = last.cloneNode(true), i = rows.length;
-    n.querySelectorAll("input,select").forEach(function (el) {
-      if (el.type === "checkbox") { el.checked = false; el.name = "cond_not_" + i; }
-      else if (el.name && el.name.indexOf("list_items_") === 0) { el.name = "list_items_" + i; el.value = ""; }
-      else if (el.tagName === "INPUT") el.value = "";
-      else el.selectedIndex = 0;
-    });
-    last.parentNode.insertBefore(n, last.nextSibling);
+    var b = document.querySelector(t.getAttribute("data-toggle"));
+    if (!b) return;
+    b.removeAttribute("data-collapsed");
+    var f = b.querySelector("select,input");
+    if (f) f.focus();
+  });
+  document.addEventListener("keydown", function (e) {
+    var el = e.target.closest && e.target.closest("[data-enter]");
+    if (!el || e.key !== "Enter") return;
+    e.preventDefault();
+    var b = el.form.querySelector('[name="' + el.getAttribute("data-enter") + '"]');
+    if (b) b.click();
   });
 
   // Решение по запросу отправляется один раз: повторное нажатие (или второй
