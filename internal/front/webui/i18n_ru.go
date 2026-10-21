@@ -46,12 +46,14 @@ var ru = map[string]string{
 	// Время
 	"%d min ago": "%d мин назад", "%d h ago": "%d ч назад", "%d d ago": "%d дн назад",
 	"%d min left": "осталось %d мин", "%d h left": "осталось %d ч", "%d d left": "осталось %d дн",
-	"15m": "15 минут", "30m": "30 минут", "1h": "1 час", "2h": "2 часа", "8h": "8 часов", "1d": "сутки",
+	"15 minutes": "15 минут", "30 minutes": "30 минут", "1 hour": "1 час", "2 hours": "2 часа", "8 hours": "8 часов", "1 day": "сутки",
+	"30 days": "30 дней", "90 days": "90 дней", "1 year": "1 год", "3 years": "3 года", "forever": "бессрочно",
+	"Journal entries": "Записи журнала", "Denials": "Отказы", "Evidence": "Доказательства", "Evidence of money actions": "Доказательства денежных действий",
 
 	// Статусы
 	"approved": "разрешено", "rejected": "отклонено", "timeout": "истекло", "ok": "выполнено", "failed": "ошибка",
 	"verified": "проверено", "unverified": "не проверено", "skipped": "пропущено", "pending": "ждёт", "denied": "отклонено",
-	"allowed": "разрешено", "Allowed": "Разрешено", "Denied": "Отклонено", "not_run": "не исполнялось", "not set up": "не настроен",
+	"allowed": "разрешено", "Allowed": "Разрешено", "Denied": "Отклонено", "not_run": "не исполнялось", "not done": "не выполнено", "not set up": "не настроен",
 	"bot is not set up": "бот не настроен", "not running": "не запущен", "no VAPID key": "нет ключа VAPID",
 	"no browser is subscribed": "ни один браузер не подписан", "notifications are not available here": "уведомления здесь недоступны",
 
@@ -166,7 +168,7 @@ var ru = map[string]string{
 	"Files are open for the whole home folder. Limit them to the folders you need:":                      "Файлы открыты на весь домашний каталог. Ограничьте нужными папками:",
 	"Files settings →": "Настройки файлов →",
 	"These permissions are shared with other agents (%s): a change applies to all of them.": "Эти права общие с другими агентами (%s): изменение действует на всех.",
-	"different rules": "разные правила", "see the rules": "смотрите правила", "No access yet — the agent sees no tools.": "Доступа пока нет — агент не видит инструментов.",
+	"different rules": "разные правила", "in the chosen folders": "в выбранных папках", "see the rules": "смотрите правила", "No access yet — the agent sees no tools.": "Доступа пока нет — агент не видит инструментов.",
 	"Access →": "Доступ →", "Finer rules (by folder, site, recipient) —": "Точнее (по папке, сайту, адресату) —", "rules of this agent": "правила этого агента",
 	"%s is not connected yet.": "%s ещё не подключён.",
 	"%s was not found on this computer — the settings file will be created anyway.": "%s не найден на этом компьютере — файл настроек всё равно будет создан.",
@@ -449,10 +451,7 @@ var ru = map[string]string{
 	"Your own relay, your own HTTPS address without a relay, registering again →": "Свой relay, свой HTTPS-адрес без relay, повторная регистрация →",
 	"Defaults suit almost everyone.":                                              "Значения по умолчанию подходят почти всем.", "Connector store": "Магазин коннекторов",
 	"Catalog address (index.json)": "Адрес каталога (index.json)", "Catalog signing keys": "Ключи подписи каталога",
-	"Keeping the journal": "Хранение журнала", "retention.receipts": "Записи журнала", "retention.denied": "Отказы",
-	"retention.evidence_other": "Доказательства", "retention.evidence_money": "Доказательства денежных действий",
-	"keep.30d": "30 дней", "keep.90d": "90 дней", "keep.1y": "1 год", "keep.3y": "3 года", "keep.0s": "бессрочно",
-	"Rules as YAML and versions": "Правила в YAML и версии", "YAML for technical users →": "YAML для технических пользователей →",
+	"Keeping the journal": "Хранение журнала", "Rules as YAML and versions": "Правила в YAML и версии", "YAML for technical users →": "YAML для технических пользователей →",
 	"Lists, check, versions →": "Списки, проверка, версии →", "Autostart files:": "Файлы автозапуска:",
 	"The same in the terminal: <code>gate4ai service install</code> / <code>uninstall</code>, <code>gate4ai status</code>.": "То же в терминале: <code>gate4ai service install</code> / <code>uninstall</code>, <code>gate4ai status</code>.",
 	"Signing in": "Вход", "Store, journal, about": "Магазин, журнал, о программе",

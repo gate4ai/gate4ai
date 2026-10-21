@@ -1,7 +1,7 @@
 {{template "head" .}}
 {{$d := .Data}}
 <div style="max-width:48rem;margin:0 auto">
-<div class="row between"><span class="muted">{{T "Getting started"}}</span><a href="{{.Base}}/setup/skip" class="muted">{{T "Skip, I will set it up myself"}}</a></div>
+<div class="row between" style="margin-bottom:.6rem"><span class="muted">{{T "Getting started"}}</span><a href="{{.Base}}/setup/skip" class="muted">{{T "Skip, I will set it up myself"}}</a></div>
 <ol class="stepper">
 <li class="{{if eq $d.Step 1}}on{{else}}done{{end}}">{{T "Assistant"}}{{if gt $d.Step 1}}: {{$d.ClientTitle}}{{end}}</li>
 <li class="{{if eq $d.Step 2}}on{{else if gt $d.Step 2}}done{{end}}">{{T "What it may do"}}</li>
@@ -14,7 +14,7 @@
 <fieldset class="tiles"><legend class="skip">{{T "Assistant"}}</legend>
 {{range $d.Clients}}{{if or .Found .Cloud}}<label><input type="radio" name="client" value="{{.ID}}" {{if eq .ID $d.Client}}checked{{end}} required><span class="tile">{{if .Found}}<span class="found">● {{T "found on this computer"}}</span>{{end}}<b>{{T .Title}}</b>{{with .Note}}<span class="muted">{{T .}}</span>{{end}}</span></label>{{end}}{{end}}
 </fieldset>
-<details class="adv"{{if not $d.Client}} open{{end}}><summary>{{T "Others: VS Code, Codex, Gemini CLI, a script"}}</summary>
+<details class="adv"{{if not $d.Client}} open{{end}}><summary>{{T "Other assistants"}}</summary>
 <fieldset class="tiles" style="margin-top:.6rem"><legend class="skip">{{T "Other assistants"}}</legend>
 {{range $d.Clients}}{{if not (or .Found .Cloud)}}<label><input type="radio" name="client" value="{{.ID}}" {{if eq .ID $d.Client}}checked{{end}}><span class="tile"><b>{{T .Title}}</b>{{with .Note}}<span class="muted">{{T .}}</span>{{end}}</span></label>{{end}}{{end}}
 </fieldset></details>
@@ -89,6 +89,6 @@
 {{template "foot"}}
 
 {{define "setup_feed"}}{{$d := .Data}}<ul class="feed">
-{{range $d.Feed}}<li><span class="t">{{ago .At}}</span><span>{{if .Effect}}<span class="dot {{if eq .Effect "deny"}}bad{{else if eq .Effect "ask"}}warn{{end}}" aria-hidden="true"></span>{{else}}<span class="dot" aria-hidden="true"></span>{{end}}{{.Text}}{{with .Effect}} — <span class="{{.}}">{{effect .}}</span>{{end}}{{with .Hash}} · <a href="{{$.Base}}/journal/{{.}}">{{T "entry"}}</a>{{end}}</span></li>
+{{range $d.Feed}}<li><span class="t">{{ago .At}}</span><span>{{if .Effect}}<span class="dot {{if eq .Effect "deny"}}bad{{else if eq .Effect "ask"}}warn{{end}}" aria-hidden="true"></span>{{else}}<span class="dot" aria-hidden="true"></span>{{end}}{{.Text}}{{with .Effect}} — <span class="{{.}}">{{effect .}}</span>{{end}}{{if and .Status (ne .Status "ok") (ne .Status "skipped")}} · <span class="bad">{{T "not done"}}: {{T .Status}}</span>{{end}}{{with .Hash}} · <a href="{{$.Base}}/journal/{{.}}">{{T "entry"}}</a>{{end}}</span></li>
 {{else}}<li class="muted">{{T "Waiting for the assistant's first request…"}}</li>{{end}}
 </ul>{{end}}

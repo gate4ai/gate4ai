@@ -21,7 +21,7 @@
 {{range $d.Access}}{{$a := .}}<div style="padding:.4rem 0"><b><a href="{{$.Base}}/connectors/{{.Conn.Name}}?profile={{$d.Agent.Profile}}">{{.Conn.Title}}</a></b>
 {{range .Groups}}{{$g := .}}<form method="post" action="{{$.Base}}/access/group" class="grp"><input type="hidden" name="csrf" value="{{$.CSRF}}">
 <input type="hidden" name="profile" value="{{$d.Agent.Profile}}"><input type="hidden" name="connector" value="{{.Connector}}"><input type="hidden" name="class" value="{{.Class}}"><input type="hidden" name="back" value="/agents/{{$d.Name}}">
-<span>{{T .Title}}{{if eq .Effect "mixed"}} <span class="muted">— {{T "different rules"}}, <a href="{{$.Base}}/policy?profile={{$d.Agent.Profile}}">{{T "see the rules"}}</a></span>{{end}}</span>
+<span>{{T .Title}}{{if .Scoped}} <span class="muted">— {{T "in the chosen folders"}}</span>{{end}}{{if eq .Effect "mixed"}} <span class="muted">— {{T "different rules"}}, <a href="{{$.Base}}/policy?profile={{$d.Agent.Profile}}">{{T "see the rules"}}</a></span>{{end}}</span>
 <span class="seg" role="group" aria-label="{{T .Title}}">{{range (list "allow" "ask" "deny")}}<button name="effect" value="{{.}}" class="{{if eq . $g.Effect}}on{{end}}"{{if eq . $g.Effect}} aria-pressed="true"{{else}} aria-pressed="false"{{end}}>{{effect .}}</button>{{end}}</span></form>{{end}}
 </div>{{else}}<p class="warn">{{T "No access yet — the agent sees no tools."}} <a href="{{.Base}}/connectors">{{T "Access →"}}</a></p>{{end}}
 <p class="help">{{T "Finer rules (by folder, site, recipient) —"}} <a href="{{.Base}}/policy?profile={{$d.Agent.Profile}}">{{T "rules of this agent"}}</a>.</p></div>

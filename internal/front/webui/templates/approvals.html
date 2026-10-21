@@ -2,7 +2,7 @@
 {{$d := .Data}}
 <h2>{{T "Waiting for your decision"}}</h2>
 <div data-live-pending data-back="/approvals">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/approvals")}}</div>
-<p class="help">{{T "Unanswered requests are denied after %s." $d.Timeout}}{{if not .Remote}} {{if not $d.PhoneOK}}<a href="{{.Base}}/settings/notifications">{{T "Get these requests on your phone →"}}</a>{{else}}<a href="{{.Base}}/settings/notifications">{{T "Notifications →"}}</a>{{end}}{{end}}</p>
+<p class="help">{{T "Unanswered requests are denied after %s." (dur $d.Timeout)}}{{if not .Remote}} {{if not $d.PhoneOK}}<a href="{{.Base}}/settings/notifications">{{T "Get these requests on your phone →"}}</a>{{else}}<a href="{{.Base}}/settings/notifications">{{T "Notifications →"}}</a>{{end}}{{end}}</p>
 
 {{if $d.Questions}}<h2 id="questions">{{T "A code is needed"}}</h2>
 {{range $d.Questions}}<div class="card"><p>{{TH "<b>%s</b> signs in to %s with the account <code>%s</code> and asks: %s" (or .Caller .Agent) (join .Bind ", ") .Account .Text}}</p>

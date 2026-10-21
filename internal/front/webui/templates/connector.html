@@ -27,7 +27,7 @@
 <p class="help">{{if $d.ProfileAgents}}{{T "For %s." (join $d.ProfileAgents ", ")}}{{else}}{{T "Permissions %s have no agents." $d.Profile}}{{end}}</p>
 {{range $d.Groups}}{{$g := .}}<form method="post" action="{{$.Base}}/access/group" class="grp"><input type="hidden" name="csrf" value="{{$.CSRF}}">
 <input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="connector" value="{{.Connector}}"><input type="hidden" name="class" value="{{.Class}}"><input type="hidden" name="back" value="/connectors/{{$d.Name}}?profile={{$d.Profile}}#actions">
-<span>{{T .Title}}{{if eq .Effect "mixed"}} <span class="muted">— {{T "different decisions, see below"}}</span>{{end}}</span>
+<span>{{T .Title}}{{if .Scoped}} <span class="muted">— {{T "in the chosen folders"}}</span>{{end}}{{if eq .Effect "mixed"}} <span class="muted">— {{T "different decisions, see below"}}</span>{{end}}</span>
 <span class="seg" role="group" aria-label="{{T .Title}}">{{range (list "allow" "ask" "deny")}}<button name="effect" value="{{.}}" class="{{if eq . $g.Effect}}on{{end}}" aria-pressed="{{if eq . $g.Effect}}true{{else}}false{{end}}">{{effect .}}</button>{{end}}</span></form>{{end}}
 <p class="help">{{T "Finer rules (by folder, site, recipient) —"}} <a href="{{.Base}}/policy?profile={{$d.Profile}}">{{T "Access → Rules"}}</a>.</p>
 

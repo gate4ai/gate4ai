@@ -11,7 +11,7 @@
 <span class="seg" role="group" aria-label="{{T "Start gate4.ai when I log in"}}"><button name="on" value="1" class="{{if ne $d.AutostartState "off"}}on{{end}}" aria-pressed="{{if ne $d.AutostartState "off"}}true{{else}}false{{end}}">{{T "on"}}</button><button name="on" value="0" class="{{if eq $d.AutostartState "off"}}on{{end}}" aria-pressed="{{if eq $d.AutostartState "off"}}true{{else}}false{{end}}">{{T "off"}}</button></span></form>{{end}}</div>
 <div class="set"><div class="d"><b><label for="s-timeout" style="margin:0">{{T "How long to wait for your answer"}}</label></b><div class="help">{{T "If nobody answers, the action is denied."}}</div></div>
 <form method="post" action="{{.Base}}/settings/approvals" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="/settings">
-<select id="s-timeout" name="timeout" data-autosubmit>{{range $d.Timeouts}}<option value="{{.}}" {{if eq . $d.Timeout}}selected{{end}}>{{T .}}</option>{{end}}{{if not (has $d.Timeouts $d.Timeout)}}<option selected>{{$d.Timeout}}</option>{{end}}</select><noscript><button class="small">{{T "Save"}}</button></noscript></form></div>
+<select id="s-timeout" name="timeout" data-autosubmit>{{range $d.Timeouts}}<option value="{{.}}" {{if eq . $d.Timeout}}selected{{end}}>{{dur .}}</option>{{end}}{{if not (has $d.Timeouts $d.Timeout)}}<option selected>{{$d.Timeout}}</option>{{end}}</select><noscript><button class="small">{{T "Save"}}</button></noscript></form></div>
 <div class="set"><div class="d"><b>{{T "Agents may change gate4.ai settings"}}</b><div class="help">{{TH "With <code>gate4ai.change_policy</code> an agent proposes a rule, a list or a connector; you approve each change. Passwords — never."}}</div></div>
 <form method="post" action="{{.Base}}/settings/self"><input type="hidden" name="csrf" value="{{.CSRF}}"><span class="seg" role="group" aria-label="{{T "Agents may change gate4.ai settings"}}"><button name="self" value="ask" class="{{if not $d.SelfDenied}}on{{end}}" aria-pressed="{{if not $d.SelfDenied}}true{{else}}false{{end}}">{{effect "ask"}}</button><button name="self" value="deny" class="{{if $d.SelfDenied}}on{{end}}" aria-pressed="{{if $d.SelfDenied}}true{{else}}false{{end}}">{{effect "deny"}}</button></span></form></div>
 <div class="set"><div class="d"><b>{{T "Access from the phone and for Claude.ai / ChatGPT"}}</b><div class="help">{{if $d.PublicURL}}<code>{{$d.PublicURL}}</code>{{else}}{{T "An address like xxxx.relay.gate4.ai; no ports to open, the relay sees only encrypted traffic."}}{{end}}</div></div>
@@ -24,7 +24,7 @@
 
 {{if eq $d.Sub "notifications"}}
 <h2 id="channels">{{T "Notifications"}}</h2>
-<p class="muted">{{T "Where gate4.ai tells you about approval requests. You decide with a button in the channel or in the Web UI; without an answer in %s the action is denied." (T $d.Timeout)}} <a href="{{.Base}}/settings">{{T "Change"}}</a></p>
+<p class="muted">{{T "Where gate4.ai tells you about approval requests. You decide with a button in the channel or in the Web UI; without an answer in %s the action is denied." (dur $d.Timeout)}} <a href="{{.Base}}/settings">{{T "Change"}}</a></p>
 <div class="card">
 {{range $d.Channels}}<div class="set"><div class="d"><span class="dot {{if not .On}}off{{else if ne .State "ok"}}bad{{end}}" aria-hidden="true"></span><b>{{T .Title}}</b> — {{if not .On}}{{T "off"}}{{else if eq .State "ok"}}<span class="ok">{{T "on"}}</span>{{else if eq .State "not_configured"}}<span class="warn">{{T "not set up"}}</span>{{else}}<span class="bad">{{T "error"}}</span>{{end}}
 {{if and .On (ne .State "ok") .Detail}}<div class="help">{{T .Detail}}</div>{{end}}
@@ -122,7 +122,7 @@
 <button>{{T "Save"}}</button></form></div>
 <div class="card"><h3>{{T "Keeping the journal"}}</h3>
 <form method="post" action="{{.Base}}/settings/general" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}">
-{{$rs := $d.Retentions}}{{range (list "receipts" "denied" "evidence_other" "evidence_money")}}{{$k := .}}{{$cur := index $d.Retention $k}}<label class="inline" for="ret-{{$k}}">{{T (printf "retention.%s" $k)}}</label><select id="ret-{{$k}}" name="ret_{{$k}}">{{range $rs}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{T (printf "keep.%s" .)}}</option>{{end}}{{if not (has $rs $cur)}}<option selected>{{$cur}}</option>{{end}}</select>{{end}}
+{{$rs := $d.Retentions}}{{range (list "receipts" "denied" "evidence_other" "evidence_money")}}{{$k := .}}{{$cur := index $d.Retention $k}}<label class="inline" for="ret-{{$k}}">{{dur $k}}</label><select id="ret-{{$k}}" name="ret_{{$k}}">{{range $rs}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{dur .}}</option>{{end}}{{if not (has $rs $cur)}}<option selected>{{$cur}}</option>{{end}}</select>{{end}}
 <button>{{T "Save"}}</button></form></div>
 <div class="card"><h3>{{T "Rules as YAML and versions"}}</h3><p><a href="{{.Base}}/policy/yaml">{{T "YAML for technical users →"}}</a> · <a href="{{.Base}}/policy#advanced">{{T "Lists, check, versions →"}}</a></p></div>
 <div class="card"><h3>{{T "About"}}</h3>

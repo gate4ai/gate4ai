@@ -32,6 +32,7 @@ ol.steps li,ul li{margin:.15rem 0}
 </style></head><body><main>
 
 <h1>UI/UX ревью gate4.ai</h1>
+<div class="note"><b>22 октября 2026: все исправления внесены</b> — см. <a href="#done">раздел 11</a> и <a href="plan.md">план с допущениями</a>. Основной язык интерфейса по решению владельца — английский, русский — перевод.</div>
 <p class="lead">Веб-интерфейс ядра, сайт gate4.ai и путь установки. Как упростить продукт и онбординг, какие паттерны нарушены, что спрятать в «Расширенные настройки». 21 октября 2026, сборка <code>gate4ai 0.1.0-dev</code> из <code>main</code>, коннекторы 0.7.2.</p>
 
 <nav class="toc"><b>Содержание</b><ol>
@@ -45,6 +46,7 @@ ol.steps li,ul li{margin:.15rem 0}
 <li><a href="#mockups">Новые макеты</a></li>
 <li><a href="#plan">Приоритизированный список изменений</a></li>
 <li><a href="#appendix">Приложение: сайт, установщик, CLI</a></li>
+<li><a href="#done">Что сделано (2026-10-22)</a></li>
 </ol></nav>
 
 <h2 id="summary">1. Коротко</h2>
@@ -400,6 +402,71 @@ ol.steps li,ul li{margin:.15rem 0}
 <p>Последние строки <code>install.sh</code> — «Next steps» из трёх команд на английском и ссылка на README. Предложение: по умолчанию включать автозапуск (флаг <code>GATE4AI_NO_START=1</code> для отказа — обратное нынешнему <code>GATE4AI_START=1</code>) и, если есть графическая сессия, открыть Web UI сразу; иначе — одна строка «Откройте: <code>gate4ai ui</code>». Язык — по <code>LANG</code>, как уже сделано для трея.</p>
 <h3>10.3. CLI</h3>
 <p>Сообщения об ошибках, таблицы для человека и автозапуск daemon из <code>gate4ai ui</code> уже доработаны (<code>docs/cli-ux.md</code>). Нашлось одно: <code>--json</code> после действия коннектора воспринимается как аргумент (I-23).</p>
+
+
+<h2 id="done">11. Что сделано (2026-10-22)</h2>
+<p>Все пункты раздела 9 внесены в код, документы и спецификацию (версия 0.8). План, допущения и статус — <a href="plan.md">plan.md</a>. По указанию владельца в ходе работы <b>основной язык интерфейса — английский, русский — перевод</b>: исходные строки Web UI английские, русский каталог проверяется тестом на полноту, язык выбирается переключателем в шапке или по языку браузера. Скриншоты ниже сняты со свежего daemon с подменённым <code>HOME</code> (длинные пути в адресах — от этого).</p>
+<div class="scroll"><table>
+<tr><th>#</th><th>Изменение</th><th>Результат</th></tr>
+<tr><td>1</td><td>Закрытые пути «Файлов»</td><td>Скрытые файлы и папки ниже корня, ключи, данные браузеров и gate4.ai закрыты всегда (<code>allow_hidden</code>, <code>allow_paths</code> — в «Расширенных»); начальный корень <code>~/Documents</code>; мастер ограничивает агента выбранными папками. Вживую: <code>~/.ssh/id_ed25519</code> — <code>deny</code>, <code>notes/server.pem</code> и <code>notes/.git/config</code> — <code>capability_denied</code>.</td></tr>
+<tr><td>2</td><td>Одна модель умолчаний</td><td>Мастер пишет явные правила по группам; страницы показывают фактическое решение; профиль без агентов на экране согласия по умолчанию не отмечен.</td></tr>
+<tr><td>3</td><td>Запрос человеческим языком</td><td>«claude-code хочет создать или перезаписать файл …», предпросмотр, «почему», «осталось 30 мин», «Разрешать всегда в ~/Documents/notes» — правило одним нажатием.</td></tr>
+<tr><td>4</td><td>Языки</td><td>Английский + русский каталог (~900 строк), <code>title</code>/<code>i18n</code> в манифесте, переводы официальных коннекторов, причины решений и версии политики — словами.</td></tr>
+<tr><td>5</td><td>Мастер первого запуска</td><td>3 шага, автоподключение и автозапуск в одной кнопке, живая лента и первое подтверждение на шаге «Проверка».</td></tr>
+<tr><td>6</td><td>Установщик и /install</td><td>Автозапуск по умолчанию, открывает мастер, одна строка «Next: gate4ai ui».</td></tr>
+<tr><td>7–9</td><td>Меню, «Расширенные», каналы</td><td>5 разделов (нижняя панель на телефоне), настройки по подстраницам, технические поля и таблицы — в «Расширенных», каналы — одной кнопкой по состоянию, таймаут — списком.</td></tr>
+<tr><td>10–18</td><td>Автозапуск, учётки, доступность, словарь, сообщения, вход, шаблоны, одна форма, CLI</td><td>Три состояния автозапуска; учётка сайта из трёх полей; подписи, <code>aria-current</code>, <code>aria-pressed</code>, радиокнопки; сообщения в сессии; кнопка «Copy» на странице входа; предпросмотр готовых правил; одна кнопка «Save» и предупреждение о несохранённом; <code>--json</code> в любом месте.</td></tr>
+<tr><td>19</td><td>Сайт</td><td>Русские названия коннекторов, «Open in gate4.ai», возможности без дублей, <code>@media print</code>.</td></tr>
+</table></div>
+
+<h3>До и после</h3>
+<div class="two">
+<figure><a href="shots/04-agent-new.png"><img src="shots/04-agent-new.png" alt="Было: новый агент" style="max-height:24rem;object-fit:cover;object-position:top"></a><figcaption>Было: мастер агента, шаг 1</figcaption></figure>
+<figure><a href="shots-after/a01-setup-step1.png"><img src="shots-after/a01-setup-step1.png" alt="Стало: мастер первого запуска" style="max-height:24rem;object-fit:cover;object-position:top"></a><figcaption>Стало: мастер первого запуска, найденные ассистенты сверху</figcaption></figure>
+<figure><a href="shots/20-agent-new-step2.png"><img src="shots/20-agent-new-step2.png" alt="Было: шаг 2" style="max-height:30rem;object-fit:cover;object-position:top"></a><figcaption>Было: профиль, шаблон и 4 поля параметров</figcaption></figure>
+<figure><a href="shots-after/a02-setup-step2.png"><img src="shots-after/a02-setup-step2.png" alt="Стало: что можно" style="max-height:30rem;object-fit:cover;object-position:top"></a><figcaption>Стало: папки, сайты и решения по группам</figcaption></figure>
+<figure><a href="shots/31-approvals-pending.png"><img src="shots/31-approvals-pending.png" alt="Было: запрос" style="max-height:24rem;object-fit:cover;object-position:top"></a><figcaption>Было: дамп и английская причина</figcaption></figure>
+<figure><a href="shots-after/a05-home-pending.png"><img src="shots-after/a05-home-pending.png" alt="Стало: главная с запросом" style="max-height:24rem;object-fit:cover;object-position:top"></a><figcaption>Стало: главная — запрос человеческим языком, «Разрешать всегда в …»</figcaption></figure>
+<figure><a href="shots/06-connector-browser.png"><img src="shots/06-connector-browser.png" alt="Было: браузер" style="max-height:28rem;object-fit:cover;object-position:top"></a><figcaption>Было: 8 технических полей и 12 действий</figcaption></figure>
+<figure><a href="shots-after/a14-connector-browser.png"><img src="shots-after/a14-connector-browser.png" alt="Стало: браузер" style="max-height:28rem;object-fit:cover;object-position:top"></a><figcaption>Стало: сайты, кто пользуется, группы действий; остальное — в «Расширенных»</figcaption></figure>
+<figure><a href="shots/14-settings.png"><img src="shots/14-settings.png" alt="Было: настройки" style="max-height:28rem;object-fit:cover;object-position:top"></a><figcaption>Было: 9 блоков одним столбцом</figcaption></figure>
+<figure><a href="shots-after/a18-settings.png"><img src="shots-after/a18-settings.png" alt="Стало: настройки" style="max-height:28rem;object-fit:cover;object-position:top"></a><figcaption>Стало: «Основные» и боковое меню с «Расширенными»</figcaption></figure>
+<figure><a href="shots/32-approvals-pending-mobile.png"><img src="shots/32-approvals-pending-mobile.png" alt="Было: телефон" style="max-width:20rem"></a><figcaption>Было: телефон</figcaption></figure>
+<figure><a href="shots-after/a06-home-mobile.png"><img src="shots-after/a06-home-mobile.png" alt="Стало: телефон" style="max-width:20rem"></a><figcaption>Стало: нижняя панель, кнопки под пальцем</figcaption></figure>
+</div>
+
+<h3>Остальные экраны после правок</h3>
+<div class="gallery">
+<figure><a href="shots-after/a03-setup-step3.png"><img src="shots-after/a03-setup-step3.png" alt="Мастер: проверка"></a><figcaption>Мастер: проверка</figcaption></figure>
+<figure><a href="shots-after/a04-check-live.png"><img src="shots-after/a04-check-live.png" alt="Проверка: живая лента и первый запрос"></a><figcaption>Проверка: живая лента и первый запрос</figcaption></figure>
+<figure><a href="shots-after/a10-agents.png"><img src="shots-after/a10-agents.png" alt="Агенты"></a><figcaption>Агенты</figcaption></figure>
+<figure><a href="shots-after/a11-agent.png"><img src="shots-after/a11-agent.png" alt="Агент: что можно, подключение"></a><figcaption>Агент: что можно, подключение</figcaption></figure>
+<figure><a href="shots-after/a12-access.png"><img src="shots-after/a12-access.png" alt="Доступ: коннекторы"></a><figcaption>Доступ: коннекторы</figcaption></figure>
+<figure><a href="shots-after/a13-connector-files.png"><img src="shots-after/a13-connector-files.png" alt="Файлы"></a><figcaption>Файлы</figcaption></figure>
+<figure><a href="shots-after/a15-consent-email.png"><img src="shots-after/a15-consent-email.png" alt="Согласие на установку почты"></a><figcaption>Согласие на установку почты</figcaption></figure>
+<figure><a href="shots-after/a16-rules.png"><img src="shots-after/a16-rules.png" alt="Правила"></a><figcaption>Правила</figcaption></figure>
+<figure><a href="shots-after/a17-templates.png"><img src="shots-after/a17-templates.png" alt="Готовые правила"></a><figcaption>Готовые правила</figcaption></figure>
+<figure><a href="shots-after/a28-template-preview.png"><img src="shots-after/a28-template-preview.png" alt="Предпросмотр готовых правил"></a><figcaption>Предпросмотр готовых правил</figcaption></figure>
+<figure><a href="shots-after/a19-notifications.png"><img src="shots-after/a19-notifications.png" alt="Уведомления"></a><figcaption>Уведомления</figcaption></figure>
+<figure><a href="shots-after/a20-internet.png"><img src="shots-after/a20-internet.png" alt="Доступ из интернета"></a><figcaption>Доступ из интернета</figcaption></figure>
+<figure><a href="shots-after/a21-login-settings.png"><img src="shots-after/a21-login-settings.png" alt="Вход"></a><figcaption>Вход</figcaption></figure>
+<figure><a href="shots-after/a22-advanced.png"><img src="shots-after/a22-advanced.png" alt="Расширенные"></a><figcaption>Расширенные</figcaption></figure>
+<figure><a href="shots-after/a23-vault.png"><img src="shots-after/a23-vault.png" alt="Пароли и учётки"></a><figcaption>Пароли и учётки</figcaption></figure>
+<figure><a href="shots-after/a24-journal.png"><img src="shots-after/a24-journal.png" alt="Журнал"></a><figcaption>Журнал</figcaption></figure>
+<figure><a href="shots-after/a25-entry.png"><img src="shots-after/a25-entry.png" alt="Запись журнала"></a><figcaption>Запись журнала</figcaption></figure>
+<figure><a href="shots-after/a26-telegram.png"><img src="shots-after/a26-telegram.png" alt="Мастер Telegram"></a><figcaption>Мастер Telegram</figcaption></figure>
+<figure><a href="shots-after/a27-approvals.png"><img src="shots-after/a27-approvals.png" alt="Подтверждения и история"></a><figcaption>Подтверждения и история</figcaption></figure>
+<figure><a href="shots-after/a29-after-allow-always.png"><img src="shots-after/a29-after-allow-always.png" alt="После «Разрешать всегда»"></a><figcaption>После «Разрешать всегда»</figcaption></figure>
+<figure><a href="shots-after/a30-login.png"><img src="shots-after/a30-login.png" alt="Вход: копирование команды"></a><figcaption>Вход: копирование команды</figcaption></figure>
+<figure><a href="shots-after/r01-home-ru.png"><img src="shots-after/r01-home-ru.png" alt="Главная (русский)"></a><figcaption>Главная (русский)</figcaption></figure>
+<figure><a href="shots-after/r02-setup-step2-ru.png"><img src="shots-after/r02-setup-step2-ru.png" alt="Мастер, шаг 2 (русский)"></a><figcaption>Мастер, шаг 2 (русский)</figcaption></figure>
+<figure><a href="shots-after/r03-settings-ru.png"><img src="shots-after/r03-settings-ru.png" alt="Настройки (русский)"></a><figcaption>Настройки (русский)</figcaption></figure>
+<figure><a href="shots-after/r04-connector-files-ru.png"><img src="shots-after/r04-connector-files-ru.png" alt="Файлы (русский)"></a><figcaption>Файлы (русский)</figcaption></figure>
+<figure><a href="shots-after/w01-install.png"><img src="shots-after/w01-install.png" alt="Сайт: /install"></a><figcaption>Сайт: /install</figcaption></figure>
+<figure><a href="shots-after/w02-connector-email.png"><img src="shots-after/w02-connector-email.png" alt="Сайт: коннектор почты"></a><figcaption>Сайт: коннектор почты</figcaption></figure>
+<figure><a href="shots-after/w03-connectors-ru.png"><img src="shots-after/w03-connectors-ru.png" alt="Сайт: каталог (русский)"></a><figcaption>Сайт: каталог (русский)</figcaption></figure>
+</div>
+<p class="help">Проверено: <code>go build ./... && go vet ./... && go test ./...</code> в <code>gate4ai</code> (в т. ч. новые <code>review_test.go</code>, <code>i18n_test.go</code>, тесты защиты путей и CLI), <code>go test ./...</code> в <code>www</code>; вживую — путь «мастер → агент → первое подтверждение → Разрешать всегда» в Chrome. Не проверено вживую: <code>install.ps1</code> и автозапуск на macOS/Windows, Telegram и push на настоящих сервисах.</p>
 
 <p class="lead" style="margin-top:3rem">Скриншоты: <code>shots/</code> · макеты: <code>mockups/</code> (HTML + PNG). Код продукта и спецификация в рамках ревью не менялись.</p>
 </main></body></html>

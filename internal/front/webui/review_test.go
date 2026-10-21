@@ -178,7 +178,7 @@ func TestApprovalCardAndAllowAlways(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 	p := get("/approvals")
-	for _, want := range []string{"<b>bot</b> хочет <b>Записать документ</b>", "<code>/srv/notes/todo.md</code>", "milk",
+	for _, want := range []string{"<b>bot</b> хочет <b>записать документ</b>", "<code>/srv/notes/todo.md</code>", "milk",
 		"Правила на это нет, а действия вида «изменение» спрашивают вас.", "Разрешать всегда в /srv/notes", "осталось"} {
 		if !strings.Contains(p, want) {
 			t.Fatal(want, p)
@@ -300,5 +300,36 @@ func TestVersionComments(t *testing.T) {
 		if got := versionComment(langRU, in); got != want {
 			t.Errorf("%q: %q", in, got)
 		}
+	}
+}
+
+// Правила мастера «в выбранных папках» — одно решение группы, папки сохраняются при смене.
+func TestGroupDecisionFolders(t *testing.T) {
+	in := `glob(path, "~/n/**") || glob(path, "/data/**")`
+	p := config.Profile{Rules: []config.Rule{{ID: "a", Action: "docs.read", When: in, Effect: "allow"}, {ID: "b", Action: "docs.list", When: in, Effect: "allow"},
+		{ID: "out", Action: "docs.*", When: "!(" + in + ")", Effect: "deny"}}}
+	if e, scoped := groupDecision(p, "docs.read", "read"); e != "allow" || !scoped {
+		t.Fatal(e, scoped)
+	}
+	c := &config.Config{Profiles: map[string]config.Profile{"p": p}}
+	if err := setGroupRules(c, "p", []string{"docs.read", "docs.list"}, "ask"); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, r := range c.Profiles["p"].Rules {
+		if r.Action == "docs.read" || r.Action == "docs.list" {
+			n++
+			if r.Effect != "ask" || r.When != in {
+				t.Fatalf("%+v", r)
+			}
+		}
+	}
+	if n != 2 || len(c.Profiles["p"].Rules) != 3 {
+		t.Fatalf("%+v", c.Profiles["p"].Rules)
+	}
+	// Своё условие (не папки) — группа «разные».
+	p.Rules = append(p.Rules, config.Rule{ID: "c", Action: "docs.read", When: `path.contains("x")`, Effect: "deny"})
+	if e, _ := groupDecision(p, "docs.read", "read"); e != decisionMixed {
+		t.Fatal(e)
 	}
 }

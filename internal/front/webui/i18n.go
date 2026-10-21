@@ -163,6 +163,12 @@ func langFuncs(l string) template.FuncMap {
 		"errView":  func(msg string) ErrView { return errView(l, msg) },
 		"title":    func(nav string) string { return tr(l, or(titles[nav], nav)) },
 		"reason":   func(s string) string { return reasonText(l, s) },
+		"dur":      func(s string) string { return tr(l, or(durWords[s], s)) },
 		"version":  func(s string) string { return versionComment(l, s) },
 	}
 }
+
+// durWords — сроки из выпадающих списков словами (таймаут подтверждения, хранение журнала).
+var durWords = map[string]string{"15m": "15 minutes", "30m": "30 minutes", "1h": "1 hour", "2h": "2 hours", "8h": "8 hours", "1d": "1 day",
+	"30d": "30 days", "90d": "90 days", "1y": "1 year", "3y": "3 years", "0s": "forever",
+	"receipts": "Journal entries", "denied": "Denials", "evidence_other": "Evidence", "evidence_money": "Evidence of money actions"}

@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
@@ -31,6 +32,7 @@ type argKV struct{ K, V string }
 type approvalView struct {
 	*state.Approval
 	Title, Desc string // действие на языке страницы
+	Verb        string // название действия внутри фразы «агент хочет …» (со строчной)
 	Target      string // файл, сайт, адресаты
 	Preview     string // содержимое, которое запишется или уйдёт
 	Append      bool   // дописывается в конец (показывается «+»)
@@ -160,6 +162,7 @@ func (u *UI) alwaysScope(a *state.Approval) (Msg, []Cond, bool) {
 func (u *UI) approvalView(l string, a *state.Approval) approvalView {
 	v := approvalView{Approval: a, Target: argTarget(a.Args)}
 	v.Title, v.Desc = u.actionText(l, a.Action)
+	v.Verb = lowerFirst(v.Title)
 	used := map[string]bool{}
 	for _, k := range targetKeys {
 		if _, ok := a.Args[k]; ok {
@@ -657,4 +660,13 @@ func changeLines(l string, args map[string]any) []string {
 		out = append(out, line)
 	}
 	return out
+}
+
+// lowerFirst — «Append to a file» → «append to a file» (внутри фразы).
+func lowerFirst(s string) string {
+	r := []rune(s)
+	if len(r) > 1 && unicode.IsUpper(r[0]) && !unicode.IsUpper(r[1]) {
+		r[0] = unicode.ToLower(r[0])
+	}
+	return string(r)
 }

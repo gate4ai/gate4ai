@@ -80,6 +80,7 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 .found{color:var(--ok);font-size:.82rem;font-weight:600}.prompt{font:1rem/1.5 ui-monospace,Menlo,monospace;background:var(--bg);border:1px dashed var(--accent);border-radius:8px;padding:.6rem .8rem;flex:1}
 .feed{list-style:none;margin:0;padding:0}.feed li{display:flex;gap:.7rem;padding:.5rem 0;border-bottom:1px solid var(--line)}.feed li:last-child{border:0}.feed .t{flex:0 0 4rem;color:var(--muted);font-size:.85rem}
 .big{font-size:1.02rem;padding:.6rem 1.2rem}
+.card input:not([type=checkbox]):not([type=radio]),.card textarea{max-width:100%}
 .skip{position:absolute;left:-9999px}.skip:focus{left:1rem;top:1rem;z-index:30;background:var(--card);padding:.4rem .8rem;border:1px solid var(--accent)}
 @media (max-width:700px){.layout{grid-template-columns:1fr}.side{display:flex;flex-wrap:wrap;gap:.2rem}.side .sep{flex-basis:100%}}
 @media (max-width:640px){main{padding:.8rem .8rem 5rem}td,th{padding:.35rem .3rem}header nav.main{position:fixed;bottom:0;left:0;right:0;z-index:12;background:var(--card);border-top:1px solid var(--line);justify-content:space-around;padding:.45rem .3rem calc(.45rem + env(safe-area-inset-bottom));gap:.2rem}header nav.main a{font-size:.82rem;text-align:center}}
@@ -114,7 +115,7 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 {{/* approval_card — запрос подтверждения человеческим языком; её же отдаёт /approvals/live. */}}
 {{define "approval_card"}}{{$v := .V}}{{with .A}}
 <div class="card ask-card" data-approval="{{.ID}}">
-  <div class="row between"><div class="what"><b>{{.Agent}}</b> {{T "wants to"}} <b>{{.Title}}</b>{{with .Target}} <code>{{.}}</code>{{end}}</div>
+  <div class="row between"><div class="what"><b>{{.Agent}}</b> {{T "wants to"}} <b>{{.Verb}}</b>{{with .Target}} <code>{{.}}</code>{{end}}</div>
   <span class="muted" title="{{ts .Expires}}">{{left .Expires}}</span></div>
   {{with .Preview}}<div class="preview" aria-label="{{T "What will be written or sent"}}">{{if $.A.Append}}<span class="add">+ {{.}}</span>{{else}}{{.}}{{end}}</div>{{end}}
   {{range .Args}}<div class="help"><code>{{.K}}</code>: {{.V}}</div>{{end}}
@@ -133,4 +134,4 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 {{end}}{{end}}
 
 {{/* entry_line — действие из журнала одной строкой. */}}
-{{define "entry_line"}}{{.Title}}{{with .Target}} · <code>{{.}}</code>{{end}}{{end}}
+{{define "entry_line"}}{{.Title}}{{with .Target}} · <code>{{.}}</code>{{end}}{{with .Receipt.Execution.Status}}{{if and (ne . "ok") (ne . "") (ne . "skipped")}} · <span class="bad">{{T "not done"}}: {{T .}}</span>{{end}}{{end}}{{end}}

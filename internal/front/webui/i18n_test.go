@@ -58,7 +58,7 @@ func i18nKeys(t *testing.T) []string {
 		}
 	}
 	// Словари слов и подписей.
-	for _, m := range []map[string]string{classWords, classVerbs, effectWords, viaWords, channelWords, titles} {
+	for _, m := range []map[string]string{classWords, classVerbs, effectWords, viaWords, channelWords, titles, durWords} {
 		for _, v := range m {
 			add(strconv.Quote(v))
 		}

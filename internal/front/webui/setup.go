@@ -41,6 +41,37 @@ type groupView struct {
 	Connector, Class, Title string
 	Effect                  string   // allow | ask | deny; "mixed" — разные решения или правила с условием
 	Actions                 []string // полные имена
+	Scoped                  bool     // решение действует в выбранных папках (правила с условием «внутри папки»)
+}
+
+// foldersOnly — условие правила состоит только из «путь внутри папки …» через «или».
+var foldersOnly = regexp.MustCompile(`^glob\(path, "[^"]+"\)( \|\| glob\(path, "[^"]+"\))*$`)
+
+// groupDecision — решение профиля для одного действия в группе: правила точно на
+// это действие без условия или с условием «внутри выбранных папок»; иначе mixed.
+func groupDecision(p config.Profile, action, class string) (string, bool) {
+	var effs []string
+	scoped := false
+	for _, r := range p.Rules {
+		if r.Action != action {
+			continue
+		}
+		w := strings.TrimSpace(r.When)
+		if w != "" && !foldersOnly.MatchString(w) {
+			return decisionMixed, false
+		}
+		scoped = scoped || w != ""
+		effs = append(effs, r.Effect)
+	}
+	if len(effs) == 0 {
+		return defaultEffect(class), false
+	}
+	for _, e := range effs[1:] {
+		if e != effs[0] {
+			return decisionMixed, false
+		}
+	}
+	return effs[0], scoped
 }
 
 // groups — группы действий коннектора conn с решениями профиля prof.
@@ -61,10 +92,8 @@ func (u *UI) groups(conn string, prof config.Profile) []groupView {
 		}
 		full := conn + "." + a.Name
 		g.Actions = append(g.Actions, full)
-		eff, _ := actionDecision(prof, full)
-		if eff == "" {
-			eff = defaultEffect(a.Class)
-		}
+		eff, scoped := groupDecision(prof, full, a.Class)
+		g.Scoped = g.Scoped || scoped
 		switch {
 		case len(g.Actions) == 1:
 			g.Effect = eff
@@ -81,17 +110,26 @@ func (u *UI) groups(conn string, prof config.Profile) []groupView {
 	return out
 }
 
-// setGroupRules — одно решение для всех действий группы: правило без условия
-// на каждое действие (прежние правила без условия заменяются).
+// setGroupRules — одно решение для всех действий группы: правило на каждое
+// действие; прежние правила без условия или «в выбранных папках» заменяются,
+// папки сохраняются.
 func setGroupRules(c *config.Config, profile string, actions []string, effect string) error {
 	p := c.Profiles[profile]
+	when := map[string]string{}
 	p.Rules = slices.DeleteFunc(p.Rules, func(x config.Rule) bool {
-		return slices.Contains(actions, x.Action) && strings.TrimSpace(x.When) == ""
+		w := strings.TrimSpace(x.When)
+		if !slices.Contains(actions, x.Action) || (w != "" && !foldersOnly.MatchString(w)) {
+			return false
+		}
+		if w != "" {
+			when[x.Action] = w
+		}
+		return true
 	})
 	c.Profiles[profile] = p
 	for _, a := range actions {
 		id := c.Profiles[profile].UniqueRuleID(strings.ReplaceAll(a, ".", "-") + "-" + effect)
-		if err := c.PutRule(profile, config.Rule{ID: id, Action: a, Effect: effect}); err != nil {
+		if err := c.PutRule(profile, config.Rule{ID: id, Action: a, When: when[a], Effect: effect}); err != nil {
 			return err
 		}
 	}
@@ -336,8 +374,9 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 					s[k] = v
 				}
 				roots := toStrings(s["roots"])
-				// Начальный корень «весь домашний каталог» заменяется выбранными папками.
-				if len(roots) == 1 && (roots[0] == "~" || roots[0] == "~/") {
+				// Начальный корень («весь домашний каталог» прежних версий или ~/Documents)
+				// заменяется выбранными папками.
+				if len(roots) == 1 && (roots[0] == "~" || roots[0] == "~/" || roots[0] == "~/Documents") {
 					roots = nil
 				}
 				for _, d := range folders {

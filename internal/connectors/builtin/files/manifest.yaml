@@ -1,17 +1,10 @@
 connector: files
 title: Files
-description: >-
-  Files in allowed folders. Hidden files and folders below an allowed folder,
-  key files (id_rsa, *.pem, *.key…) and keychain or browser data folders are
-  always closed (settings allow_hidden and allow_paths open them).
+description: Files in the folders you allow. Hidden files, keys and app data stay closed.
 i18n:
   ru:
     title: Файлы
-    description: >-
-      Файлы в разрешённых папках. Скрытые файлы и папки внутри разрешённой
-      папки, файлы ключей (id_rsa, *.pem, *.key…) и папки связок ключей и
-      данных браузеров закрыты всегда (открывают настройки allow_hidden и
-      allow_paths).
+    description: Файлы в разрешённых папках. Скрытые файлы, ключи и данные приложений закрыты всегда.
 version: "6"
 runtime: builtin
 capabilities:
