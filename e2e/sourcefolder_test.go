@@ -23,13 +23,15 @@ func TestConnectorFromSourceFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Папка вне репозитория, как у стороннего автора: свой go.mod, модуль gate4ai —
-	// из этого репозитория (replace), зависимости — из кэша модулей, без сети.
+	// из этого репозитория (replace), зависимости — из кэша модулей. tidy строит
+	// полный граф модулей с тестами зависимостей (go-message объявлен как go 1.14),
+	// и в чистом кэше (CI) недостающее докачивает из сети.
 	mod := "module example.com/mail-src\n\ngo 1.27.1\n\nrequire github.com/gate4ai/gate4ai v0.0.0\n\nreplace github.com/gate4ai/gate4ai => " + src(t, "") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tidy := exec.Command("go", "mod", "tidy")
-	tidy.Dir, tidy.Env = dir, append(g.env, "GOPROXY=off", "GOFLAGS=-mod=mod")
+	tidy.Dir, tidy.Env = dir, append(g.env, "GOFLAGS=-mod=mod")
 	if out, err := tidy.CombinedOutput(); err != nil {
 		t.Fatalf("go mod tidy: %v\n%s", err, out)
 	}

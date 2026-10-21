@@ -52,7 +52,7 @@ func TestListReadInbound(t *testing.T) {
 		t.Fatal(err)
 	}
 	msgs := res.Structured.(map[string]any)["messages"].([]any)
-	if len(msgs) != 2 {
+	if len(msgs) != 1 {
 		t.Fatal(len(msgs))
 	}
 	// Результат пришёл из модуля в JSON.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package mailtest — фейковые IMAP и SMTP серверы для тестов коннектора почты и e2e:
-// IMAP на memory-бэкенде go-imap, SMTP на go-smtp; принятое SMTP письмо
+// IMAP на imapmemserver из go-imap v2, SMTP на go-smtp; принятое SMTP письмо
 // (по желанию) кладётся в «Отправленные», как делает Gmail.
 package mailtest
 
@@ -14,10 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/emersion/go-imap"
-	"github.com/emersion/go-imap/backend"
-	"github.com/emersion/go-imap/backend/memory"
-	imapserver "github.com/emersion/go-imap/server"
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapserver"
+	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
 )
@@ -38,7 +37,7 @@ type Server struct {
 	RejectRcpt map[string]bool
 
 	mu       sync.Mutex
-	user     backend.User
+	user     *imapmemserver.User
 	imap     *imapserver.Server
 	smtp     *smtp.Server
 	Received []Envelope
@@ -53,19 +52,21 @@ type Envelope struct {
 
 // Start запускает серверы на 127.0.0.1.
 func Start() (*Server, error) {
-	be := memory.New()
-	u, err := be.Login(nil, User, Password)
-	if err != nil {
-		return nil, err
-	}
-	for _, mb := range []string{"Sent", "Drafts"} {
-		if err := u.CreateMailbox(mb); err != nil {
+	mem := imapmemserver.New()
+	u := imapmemserver.NewUser(User, Password)
+	for _, mb := range []string{"INBOX", "Sent", "Drafts"} {
+		if err := u.Create(mb, nil); err != nil {
 			return nil, err
 		}
 	}
+	mem.AddUser(u)
 	s := &Server{AutoSaveSent: true, user: u, RejectRcpt: map[string]bool{}}
-	s.imap = imapserver.New(be)
-	s.imap.AllowInsecureAuth = true
+	s.imap = imapserver.New(&imapserver.Options{
+		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
+			return mem.NewSession(), nil, nil
+		},
+		InsecureAuth: true,
+	})
 	il, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -109,28 +110,17 @@ func (s *Server) Secrets() map[string]string { return map[string]string{Alias: P
 
 // Deliver кладёт письмо во входящие (как будто пришло извне).
 func (s *Server) Deliver(raw string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	mb, err := s.user.GetMailbox("INBOX")
-	if err != nil {
-		return err
-	}
-	return mb.CreateMessage(nil, time.Now(), bytes.NewBufferString(raw))
+	_, err := s.user.Append("INBOX", bytes.NewReader([]byte(raw)), &imap.AppendOptions{Time: time.Now()})
+	return err
 }
 
 // Count — число писем в папке.
 func (s *Server) Count(folder string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	mb, err := s.user.GetMailbox(folder)
-	if err != nil {
+	st, err := s.user.Status(folder, &imap.StatusOptions{NumMessages: true})
+	if err != nil || st.NumMessages == nil {
 		return -1
 	}
-	st, err := mb.Status([]imap.StatusItem{imap.StatusMessages})
-	if err != nil {
-		return -1
-	}
-	return int(st.Messages)
+	return int(*st.NumMessages)
 }
 
 type smtpBackend struct{ s *Server }
@@ -181,11 +171,8 @@ func (ss *session) Data(r io.Reader) error {
 	defer ss.s.mu.Unlock()
 	ss.s.Received = append(ss.s.Received, ss.env)
 	if ss.s.AutoSaveSent {
-		mb, err := ss.s.user.GetMailbox("Sent")
-		if err != nil {
-			return err
-		}
-		return mb.CreateMessage([]string{imap.SeenFlag}, time.Now(), bytes.NewReader(b))
+		_, err := ss.s.user.Append("Sent", bytes.NewReader(b), &imap.AppendOptions{Flags: []imap.Flag{imap.FlagSeen}, Time: time.Now()})
+		return err
 	}
 	return nil
 }

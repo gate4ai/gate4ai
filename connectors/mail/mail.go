@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/emersion/go-imap"
-	"github.com/emersion/go-imap/client"
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 	gomail "github.com/emersion/go-message/mail"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
@@ -92,7 +92,7 @@ func (c *Mail) now() time.Time {
 	if c.Now == nil {
 		return time.Now()
 	}
-	return c.now()
+	return c.Now()
 }
 
 // Execute исполняет действие.
@@ -123,7 +123,7 @@ func tlsMode(s Server) string {
 
 // dialIMAP — соединение открывает хост и сам выполняет вход по алиасу пароля;
 // коннектор получает уже аутентифицированную сессию (PREAUTH).
-func dialIMAP(h *abi.Host, s Server) (*client.Client, error) {
+func dialIMAP(h *abi.Host, s Server) (*imapclient.Client, error) {
 	req := abi.DialRequest{Host: s.Host, Port: s.Port, TLS: tlsMode(s), Protocol: abi.ProtoIMAP}
 	if s.Password != "" {
 		req.Auth = &abi.DialAuth{Scheme: abi.AuthIMAPLogin, Username: s.Username, Secret: s.Password}
@@ -132,13 +132,37 @@ func dialIMAP(h *abi.Host, s Server) (*client.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("imap connect %s: %w", s.Host, err)
 	}
-	c, err := client.New(conn)
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("imap: %w", err)
+	return imapclient.New(conn, nil), nil
+}
+
+// logout завершает сессию и закрывает соединение.
+func logout(cl *imapclient.Client) {
+	_ = cl.Logout().Wait()
+	_ = cl.Close()
+}
+
+// appendMessage кладёт письмо в папку (APPEND).
+func appendMessage(cl *imapclient.Client, folder string, flags []imap.Flag, t time.Time, raw []byte) error {
+	cmd := cl.Append(folder, int64(len(raw)), &imap.AppendOptions{Flags: flags, Time: t})
+	if _, err := cmd.Write(raw); err != nil {
+		cmd.Close()
+		return err
 	}
-	c.Timeout = 30 * time.Second
-	return c, nil
+	if err := cmd.Close(); err != nil {
+		return err
+	}
+	_, err := cmd.Wait()
+	return err
+}
+
+// fetchRaw — письмо целиком (BODY.PEEK[]) по UID; nil — письма нет.
+func fetchRaw(cl *imapclient.Client, uid imap.UID) ([]byte, error) {
+	section := &imap.FetchItemBodySection{Peek: true}
+	msgs, err := cl.Fetch(imap.UIDSetNum(uid), &imap.FetchOptions{BodySection: []*imap.FetchItemBodySection{section}}).Collect()
+	if err != nil || len(msgs) == 0 {
+		return nil, err
+	}
+	return msgs[0].FindBodySection(section), nil
 }
 
 func intArg(a map[string]any, k string, def int) int {
@@ -178,12 +202,12 @@ type Summary struct {
 	Seen      bool     `json:"seen"`
 }
 
-func addrs(as []*imap.Address) []string {
+func addrs(as []imap.Address) []string {
 	out := []string{}
 	for _, a := range as {
-		s := a.Address()
-		if a.PersonalName != "" {
-			s = a.PersonalName + " <" + s + ">"
+		s := a.Addr()
+		if a.Name != "" {
+			s = a.Name + " <" + s + ">"
 		}
 		out = append(out, s)
 	}
@@ -195,22 +219,23 @@ func (c *Mail) list(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, 
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	defer cl.Logout()
+	defer logout(cl)
 	folder := strArg(a, "folder", "INBOX")
-	if _, err := cl.Select(folder, true); err != nil {
+	if _, err := cl.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
 		return abi.ExecResult{}, fmt.Errorf("folder %q: %w", folder, err)
 	}
-	crit := imap.NewSearchCriteria()
+	crit := &imap.SearchCriteria{}
 	if b, _ := a["unseen_only"].(bool); b {
-		crit.WithoutFlags = []string{imap.SeenFlag}
+		crit.NotFlag = []imap.Flag{imap.FlagSeen}
 	}
 	if q := strArg(a, "query", ""); q != "" {
 		crit.Text = []string{q}
 	}
-	uids, err := cl.UidSearch(crit)
+	data, err := cl.UIDSearch(crit, nil).Wait()
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
+	uids := data.AllUIDs()
 	limit := intArg(a, "limit", 20)
 	if limit > 100 {
 		limit = 100
@@ -220,20 +245,21 @@ func (c *Mail) list(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, 
 	}
 	out := []any{}
 	if len(uids) > 0 {
-		set := new(imap.SeqSet)
-		set.AddNum(uids...)
-		ch := make(chan *imap.Message, len(uids))
-		if err := cl.UidFetch(set, []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags, imap.FetchUid}, ch); err != nil {
+		fetched, err := cl.Fetch(imap.UIDSetNum(uids...), &imap.FetchOptions{Envelope: true, Flags: true, UID: true}).Collect()
+		if err != nil {
 			return abi.ExecResult{}, err
 		}
 		var msgs []Summary
-		for m := range ch {
-			sm := Summary{UID: m.Uid}
+		for _, m := range fetched {
+			sm := Summary{UID: uint32(m.UID)}
 			for _, f := range m.Flags {
-				sm.Seen = sm.Seen || f == imap.SeenFlag
+				sm.Seen = sm.Seen || f == imap.FlagSeen
 			}
 			if e := m.Envelope; e != nil {
-				sm.MessageID, sm.Subject, sm.From, sm.To = e.MessageId, e.Subject, addrs(e.From), addrs(e.To)
+				sm.Subject, sm.From, sm.To = e.Subject, addrs(e.From), addrs(e.To)
+				if e.MessageID != "" {
+					sm.MessageID = "<" + e.MessageID + ">"
+				}
 				if !e.Date.IsZero() {
 					sm.Date = e.Date.UTC().Format(time.RFC3339)
 				}
@@ -252,24 +278,19 @@ func (c *Mail) read(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, 
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	defer cl.Logout()
+	defer logout(cl)
 	folder := strArg(a, "folder", "INBOX")
-	if _, err := cl.Select(folder, true); err != nil {
+	if _, err := cl.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
 		return abi.ExecResult{}, fmt.Errorf("folder %q: %w", folder, err)
 	}
 	uid := uint32(intArg(a, "uid", 0))
-	set := new(imap.SeqSet)
-	set.AddNum(uid)
-	section := &imap.BodySectionName{Peek: true}
-	ch := make(chan *imap.Message, 1)
-	if err := cl.UidFetch(set, []imap.FetchItem{section.FetchItem(), imap.FetchUid}, ch); err != nil {
+	raw, err := fetchRaw(cl, imap.UID(uid))
+	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	m := <-ch
-	if m == nil {
+	if raw == nil {
 		return abi.ExecResult{}, fmt.Errorf("message uid %d not found in %s", uid, folder)
 	}
-	raw, _ := io.ReadAll(m.GetBody(section))
 	msg, err := parseMessage(raw, s.MaxBodyChars)
 	if err != nil {
 		return abi.ExecResult{}, err
@@ -409,12 +430,12 @@ func (c *Mail) draft(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult,
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	defer cl.Logout()
-	folder, err := findFolder(cl, s.DraftsFolder, imap.DraftsAttr, []string{"Drafts", "[Gmail]/Drafts", "Черновики", "Draft"})
+	defer logout(cl)
+	folder, err := findFolder(cl, s.DraftsFolder, imap.MailboxAttrDrafts, []string{"Drafts", "[Gmail]/Drafts", "Черновики", "Draft"})
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	if err := cl.Append(folder, []string{imap.DraftFlag, imap.SeenFlag}, c.now(), bytes.NewReader(raw)); err != nil {
+	if err := appendMessage(cl, folder, []imap.Flag{imap.FlagDraft, imap.FlagSeen}, c.now(), raw); err != nil {
 		return abi.ExecResult{}, fmt.Errorf("save draft: %w", err)
 	}
 	return abi.ExecResult{Structured: map[string]any{"message_id": id, "folder": folder, "status": "draft saved, not sent"}, ResultRef: id,
@@ -434,10 +455,10 @@ func (c *Mail) send(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, 
 	if s.SentCopy == "client" {
 		cl, err := dialIMAP(h, s.IMAP)
 		if err == nil {
-			if folder, err := findFolder(cl, s.SentFolder, imap.SentAttr, sentNames); err == nil {
-				_ = cl.Append(folder, []string{imap.SeenFlag}, c.now(), bytes.NewReader(raw))
+			if folder, err := findFolder(cl, s.SentFolder, imap.MailboxAttrSent, sentNames); err == nil {
+				_ = appendMessage(cl, folder, []imap.Flag{imap.FlagSeen}, c.now(), raw)
 			}
-			cl.Logout()
+			logout(cl)
 		}
 	}
 	return abi.ExecResult{Structured: res, ResultRef: id, Evidence: ev}, nil
@@ -531,25 +552,23 @@ func dotStuff(raw []byte) []byte {
 }
 
 // findFolder — папка по настройке, по атрибуту SPECIAL-USE или по известным именам.
-func findFolder(cl *client.Client, configured, attr string, names []string) (string, error) {
+func findFolder(cl *imapclient.Client, configured string, attr imap.MailboxAttr, names []string) (string, error) {
 	if configured != "" {
 		return configured, nil
 	}
-	ch := make(chan *imap.MailboxInfo, 64)
-	done := make(chan error, 1)
-	go func() { done <- cl.List("", "*", ch) }()
+	list, err := cl.List("", "*", nil).Collect()
+	if err != nil {
+		return "", err
+	}
 	var all []string
 	found := ""
-	for m := range ch {
-		all = append(all, m.Name)
-		for _, a := range m.Attributes {
+	for _, m := range list {
+		all = append(all, m.Mailbox)
+		for _, a := range m.Attrs {
 			if a == attr && found == "" {
-				found = m.Name
+				found = m.Mailbox
 			}
 		}
-	}
-	if err := <-done; err != nil {
-		return "", err
 	}
 	if found != "" {
 		return found, nil
@@ -572,9 +591,9 @@ func (c *Mail) Verify(ctx context.Context, h *abi.Host, r abi.VerifyRequest) (ab
 	if err != nil {
 		return abi.VerifyResult{}, err
 	}
-	method, attr, names, cfg := "sent_folder", imap.SentAttr, sentNames, s.SentFolder
+	method, attr, names, cfg := "sent_folder", imap.MailboxAttrSent, sentNames, s.SentFolder
 	if r.Action == "draft" {
-		method, attr, names, cfg = "drafts_folder", imap.DraftsAttr, []string{"Drafts", "[Gmail]/Drafts", "Черновики"}, s.DraftsFolder
+		method, attr, names, cfg = "drafts_folder", imap.MailboxAttrDrafts, []string{"Drafts", "[Gmail]/Drafts", "Черновики"}, s.DraftsFolder
 	}
 	if s.SentCopy == "client" && r.Action == "send" {
 		method = "smtp_accepted+client_copy"
@@ -604,35 +623,28 @@ func (c *Mail) Verify(ctx context.Context, h *abi.Host, r abi.VerifyRequest) (ab
 	return abi.VerifyResult{Status: abi.NotConfirmed, Method: method, Detail: "message " + r.ResultRef + " not found"}, nil
 }
 
-func (c *Mail) findByID(h *abi.Host, s Settings, cfg, attr string, names []string, id string) (bool, []byte, error) {
+func (c *Mail) findByID(h *abi.Host, s Settings, cfg string, attr imap.MailboxAttr, names []string, id string) (bool, []byte, error) {
 	cl, err := dialIMAP(h, s.IMAP)
 	if err != nil {
 		return false, nil, err
 	}
-	defer cl.Logout()
+	defer logout(cl)
 	folder, err := findFolder(cl, cfg, attr, names)
 	if err != nil {
 		return false, nil, err
 	}
-	if _, err := cl.Select(folder, true); err != nil {
+	if _, err := cl.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
 		return false, nil, err
 	}
-	crit := imap.NewSearchCriteria()
-	crit.Header.Set("Message-Id", id)
-	uids, err := cl.UidSearch(crit)
-	if err != nil || len(uids) == 0 {
+	crit := &imap.SearchCriteria{Header: []imap.SearchCriteriaHeaderField{{Key: "Message-Id", Value: id}}}
+	data, err := cl.UIDSearch(crit, nil).Wait()
+	if err != nil {
 		return false, nil, err
 	}
-	set := new(imap.SeqSet)
-	set.AddNum(uids[0])
-	section := &imap.BodySectionName{Peek: true}
-	ch := make(chan *imap.Message, 1)
-	if err := cl.UidFetch(set, []imap.FetchItem{section.FetchItem()}, ch); err != nil {
-		return true, nil, nil
+	uids := data.AllUIDs()
+	if len(uids) == 0 {
+		return false, nil, nil
 	}
-	var raw []byte
-	if m := <-ch; m != nil {
-		raw, _ = io.ReadAll(m.GetBody(section))
-	}
+	raw, _ := fetchRaw(cl, uids[0])
 	return true, raw, nil
 }
