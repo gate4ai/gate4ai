@@ -19,6 +19,69 @@
     if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function () {});
   });
 
+  // Ошибка действия — окном по центру экрана, а не строкой сверху: строку не
+  // видно, если страница прокручена вниз. Без JS остаётся строка.
+  var err = document.querySelector("[data-error]");
+  if (err) {
+    var m = document.createElement("div");
+    m.className = "modal err open";
+    m.setAttribute("role", "alertdialog");
+    m.setAttribute("aria-modal", "true");
+    m.innerHTML = '<div class="box"><h3>Не получилось</h3><div class="msg"></div><div class="actions"><button class="primary" data-close>Понятно</button></div></div>';
+    while (err.firstChild) m.querySelector(".msg").appendChild(err.firstChild);
+    err.replaceWith(m);
+    m.querySelector("[data-close]").focus();
+  }
+  // Сообщение об успехе — всплывающей плашкой, видной и на прокрученной
+  // странице (после действия она открывается на нужном блоке); гаснет сама.
+  var flash = document.querySelector("[data-flash]");
+  if (flash && location.hash) {
+    flash.classList.add("toast");
+    var hide = function () { flash.style.opacity = "0"; setTimeout(function () { flash.remove(); }, 400); };
+    setTimeout(hide, 6000);
+    flash.addEventListener("click", hide);
+  }
+
+  var closeModal = function (m) {
+    if (m.classList.contains("open")) { m.classList.remove("open"); return; }
+    location.hash = m.getAttribute("data-back") || "#"; // окно по якорю: возвращаемся к своему блоку
+  };
+  document.addEventListener("click", function (e) {
+    var m = e.target.closest(".modal");
+    if (!m) return;
+    var c = e.target.closest("[data-close]");
+    if (c && c.tagName === "A") return; // ссылка закрытия работает и без JS
+    if (c || e.target === m) { e.preventDefault(); closeModal(m); } // кнопка или клик по фону
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    document.querySelectorAll(".modal.open, .modal:target").forEach(closeModal);
+  });
+  // Окно по якорю: фокус в первое поле.
+  var focusTarget = function () {
+    var m = location.hash.length > 1 && document.getElementById(location.hash.slice(1));
+    if (m && m.classList.contains("modal")) {
+      var f = m.querySelector("input:not([type=hidden]),button");
+      if (f) f.focus();
+    }
+  };
+  // Ссылка на строку внутри закрытого блока (#rule-… в группе правил) раскрывает его.
+  var openTarget = function () {
+    var t = location.hash.length > 1 && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    for (var d = t && t.closest("details"); d; d = d.parentElement.closest("details")) d.open = true;
+    if (t && t.tagName === "TR") t.scrollIntoView({ block: "center" });
+  };
+  window.addEventListener("hashchange", openTarget);
+  openTarget();
+  window.addEventListener("hashchange", focusTarget);
+  focusTarget();
+
+  // Чип с описанием (<details class="chip">): открыт только один, клик мимо закрывает.
+  document.addEventListener("click", function (e) {
+    var mine = e.target.closest("details.chip");
+    document.querySelectorAll("details.chip[open]").forEach(function (d) { if (d !== mine) d.open = false; });
+  });
+
   // Подтверждение опасных действий: <form data-confirm="Текст?">.
   document.addEventListener("submit", function (e) {
     var f = e.target, q = f.getAttribute("data-confirm");
@@ -48,22 +111,32 @@
     if (e.target.form && e.target.form.querySelector("[data-show-when]")) showWhen();
   });
 
-  // Ещё одно условие правила.
+  // Форма правила: смена профиля или действия перезагружает страницу (GET,
+  // без csrf); «+ условие» и «CEL» раскрывают блок; Enter в новом условии — «Добавить».
+  document.addEventListener("change", function (e) {
+    if (e.target.matches("#rule-form select[name=effect]")) e.target.className = e.target.value; // цвет решения
+    var s = e.target.closest("[data-reload]");
+    if (!s) return;
+    var f = s.form, q = new URLSearchParams();
+    ["profile", "action", "id", "effect"].forEach(function (k) { if (f.elements[k] && f.elements[k].value) q.set(k, f.elements[k].value); });
+    location.href = base + "/policy/rule?" + q.toString();
+  });
   document.addEventListener("click", function (e) {
-    var b = e.target.closest("[data-add-cond]");
-    if (!b) return;
+    var t = e.target.closest("[data-toggle]");
+    if (!t) return;
     e.preventDefault();
-    var rows = document.querySelectorAll(".cond");
-    var last = rows[rows.length - 1];
-    if (!last) return;
-    var n = last.cloneNode(true), i = rows.length;
-    n.querySelectorAll("input,select").forEach(function (el) {
-      if (el.type === "checkbox") { el.checked = false; el.name = "cond_not_" + i; }
-      else if (el.name && el.name.indexOf("list_items_") === 0) { el.name = "list_items_" + i; el.value = ""; }
-      else if (el.tagName === "INPUT") el.value = "";
-      else el.selectedIndex = 0;
-    });
-    last.parentNode.insertBefore(n, last.nextSibling);
+    var b = document.querySelector(t.getAttribute("data-toggle"));
+    if (!b) return;
+    b.removeAttribute("data-collapsed");
+    var f = b.querySelector("select,input");
+    if (f) f.focus();
+  });
+  document.addEventListener("keydown", function (e) {
+    var el = e.target.closest && e.target.closest("[data-enter]");
+    if (!el || e.key !== "Enter") return;
+    e.preventDefault();
+    var b = el.form.querySelector('[name="' + el.getAttribute("data-enter") + '"]');
+    if (b) b.click();
   });
 
   // Решение по запросу отправляется один раз: повторное нажатие (или второй

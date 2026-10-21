@@ -29,13 +29,13 @@ func TestSecretUses(t *testing.T) {
 	}
 	got := secretUses(cfg, ms)
 	want := map[string][]SecretUse{
-		"@telegram.bot":        {{"Telegram-бот (подтверждения)", "/approvals/telegram"}},
-		"@relay.token":         {{"relay (подключение устройства)", "/settings#relay"}},
-		"@api.key":             {{"Egress Proxy: api.example", ""}},
-		"@email.imap.password": {{"коннектор email", "/connectors/email"}},
-		"@jira.fixed":          {{"коннектор jira", "/connectors/jira"}},
-		"@jira.acme":           {{"коннектор jira", "/connectors/jira"}},
-		"@old.key":             {{"коннектор old (не установлен)", ""}},
+		"@telegram.bot":        {{Name: "Telegram-бот", Post: " (подтверждения)", Link: "/approvals/telegram"}},
+		"@relay.token":         {{Name: "relay", Post: " (подключение устройства)", Link: "/settings#relay"}},
+		"@api.key":             {{Pre: "Egress Proxy: ", Name: "api.example"}},
+		"@email.imap.password": {{Pre: "коннектор ", Name: "email", Link: "/connectors/email"}},
+		"@jira.fixed":          {{Pre: "коннектор ", Name: "jira", Link: "/connectors/jira"}},
+		"@jira.acme":           {{Pre: "коннектор ", Name: "jira", Link: "/connectors/jira"}},
+		"@old.key":             {{Pre: "коннектор ", Name: "old", Post: " (не установлен)"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v\nwant %v", got, want)
@@ -46,7 +46,7 @@ func TestSecretUses(t *testing.T) {
 
 	// Канал выключен — токен всё равно указан, с пометкой.
 	cfg.Approvals.Channels = []string{"desktop"}
-	if u := secretUses(cfg, nil)["@telegram.bot"]; len(u) != 1 || u[0].Text != "Telegram-бот (подтверждения), канал выключен" {
+	if u := secretUses(cfg, nil)["@telegram.bot"]; len(u) != 1 || u[0].Text() != "Telegram-бот (подтверждения, канал выключен)" {
 		t.Fatalf("telegram off: %v", u)
 	}
 }

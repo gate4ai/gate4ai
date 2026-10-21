@@ -1,20 +1,28 @@
 {{template "head" .}}
 <h2>Секреты</h2>
 <p class="muted">Пароли и токены хранятся в системном keychain. Агенты и коннекторы видят только алиасы (<code>@mail.work</code>); значение подставляет gate4.ai — и только для адресов, к которым секрет привязан.</p>
-<table><tr><th>Алиас</th><th>Используется</th><th></th></tr>{{range .Data.Aliases}}<tr><td><code>{{.}}</code></td>
-<td>{{with index $.Data.Uses .}}{{range $i, $u := .}}{{if $i}}<br>{{end}}{{if $u.Link}}<a href="{{$.Base}}{{$u.Link}}">{{$u.Text}}</a>{{else}}{{$u.Text}}{{end}}{{end}}{{else}}<span class="muted">не используется</span>{{end}}</td>
-<td><form method="post" action="{{$.Base}}/vault/delete" data-confirm="Удалить секрет {{.}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="alias" value="{{.}}"><button class="small danger">Удалить</button></form></td></tr>
+<table><tr><th>Алиас</th><th>Используется</th><th></th></tr>{{range .Data.Aliases}}<tr id="{{secAnchor .}}"><td><code>{{.}}</code></td>
+<td>{{with index $.Data.Uses .}}{{range $i, $u := .}}{{if $i}}<br>{{end}}{{$u.Pre}}{{if $u.Link}}<a href="{{if eq (slice $u.Link 0 1) "#"}}{{$u.Link}}{{else}}{{$.Base}}{{$u.Link}}{{end}}">{{$u.Name}}</a>{{else}}{{$u.Name}}{{end}}{{$u.Post}}{{end}}{{else}}<span class="muted">не используется</span>{{end}}</td>
+<td><div class="row" style="flex-wrap:nowrap"><a class="btn small" href="#m-{{secAnchor .}}">Изменить</a>
+<form method="post" action="{{$.Base}}/vault/delete" data-confirm="Удалить секрет {{.}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="alias" value="{{.}}"><button class="small danger">Удалить</button></form></div>
+<div class="modal" id="m-{{secAnchor .}}" data-back="#{{secAnchor .}}" role="dialog" aria-modal="true"><div class="box"><h3>Изменить <code>{{.}}</code></h3>
+<form method="post" action="{{$.Base}}/vault" autocomplete="off"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="alias" value="{{.}}"><input type="hidden" name="edit" value="1">
+<label>Новое значение</label><input name="value" type="password" autocomplete="new-password" required>
+<p class="help">Текущее значение не показывается: введите новое целиком. Там, где секрет используется, оно подставится само.</p>
+<div class="actions"><a class="btn" href="#{{secAnchor .}}" data-close>Отмена</a><button class="primary">Сохранить</button></div></form></div></div></td></tr>
 {{else}}<tr><td colspan="3" class="muted">Секретов нет. Пароль почты удобнее ввести в настройках коннектора — там он сразу привяжется.</td></tr>{{end}}</table>
 <form method="post" action="{{$.Base}}/vault" class="card row" style="margin-top:1rem" autocomplete="off">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <input name="alias" placeholder="@mail.work" required><input name="value" type="password" placeholder="значение" required>
 <button class="primary">Сохранить</button></form>
 <h2 id="accounts">Учётки для входа на сайты</h2>
-<p class="muted">Браузер входит по ним сам (<code>browser.login</code>): значения секретов вводит gate4.ai, агент и коннекторы их не видят. Секрет вводится только в поле пароля, если у поля не указано <code>type: text</code>. Изменить учётки — в <a href="{{.Base}}/policy/yaml">YAML политики</a>, раздел <code>credentials</code>.</p>
-<table><tr><th>Учётка</th><th>Где вход</th><th>Что вводится</th><th>Кому доступна</th></tr>
-{{range .Data.Accounts}}<tr><td><code>{{.Alias}}</code>{{range .Missing}}<form method="post" action="{{$.Base}}/vault" class="row" autocomplete="off"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="alias" value="{{.}}"><span class="bad help">нет <code>{{.}}</code></span><input name="value" type="password" placeholder="значение" required size="14"><button class="small primary">Задать</button></form>{{end}}</td>
+<p class="muted">Браузер входит по ним сам (<code>browser.login</code>): значения секретов вводит gate4.ai, агент и коннекторы их не видят. Секрет вводится только в поле пароля, если у поля не указано <code>type: text</code>.</p>
+<table><tr><th>Учётка</th><th>Применяется на</th><th>Что вводится</th><th>Кому доступна</th></tr>
+{{range .Data.Accounts}}<tr id="{{accAnchor .Alias}}"><td><code>{{.Alias}}</code>{{range .Missing}}<form method="post" action="{{$.Base}}/vault" class="row" autocomplete="off"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="alias" value="{{.}}"><span class="bad help">нет <code>{{.}}</code></span><input name="value" type="password" placeholder="значение" required size="14"><button class="small primary">Задать</button></form>{{end}}</td>
 <td>{{range $i, $b := .Bind}}{{if $i}}<br>{{end}}{{$b}}{{end}}</td>
-<td>{{if .Via}}коннектор входа <code>{{.Via}}</code>{{range .Fields}}<br><code>{{or .Name .Secret}}</code> ← {{if .Secret}}секрет <code>{{.Secret}}</code>{{if .Set}} ✓{{end}}{{else}}«{{.Value}}»{{end}}{{end}}{{else}}{{range .Fields}}<code>{{.Selector}}</code> ← {{if .Secret}}секрет <code>{{.Secret}}</code>{{if .Type}} ({{.Type}}){{end}}{{if .Set}} ✓{{end}}{{else}}«{{.Value}}»{{end}}<br>{{end}}отправка: <code>{{.Submit}}</code>{{if .Success}}<br>успех: {{.Success}}…{{end}}{{end}}</td>
+<td>{{if .Via}}коннектор входа <code>{{.Via}}</code>{{range .Fields}}<br><code>{{or .Name .Secret}}</code> ← {{if .Secret}}секрет {{template "acc_secret" .}}{{else}}«{{.Value}}»{{end}}{{end}}{{else}}{{range .Fields}}<code>{{.Selector}}</code> ← {{if .Secret}}секрет {{template "acc_secret" .}}{{if .Type}} ({{.Type}}){{end}}{{else}}«{{.Value}}»{{end}}<br>{{end}}отправка: <code>{{.Submit}}</code>{{if .Success}}<br>успех: {{.Success}}…{{end}}{{end}}</td>
 <td>{{range .Use}}профиль <code>{{.}}</code><br>{{end}}{{range .Connectors}}коннектор <code>{{.}}</code><br>{{end}}{{if and (not .Use) (not .Connectors)}}<span class="muted">никому{{if .Via}} (кроме коннектора входа){{end}}</span>{{end}}</td></tr>
-{{else}}<tr><td colspan="4" class="muted">Учёток нет. Пример — в <code>credentials</code> политики: <code>"@site": { bind: ["https://login.example"], form: { fields: [{selector: "#login", value: "me"}, {selector: "#password", secret: "@site.password"}], submit: {selector: "button[type=submit]"} }, use: [default] }</code></td></tr>{{end}}</table>
+{{else}}<tr><td colspan="4" class="muted">Учёток нет. Пример — в <code>credentials</code> <a href="{{.Base}}/policy/yaml">политики</a>: <code>"@site": { bind: ["https://login.example"], form: { fields: [{selector: "#login", value: "me"}, {selector: "#password", secret: "@site.password"}], submit: {selector: "button[type=submit]"} }, use: [default] }</code></td></tr>{{end}}</table>
 {{template "foot"}}
+{{/* acc_secret — секрет поля учётки: заданный — ссылка на его строку в «Секретах» и ✓. */}}
+{{define "acc_secret"}}{{if .Set}}<a href="#{{secAnchor .Secret}}"><code>{{.Secret}}</code></a> ✓{{else}}<code>{{.Secret}}</code>{{end}}{{end}}

@@ -22,8 +22,16 @@ import (
 const TrustLocal = "local"
 
 // fetch читает путь или http(s)-URL.
-func fetch(ctx context.Context, src string) ([]byte, error) {
-	if strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "http://") {
+func fetch(ctx context.Context, src string) ([]byte, error) { return fetchN(ctx, src, maxPackage) }
+
+// isURL — источник по адресу http(s).
+func isURL(src string) bool {
+	return strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "http://")
+}
+
+// fetchN — fetch с пределом размера ответа (больше предела — ошибку даст Open).
+func fetchN(ctx context.Context, src string, limit int64) ([]byte, error) {
+	if isURL(src) {
 		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 		req, _ := http.NewRequestWithContext(ctx, "GET", src, nil)
@@ -35,7 +43,7 @@ func fetch(ctx context.Context, src string) ([]byte, error) {
 		if resp.StatusCode != 200 {
 			return nil, fmt.Errorf("GET %s: %s", src, resp.Status)
 		}
-		return io.ReadAll(io.LimitReader(resp.Body, maxPackage+1))
+		return io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	}
 	return os.ReadFile(src)
 }

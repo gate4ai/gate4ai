@@ -66,10 +66,21 @@ var condKinds = []struct{ ID, Title string }{
 	{"untrusted", "взято из входящего письма или страницы"},
 }
 
+// kindTitle — название вида условия для сообщений.
+func kindTitle(id string) string {
+	for _, k := range condKinds {
+		if k.ID == id {
+			return k.Title
+		}
+	}
+	return id
+}
+
 // Cond — один блок условия формы.
 type Cond struct {
 	Kind, Arg, Value string
 	Not              bool
+	Items            string // «из списка»: элементы нового списка через запятую
 }
 
 var identRe = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
@@ -92,12 +103,12 @@ func splitItems(s string) []string {
 // CEL — выражение блока; arr — аргумент-массив.
 func (c Cond) CEL(arr bool) (string, error) {
 	if !identRe.MatchString(c.Arg) {
-		return "", fmt.Errorf("choose an argument for «%s»", c.Kind)
+		return "", fmt.Errorf("выберите аргумент для проверки «%s»", kindTitle(c.Kind))
 	}
 	v := strings.TrimSpace(c.Value)
 	need := func() error {
 		if v == "" {
-			return fmt.Errorf("condition on %s needs a value", c.Arg)
+			return fmt.Errorf("условию на %s нужно значение", c.Arg)
 		}
 		return nil
 	}
@@ -111,7 +122,7 @@ func (c Cond) CEL(arr bool) (string, error) {
 	switch c.Kind {
 	case "in_list":
 		if !identRe.MatchString(v) {
-			return "", fmt.Errorf("list name %q: use lowercase letters, digits and _", v)
+			return "", fmt.Errorf("имя списка %q: только строчные латинские буквы, цифры и _", v)
 		}
 		e = each("§ in lists." + v)
 	case "eq":
@@ -136,7 +147,7 @@ func (c Cond) CEL(arr bool) (string, error) {
 	case "domain":
 		items := splitItems(v)
 		if len(items) == 0 {
-			return "", fmt.Errorf("list the sites for %s", c.Arg)
+			return "", fmt.Errorf("перечислите сайты для %s", c.Arg)
 		}
 		q := make([]string, len(items))
 		for i, it := range items {
@@ -145,14 +156,14 @@ func (c Cond) CEL(arr bool) (string, error) {
 		e = each("domain_matches(§, [" + strings.Join(q, ", ") + "])")
 	case "lte", "gte":
 		if _, err := strconv.ParseFloat(v, 64); err != nil {
-			return "", fmt.Errorf("%s: %q is not a number", c.Arg, v)
+			return "", fmt.Errorf("%s: %q — не число", c.Arg, v)
 		}
 		op := map[string]string{"lte": " <= ", "gte": " >= "}[c.Kind]
 		e = c.Arg + op + v
 	case "untrusted":
 		e = celString(c.Arg) + " in provenance && 'untrusted_content' in provenance[" + celString(c.Arg) + "]"
 	default:
-		return "", fmt.Errorf("unknown condition %q", c.Kind)
+		return "", fmt.Errorf("неизвестная проверка %q", c.Kind)
 	}
 	if c.Not {
 		return "!(" + e + ")", nil

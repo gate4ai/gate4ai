@@ -18,16 +18,18 @@ table{width:100%;border-collapse:collapse}td,th{padding:.45rem .5rem;border-bott
 th{color:var(--muted);font-weight:500}pre{white-space:pre-wrap;margin:0;font:13px/1.45 ui-monospace,Menlo,monospace}
 pre.box{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:.7rem;overflow:auto}
 button,.btn{font:inherit;padding:.4rem .9rem;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer;text-decoration:none;display:inline-block}
-button.primary,.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.danger{color:var(--bad)}button.small,.btn.small{padding:.2rem .6rem;font-size:.85rem}
+button.primary,.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.danger,.btn.danger{color:var(--bad)}button.small,.btn.small{padding:.2rem .6rem;font-size:.85rem}
 button:disabled{opacity:.5;cursor:default}
 input,select,textarea{font:inherit;padding:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
 textarea{width:100%}textarea.code{font-family:ui-monospace,Menlo,monospace;font-size:13px}
 label{display:block;margin:.5rem 0 .2rem;font-weight:500}label.inline{display:inline-flex;gap:.35rem;align-items:center;font-weight:400;margin:0 .8rem .3rem 0}
 .help{color:var(--muted);font-size:.88rem;margin:.15rem 0 .4rem}
 .flash{padding:.6rem 1rem;border-radius:8px;background:color-mix(in srgb,var(--ok) 15%,transparent);margin-bottom:1rem}
+.flash.toast{position:fixed;z-index:15;top:1rem;left:50%;transform:translateX(-50%);max-width:min(40rem,calc(100% - 2rem));background:var(--card);border:1px solid var(--ok);box-shadow:0 8px 28px rgba(0,0,0,.18);transition:opacity .4s}
 .error{padding:.6rem 1rem;border-radius:8px;background:color-mix(in srgb,var(--bad) 15%,transparent);margin-bottom:1rem;white-space:pre-wrap}
 .note{padding:.6rem 1rem;border-radius:8px;background:color-mix(in srgb,var(--accent) 10%,transparent);margin-bottom:1rem}
-.muted{color:var(--muted)}.allow,.ok{color:var(--ok)}.deny,.bad{color:var(--bad)}.ask{color:var(--accent)}.warn{color:var(--warn)}code{font-family:ui-monospace,Menlo,monospace;font-size:.92em}
+.muted{color:var(--muted)}.allow,.ok{color:var(--ok)}.deny,.bad{color:var(--bad)}.ask{color:var(--accent)}.warn{color:var(--warn)}
+code{font-family:ui-monospace,Menlo,monospace;font-size:.88em;background:color-mix(in srgb,var(--muted) 14%,transparent);padding:.05em .35em;border-radius:4px}pre code{background:none;padding:0}
 .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}.between{justify-content:space-between}
 .grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fill,minmax(16rem,1fr))}
 .tile{display:block;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.9rem;color:var(--fg);text-decoration:none}
@@ -44,6 +46,25 @@ details{margin:.5rem 0}summary{cursor:pointer;color:var(--accent)}
 .cond{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.3rem 0}
 form.inline{display:inline}
 .card.gone{opacity:.75}
+/* Окно поверх страницы: открывается якорем (<a href="#id">, работает без JS) или классом open (app.js). */
+.modal{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;padding:1rem;background:rgba(0,0,0,.45)}
+.modal:target,.modal.open{display:flex}
+.modal>.box{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:1.2rem 1.3rem;width:100%;max-width:30rem;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.modal>.box h3{margin:0 0 .6rem}.modal input:not([type=checkbox]):not([type=radio]){width:100%}
+.modal .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem}
+.modal.err>.box{border-top:4px solid var(--bad)}.modal.err .msg{white-space:pre-wrap}
+tr.hl>td,tr:target>td{animation:hl 2.5s ease-out;background:color-mix(in srgb,var(--accent) 12%,transparent)}
+@keyframes hl{from{background:color-mix(in srgb,var(--accent) 35%,transparent)}}
+.chip{display:inline-block;margin:.1rem .2rem .1rem 0}.chip>summary{list-style:none;display:inline-block;padding:0 .55em;border:1px solid var(--line);border-radius:1em;font:12.5px/1.6 ui-monospace,Menlo,monospace;color:var(--fg);background:var(--bg)}
+.chip>summary::-webkit-details-marker{display:none}.chip[open]>summary{border-color:var(--accent);color:var(--accent)}
+.chip>div{position:absolute;z-index:5;max-width:26rem;margin-top:.3rem;padding:.7rem .8rem;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.15);font-size:.9rem}
+.sentence{font-size:1.12rem;line-height:2.5;margin:.2rem 0 .6rem}.sentence select{font-size:1rem}
+.pill{display:inline-block;padding:.05rem .65rem;border:1px dashed var(--accent);border-radius:1em;color:var(--accent);text-decoration:none;line-height:1.9;font-size:1rem}
+.pill.solid{border-style:solid;background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--fg)}
+button.link{border:0;background:none;padding:0 .1rem;color:var(--muted);font-size:1rem;cursor:pointer}button.link:hover{color:var(--bad)}
+.cond2{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;padding:.6rem;border:1px solid var(--line);border-radius:8px;margin:.4rem 0;background:var(--bg)}
+[data-collapsed]:not(:target){display:none}
+tr.more>td{padding-top:0;border-bottom:1px solid var(--line)}tr.more details{margin:0 0 .3rem}tr.has-more>td{border-bottom:0}
 @media (max-width:640px){main{padding:.8rem}td,th{padding:.35rem .3rem}}
 </style>
 <script src="{{.Base}}/static/app.js" defer></script>
@@ -60,8 +81,8 @@ form.inline{display:inline}
 <form method="post" action="{{$.Base}}/logout" style="margin-left:auto"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">Выйти</button></form>
 </header><main>
 {{if .Remote}}<div class="note">Удалённый вход: подтверждения и журнал. Правила, агенты, коннекторы и секреты меняются только на самом компьютере.</div>{{end}}
-{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
-{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+{{if .Flash}}<div class="flash" role="status" data-flash>{{.Flash}}</div>{{end}}
+{{if .Error}}{{with errView .Error}}<div class="error" role="alert" data-error>{{.Text}}{{with .Detail}}<details><summary>Подробности</summary><code>{{.}}</code></details>{{end}}</div>{{end}}{{end}}
 {{end}}
 {{define "foot"}}</main></body></html>{{end}}
 

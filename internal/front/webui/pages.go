@@ -411,36 +411,55 @@ func (u *UI) saveApprovalSettings(w http.ResponseWriter, r *http.Request) map[st
 func (u *UI) telegramPage(r *http.Request) (string, map[string]any, error) {
 	cfg := u.D.Config.Current()
 	_, tokErr := u.D.Vault.Get("@telegram.bot")
+	p := u.Protection()
 	data := map[string]any{"HasToken": tokErr == nil, "Bot": r.URL.Query().Get("bot"), "Telegram": cfg.Approvals.Telegram,
-		"On": cfg.ChannelOn("telegram"), "Public": u.D.PublicURL() != ""}
+		"On": cfg.ChannelOn("telegram"), "Public": u.D.PublicURL() != "",
+		// Мастер открыт из «Защиты входа» (for=login): назад — в Настройки. В конце мастера
+		// в любом случае — включение подтверждения входа в Web UI через этого бота.
+		"For": r.URL.Query().Get("for"), "LoginTelegram": p.Telegram, "LoginPassword": p.Password != "", "LoginReady": u.confirmer() != nil}
 	return "telegram", data, nil
 }
 
+// telegramBack — адрес мастера Telegram с тем же for=, что у формы шага.
+func telegramBack(r *http.Request, q string) string {
+	to := "/approvals/telegram"
+	if r.PostForm.Get("for") == "login" {
+		to = withParam(to, "for", "login")
+	}
+	if q != "" {
+		k, v, _ := strings.Cut(q, "=")
+		to = withParam(to, k, v)
+	}
+	return to
+}
+
 func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any {
+	back := telegramBack(r, "")
 	if u.Channels == nil {
-		return redirectErr("/approvals/telegram", errors.New("channels are not attached"))
+		return redirectErr(back, errors.New("channels are not attached"))
 	}
 	ctx := r.Context()
 	switch r.PostForm.Get("step") {
 	case "token":
 		tok := strings.TrimSpace(r.PostForm.Get("token"))
 		if tok == "" {
-			return redirectErr("/approvals/telegram", errors.New("paste the token from @BotFather"))
+			return redirectErr(back, errors.New("paste the token from @BotFather"))
 		}
 		name, err := u.Channels.TelegramBot(ctx, tok)
 		if err != nil {
-			return redirectErr("/approvals/telegram", fmt.Errorf("Telegram did not accept the token: %v", err))
+			return redirectErr(back, fmt.Errorf("Telegram did not accept the token: %v", err))
 		}
 		if err := u.D.Vault.Set("@telegram.bot", tok); err != nil {
-			return redirectErr("/approvals/telegram", err)
+			return redirectErr(back, err)
 		}
-		return redirect("/approvals/telegram?bot="+url.QueryEscape(name), "Бот @"+name+" найден, токен сохранён в хранилище секретов.")
+		return redirect(telegramBack(r, "bot="+name), "Бот @"+name+" найден, токен сохранён в хранилище секретов.")
 	case "find":
 		tok, err := u.D.Vault.Get("@telegram.bot")
 		if err != nil {
-			return redirectErr("/approvals/telegram", errors.New("save the bot token first"))
+			return redirectErr(back, errors.New("save the bot token first"))
 		}
 		users, err := u.Channels.TelegramWriters(ctx, tok)
+		r.URL.RawQuery = url.Values{"for": {r.PostForm.Get("for")}}.Encode()
 		data, _ := func() (map[string]any, error) { _, d, e := u.telegramPage(r); return d, e }()
 		data["page"] = "telegram"
 		data["Users"] = users
@@ -452,7 +471,7 @@ func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any
 	case "owner":
 		id, err := strconv.ParseInt(strings.TrimSpace(r.PostForm.Get("owner_id")), 10, 64)
 		if err != nil || id == 0 {
-			return redirectErr("/approvals/telegram", errors.New("owner id must be a number"))
+			return redirectErr(back, errors.New("owner id must be a number"))
 		}
 		if err := u.edit("telegram approvals", func(c *config.Config) error {
 			t := &config.Telegram{Token: "@telegram.bot", OwnerID: id}
@@ -464,15 +483,16 @@ func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any
 			c.SetChannel("telegram", true)
 			return nil
 		}); err != nil {
-			return redirectErr("/approvals/telegram", err)
+			return redirectErr(back, err)
 		}
 		// Канал перезапускается подпиской на конфигурацию; пробное сообщение — сразу.
+		// Дальше — шаг «Готово»: там же включается подтверждение входа в Web UI.
 		if err := u.Channels.Test(ctx, "telegram"); err != nil {
-			return redirectErr("/approvals#channels", fmt.Errorf("Telegram is on, but the test message failed: %v", err))
+			return redirectErr(back+"#done", fmt.Errorf("Telegram is on, but the test message failed: %v", err))
 		}
-		return redirect("/approvals#channels", "Telegram включён — пробное сообщение отправлено вам в чат с ботом.")
+		return redirect(back+"#done", "Telegram включён — пробное сообщение отправлено вам в чат с ботом.")
 	}
-	return redirectErr("/approvals/telegram", errors.New("unknown step"))
+	return redirectErr(back, errors.New("unknown step"))
 }
 
 // ---- Агенты ----
@@ -858,11 +878,19 @@ func (u *UI) connectorsPage(r *http.Request) (string, map[string]any, error) {
 	}
 	sort.Strings(profiles)
 	data := map[string]any{"Items": items, "IndexError": ierr, "Profiles": profiles, "Registry": cfg.Store.Registry}
-	if src := r.URL.Query().Get("install"); src != "" {
-		plan, err := u.D.PrepareConnector(r.Context(), src)
+	if src := strings.TrimSpace(r.URL.Query().Get("install")); src != "" {
+		// Не из магазина: папка с исходниками, файл .g4c на этом компьютере или адрес .g4c.
+		local := r.URL.Query().Get("local") == "1"
+		dev := local && r.URL.Query().Get("dev") == "1"
+		data["Src"], data["Local"], data["Dev"] = src, local, dev
+		if local {
+			src = expandHome(src)
+		}
+		plan, err := u.D.PrepareConnectorDev(r.Context(), src, dev)
 		if err != nil {
 			return "connectors", data, fmt.Errorf("%s: %v", src, err)
 		}
+		data["Src"] = src
 		data["Plan"] = plan
 	}
 	return "connectors", data, nil
@@ -874,9 +902,17 @@ func (u *UI) installConnector(w http.ResponseWriter, r *http.Request) map[string
 	if consent == nil {
 		consent = []string{}
 	}
-	info, plan, warn, err := u.D.InstallConnector(r.Context(), src, consent)
+	local, dev := r.PostForm.Get("local") == "1", r.PostForm.Get("dev") == "1"
+	info, plan, warn, err := u.D.InstallConnectorDev(r.Context(), src, consent, local && dev)
 	if errors.Is(err, store.ErrConsent) {
-		return redirect("/connectors?install="+url.QueryEscape(src), "Возможности коннектора изменились — подтвердите заново.")
+		again := url.Values{"install": {src}}
+		if local {
+			again.Set("local", "1")
+			if dev {
+				again.Set("dev", "1")
+			}
+		}
+		return redirect("/connectors?"+again.Encode(), "Возможности коннектора изменились — подтвердите заново.")
 	}
 	if err != nil {
 		return redirectErr("/connectors", err)
@@ -900,6 +936,16 @@ func (u *UI) installConnector(w http.ResponseWriter, r *http.Request) map[string
 		msg += " Внимание: " + warn
 	}
 	return redirect("/connectors/"+url.PathEscape(info.Connector), msg+" Настройте его ниже.")
+}
+
+// expandHome — «~/…» в пути на этом компьютере.
+func expandHome(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if h, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(h, strings.TrimPrefix(p, "~"))
+		}
+	}
+	return p
 }
 
 func (u *UI) refreshIndex(w http.ResponseWriter, r *http.Request) map[string]any {
@@ -931,8 +977,11 @@ func (u *UI) connectorPage(r *http.Request) (string, map[string]any, error) {
 	}
 	sort.Strings(profiles)
 	in := u.installed()[name]
+	access := accessProfiles(cfg, name)
+	prof := connectorProfile(access, r.URL.Query().Get("profile"))
+	acts, calls := u.actionViews(name, m, cfg, prof)
 	data := map[string]any{"Name": name, "Manifest": m, "Fields": fields, "Profiles": profiles, "Config": cfg, "Info": in.Info,
-		"Builtin": in.Name == ""}
+		"Builtin": in.Name == "", "Actions": acts, "Calls": calls, "Access": access, "Profile": prof}
 	if name == "email" {
 		data["Providers"] = mailProviders
 	}
@@ -1084,13 +1133,17 @@ func (u *UI) policyPage(r *http.Request) (string, map[string]any, error) {
 		}
 		acts = append(acts, row)
 	}
+	names := make([]string, len(acts))
+	for i, a := range acts {
+		names[i] = a.Tool.Name
+	}
 	_, n := u.D.Config.CurrentRaw()
 	vs, _ := u.D.Config.Versions()
 	if len(vs) > 15 {
 		vs = vs[len(vs)-15:]
 	}
 	slices.Reverse(vs)
-	data := map[string]any{"Profiles": profiles, "Profile": prof, "P": p, "Agents": agents, "Acts": acts, "Connectors": u.connectorNames(),
+	data := map[string]any{"Profiles": profiles, "Profile": prof, "P": p, "Groups": groupRules(p.Rules, names), "Agents": agents, "Acts": acts, "Connectors": u.connectorNames(),
 		"Lists": cfg.Lists, "Version": n, "Versions": vs, "AllAgents": cfg.Agents, "Tools": u.tools()}
 	u.simData(r.URL.Query().Get("sim"), data)
 	return "policy", data, nil
@@ -1184,7 +1237,9 @@ func (u *UI) simulate(w http.ResponseWriter, r *http.Request) map[string]any {
 // ruleForm — данные формы правила.
 type ruleForm struct {
 	Profile, ID, Action, Effect, Reason, When string
-	Conds                                     []Cond
+	WhenParts                                 []string // условие CEL по частям «&&» (чипы)
+	Conds                                     []Cond   // блоки условия (чипы)
+	New                                       Cond     // недобавленное условие с ошибкой
 }
 
 func (u *UI) rulePage(r *http.Request) (string, map[string]any, error) {
@@ -1192,14 +1247,16 @@ func (u *UI) rulePage(r *http.Request) (string, map[string]any, error) {
 	cfg := u.D.Config.Current()
 	f := ruleForm{Profile: q.Get("profile"), ID: q.Get("id"), Action: q.Get("action"), Effect: or(q.Get("effect"), "allow")}
 	var note string
-	// Правка существующего правила.
+	// Правка существующего правила (если в форме не выбрано другое действие —
+	// тогда условия прежнего действия к нему не относятся).
 	if f.ID != "" {
 		for _, rl := range cfg.Profiles[f.Profile].Rules {
-			if rl.ID == f.ID {
+			if rl.ID == f.ID && (f.Action == "" || f.Action == rl.Action) {
 				f.Action, f.Effect, f.Reason, f.When = rl.Action, rl.Effect, rl.Reason, rl.When
 			}
 		}
 	}
+	f.WhenParts = splitAnd(f.When)
 	// На основе запроса подтверждения или квитанции журнала.
 	var agent string
 	var args map[string]any
@@ -1226,24 +1283,28 @@ func (u *UI) rulePage(r *http.Request) (string, map[string]any, error) {
 			break
 		}
 	}
-	tools := u.tools()
-	t, hasTool := toolSchema(tools, f.Action)
-	if args != nil && hasTool {
+	if t, ok := toolSchema(u.tools(), f.Action); args != nil && ok {
 		f.Conds = suggestConds(t, args)
 	}
-	for len(f.Conds) < 3 {
-		f.Conds = append(f.Conds, Cond{})
-	}
+	return "rule", u.ruleData(f, note, approvalID), nil
+}
+
+// ruleData — данные страницы правила для формы f.
+func (u *UI) ruleData(f ruleForm, note, approvalID string) map[string]any {
+	cfg := u.D.Config.Current()
+	tools := u.tools()
+	t, hasTool := toolSchema(tools, f.Action)
 	profiles := make([]string, 0, len(cfg.Profiles))
 	for p := range cfg.Profiles {
 		profiles = append(profiles, p)
 	}
 	sort.Strings(profiles)
-	data := map[string]any{"F": f, "Tools": tools, "Profiles": profiles, "Kinds": condKinds, "Lists": cfg.Lists, "Note": note, "Approval": approvalID}
+	data := map[string]any{"F": f, "Chips": ruleChips(f), "Tools": tools, "Profiles": profiles, "Kinds": condKinds, "Lists": cfg.Lists,
+		"Note": note, "Approval": approvalID}
 	if hasTool {
 		data["Tool"], data["Args"] = t, actionArgs(t)
 	}
-	return "rule", data, nil
+	return data
 }
 
 // amountArg — числовые аргументы, для которых «не больше значения» осмысленно.
@@ -1278,46 +1339,42 @@ func suggestConds(t daemon.Tool, args map[string]any) []Cond {
 
 func (u *UI) saveRule(w http.ResponseWriter, r *http.Request) map[string]any {
 	f := r.PostForm
-	form := ruleForm{Profile: f.Get("profile"), ID: strings.TrimSpace(f.Get("id")), Action: f.Get("action"), Effect: f.Get("effect"), Reason: strings.TrimSpace(f.Get("reason"))}
+	form := parseRuleForm(f)
 	back := "/policy/rule?" + url.Values{"profile": {form.Profile}, "action": {form.Action}, "id": {form.ID}, "effect": {form.Effect}}.Encode()
 	t, ok := toolSchema(u.tools(), form.Action)
 	var args []argInfo
 	if ok {
 		args = actionArgs(t)
 	}
-	var conds []Cond
-	kinds, argsF, vals := f["cond_kind"], f["cond_arg"], f["cond_value"]
-	for i := range kinds {
-		c := Cond{Kind: kinds[i]}
-		if i < len(argsF) {
-			c.Arg = argsF[i]
+	// «+ условие» и «×» — та же страница с изменёнными условиями, без сохранения.
+	if f.Has("add_cond") || f.Get("drop") != "" {
+		err := editRuleForm(&form, f, args)
+		data := u.ruleData(form, "", f.Get("approval"))
+		data["page"] = "rule"
+		if err != nil {
+			data["error"] = err.Error()
 		}
-		if i < len(vals) {
-			c.Value = vals[i]
-		}
-		c.Not = f.Get(fmt.Sprintf("cond_not_%d", i)) == "1"
-		conds = append(conds, c)
+		return data
 	}
+	conds := form.Conds
 	when, err := BuildWhen(conds, args)
 	if err != nil {
 		return redirectErr(back, err)
 	}
 	// Новые списки из блоков «из списка»: элементы — в поле list_items_<i>.
 	newLists := map[string][]string{}
-	for i, c := range conds {
+	for _, c := range conds {
 		if c.Kind == "in_list" {
-			if items := splitItems(f.Get(fmt.Sprintf("list_items_%d", i))); len(items) > 0 {
+			if items := splitItems(c.Items); len(items) > 0 {
 				newLists[c.Value] = items
 			}
 		}
 	}
+	parts := append([]string{}, form.WhenParts...)
 	if raw := strings.TrimSpace(f.Get("when")); raw != "" {
-		if when != "" {
-			when = "(" + raw + ") && " + when
-		} else {
-			when = raw
-		}
+		parts = append(parts, raw)
 	}
+	when = joinAnd(append(parts, when))
 	err = u.edit("rule in "+form.Profile, func(c *config.Config) error {
 		for name, items := range newLists {
 			if err := c.SetList(name, append(c.Lists[name], items...)); err != nil {
@@ -1532,7 +1589,11 @@ func (u *UI) setSecret(w http.ResponseWriter, r *http.Request) map[string]any {
 	if err := u.D.Vault.Set(r.PostForm.Get("alias"), r.PostForm.Get("value")); err != nil {
 		return redirectErr("/vault", err)
 	}
-	return redirect("/vault", "Сохранён "+r.PostForm.Get("alias"))
+	alias := r.PostForm.Get("alias")
+	if r.PostForm.Get("edit") == "1" {
+		return redirect("/vault#"+SecretAnchor(alias), "Значение "+alias+" изменено")
+	}
+	return redirect("/vault#"+SecretAnchor(alias), "Сохранён "+alias)
 }
 
 func (u *UI) deleteSecret(w http.ResponseWriter, r *http.Request) map[string]any {
@@ -1588,6 +1649,10 @@ func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 	// Хэш пароля на страницу не попадает — только «задан / не задан».
 	p := u.Protection()
 	data["Protection"] = map[string]bool{"Link": !p.NoLink, "Password": p.Password != "", "Telegram": p.Telegram}
+	data["LastMethod"] = p.lastMethod()
+	if _, s, ok := u.session(local, r); ok {
+		data["SessionUnprotected"] = p.Custom() && !s.protected
+	}
 	data["Addr"] = u.Addr
 	data["TelegramReady"] = u.confirmer() != nil
 	if link := r.URL.Query().Get("link"); link == "1" {

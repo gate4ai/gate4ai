@@ -106,8 +106,14 @@ func (d *Daemon) reloadConnector(name string, removed bool) error {
 // InstallConnector ставит коннектор (файл .g4c или имя из registry) с согласием
 // на возможности consent; при ErrConsent возвращает план для показа владельцу.
 func (d *Daemon) InstallConnector(ctx context.Context, source string, consent []string) (store.Info, *store.Plan, string, error) {
+	return d.InstallConnectorDev(ctx, source, consent, false)
+}
+
+// InstallConnectorDev — InstallConnector; dev — своя сборка без доверенной подписи
+// (папка с исходниками, файл или адрес .g4c), как `connectors install --dev`.
+func (d *Daemon) InstallConnectorDev(ctx context.Context, source string, consent []string, dev bool) (store.Info, *store.Plan, string, error) {
 	opts := d.StoreOptions()
-	plan, err := opts.Prepare(ctx, source, false)
+	plan, err := opts.Prepare(ctx, source, dev)
 	if err != nil {
 		return store.Info{}, nil, "", err
 	}
@@ -132,6 +138,11 @@ func (d *Daemon) InstallConnector(ctx context.Context, source string, consent []
 // PrepareConnector — план установки (возможности, доверие) без установки.
 func (d *Daemon) PrepareConnector(ctx context.Context, source string) (*store.Plan, error) {
 	return d.StoreOptions().Prepare(ctx, source, false)
+}
+
+// PrepareConnectorDev — PrepareConnector для своей сборки (dev, см. InstallConnectorDev).
+func (d *Daemon) PrepareConnectorDev(ctx context.Context, source string, dev bool) (*store.Plan, error) {
+	return d.StoreOptions().Prepare(ctx, source, dev)
 }
 
 // RemoveConnector удаляет коннектор; warning — политика ещё ссылается на него.

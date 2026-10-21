@@ -66,10 +66,13 @@ var funcs = template.FuncMap{
 		}
 		return false
 	},
-	"capRu": humanCapability,
-	"title": func(nav string) string { return or(titles[nav], nav) },
-	"inc":   func(i int) int { return i + 1 },
-	"list":  func(s ...string) []string { return s },
+	"capRu":     humanCapability,
+	"errView":   errView,
+	"accAnchor": AccountAnchor,
+	"secAnchor": SecretAnchor,
+	"title":     func(nav string) string { return or(titles[nav], nav) },
+	"inc":       func(i int) int { return i + 1 },
+	"list":      func(s ...string) []string { return s },
 	"dict": func(kv ...any) map[string]any {
 		m := map[string]any{}
 		for i := 0; i+1 < len(kv); i += 2 {
@@ -378,6 +381,7 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/connectors/{name}/settings", u.saveConnectorSettings)
 	change("/connectors/{name}/profiles", u.saveConnectorProfiles)
 	change("/connectors/{name}/remove", u.removeConnector)
+	change("/connectors/{name}/decision", u.saveActionDecision)
 	change("/policy", u.savePolicy)
 	change("/policy/rollback", u.rollback)
 	change("/policy/simulate", u.simulate)
