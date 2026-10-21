@@ -141,23 +141,44 @@ func (s *Store) ListApprovals(status string, limit int) ([]*Approval, error) {
 	return out, rows.Err()
 }
 
+// ErrExpired — срок запроса истёк: решение человека не принимается
+// (таймаут по спецификации — deny).
+var ErrExpired = errors.New("approval expired")
+
 // Decide атомарно переводит pending → status (approved / rejected / timeout).
-// Повторное решение возвращает ErrAlreadyDecided.
+// Повторное решение возвращает ErrAlreadyDecided; одобрить или отклонить
+// просроченный запрос нельзя (ErrExpired) — только перевести в timeout.
 func (s *Store) Decide(id, status, channel, who string) (*Approval, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res, err := s.db.Exec(`UPDATE approvals SET status=?, channel=?, who=?, decided_at=? WHERE id=? AND status='pending'`,
-		status, channel, who, s.Now().UnixNano(), id)
+	now := s.Now().UnixNano()
+	q := `UPDATE approvals SET status=?, channel=?, who=?, decided_at=? WHERE id=? AND status='pending'`
+	args := []any{status, channel, who, now, id}
+	if status != Timeout {
+		q += ` AND expires > ?`
+		args = append(args, now)
+	}
+	res, err := s.db.Exec(q, args...)
 	if err != nil {
 		return nil, err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		if _, err := s.GetApproval(id); err != nil {
+		a, err := s.GetApproval(id)
+		if err != nil {
 			return nil, err
+		}
+		if a.Status == Pending {
+			return nil, ErrExpired
 		}
 		return nil, ErrAlreadyDecided
 	}
 	return s.GetApproval(id)
+}
+
+// Unfinished — одобренные запросы без итога: исполнение прервано остановкой
+// daemon (восстановление при старте).
+func (s *Store) Unfinished() ([]*Approval, error) {
+	return s.queryApprovals(`SELECT ` + approvalCols + ` FROM approvals WHERE status='approved' AND result=''`)
 }
 
 // SetResult сохраняет итог исполнения запроса.
@@ -174,7 +195,11 @@ func (s *Store) MarkDone(id string) error {
 
 // Expired — ожидающие запросы с истёкшим сроком.
 func (s *Store) Expired() ([]*Approval, error) {
-	rows, err := s.db.Query(`SELECT `+approvalCols+` FROM approvals WHERE status='pending' AND expires<=?`, s.Now().UnixNano())
+	return s.queryApprovals(`SELECT `+approvalCols+` FROM approvals WHERE status='pending' AND expires<=?`, s.Now().UnixNano())
+}
+
+func (s *Store) queryApprovals(q string, args ...any) ([]*Approval, error) {
+	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

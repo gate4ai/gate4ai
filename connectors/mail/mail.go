@@ -11,16 +11,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"mime"
 	"mime/quotedprintable"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	"github.com/emersion/go-message/charset" // кодировки писем (windows-1251, koi8-r…); импорт ставит message.CharsetReader
 	gomail "github.com/emersion/go-message/mail"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
@@ -132,7 +135,8 @@ func dialIMAP(h *abi.Host, s Server) (*imapclient.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("imap connect %s: %w", s.Host, err)
 	}
-	return imapclient.New(conn, nil), nil
+	// Темы и имена в конвертах (list) — и в кодировках кроме UTF-8.
+	return imapclient.New(conn, &imapclient.Options{WordDecoder: &mime.WordDecoder{CharsetReader: charset.Reader}}), nil
 }
 
 // logout завершает сессию и закрывает соединение.
@@ -365,17 +369,44 @@ func parseMessage(raw []byte, max int) (map[string]any, error) {
 	return out, nil
 }
 
+// stripTags — текст HTML-письма: без тегов, комментариев и содержимого
+// script/style/head, сущности (&nbsp;, &amp;) раскодированы.
 func stripTags(s string) string {
 	var b strings.Builder
-	in := false
-	for _, r := range s {
-		switch {
-		case r == '<':
-			in = true
-		case r == '>':
-			in = false
-		case !in:
-			b.WriteRune(r)
+	low := strings.ToLower(s)
+	for i := 0; i < len(s); {
+		lt := strings.IndexByte(s[i:], '<')
+		if lt < 0 {
+			b.WriteString(html.UnescapeString(s[i:]))
+			break
+		}
+		b.WriteString(html.UnescapeString(s[i : i+lt]))
+		i += lt
+		if strings.HasPrefix(s[i:], "<!--") {
+			end := strings.Index(s[i+4:], "-->")
+			if end < 0 {
+				break
+			}
+			i += 4 + end + 3
+			continue
+		}
+		gt := strings.IndexByte(s[i:], '>')
+		if gt < 0 {
+			break
+		}
+		tag := low[i+1 : i+gt]
+		i += gt + 1
+		b.WriteByte(' ')
+		for _, skip := range []string{"script", "style", "head", "title"} {
+			if name, _, _ := strings.Cut(tag, " "); strings.TrimSuffix(name, "/") == skip && !strings.HasSuffix(tag, "/") {
+				end := strings.Index(low[i:], "</"+skip)
+				if end < 0 {
+					i = len(s)
+				} else {
+					i += end
+				}
+				break
+			}
 		}
 	}
 	return strings.Join(strings.Fields(b.String()), " ")
@@ -391,15 +422,29 @@ func newMessageID(from string) string {
 	return "<" + hex.EncodeToString(b) + ".gate4ai@" + dom + ">"
 }
 
+// msgIDRe — Message-ID (RFC 5322 msg-id): <left@right> без пробелов, CR/LF и скобок внутри.
+var msgIDRe = regexp.MustCompile(`^<[^<>\s@]+@[^<>\s@]+>$`)
+
 // compose собирает RFC 5322 сообщение (text/plain UTF-8, quoted-printable).
-func (c *Mail) compose(s Settings, a map[string]any) (raw []byte, msgID string) {
+// Значение заголовка с CR или LF — ошибка: иначе аргумент добавил бы свои
+// заголовки (Bcc, Reply-To) или начал тело раньше, чем показано владельцу.
+func (c *Mail) compose(s Settings, a map[string]any) (raw []byte, msgID string, err error) {
 	msgID = newMessageID(s.Address)
 	from := s.Address
 	if s.Name != "" {
 		from = mime.QEncoding.Encode("utf-8", s.Name) + " <" + s.Address + ">"
 	}
+	irt := strArg(a, "in_reply_to", "")
+	if irt != "" && !msgIDRe.MatchString(irt) {
+		return nil, "", abi.Errorf(abi.CodeBadRequest, "in_reply_to must be a Message-ID like <id@host> (from email list/read)")
+	}
 	var b bytes.Buffer
-	hdr := func(k, v string) { fmt.Fprintf(&b, "%s: %s\r\n", k, v) }
+	hdr := func(k, v string) {
+		if strings.ContainsAny(v, "\r\n") && err == nil {
+			err = abi.Errorf(abi.CodeBadRequest, "header %s: line breaks are not allowed", k)
+		}
+		fmt.Fprintf(&b, "%s: %s\r\n", k, v)
+	}
 	hdr("From", from)
 	hdr("To", strings.Join(listArg(a, "to"), ", "))
 	if cc := listArg(a, "cc"); len(cc) > 0 {
@@ -408,7 +453,7 @@ func (c *Mail) compose(s Settings, a map[string]any) (raw []byte, msgID string) 
 	hdr("Subject", mime.QEncoding.Encode("utf-8", strArg(a, "subject", "")))
 	hdr("Date", c.now().Format(time.RFC1123Z))
 	hdr("Message-ID", msgID)
-	if irt := strArg(a, "in_reply_to", ""); irt != "" {
+	if irt != "" {
 		hdr("In-Reply-To", irt)
 		hdr("References", irt)
 	}
@@ -421,17 +466,23 @@ func (c *Mail) compose(s Settings, a map[string]any) (raw []byte, msgID string) 
 	body := strings.ReplaceAll(strArg(a, "body", ""), "\r\n", "\n")
 	_, _ = qp.Write([]byte(strings.ReplaceAll(body, "\n", "\r\n")))
 	_ = qp.Close()
-	return b.Bytes(), msgID
+	if err != nil {
+		return nil, "", err
+	}
+	return b.Bytes(), msgID, nil
 }
 
 func (c *Mail) draft(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, error) {
-	raw, id := c.compose(s, a)
+	raw, id, err := c.compose(s, a)
+	if err != nil {
+		return abi.ExecResult{}, err
+	}
 	cl, err := dialIMAP(h, s.IMAP)
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
 	defer logout(cl)
-	folder, err := findFolder(cl, s.DraftsFolder, imap.MailboxAttrDrafts, []string{"Drafts", "[Gmail]/Drafts", "Черновики", "Draft"})
+	folder, err := findFolder(cl, s.DraftsFolder, imap.MailboxAttrDrafts, draftNames)
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
@@ -443,7 +494,10 @@ func (c *Mail) draft(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult,
 }
 
 func (c *Mail) send(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, error) {
-	raw, id := c.compose(s, a)
+	raw, id, err := c.compose(s, a)
+	if err != nil {
+		return abi.ExecResult{}, err
+	}
 	rcpts := append(listArg(a, "to"), listArg(a, "cc")...)
 	resp, err := smtpSend(h, s.SMTP, s.Address, rcpts, raw)
 	if err != nil {
@@ -453,18 +507,38 @@ func (c *Mail) send(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, 
 	ev := []abi.EvidenceItem{{Name: "sent.eml", MIME: "message/rfc822", Data: raw},
 		{Name: "smtp.txt", MIME: "text/plain", Data: []byte(resp)}}
 	if s.SentCopy == "client" {
-		cl, err := dialIMAP(h, s.IMAP)
-		if err == nil {
-			if folder, err := findFolder(cl, s.SentFolder, imap.MailboxAttrSent, sentNames); err == nil {
-				_ = appendMessage(cl, folder, []imap.Flag{imap.FlagSeen}, c.now(), raw)
-			}
-			logout(cl)
+		// Письмо уже отправлено: ошибка копии — не ошибка действия, но её
+		// причина видна в ответе (иначе Verify вернёт not_confirmed без объяснения).
+		if err := c.clientCopy(h, s, raw); err != nil {
+			res["client_copy_error"] = err.Error()
 		}
 	}
 	return abi.ExecResult{Structured: res, ResultRef: id, Evidence: ev}, nil
 }
 
-var sentNames = []string{"Sent", "[Gmail]/Sent Mail", "Sent Items", "Sent Messages", "Отправленные", "INBOX.Sent"}
+// clientCopy — копия отправленного письма в «Отправленные» (sent_copy: client).
+func (c *Mail) clientCopy(h *abi.Host, s Settings, raw []byte) error {
+	cl, err := dialIMAP(h, s.IMAP)
+	if err != nil {
+		return err
+	}
+	defer logout(cl)
+	folder, err := findFolder(cl, s.SentFolder, imap.MailboxAttrSent, sentNames)
+	if err != nil {
+		return err
+	}
+	if err := appendMessage(cl, folder, []imap.Flag{imap.FlagSeen}, c.now(), raw); err != nil {
+		return fmt.Errorf("save the copy to %s: %w", folder, err)
+	}
+	return nil
+}
+
+// Известные имена папок (если сервер не помечает их SPECIAL-USE): одни и те
+// же для сохранения и проверки.
+var (
+	sentNames  = []string{"Sent", "[Gmail]/Sent Mail", "Sent Items", "Sent Messages", "Отправленные", "INBOX.Sent"}
+	draftNames = []string{"Drafts", "[Gmail]/Drafts", "Черновики", "Draft"}
+)
 
 // smtpSend — SMTP-сессию открывает хост: EHLO, STARTTLS и AUTH PLAIN по алиасу
 // пароля он выполняет сам, коннектор начинает сразу с MAIL FROM.
@@ -593,7 +667,7 @@ func (c *Mail) Verify(ctx context.Context, h *abi.Host, r abi.VerifyRequest) (ab
 	}
 	method, attr, names, cfg := "sent_folder", imap.MailboxAttrSent, sentNames, s.SentFolder
 	if r.Action == "draft" {
-		method, attr, names, cfg = "drafts_folder", imap.MailboxAttrDrafts, []string{"Drafts", "[Gmail]/Drafts", "Черновики"}, s.DraftsFolder
+		method, attr, names, cfg = "drafts_folder", imap.MailboxAttrDrafts, draftNames, s.DraftsFolder
 	}
 	if s.SentCopy == "client" && r.Action == "send" {
 		method = "smtp_accepted+client_copy"

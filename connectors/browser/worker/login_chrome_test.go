@@ -143,6 +143,32 @@ func TestLoginRealChrome(t *testing.T) {
 	if _, _, _, _, err := x.Observe(ctx, 0); !errors.Is(err, ErrSecretOnPage) {
 		t.Fatal("observe with a secret on the page:", err)
 	}
+	// Значение секрета не возвращается агенту: ни в ответе act (в том числе
+	// поля type: text, куда секрет ввёл хост), ни подбором по тексту.
+	if _, err := x.FillSecret(ctx, bind, LoginField{Selector: "#login", Value: user, Secret: true, AnyType: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []ActRequest{{Selector: "#password", Method: ActWait}, {Selector: "#login", Method: ActWait},
+		{Selector: "#password", Method: ActPress, Value: "Tab"}, {Selector: "#bind", Method: ActWait}} {
+		if res, err := x.Act(ctx, r); err != nil || res.Text != "" {
+			t.Fatal("act with a secret on the page:", r, res, err)
+		}
+	}
+	for _, text := range []string{pass[:4], user[:4]} {
+		if _, err := x.Act(ctx, ActRequest{Selector: "input", Method: ActWait, Text: text, TimeoutMS: 1}); !errors.Is(err, ErrNotFound) {
+			t.Fatal("act text matches the secret:", text, err)
+		}
+		if err := x.WaitFor(ctx, "", text, 1); !errors.Is(err, ErrNotFound) {
+			t.Fatal("wait_for_text matches the secret:", text, err)
+		}
+		if _, err := x.Act(ctx, ActRequest{Selector: "#bind", Method: ActWait, ExpectText: text, ExpectMS: 1}); !errors.Is(err, ErrNoEffect) {
+			t.Fatal("expect_text matches the secret:", text, err)
+		}
+	}
+	// Кнопку по надписи найти можно.
+	if _, err := x.Act(ctx, ActRequest{Selector: "button", Method: ActWait, Text: "войти"}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := x.Elements(ctx, ""); !errors.Is(err, ErrSecretOnPage) {
 		t.Fatal("elements with a secret on the page:", err)
 	}

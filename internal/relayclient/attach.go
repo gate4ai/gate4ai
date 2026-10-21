@@ -214,8 +214,11 @@ func deviceFor(ctx context.Context, d *daemon.Daemon, r config.Relay, tok string
 	if err != nil {
 		return nil, err
 	}
-	dev := &Device{RelayURL: r.URL, ID: r.DeviceID, Token: tok, RelayTLS: rt, Handler: d.PublicHandler(), Log: d.Log}
 	host := deviceHost(r)
+	// Публичный адрес (issuer OAuth и ссылки) — адрес устройства, а не
+	// заголовок Host, который задаёт клиент (SNI проверен сертификатом, Host — нет).
+	dev := &Device{RelayURL: r.URL, ID: r.DeviceID, Token: tok, RelayTLS: rt,
+		Handler: daemon.WithExternalURL(d.PublicHandler(), "https://"+host), Log: d.Log}
 	if r.SelfSigned {
 		cert, _, err := SelfSigned(host)
 		if err != nil {

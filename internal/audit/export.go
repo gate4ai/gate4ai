@@ -31,7 +31,7 @@ type Manifest struct {
 // (расшифрованные, чтобы их хэши проверялись где угодно), публичный ключ.
 // Если passphrase не пуст, весь архив шифруется age (scrypt).
 func (j *Journal) Export(w io.Writer, passphrase string) error {
-	entries, err := j.List(Filter{})
+	entries, err := j.List(Filter{All: true})
 	if err != nil {
 		return err
 	}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"filippo.io/age"
 
@@ -67,6 +68,10 @@ func (e *Evidence) Put(data []byte) (string, error) {
 	ref := Ref(HashBytes(data))
 	p, _ := e.path(ref)
 	if _, err := os.Stat(p); err == nil {
+		// Тот же файл у новой квитанции: отметка времени защищает его от
+		// очистки по сроку старой квитанции, пока новая ещё не записана.
+		now := time.Now()
+		_ = os.Chtimes(p, now, now)
 		return ref, nil
 	}
 	var buf bytes.Buffer
@@ -84,6 +89,19 @@ func (e *Evidence) Put(data []byte) (string, error) {
 		return "", err
 	}
 	return ref, nil
+}
+
+// reuseGuard — сколько файл, только что выданный Put, не удаляется очисткой.
+const reuseGuard = time.Hour
+
+// recentlyUsed — файл записан или переиспользован Put недавно.
+func (e *Evidence) recentlyUsed(ref string, now time.Time) bool {
+	p, err := e.path(ref)
+	if err != nil {
+		return false
+	}
+	st, err := os.Stat(p)
+	return err == nil && now.Sub(st.ModTime()) < reuseGuard && st.ModTime().Sub(now) < reuseGuard
 }
 
 // ErrShredded — доказательство удалено (срок хранения или crypto-shredding).

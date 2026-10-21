@@ -105,3 +105,48 @@ func TestConnectCodexTOML(t *testing.T) {
 		t.Fatal(string(b))
 	}
 }
+
+// Код-ревью E.17: числа не теряют точность, бэкап — исходный файл, временный
+// файл не наследует права, другие формы записи TOML не дают дубликата.
+func TestConnectReviewFixes(t *testing.T) {
+	e := testEnv(t, "linux")
+	p := e.ConfigPath("cursor")
+	_ = os.MkdirAll(filepath.Dir(p), 0o700)
+	orig := `{"big":9007199254740993,"mcpServers":{}}`
+	_ = os.WriteFile(p, []byte(orig), 0o600)
+	// Чужой остаток временного файла с широкими правами не мешает.
+	_ = os.WriteFile(p+".gate4ai.tmp", []byte("x"), 0o666)
+	r, err := e.Connect("cursor", "/b", "t1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	if !strings.Contains(string(b), "9007199254740993") {
+		t.Fatal("number precision lost:", string(b))
+	}
+	if _, err := e.Connect("cursor", "/b", "t2", ""); err != nil {
+		t.Fatal(err)
+	}
+	if bak, _ := os.ReadFile(r.Backup); string(bak) != orig {
+		t.Fatal("backup overwritten:", string(bak))
+	}
+	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o600 {
+		t.Fatal(fi.Mode())
+	}
+	for _, doc := range []string{
+		"model = \"o3\"\nmcp_servers.gate4ai = { command = \"/old\" }\n\n[other]\nx = 1\n",
+		"[mcp_servers]\ngate4ai = { command = \"/old\" }\nkeep = { command = \"k\" }\n",
+		"[mcp_servers]\ngate4ai.command = \"/old\"\n",
+	} {
+		got := tomlSet(doc, tomlBlock("/new", "tok"))
+		if strings.Contains(got, "/old") || strings.Count(got, "gate4ai") != 1 {
+			t.Fatalf("%q → %q", doc, got)
+		}
+		if strings.Contains(doc, "keep") && !strings.Contains(got, "keep = ") {
+			t.Fatal("other server removed:", got)
+		}
+		if strings.Contains(doc, "[other]") && !strings.Contains(got, "x = 1") {
+			t.Fatal(got)
+		}
+	}
+}

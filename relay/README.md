@@ -21,7 +21,9 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
   --cert relay.crt --key relay.key --state /var/lib/gate4ai-relay/state.json
 ```
 
-Сайт на том же сервере и порту 443: `--route example.org=127.0.0.1:8443` (повторяемый флаг). TLS завершает веб-сервер на `127.0.0.1:8443`; сертификат он может получать через ACME TLS-ALPN-01 — проверка проходит через relay. На relay.gate4.ai так подключены `gate4.ai`, `www.gate4.ai` и `grafana.gate4.ai`: TLS для них завершает Caddy на `127.0.0.1:8444` ([docs/observability.md](docs/observability.md#сайт-gate4ai)).
+Сайт на том же сервере и порту 443: `--route example.org=127.0.0.1:8443` (повторяемый флаг; `--route example.org=127.0.0.1:8443,proxy` — бэкенду заголовок PROXY protocol v2 с настоящим адресом клиента). TLS завершает веб-сервер на `127.0.0.1:8443`; сертификат он может получать через ACME TLS-ALPN-01 — проверка проходит через relay. На relay.gate4.ai так подключены `gate4.ai`, `www.gate4.ai` и `grafana.gate4.ai`: TLS для них завершает Caddy на `127.0.0.1:8444` ([docs/observability.md](docs/observability.md#сайт-gate4ai)).
+
+Пределы против злоупотреблений (значения по умолчанию подходят hosted relay): `--reg-per-ip` и `--reg-per-day` — регистраций в сутки с адреса и всего, `--max-devices` — устройств всего, `--cert-orders-per-device` — заказов сертификата на устройство в сутки, `--max-conns` и `--max-conns-per-ip` — одновременных соединений; `--caa` — CA, которым разрешён выпуск в зоне (CAA). Подробно — [docs/protocol.md](docs/protocol.md). Состояние: `--state` (устройства, TXT, счётчики; пишется атомарно с fsync) и каталог `<state>.witness/` рядом — чекпоинты свидетеля, по файлу на устройство.
 
 Наблюдаемость: `--metrics 127.0.0.1:9464` (Prometheus `/metrics`, только localhost), `--otlp 127.0.0.1:4318` и `--trace-ratio` (трейсы OpenTelemetry); логи — в stderr. Стек Grafana + Prometheus + Loki + Tempo для сервера relay и дашборд — [docs/observability.md](docs/observability.md).
 

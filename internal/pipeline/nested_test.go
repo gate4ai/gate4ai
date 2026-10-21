@@ -180,7 +180,8 @@ func TestNestedCall(t *testing.T) {
 			deny = r
 		}
 	}
-	if open == nil || open.Parent != res.ID || open.Agent != "bot" || deny == nil {
+	// Квитанция отказа во вложенном вызове тоже ссылается на родительскую (C.L6).
+	if open == nil || open.Parent != res.ID || open.Agent != "bot" || deny == nil || deny.Parent != res.ID {
 		t.Fatalf("receipts: %+v", recs)
 	}
 	if len(*ended) != 1 || (*ended)[0] != res.ID {

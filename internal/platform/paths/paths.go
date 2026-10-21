@@ -51,7 +51,7 @@ func OwnerSocket() string {
 		return s
 	}
 	if runtime.GOOS == "windows" {
-		return `\\.\pipe\gate4ai-` + userName()
+		return pipeName("gate4ai-", currentUser())
 	}
 	return filepath.Join(RunDir(), "gate4ai.sock")
 }
@@ -62,18 +62,33 @@ func AgentSocket() string {
 		return s
 	}
 	if runtime.GOOS == "windows" {
-		return `\\.\pipe\gate4ai-agent-` + userName()
+		return pipeName("gate4ai-agent-", currentUser())
 	}
 	return filepath.Join(RunDir(), "agent.sock")
 }
 
-func userName() string {
+// currentUser — текущий пользователь ОС (nil — неизвестен).
+func currentUser() *user.User {
 	u, err := user.Current()
 	if err != nil {
-		return "user"
+		return nil
 	}
-	n := filepath.Base(filepath.ToSlash(u.Username))
-	return n
+	return u
+}
+
+// pipeName — named pipe Windows для пользователя u. В имени — SID (u.Uid на
+// Windows), а не короткое имя: у PC\alex и CORP\alex оно одинаковое, и чужой
+// пользователь мог бы заранее занять pipe с таким именем.
+func pipeName(prefix string, u *user.User) string {
+	id := "user"
+	switch {
+	case u == nil:
+	case u.Uid != "":
+		id = u.Uid
+	case u.Username != "":
+		id = filepath.Base(filepath.ToSlash(u.Username))
+	}
+	return `\\.\pipe\` + prefix + id
 }
 
 // FindOwnerSocket — сокет владельца, который есть на диске: CLI и трей могут

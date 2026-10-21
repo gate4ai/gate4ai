@@ -155,7 +155,9 @@ type env struct {
 	now  *time.Time
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { t.Helper(); return newEnvPolicy(t, testPolicy) }
+
+func newEnvPolicy(t *testing.T, pol string) *env {
 	t.Helper()
 	dir := t.TempDir()
 	ks := keys.NewMemory()
@@ -166,7 +168,7 @@ func newEnv(t *testing.T) *env {
 	}
 	reg := connectors.NewRegistry()
 	reg.Add(cli)
-	cfg, err := config.Parse([]byte(testPolicy), policy.Validator(reg.Catalog()))
+	cfg, err := config.Parse([]byte(pol), policy.Validator(reg.Catalog()))
 	if err != nil {
 		t.Fatal(err)
 	}

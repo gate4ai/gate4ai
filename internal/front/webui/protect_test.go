@@ -520,3 +520,52 @@ func protectedSessionTG(t *testing.T, u *UI, base string, f *fakeConfirm, pw str
 		return p
 	}
 }
+
+// TestPasswordLimiterParallel: параллельные неверные пароли не проходят
+// задержку все сразу (проверка и учёт атомарны), а проверок argon2id
+// одновременно не больше pwSlots.
+func TestPasswordLimiterParallel(t *testing.T) {
+	u, _, _, _ := setup(t)
+	saved := kdf
+	kdf.memory = 8 * 1024 // проверка заметно дольше старта горутин
+	enc := hashPassword("correct horse")
+	kdf = saved
+	var wg sync.WaitGroup
+	var wrong, delayed atomic.Int32
+	start := make(chan struct{})
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			switch err := u.verifyPassword(remote, enc, "guess"); {
+			case err == nil:
+				t.Error("wrong password accepted")
+			case err.Error() == "неверный пароль":
+				wrong.Add(1)
+			default:
+				delayed.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if wrong.Load() > freeFailures || wrong.Load()+delayed.Load() != 20 {
+		t.Fatalf("checked %d passwords in parallel past the limiter (delayed %d)", wrong.Load(), delayed.Load())
+	}
+	// Слоты заняты — запрос не ждёт argon2id бесконечно и не считает пароль.
+	for i := 0; i < cap(pwSlots); i++ {
+		pwSlots <- struct{}{}
+	}
+	defer func() {
+		for i := 0; i < cap(pwSlots); i++ {
+			<-pwSlots
+		}
+	}()
+	old := pwSlotWait
+	pwSlotWait = 20 * time.Millisecond
+	defer func() { pwSlotWait = old }()
+	if err := u.verifyPassword(local, enc, "correct horse"); err == nil || !strings.Contains(err.Error(), "одновременных") {
+		t.Fatal("no semaphore on password checks:", err)
+	}
+}

@@ -93,6 +93,57 @@ const (
 	DefaultVerifyDeadlineS = 86400
 )
 
+// Верхние границы лимитов. MaxMemoryMB — предел линейной памяти WASM (65536
+// страниц по 64 КиБ); больше манифест объявить не может (Validate). Для новых
+// установок действуют более строгие InstallMaxMemoryMB и InstallMaxTimeoutS
+// (CheckInstall): уже установленные пакеты с большими значениями загружаются.
+const (
+	MaxMemoryMB        = 4096
+	MaxTimeoutS        = 3600
+	MaxVerifyDeadlineS = 30 * 86400
+	InstallMaxMemoryMB = 1024
+	InstallMaxTimeoutS = 600
+)
+
+func (l Limits) validate() error {
+	switch {
+	case l.MemoryMB < 0 || l.TimeoutS < 0 || l.VerifyDeadlineS < 0:
+		return errors.New("negative limits")
+	case l.MemoryMB > MaxMemoryMB:
+		return fmt.Errorf("limits.memory_mb %d is above %d", l.MemoryMB, MaxMemoryMB)
+	case l.TimeoutS > MaxTimeoutS:
+		return fmt.Errorf("limits.timeout_s %d is above %d", l.TimeoutS, MaxTimeoutS)
+	case l.VerifyDeadlineS > MaxVerifyDeadlineS:
+		return fmt.Errorf("limits.verify_deadline_s %d is above %d", l.VerifyDeadlineS, MaxVerifyDeadlineS)
+	}
+	return nil
+}
+
+// CheckInstall — лимиты допустимы для новой установки или обновления
+// (строже Validate: память и время вызова одного экземпляра).
+func (l Limits) CheckInstall() error {
+	if l.MemoryMB > InstallMaxMemoryMB {
+		return fmt.Errorf("limits.memory_mb %d is above %d allowed for installation", l.MemoryMB, InstallMaxMemoryMB)
+	}
+	if l.TimeoutS > InstallMaxTimeoutS {
+		return fmt.Errorf("limits.timeout_s %d is above %d allowed for installation", l.TimeoutS, InstallMaxTimeoutS)
+	}
+	return nil
+}
+
+// Summary — лимиты выше значений по умолчанию человеческим языком (входят в
+// согласие); память — только для WASM (нативный процесс ею не ограничен).
+func (l Limits) Summary(runtime string) []string {
+	var out []string
+	if l.MemoryMB > DefaultMemoryMB && (runtime == RuntimeWasm || runtime == "") {
+		out = append(out, fmt.Sprintf("memory up to %d MB per call", l.MemoryMB))
+	}
+	if l.TimeoutS > DefaultTimeoutS {
+		out = append(out, fmt.Sprintf("a call may run up to %d s", l.TimeoutS))
+	}
+	return out
+}
+
 // WithDefaults — лимиты с подставленными значениями по умолчанию.
 func (l Limits) WithDefaults() Limits {
 	if l.MemoryMB == 0 {

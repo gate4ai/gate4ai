@@ -34,3 +34,13 @@ func TestProblem(t *testing.T) {
 		t.Fatal("NotRunning")
 	}
 }
+
+// Самонастройка в трее одним нажатием не решается (код-ревью E.5).
+func TestNeedsWebUI(t *testing.T) {
+	if !(Pending{Action: "gate4ai.change_policy"}).NeedsWebUI() || !(Pending{Action: "email.send", WebOnly: true}).NeedsWebUI() {
+		t.Fatal("self-config must go to the Web UI")
+	}
+	if (Pending{Action: "email.send"}).NeedsWebUI() || (Pending{Action: "gate4aix.y"}).NeedsWebUI() {
+		t.Fatal("ordinary action")
+	}
+}

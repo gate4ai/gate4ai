@@ -21,7 +21,10 @@ type Receipt struct {
 	TS    time.Time `json:"ts"`
 	Agent string    `json:"agent"`
 	// Parent — квитанция действия, которое вызвало это через service_call.
-	Parent       string         `json:"parent,omitempty"`
+	Parent string `json:"parent,omitempty"`
+	// Intent — квитанция-намерение этого действия (execution.status "started"),
+	// записанная до исполнения; итоговая квитанция ссылается на неё.
+	Intent       string         `json:"intent,omitempty"`
 	Action       string         `json:"action"`
 	Class        string         `json:"class,omitempty"`
 	Args         map[string]any `json:"args"` // после маскирования
@@ -37,6 +40,8 @@ type Decision struct {
 	Effect  string   `json:"effect"`
 	RuleIDs []string `json:"rule_ids"`
 	Reason  string   `json:"reason"`
+	// Errors — ошибки вычисления условий правил (решено в пользу строгости).
+	Errors []string `json:"errors,omitempty"`
 }
 
 // Approval — подтверждение человеком.
@@ -48,9 +53,15 @@ type Approval struct {
 	PreviewHash string    `json:"hash"`   // хэш превью, показанного человеку
 }
 
+// Статусы исполнения квитанции-намерения и прерванного действия.
+const (
+	ExecStarted     = "started"     // намерение: записано до исполнения
+	ExecInterrupted = "interrupted" // daemon остановился во время исполнения
+)
+
 // Execution — результат исполнения.
 type Execution struct {
-	Status    string `json:"status"` // ok | error | invalid_result | skipped
+	Status    string `json:"status"` // ok | error | invalid_result | skipped | started | interrupted
 	ResultRef string `json:"result_ref,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
@@ -90,6 +101,16 @@ func (r *Receipt) Hash() (string, error) {
 		return "", err
 	}
 	return HashBytes(b), nil
+}
+
+// HeaderHash — хэш заголовка квитанции: то, что остаётся в индексе после
+// редактирования (seq, id, ts, agent, action, class, effect, prev_hash).
+// Запись о редактировании (journal.redact) хранит его, поэтому подмена
+// метаданных отредактированной квитанции видна при проверке.
+func HeaderHash(r Receipt) string {
+	b, _ := Canonicalize(map[string]any{"seq": r.Seq, "id": r.ID, "ts": r.TS.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano),
+		"agent": r.Agent, "action": r.Action, "class": r.Class, "effect": r.Decision.Effect, "prev_hash": r.PrevHash})
+	return HashBytes(b)
 }
 
 // HashBytes — sha256 в hex.

@@ -176,3 +176,26 @@ func TestServeCancelAndDeadline(t *testing.T) {
 		t.Fatal("deadline:", err, took)
 	}
 }
+
+// Собеседник перестал читать: Call и NotifyContext возвращаются по сроку, а не
+// висят на записи в полный pipe (раньше Close хоста не доходил до kill).
+func TestSendDoesNotHangOnStuckReader(t *testing.T) {
+	inR, _ := io.Pipe()
+	_, outW := io.Pipe() // никто не читает: запись блокируется
+	p := NewPeer(inR, outW, nil)
+	go p.Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := p.Call(ctx, MethodExecute, struct{}{}, nil); err == nil {
+		t.Fatal("call to a stuck peer succeeded")
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel2()
+	if err := p.NotifyContext(ctx2, MethodShutdown, struct{}{}); err == nil {
+		t.Fatal("notify to a stuck peer succeeded")
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatal("send hung for", d)
+	}
+}

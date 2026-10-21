@@ -19,6 +19,7 @@ import (
 // отправка #bind уводит в кабинет при верных фейковых значениях.
 type formEngine struct {
 	url    string
+	after  string // адрес кабинета после входа ("" — testLK)
 	marked bool
 	focus  string
 	values map[string]string
@@ -70,11 +71,14 @@ func (f *formEngine) Eval(_ context.Context, expr string, out any) error {
 		}
 	case strings.HasPrefix(expr, "((sel) =>"):
 		f.focus, v = sel(), true
-	case strings.HasPrefix(expr, "((sel, text, method) =>") && sel() == "#absent":
+	case strings.HasPrefix(expr, "((sel, text, method, secret) =>") && sel() == "#absent":
 		v = nil // элемента нет (признак страницы входа не найден)
-	case strings.HasPrefix(expr, "((sel, text, method) =>"):
+	case strings.HasPrefix(expr, "((sel, text, method, secret) =>"):
 		if args[2] == "click" && sel() == "#bind" && f.values["#password"] == testPass {
 			f.url, f.marked = testLK, false
+			if f.after != "" {
+				f.url = f.after
+			}
 		}
 	case strings.Contains(expr, "XMLHttpRequest"), strings.Contains(expr, "performance."):
 		v = []any{}
@@ -99,7 +103,8 @@ func (f *formEngine) Close() error                      { return nil }
 var emias = abi.Account{Alias: "@emias", Bind: []string{"https://login.example"}, Success: "https://lk.example/",
 	Submit: &abi.AccountSubmit{Selector: "#bind"},
 	Fields: []abi.AccountField{{Name: "login", Selector: "#login", Value: testLogin},
-		{Name: "@emias.password", Selector: "#password", Secret: "@emias.password"}}}
+		{Name: "@emias.password", Selector: "#password", Secret: "@emias.password"},
+		{Name: "sms", Selector: "#sms", Type: "text"}}} // поле кода от человека
 
 func loginSetup(t *testing.T) (*hosttest.Host, *Browser, *formEngine) {
 	t.Helper()
@@ -175,9 +180,9 @@ func TestFillSecretAndSecretOnPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := res.Structured.(map[string]any)["session"].(string)
-	// Секрет в поле не password — form_mismatch.
-	if _, err := h.ExecuteRequest(b, req("fill_secret", map[string]any{"session": session, "account": "@emias", "field": "password", "selector": "#login"}, true)); err == nil || !strings.Contains(err.Error(), "form_mismatch") {
-		t.Fatal(err)
+	// Селектор поля задал владелец: вызывающий его не подменяет.
+	if _, err := h.ExecuteRequest(b, req("fill_secret", map[string]any{"session": session, "account": "@emias", "field": "password", "selector": "#login"}, true)); err == nil || !strings.Contains(err.Error(), "the owner set its selector") || len(eng.values) != 0 {
+		t.Fatal(err, eng.values)
 	}
 	if _, err := h.ExecuteRequest(b, req("fill_secret", map[string]any{"session": session, "account": "@emias", "field": "nope"}, true)); err == nil || !strings.Contains(err.Error(), "no field") {
 		t.Fatal(err)
@@ -207,7 +212,19 @@ func TestFillSecretAndSecretOnPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Код от человека: хост спросил и передал ответ; в результат и шаги он не попадает.
-	human := req("fill_secret", map[string]any{"session": session, "account": "@emias", "source": "human", "selector": "#sms"}, true)
+	// Поле для кода задаёт владелец (поле кода учётки); агент не выбирает
+	// текстовое поле сам — без поля владельца только input[type=password].
+	for _, args := range []map[string]any{
+		{"session": session, "account": "@emias", "source": "human", "selector": "#login"},
+		{"session": session, "account": "@emias", "source": "human", "field": "sms", "selector": "#login"},
+	} {
+		bad := req("fill_secret", args, true)
+		bad.Revealed = map[string]string{abi.HumanValue: "246810"}
+		if _, err := h.ExecuteRequest(b, bad); err == nil || eng.values["#login"] == "246810" {
+			t.Fatal("human code typed into a field the agent chose", args, err)
+		}
+	}
+	human := req("fill_secret", map[string]any{"session": session, "account": "@emias", "source": "human", "field": "sms"}, true)
 	human.Revealed = map[string]string{abi.HumanValue: "246810"}
 	if _, err := h.ExecuteRequest(b, human); err != nil || eng.values["#sms"] != "246810" {
 		t.Fatal(err, eng.values)
@@ -294,7 +311,7 @@ func TestViaAccount(t *testing.T) {
 	}
 	// Хост проверяет страницу и поле до вопроса человеку: ничего не вводится.
 	typed := len(eng.values)
-	pre := withVia("fill_secret", map[string]any{"session": session, "account": "@emias", "source": "human", "selector": "#login", "precheck": true})
+	pre := withVia("fill_secret", map[string]any{"session": session, "account": "@emias", "source": "human", "selector": "#login", "precheck": true, viaArg: "site_login"}) // шаг коннектора входа
 	pre.Revealed = nil
 	pre.Settings = h.Settings
 	// Служебные аргументы хост добавляет после проверки по схеме — напрямую, как daemon.
@@ -333,6 +350,70 @@ func TestViaAccount(t *testing.T) {
 		}
 	}
 	if vias != 1 || logins != 1 || strings.Contains(string(raw), testPass) {
+		t.Fatalf("steps: %s", raw)
+	}
+}
+
+// Правило поля задаёт владелец (A.M5): селектор вызывающего не уводит секрет
+// поля type: text в другое поле; без селектора владельца вызывающий выбирает
+// только поле пароля; коннектор входа учётки (via) задаёт поле сам.
+func TestFillSecretOwnerSelector(t *testing.T) {
+	h, b, eng := loginSetup(t)
+	res, err := h.ExecuteRequest(b, req("open", map[string]any{"url": testSign}, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := res.Structured.(map[string]any)["session"].(string)
+	with := func(f abi.AccountField, sel string) abi.ExecRequest {
+		r := req("fill_secret", map[string]any{"session": session, "account": "@emias", "field": "pin", "selector": sel}, true)
+		r.Login.Fields = []abi.AccountField{f}
+		return r
+	}
+	pin := abi.AccountField{Name: "pin", Selector: "#pin", Secret: "@emias.password", Type: "text"}
+	if _, err := h.ExecuteRequest(b, with(pin, "#comment")); err == nil || !strings.Contains(err.Error(), "the owner set its selector") {
+		t.Fatal("type: text secret into the caller's field:", err)
+	}
+	pin.Selector = ""
+	if _, err := h.ExecuteRequest(b, with(pin, "#comment")); err == nil || !strings.Contains(err.Error(), "form_mismatch") {
+		t.Fatal("without the owner's selector — only a password field:", err)
+	}
+	if len(eng.values) != 0 {
+		t.Fatal("typed:", eng.values)
+	}
+	if _, err := h.ExecuteRequest(b, with(pin, "#password")); err != nil || eng.values["#password"] != testPass {
+		t.Fatal(err, eng.values)
+	}
+	// Учётка с via: агент — не её коннектор входа, коннектор другого входа — тоже.
+	pin.Selector = "#pin"
+	for _, c := range []*abi.Caller{nil, {Connector: "other_login", Call: "r", Session: session}} {
+		r := with(pin, "#comment")
+		r.Login.Via = "site_login.login"
+		r.Caller = c
+		if _, err := h.ExecuteRequest(b, r); err == nil || !strings.Contains(err.Error(), "the owner set its selector") {
+			t.Fatal(c, err)
+		}
+	}
+}
+
+// Адрес после входа — без одноразовых кодов и токенов (query и fragment).
+func TestLoginCleansURL(t *testing.T) {
+	h, b, eng := loginSetup(t)
+	eng.after = testLK + "?code=one-time-code#access_token=tok-123&state=x"
+	res, err := h.ExecuteRequest(b, req("open", map[string]any{"url": testSign}, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := res.Structured.(map[string]any)["session"].(string)
+	res, err = h.ExecuteRequest(b, req("login", map[string]any{"session": session, "account": "@emias"}, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := res.Structured.(map[string]any)["url"]; u != testLK+"?code=***#access_token=***&state=***" {
+		t.Fatal(u)
+	}
+	res, _ = h.ExecuteRequest(b, req("close", map[string]any{"session": session}, false))
+	raw, _ := json.Marshal(res.Structured)
+	if strings.Contains(string(raw), "one-time-code") || strings.Contains(string(raw), "tok-123") {
 		t.Fatalf("steps: %s", raw)
 	}
 }

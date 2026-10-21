@@ -51,7 +51,7 @@ actions:
         cc: { type: array, items: { type: string, format: email }, description: copy recipients }
         subject: { type: string }
         body: { type: string, description: plain text body }
-        in_reply_to: { type: string, description: Message-ID of the message being answered }
+        in_reply_to: { type: string, maxLength: 998, description: "Message-ID of the message being answered, as list/read return it: <id@host>" }
       required: [to, subject]
     output_schema:
       type: object
@@ -72,4 +72,5 @@ actions:
         message_id: { type: string }
         recipients: { type: array, items: { type: string } }
         smtp_response: { type: string }
+        client_copy_error: { type: string, description: "sent_copy: client — why the copy was not saved to Sent" }
       required: [message_id, recipients, smtp_response]

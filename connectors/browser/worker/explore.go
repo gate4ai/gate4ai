@@ -354,10 +354,8 @@ func redact(v any) any {
 	case map[string]any:
 		for k, x := range t {
 			if sensitiveKey.MatchString(k) {
-				if _, nested := x.(map[string]any); !nested {
-					t[k] = "***"
-					continue
-				}
+				t[k] = "***" // и объект целиком: {"session": {"id": …, "key": …}}
+				continue
 			}
 			t[k] = redact(x)
 		}
@@ -376,13 +374,29 @@ func (x *Executor) redactURL(u string) string {
 }
 
 // RedactURL заменяет на *** значения параметров запроса, для которых hide
-// (или SecretParam) истинно; порядок и остальные параметры — как были.
+// (или SecretParam) истинно; порядок и остальные параметры — как были. Так же
+// разбирается фрагмент: токены implicit-входа OAuth и OIDC приходят в нём
+// (#access_token=…&id_token=…), у маршрутов SPA — после «?» (#/cb?code=…).
 func RedactURL(u string, hide func(string) bool) string {
-	base, query, ok := strings.Cut(u, "?")
-	if !ok {
-		return u
+	rest, frag, hasFrag := strings.Cut(u, "#")
+	base, query, hasQuery := strings.Cut(rest, "?")
+	out := base
+	if hasQuery {
+		out += "?" + redactPairs(query, hide)
 	}
-	query, frag, hasFrag := strings.Cut(query, "#")
+	if hasFrag {
+		if route, q, ok := strings.Cut(frag, "?"); ok {
+			frag = route + "?" + redactPairs(q, hide)
+		} else if strings.Contains(frag, "=") {
+			frag = redactPairs(frag, hide)
+		}
+		out += "#" + frag
+	}
+	return out
+}
+
+// redactPairs — то же для строки k=v&k=v.
+func redactPairs(query string, hide func(string) bool) string {
 	parts := strings.Split(query, "&")
 	for i, p := range parts {
 		k, _, hasVal := strings.Cut(p, "=")
@@ -394,11 +408,7 @@ func RedactURL(u string, hide func(string) bool) string {
 			parts[i] = k + "=***"
 		}
 	}
-	out := base + "?" + strings.Join(parts, "&")
-	if hasFrag {
-		out += "#" + frag
-	}
-	return out
+	return strings.Join(parts, "&")
 }
 
 func (x *Executor) redacted(k string) bool {

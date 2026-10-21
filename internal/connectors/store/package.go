@@ -74,6 +74,18 @@ type Package struct {
 // Native — нативный пакет.
 func (p *Package) Native() bool { return p.Manifest.Runtime == manifest.RuntimeNative }
 
+// SignedBy — ключ из package.json, если подпись дайджеста этим ключом верна;
+// "" — подписи нет или она неверна (ключ пакет заявляет о себе сам).
+func (p *Package) SignedBy() string {
+	if p.Sig.PublicKey == "" || p.Sig.Signature == "" {
+		return ""
+	}
+	if _, ok := registry.VerifySig([]string{p.Sig.PublicKey}, p.Sig.Digest, p.Sig.Signature); !ok {
+		return ""
+	}
+	return p.Sig.PublicKey
+}
+
 func sum(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])

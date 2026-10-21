@@ -169,7 +169,7 @@ approvals:
 	}
 	// 3. В Telegram: «… хочет … landlord@example.com #хэш [Разрешить] [Отклонить] [Показать текст]».
 	var msg map[string]any
-	for i := 0; i < 100 && msg == nil; i++ {
+	for start := time.Now(); msg == nil && time.Since(start) < StartTimeout; {
 		for _, m := range tg.messages() {
 			if strings.Contains(m["text"].(string), "landlord@example.com") {
 				msg = m
@@ -196,7 +196,8 @@ approvals:
 		"id": "cb", "from": map[string]any{"id": owner}, "data": kb[0].(map[string]any)["callback_data"]}})
 	tg.mu.Unlock()
 	// 5. Шлюз проверяет «Отправленные» и возвращает результат с идентификатором письма.
-	r = run(claude, "", "status", id, "--wait", "20s")
+	// С запасом под -race и загруженный раннер: исполнение и проверка «Отправленных».
+	r = run(claude, "", "status", id, "--wait", "60s")
 	res = r.json(t)
 	if r.code != 0 || res["status"] != "ok" || res["verified"] != true {
 		t.Fatalf("exit %d: %s", r.code, r.out)

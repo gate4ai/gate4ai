@@ -85,6 +85,12 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 		}
 	}
 
+	if err := stateErr(req, counters); err != nil {
+		// Счётчики или метки происхождения неизвестны: лимиты и правила по
+		// provenance не проверить — в пользу строгости.
+		return Decision{Effect: config.EffectDeny, RuleIDs: []string{RuleStateUnavailable}, Errors: append(errs, err.Error()),
+			Reason: "state store unavailable, limits and provenance cannot be checked: " + err.Error()}
+	}
 	for _, eff := range []string{config.EffectDeny, config.EffectAsk, config.EffectAllow} {
 		d := Decision{Effect: eff, Errors: errs}
 		obl := map[string]bool{}
@@ -119,6 +125,17 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 	eff := DefaultEffect(req.Class)
 	return Decision{Effect: eff, Default: true, Errors: errs, RuleIDs: []string{},
 		Reason: fmt.Sprintf("no rule matched; default for effect class %q is %s", req.Class, eff)}
+}
+
+// stateErr — ошибка State Store запроса или счётчиков.
+func stateErr(req Request, counters Counters) error {
+	if req.StateError != nil {
+		return req.StateError
+	}
+	if c, ok := counters.(CountersErr); ok {
+		return c.Err()
+	}
+	return nil
 }
 
 // Tighten применяет консультативный сигнал (например, от LLM «похоже на фишинг»):

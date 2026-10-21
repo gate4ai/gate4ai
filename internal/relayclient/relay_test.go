@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -146,15 +147,19 @@ func TestWitnessAndACMEDNS(t *testing.T) {
 	id, tok, _, _ := Register(context.Background(), e.relayURL, &tls.Config{RootCAs: e.relayCA, ServerName: "relay.test"}, e.dial)
 	dev, _ := e.device(t, id, tok, http.NotFoundHandler())
 	head := strings.Repeat("ab", 32)
-	if err := dev.Witness(audit.Checkpoint{Seq: 10, Head: head, TS: time.Now(), Sig: "00"}); err != nil {
+	if err := dev.Witness(audit.Checkpoint{Seq: 10, Head: head, TS: time.Now(), Sig: strings.Repeat("cd", 64)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := dev.Witness(audit.Checkpoint{Seq: 5, Head: head, TS: time.Now(), Sig: "00"}); err == nil {
+	if err := dev.Witness(audit.Checkpoint{Seq: 5, Head: head, TS: time.Now(), Sig: strings.Repeat("cd", 64)}); err == nil {
 		t.Fatal("rewound log accepted by witness")
 	}
 	if cps := e.srv.Store.Checkpoints(id); len(cps) != 1 || cps[0].Head != head {
 		t.Fatal(cps)
 	}
+	if cp, ok, err := dev.LastWitnessed(); err != nil || !ok || cp.Seq != 10 || cp.Head != head {
+		t.Fatal("last witnessed:", cp, ok, err)
+	}
+	var _ audit.WitnessReader = dev
 	other, _ := e.device(t, id, "dev_x", nil)
 	if err := other.Witness(audit.Checkpoint{Seq: 11, Head: head}); err == nil {
 		t.Fatal("unauthenticated witness")
@@ -197,5 +202,47 @@ func TestWitnessAndACMEDNS(t *testing.T) {
 	p.DeleteRecords(ctx, "relay.test.", []libdns.Record{libdns.TXT{Name: "_acme-challenge." + id, Text: "token-123"}})
 	if r := q("_acme-challenge."+id+".relay.test", dns.TypeTXT); len(r.Answer) != 0 {
 		t.Fatal("TXT not deleted")
+	}
+}
+
+// TestReconnectNoGoroutineLeak: при каждом переподключении туннеля горутина,
+// закрывающая сессию, завершается вместе с сессией, а не ждёт отмены ctx.
+func TestReconnectNoGoroutineLeak(t *testing.T) {
+	e := startRelay(t)
+	id, tok, _, err := Register(context.Background(), e.relayURL, &tls.Config{RootCAs: e.relayCA, ServerName: "relay.test"}, e.dial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev, _ := e.device(t, id, tok, http.NotFoundHandler())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go dev.Run(ctx)
+	waitOnline(t, dev)
+	reconnect := func() {
+		e.srv.Disconnect(id)
+		for i := 0; i < 200 && (dev.Online() || e.srv.Online(id)); i++ {
+			time.Sleep(5 * time.Millisecond)
+		}
+		waitOnline(t, dev)
+		for i := 0; i < 200 && !e.srv.Online(id); i++ {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	settle := func() int {
+		n := runtime.NumGoroutine()
+		for i := 0; i < 20; i++ {
+			time.Sleep(20 * time.Millisecond)
+			n = min(n, runtime.NumGoroutine())
+		}
+		return n
+	}
+	reconnect()
+	before := settle()
+	const rounds = 20
+	for i := 0; i < rounds; i++ {
+		reconnect()
+	}
+	if after := settle(); after-before >= rounds/2 {
+		t.Fatalf("goroutines grow with reconnects: %d → %d", before, after)
 	}
 }

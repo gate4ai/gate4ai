@@ -15,10 +15,20 @@ import (
 )
 
 // switchable — канал, который можно включать и выключать при смене конфигурации.
+// События уходят в канал через свою очередь (одна горутина на канал, порядок
+// сохраняется): медленный Telegram, Web Push или PowerShell не задерживают
+// ответ агенту «pending» и отказ.
 type switchable struct {
 	mu sync.RWMutex
 	n  pipeline.Notifier
+
+	qOnce sync.Once
+	q     chan func()
+	wg    sync.WaitGroup
 }
+
+// queueLen — очередь событий канала; при переполнении событие доставляется синхронно.
+const queueLen = 256
 
 func (s *switchable) set(n pipeline.Notifier) { s.mu.Lock(); s.n = n; s.mu.Unlock() }
 func (s *switchable) get() pipeline.Notifier {
@@ -26,24 +36,48 @@ func (s *switchable) get() pipeline.Notifier {
 	defer s.mu.RUnlock()
 	return s.n
 }
+
+// async ставит событие в очередь канала.
+func (s *switchable) async(f func()) {
+	s.qOnce.Do(func() {
+		s.q = make(chan func(), queueLen)
+		go func() {
+			for f := range s.q {
+				f()
+				s.wg.Done()
+			}
+		}()
+	})
+	s.wg.Add(1)
+	select {
+	case s.q <- f:
+	default:
+		f()
+		s.wg.Done()
+	}
+}
+
+// wait — дождаться доставки поставленных событий (тесты).
+func (s *switchable) wait() { s.wg.Wait() }
+
 func (s *switchable) Notify(a *state.Approval) {
 	if n := s.get(); n != nil {
-		n.Notify(a)
+		s.async(func() { n.Notify(a) })
 	}
 }
 func (s *switchable) Resolved(a *state.Approval) {
 	if n := s.get(); n != nil {
-		n.Resolved(a)
+		s.async(func() { n.Resolved(a) })
 	}
 }
 func (s *switchable) Denied(ag, ac, r string) {
 	if n := s.get(); n != nil {
-		n.Denied(ag, ac, r)
+		s.async(func() { n.Denied(ag, ac, r) })
 	}
 }
 func (s *switchable) Asked(id, text string) {
 	if a, ok := s.get().(daemon.Asker); ok {
-		a.Asked(id, text)
+		s.async(func() { a.Asked(id, text) })
 	}
 }
 
@@ -65,7 +99,7 @@ func Attach(ctx context.Context, d *daemon.Daemon, desktop *Desktop, telegramBas
 	} else {
 		push.Log = d.Log
 	}
-	ch := &Channels{d: d, Desktop: desktop, Push: push, TelegramBase: telegramBase, tg: tgSw}
+	ch := &Channels{d: d, Desktop: desktop, Push: push, TelegramBase: telegramBase, tg: tgSw, queues: []*switchable{desk, tgSw, pushSw}}
 	// Вебхук на публичном адресе; без бота в режиме вебхука — 404.
 	d.AddPublic("POST /telegram", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tg, ok := tgSw.get().(*Telegram); ok {

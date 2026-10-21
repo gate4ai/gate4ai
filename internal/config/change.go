@@ -126,7 +126,7 @@ func CheckChange(ch Change) error {
 		for i, it := range ch.Items {
 			items[i] = it
 		}
-		if hasAlias(items) || strings.Contains(strings.ToLower(ch.Key), "key") || strings.Contains(strings.ToLower(ch.Key), "password") {
+		if hasAlias(items) || SecretKey(ch.Key) {
 			return fmt.Errorf("%s: secrets and vault aliases cannot be set by agents", ch.Op)
 		}
 	case OpAddCredential:
@@ -140,6 +140,14 @@ func CheckChange(ch Change) error {
 		if err := json.Unmarshal([]byte(ch.CredentialJSON), &cr); err != nil {
 			return fmt.Errorf("add_credential: credential_json: %v", err)
 		}
+		// Только новые секреты в пространстве самой учётки (@site.password):
+		// ссылка на чужой алиас (пароль банка) привязала бы его к сайту агента
+		// (code review H4). Существующие в Vault алиасы проверяет daemon.
+		for _, a := range cr.Secrets() {
+			if !strings.HasPrefix(a, ch.Account+".") {
+				return fmt.Errorf("add_credential: secret %s must be a new alias of the account itself (%s.<field>)", a, ch.Account)
+			}
+		}
 	case OpConnectorSetting:
 		if err := need("connector", ch.Connector); err != nil {
 			return err
@@ -149,20 +157,33 @@ func CheckChange(ch Change) error {
 			return errors.New("connector_settings: settings_json must be a non-empty JSON object")
 		}
 		if hasAlias(m) {
-			return errors.New("connector_settings: secrets and vault aliases (@…) cannot be set by agents; the owner sets them in the Web UI")
+			return errors.New("connector_settings: secrets, secret-like keys (key, secret, password, token, credentials) and vault aliases (@…) cannot be set by agents; the owner sets them in the Web UI")
 		}
 	}
 	return nil
 }
 
-// hasAlias — где-то в значении есть строка-алиас Vault.
+// SecretKey — ключ настройки о секрете (ключ модели, пароль, токен, учётные
+// данные): такие настройки агент не задаёт и не видит. Одна классификация для
+// проверки правок и для сводки политики (code review E.6).
+func SecretKey(k string) bool {
+	lk := strings.ToLower(k)
+	for _, w := range []string{"key", "password", "token", "secret", "credential"} {
+		if strings.Contains(lk, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAlias — где-то в значении есть строка-алиас Vault или секретный ключ.
 func hasAlias(v any) bool {
 	switch x := v.(type) {
 	case string:
 		return strings.HasPrefix(strings.TrimSpace(x), "@")
 	case map[string]any:
 		for k, e := range x {
-			if strings.Contains(strings.ToLower(k), "password") || strings.Contains(strings.ToLower(k), "token") || hasAlias(e) {
+			if SecretKey(k) || hasAlias(e) {
 				return true
 			}
 		}
@@ -222,6 +243,17 @@ func (c *Config) ApplyChange(profile string, ch Change) error {
 	case OpAddCredential:
 		var cr Credential
 		_ = json.Unmarshal([]byte(ch.CredentialJSON), &cr)
+		// Агент заводит только новую учётку: перезапись перепривязала бы её
+		// секреты к другому сайту (code review H4).
+		if _, ok := c.Credentials[ch.Account]; ok {
+			return fmt.Errorf("add_credential: account %s already exists; only the owner changes accounts (Web UI)", ch.Account)
+		}
+		inUse := c.AliasesInUse()
+		for _, a := range cr.Secrets() {
+			if inUse[a] {
+				return fmt.Errorf("add_credential: secret %s is already used in the policy; use a new alias", a)
+			}
+		}
 		if c.Credentials == nil {
 			c.Credentials = map[string]Credential{}
 		}
@@ -239,6 +271,60 @@ func (c *Config) ApplyChange(profile string, ch Change) error {
 		c.SetConnectorSettings(ch.Connector, cur)
 	}
 	return nil
+}
+
+// AliasesInUse — алиасы Vault, на которые уже ссылается политика: секреты
+// учёток и строки-алиасы в настройках коннекторов.
+func (c *Config) AliasesInUse() map[string]bool {
+	out := map[string]bool{}
+	for _, cr := range c.Credentials {
+		for _, a := range cr.Secrets() {
+			out[a] = true
+		}
+	}
+	var walk func(v any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case string:
+			if t := strings.TrimSpace(x); strings.HasPrefix(t, "@") {
+				out[t] = true
+			}
+		case map[string]any:
+			for _, e := range x {
+				walk(e)
+			}
+		case []any:
+			for _, e := range x {
+				walk(e)
+			}
+		}
+	}
+	for _, st := range c.Connectors {
+		for _, v := range st {
+			walk(v)
+		}
+	}
+	return out
+}
+
+// DescribeIn — правка человеческим языком с учётом текущей политики:
+// add_rule с id существующего правила показывается как замена с прежним
+// правилом (code review E.3). profile — профиль агента-автора.
+func (ch Change) DescribeIn(c *Config, profile string) string {
+	if ch.Op == OpAddRule && ch.RuleID != "" && c != nil {
+		if ch.Profile != "" {
+			profile = ch.Profile
+		}
+		for _, r := range c.Profiles[profile].Rules {
+			if r.ID != ch.RuleID {
+				continue
+			}
+			old := Change{Op: OpAddRule, Action: r.Action, When: r.When, Effect: r.Effect, RuleReason: r.Reason}
+			return fmt.Sprintf("ЗАМЕНИТЬ правило %s (было: %s) на: %s", r.ID, old.describe(), ch.Describe())
+		}
+		return ch.Describe() + " [id " + ch.RuleID + "]"
+	}
+	return ch.Describe()
 }
 
 // Describe — правка человеческим языком.

@@ -108,3 +108,25 @@ credentials:
 		}
 	}
 }
+
+// Поле кода от человека (без value и secret) — только в форме и с именем.
+func TestCredentialCodeField(t *testing.T) {
+	ok := `
+agents: { bot: { profile: p } }
+profiles: { p: { connectors: [] } }
+credentials:
+  "@bank":
+    bind: ["https://id.bank.example"]
+    form:
+      fields:
+        - { selector: "#pw", secret: "@bank.password" }
+        - { name: sms, selector: "#sms", type: text }
+      submit: { selector: "#go" }
+`
+	if _, err := Parse([]byte(ok)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse([]byte(strings.Replace(ok, `{ name: sms, selector: "#sms", type: text }`, `{ selector: "#sms" }`, 1))); err == nil {
+		t.Fatal("code field without a name accepted")
+	}
+}

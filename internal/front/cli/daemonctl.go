@@ -280,6 +280,7 @@ func (e *Env) daemonRestart(ctx context.Context) int {
 			}
 		}
 	}
+	args = withoutOneShot(args)
 	if restarted, err := autostart.Restart(); restarted || err != nil {
 		if err != nil {
 			return e.fail(err)
@@ -301,4 +302,18 @@ func (e *Env) daemonRestart(ctx context.Context) int {
 	e.say("gate4ai daemon restarted: version " + fmt.Sprint(nh["version"]))
 	e.out(map[string]any{"status": "ok", "running": true, "restarted": true, "version": nh["version"]}, nil)
 	return ExitOK
+}
+
+// withoutOneShot убирает разовые флаги daemon (--reset-ui-login снимает защиту
+// входа в Web UI): restart и служба автозапуска их не повторяют (код-ревью E.14).
+func withoutOneShot(args []string) []string {
+	var out []string
+	for _, a := range args {
+		name, _, _ := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		if strings.HasPrefix(a, "-") && name == "reset-ui-login" {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }

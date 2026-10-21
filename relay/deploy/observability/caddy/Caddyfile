@@ -2,6 +2,9 @@
 # (--route {$GRAFANA_DOMAIN}=127.0.0.1:8444, --route gate4.ai=…, --route
 # www.gate4.ai=…; TLS-passthrough по SNI). Caddy завершает TLS для Grafana и
 # сайта gate4.ai (Compose-проект gate4ai-www, HTTP на 127.0.0.1:8080).
+# Все соединения приходят с 127.0.0.1 (relay): правила и лимиты по IP клиента
+# здесь не работают. Настоящий адрес — --route host=addr,proxy у relay плюс
+# listener_wrappers { proxy_protocol { allow 127.0.0.1/32 } } в servers ниже.
 {
 	admin off
 	http_port 8088

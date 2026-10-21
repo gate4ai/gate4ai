@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -96,7 +97,23 @@ func (s *Store) open(ad string, box []byte) ([]byte, error) {
 
 // RecordAction учитывает выполненное действие в счётчиках.
 func (s *Store) RecordAction(agent, action, class string, amount float64) error {
-	_, err := s.db.Exec(`INSERT INTO actions(ts,agent,action,class,amount) VALUES(?,?,?,?,?)`, s.Now().UnixNano(), agent, action, class, amount)
+	_, err := s.ReserveAction(agent, action, class, amount)
+	return err
+}
+
+// ReserveAction учитывает действие в счётчиках до исполнения (резерв лимита):
+// параллельный вызов уже видит его. Возвращает id строки для ReleaseAction.
+func (s *Store) ReserveAction(agent, action, class string, amount float64) (int64, error) {
+	res, err := s.db.Exec(`INSERT INTO actions(ts,agent,action,class,amount) VALUES(?,?,?,?,?)`, s.Now().UnixNano(), agent, action, class, amount)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// ReleaseAction снимает резерв: действие не исполнилось.
+func (s *Store) ReleaseAction(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM actions WHERE id=?`, id)
 	return err
 }
 
@@ -105,20 +122,44 @@ func (s *Store) dayStart() int64 {
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, n.Location()).UnixNano()
 }
 
-// Counters — реализация policy.Counters на текущий момент.
-func (s *Store) Counters() policy.Counters { return counters{s} }
+// Counters — реализация policy.Counters на текущий момент. Ошибка чтения
+// базы не превращается в нулевой счётчик молча: её возвращает Err, и PDP
+// решает в пользу строгости (fail-closed).
+func (s *Store) Counters() policy.Counters { return &counters{s: s} }
 
-type counters struct{ s *Store }
+type counters struct {
+	s   *Store
+	mu  sync.Mutex
+	err error
+}
 
-func (c counters) SpentToday() float64 {
+func (c *counters) fail(err error) {
+	c.mu.Lock()
+	if c.err == nil {
+		c.err = err
+	}
+	c.mu.Unlock()
+}
+
+// Err — первая ошибка чтения счётчиков (nil — все прочитаны).
+func (c *counters) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+func (c *counters) SpentToday() float64 {
 	var v sql.NullFloat64
-	_ = c.s.db.QueryRow(`SELECT SUM(amount) FROM actions WHERE class='money' AND ts>=?`, c.s.dayStart()).Scan(&v)
+	if err := c.s.db.QueryRow(`SELECT SUM(amount) FROM actions WHERE class='money' AND ts>=?`, c.s.dayStart()).Scan(&v); err != nil {
+		c.fail(err)
+	}
 	return v.Float64
 }
 
-func (c counters) scan(agent, pattern string) (int, float64) {
+func (c *counters) scan(agent, pattern string) (int, float64) {
 	rows, err := c.s.db.Query(`SELECT action, amount FROM actions WHERE agent=? AND ts>=?`, agent, c.s.dayStart())
 	if err != nil {
+		c.fail(err)
 		return 0, 0
 	}
 	defer rows.Close()
@@ -127,20 +168,27 @@ func (c counters) scan(agent, pattern string) (int, float64) {
 	for rows.Next() {
 		var a string
 		var amt float64
-		if rows.Scan(&a, &amt) == nil && policy.ActionMatches(pattern, a) {
+		if err := rows.Scan(&a, &amt); err != nil {
+			c.fail(err)
+			continue
+		}
+		if policy.ActionMatches(pattern, a) {
 			n++
 			sum += amt
 		}
 	}
+	if err := rows.Err(); err != nil {
+		c.fail(err)
+	}
 	return n, sum
 }
 
-func (c counters) CountToday(agent, pattern string) int {
+func (c *counters) CountToday(agent, pattern string) int {
 	n, _ := c.scan(agent, pattern)
 	return n
 }
 
-func (c counters) AmountToday(agent, pattern string) float64 {
+func (c *counters) AmountToday(agent, pattern string) float64 {
 	_, s := c.scan(agent, pattern)
 	return s
 }
@@ -253,13 +301,38 @@ func (s *Store) lookup(tok string) (agent, kind, label string, err error) {
 }
 
 // RevokeAgent отзывает все токены агента; возвращает число отозванных.
+// Момент отзыва запоминается: запросы подтверждения агента, поставленные
+// раньше, после этого не исполняются (AgentRevokedAt).
 func (s *Store) RevokeAgent(agent string) (int, error) {
+	if err := s.Set(revokedKey+agent, strconv.FormatInt(s.Now().UnixNano(), 10)); err != nil {
+		return 0, err
+	}
 	res, err := s.db.Exec(`UPDATE tokens SET revoked=1 WHERE agent=? AND revoked=0`, agent)
 	if err != nil {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil
+}
+
+const revokedKey = "agent_revoked:"
+
+// AgentRevokedAt — когда владелец последний раз отозвал доступ агента
+// (нулевое время — не отзывал).
+func (s *Store) AgentRevokedAt(agent string) (time.Time, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT v FROM kv WHERE k=?`, revokedKey+agent).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(0, n), nil
 }
 
 // RevokeLabel отзывает токены агента с меткой label; возвращает число отозванных.
@@ -270,6 +343,21 @@ func (s *Store) RevokeLabel(agent, label string) (int, error) {
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil
+}
+
+// ExtendToken продлевает действующий токен до now+ttl (токен запуска агента
+// продлевается, пока жив запуск). Отозванный или истёкший — ErrBadToken.
+func (s *Store) ExtendToken(tok string, ttl time.Duration) error {
+	now := s.Now()
+	res, err := s.db.Exec(`UPDATE tokens SET expires=? WHERE hash=? AND revoked=0 AND (expires=0 OR expires>?)`,
+		now.Add(ttl).UnixNano(), HashToken(tok), now.UnixNano())
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ErrBadToken
+	}
+	return nil
 }
 
 // RevokeToken отзывает один токен.

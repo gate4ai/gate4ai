@@ -25,6 +25,14 @@ type CA struct {
 	leaf map[string]*tls.Certificate
 }
 
+// Сроки: CA живёт только в памяти daemon (до перезапуска), поэтому долгий;
+// leaf перевыпускается, когда до конца срока остаётся меньше leafRenew.
+const (
+	caLifetime   = 5 * 365 * 24 * time.Hour
+	leafLifetime = 7 * 24 * time.Hour
+	leafRenew    = 24 * time.Hour
+)
+
 // NewCA создаёт CA.
 func NewCA(name string) (*CA, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -32,7 +40,7 @@ func NewCA(name string) (*CA, error) {
 		return nil, err
 	}
 	tpl := &x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: name},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(30 * 24 * time.Hour), IsCA: true,
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(caLifetime), IsCA: true,
 		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign, MaxPathLenZero: true}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
 	if err != nil {
@@ -52,11 +60,11 @@ func (c *CA) Pool() *x509.CertPool {
 	return p
 }
 
-// Leaf — сертификат для хоста.
+// Leaf — сертификат для хоста (из кэша, пока до конца срока больше leafRenew).
 func (c *CA) Leaf(host string) (*tls.Certificate, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if l, ok := c.leaf[host]; ok {
+	if l, ok := c.leaf[host]; ok && time.Until(l.Leaf.NotAfter) > leafRenew {
 		return l, nil
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -64,13 +72,24 @@ func (c *CA) Leaf(host string) (*tls.Certificate, error) {
 		return nil, err
 	}
 	tpl := &x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: host},
-		DNSNames: []string{host}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(7 * 24 * time.Hour),
+		DNSNames: []string{host}, NotBefore: time.Now().Add(-time.Hour), NotAfter: minTime(time.Now().Add(leafLifetime), c.cert.NotAfter),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, c.cert, &key.PublicKey, c.key)
 	if err != nil {
 		return nil, err
 	}
-	l := &tls.Certificate{Certificate: [][]byte{der, c.der}, PrivateKey: key}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, err
+	}
+	l := &tls.Certificate{Certificate: [][]byte{der, c.der}, PrivateKey: key, Leaf: cert}
 	c.leaf[host] = l
 	return l, nil
+}
+
+func minTime(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return a
+	}
+	return b
 }

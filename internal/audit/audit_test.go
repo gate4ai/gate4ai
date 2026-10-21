@@ -242,7 +242,7 @@ func TestRetentionAndExportVerify(t *testing.T) {
 		if err != nil || !vr.OK() {
 			t.Fatalf("verify: %+v %v", vr, err)
 		}
-		if vr.Receipts != 4 || vr.Redacted != 1 || vr.EvidenceOK != 2 || vr.EvidenceDeleted != 1 || vr.Checkpoints != 2 {
+		if vr.Receipts != 5 || vr.Redacted != 1 || vr.EvidenceOK != 2 || vr.EvidenceDeleted != 1 || vr.Checkpoints != 3 {
 			t.Fatalf("report: %+v", vr)
 		}
 		if pass != "" {

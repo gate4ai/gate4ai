@@ -17,6 +17,7 @@ var messages = map[string][2]string{ // ключ → {en, ru}
 	"allow":         {"Allow", "Разрешить"},
 	"deny":          {"Deny", "Отклонить"},
 	"details":       {"Details in the Web UI", "Подробнее в Web UI"},
+	"decide_in_ui":  {"Review the changes and decide in the Web UI", "Просмотреть правки и решить в Web UI"},
 	"open_ui":       {"Open Web UI", "Открыть Web UI"},
 	"start":         {"Start daemon", "Запустить daemon"},
 	"quit":          {"Quit tray", "Выход из трея"},

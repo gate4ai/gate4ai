@@ -1171,15 +1171,23 @@ func (u *UI) yamlData(y string) map[string]any {
 	}
 	vs, _ := u.D.Config.Versions()
 	slices.Reverse(vs)
-	return map[string]any{"YAML": y, "Version": n, "Versions": vs, "page": "policy_yaml"}
+	return map[string]any{"YAML": y, "Version": n, "Base": n, "Versions": vs, "page": "policy_yaml"}
 }
 
 func (u *UI) savePolicy(w http.ResponseWriter, r *http.Request) map[string]any {
 	y := r.PostForm.Get("yaml")
-	v, err := u.D.Config.Put(owner, []byte(y), r.PostForm.Get("comment"))
+	// base — версия, открытая в редакторе: если её сменили (одобренный
+	// change_policy, другая вкладка), сохранение не откатывает чужую правку.
+	base, _ := strconv.Atoi(r.PostForm.Get("base"))
+	v, err := u.D.Config.PutIf(owner, []byte(y), r.PostForm.Get("comment"), base)
 	if err != nil {
 		d := u.yamlData(y)
 		d["error"] = err.Error()
+		if errors.Is(err, config.ErrConflict) {
+			d["error"] = "Политику изменили, пока вы её правили (сейчас версия " + strconv.Itoa(d["Version"].(int)) +
+				"). Ваш текст ниже не сохранён: перенесите правку в текущую версию (откройте страницу заново) и сохраните."
+			d["Base"] = base
+		}
 		return d
 	}
 	return redirect("/policy/yaml", "Сохранена версия "+strconv.Itoa(v.N))

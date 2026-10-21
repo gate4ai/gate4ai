@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs"
@@ -276,4 +277,72 @@ func TestLazyLoad(t *testing.T) {
 		t.Fatal("mismatched manifest must fail on call:", err)
 	}
 	lb.Close()
+}
+
+// noMemoryModule — модуль с экспортами ABI, но без линейной памяти (B.H2):
+// type ()->(), четыре пустые функции, их экспорт.
+func noMemoryModule() []byte {
+	b := []byte{0, 'a', 's', 'm', 1, 0, 0, 0}
+	sec := func(id byte, body []byte) { b = append(append(b, id, byte(len(body))), body...) }
+	sec(1, []byte{1, 0x60, 0, 0})
+	sec(3, []byte{4, 0, 0, 0, 0})
+	exp := []byte{4}
+	for i, n := range []string{abi.ExportAlloc, abi.ExportManifest, abi.ExportExecute, abi.ExportVerify} {
+		exp = append(append(append(exp, byte(len(n))), n...), 0, byte(i))
+	}
+	sec(7, exp)
+	sec(10, []byte{4, 2, 0, 0x0b, 2, 0, 0x0b, 2, 0, 0x0b, 2, 0, 0x0b})
+	return b
+}
+
+// Модуль без памяти не загружается и не роняет daemon (раньше — nil-разыменование
+// в хосте при чтении манифеста в фоновой загрузке).
+func TestModuleWithoutMemory(t *testing.T) {
+	e, _ := NewEngine("", Services{})
+	man := manifest.Manifest{Connector: "nomem", Version: "1", Runtime: manifest.RuntimeWasm}
+	if _, err := e.Load(context.Background(), noMemoryModule(), man); err == nil || !strings.Contains(err.Error(), "memory") {
+		t.Fatal("module without memory:", err)
+	}
+	l := e.LoadLazy(noMemoryModule(), man)
+	if _, err := l.Execute(context.Background(), abi.ExecRequest{Action: "x"}); err == nil {
+		t.Fatal("lazy load of a module without memory must fail")
+	}
+	l.Close()
+}
+
+// memory_mb больше предела wazero (4096) — ошибка загрузки, а не паника в
+// фоновой горутине (раньше daemon падал при каждом старте).
+func TestHugeMemoryLimit(t *testing.T) {
+	e, _ := NewEngine("", Services{})
+	man := manifest.Manifest{Connector: "huge", Version: "1", Runtime: manifest.RuntimeWasm, Limits: manifest.Limits{MemoryMB: 5000}}
+	if _, err := e.Load(context.Background(), noMemoryModule(), man); err == nil || !strings.Contains(err.Error(), "memory_mb") {
+		t.Fatal("memory_mb 5000:", err)
+	}
+	man.Limits.MemoryMB = 1 << 28 // uint32(MemoryMB)*16 переполнялся
+	l := e.LoadLazy(noMemoryModule(), man)
+	if _, err := l.Execute(context.Background(), abi.ExecRequest{Action: "x"}); err == nil {
+		t.Fatal("lazy load with a huge memory limit must fail")
+	}
+	l.Close()
+}
+
+// Одновременных экземпляров коннектора не больше MaxConcurrentCalls: лишний
+// вызов ждёт свободного места и по сроку получает limit.
+func TestConcurrentCallsLimited(t *testing.T) {
+	c := load(t, io.Discard)
+	for i := 0; i < MaxConcurrentCalls; i++ {
+		c.slots <- struct{}{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, err := c.Execute(ctx, abi.ExecRequest{Action: "settings", Settings: map[string]any{"token": "@probe"}})
+	if err == nil {
+		t.Fatal("call ran above MaxConcurrentCalls")
+	}
+	for i := 0; i < MaxConcurrentCalls; i++ {
+		<-c.slots
+	}
+	if _, err := run(t, c, "settings", nil); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -252,7 +252,10 @@ func (d *Daemon) ServePublic(l net.Listener, external string) {
 	if external != "" {
 		h = WithExternalURL(h, external)
 	}
-	srv := &http.Server{Handler: h, ReadHeaderTimeout: 15 * time.Second}
+	// Ответ пишется не дольше самого долгого ожидания решения (maxPublicWait)
+	// с запасом; простаивающие соединения из интернета не копятся.
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 15 * time.Second, ReadTimeout: time.Minute,
+		WriteTimeout: maxPublicWait + time.Minute, IdleTimeout: 2 * time.Minute}
 	d.mu.Lock()
 	d.servers = append(d.servers, srv)
 	d.mu.Unlock()

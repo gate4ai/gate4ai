@@ -8,14 +8,80 @@ package e2e
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// binDir — каталог бинарников, собранных один раз на прогон (TestMain).
+var binDir string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "gate4ai-e2e-bin-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	binDir = dir
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// built — сборка бинарника: одна на прогон, параллельные тесты ждут её.
+type built struct {
+	once sync.Once
+	path string
+	err  error
+}
+
+var (
+	buildsMu sync.Mutex
+	builds   = map[string]*built{}
+)
+
+// binary собирает пакет pkg модуля из ../<dir> один раз за прогон и
+// возвращает путь к бинарнику (общий для тестов: они его не меняют).
+func binary(t *testing.T, dir, pkg string) string {
+	t.Helper()
+	buildsMu.Lock()
+	b, ok := builds[pkg]
+	if !ok {
+		b = &built{}
+		builds[pkg] = b
+	}
+	buildsMu.Unlock()
+	b.once.Do(func() {
+		b.path = filepath.Join(binDir, filepath.Base(pkg))
+		if runtime.GOOS == "windows" {
+			b.path += ".exe"
+		}
+		env, err := goEnv()
+		if err != nil {
+			b.err = err
+			return
+		}
+		if dir == "gate4ai" {
+			dir = ""
+		}
+		cmd := exec.Command("go", "build", "-o", b.path, pkg)
+		cmd.Dir, cmd.Env = filepath.Join("..", dir), env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			b.err = fmt.Errorf("build %s: %v\n%s", pkg, err, out)
+		}
+	})
+	if b.err != nil {
+		t.Fatal(b.err)
+	}
+	return b.path
+}
 
 // src — абсолютный путь к каталогу репозитория ("" или "gate4ai" — корень,
 // иначе relay, connectors/mail, …).
@@ -38,12 +104,40 @@ func src(t *testing.T, name string) string {
 // явно: тесты подменяют HOME.
 func workEnv(t *testing.T) []string {
 	t.Helper()
-	out, err := exec.Command("go", "env", "GOPATH", "GOMODCACHE", "GOCACHE").Output()
+	env, err := goEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
+	return slices.Clip(env) // общий срез: append вызывающих — в свою копию
+}
+
+var goEnv = sync.OnceValues(func() ([]string, error) {
+	out, err := exec.Command("go", "env", "GOPATH", "GOMODCACHE", "GOCACHE").Output()
+	if err != nil {
+		return nil, fmt.Errorf("go env: %w", err)
+	}
 	v := strings.Fields(string(out))
-	return append(os.Environ(), "GOWORK=off", "GOFLAGS=", "GOPATH="+v[0], "GOMODCACHE="+v[1], "GOCACHE="+v[2])
+	return append(os.Environ(), "GOWORK=off", "GOFLAGS=", "GOPATH="+v[0], "GOMODCACHE="+v[1], "GOCACHE="+v[2]), nil
+})
+
+// StartTimeout — сколько ждать готовности daemon и relay (медленный раннер, -race).
+var StartTimeout = 60 * time.Second
+
+// waitReady ждёт ready() до StartTimeout; процесс завершился раньше — сразу
+// ошибка (а не таймаут).
+func waitReady(t *testing.T, what string, exited <-chan struct{}, ready func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(StartTimeout)
+	for !ready() {
+		select {
+		case <-exited:
+			t.Fatalf("%s exited at start", what)
+		case <-time.After(50 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not start in %s", what, StartTimeout)
+		}
+	}
 }
 
 type cliResult struct {
@@ -76,16 +170,9 @@ func startGate(t *testing.T, extra ...string) *gate {
 		t.Skip("e2e builds binaries")
 	}
 	tmp := t.TempDir()
-	g := &gate{t: t, bin: filepath.Join(tmp, "gate4ai"), home: filepath.Join(tmp, "gate4ai-home"), user: filepath.Join(tmp, "user")}
+	g := &gate{t: t, bin: binary(t, "gate4ai", "./cmd/gate4ai"), home: filepath.Join(tmp, "gate4ai-home"), user: filepath.Join(tmp, "user")}
 	os.MkdirAll(g.user, 0o755)
 	g.env = append(workEnv(t), "GATE4AI_HOME="+g.home, "HOME="+g.user)
-
-	b := exec.Command("go", "build", "-o", g.bin, "./cmd/gate4ai")
-	b.Dir = src(t, "gate4ai")
-	b.Env = g.env
-	if out, err := b.CombinedOutput(); err != nil {
-		t.Fatalf("build gate4ai: %v\n%s", err, out)
-	}
 
 	var dlog bytes.Buffer
 	d := exec.Command(g.bin, append([]string{"daemon", "--home", g.home, "--keystore", "file", "--ui", ""}, extra...)...)
@@ -94,22 +181,16 @@ func startGate(t *testing.T, extra ...string) *gate {
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
 	}
+	exited := make(chan struct{})
+	go func() { d.Wait(); close(exited) }()
 	t.Cleanup(func() {
 		d.Process.Signal(os.Interrupt)
-		d.Wait()
+		<-exited
 		if t.Failed() {
 			t.Log("daemon log:\n" + dlog.String())
 		}
 	})
-	for i := 0; ; i++ {
-		if r := g.run("", "", "journal", "verify"); r.code == 0 {
-			break
-		}
-		if i > 100 {
-			t.Fatal("daemon did not start")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitReady(t, "daemon", exited, func() bool { return g.run("", "", "journal", "verify").code == 0 })
 	return g
 }
 

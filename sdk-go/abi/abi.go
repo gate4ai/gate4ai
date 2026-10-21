@@ -150,6 +150,10 @@ type ExecRequest struct {
 	// browser.fill_secret): поля, отправка, признак успеха; значения секретных
 	// полей — в Revealed.
 	Login *Account `json:"login,omitempty"`
+	// Agent — агент, от имени которого идёт действие (и при вложенном вызове).
+	// Хост передаёт его только нативному коннектору browser: сеансы агентов
+	// привязаны к агенту.
+	Agent string `json:"agent,omitempty"`
 }
 
 // HumanValue — ключ Revealed со значением, которое человек ввёл в ответ на
@@ -340,8 +344,9 @@ type VerifyResult struct {
 	Evidence     []EvidenceItem `json:"evidence,omitempty"`
 }
 
-// HTTPRequest — http_request. В заголовках и теле плейсхолдер {{secret:@alias}}
-// заменяется хостом значением секрета, только если адрес входит в bind секрета.
+// HTTPRequest — http_request. Плейсхолдер {{secret:@alias}} — только целиком в
+// заголовке аутентификации ("Authorization: Bearer {{secret:@alias}}"): хост
+// заменяет его значением секрета, только если адрес входит в bind секрета.
 // Редиректы хост не выполняет: 3xx возвращается модулю.
 type HTTPRequest struct {
 	Method    string            `json:"method"`
@@ -436,6 +441,9 @@ type FSRequest struct {
 	Path string `json:"path"`
 	Data []byte `json:"data,omitempty"` // fs_write, fs_append
 	Max  int64  `json:"max,omitempty"`  // fs_read: не больше Max байт (по умолчанию 1 МиБ)
+	// Offset — fs_read: читать с этой позиции; отрицательное — столько байт
+	// с конца файла (хвост большого файла, например проверка fs_append).
+	Offset int64 `json:"offset,omitempty"`
 }
 
 // FSReadResponse — fs_read.

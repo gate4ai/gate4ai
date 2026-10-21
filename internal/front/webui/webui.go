@@ -140,8 +140,21 @@ type UI struct {
 	logins   map[string]login // одноразовые токены входа
 	sessions map[string]session
 	attempts map[string]*attempt // попытки входа при включённой защите
+	messages map[string]message  // сообщения после действий форм (?msg=)
 	limits   [2]limiter          // защита от перебора пароля: локально, удалённо
 }
+
+// message — сообщение и ошибка после действия формы. Текст хранится на
+// сервере за сессией, а в адресе — только id: по ссылке с ?flash=/?error=
+// владельцу нельзя показать произвольный «системный» текст (код-ревью E.20).
+type message struct {
+	session      string
+	flash, error string
+	expires      time.Time
+}
+
+// messageTTL — сколько живёт сообщение после действия формы.
+const messageTTL = 5 * time.Minute
 
 type login struct {
 	expires time.Time
@@ -173,7 +186,7 @@ func (m mount) cookie() string {
 
 // New создаёт Web UI.
 func New(d *daemon.Daemon) *UI {
-	return &UI{D: d, Now: time.Now, logins: map[string]login{}, sessions: map[string]session{}, attempts: map[string]*attempt{},
+	return &UI{D: d, Now: time.Now, logins: map[string]login{}, sessions: map[string]session{}, attempts: map[string]*attempt{}, messages: map[string]message{},
 		Clients: agentsetup.Default(), Autostart: systemAutostart{}}
 }
 
@@ -275,7 +288,9 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		items := []map[string]any{}
 		for _, a := range pend {
 			items = append(items, map[string]any{"id": a.ID, "agent": a.Agent, "action": a.Action, "hash": audit.Short(a.PreviewHash),
-				"summary": strings.SplitN(a.Preview, "\n", 2)[0], "reason": a.Decision.Reason, "expires": a.Expires})
+				"summary": strings.SplitN(a.Preview, "\n", 2)[0], "reason": a.Decision.Reason, "expires": a.Expires,
+				// web_only — трей не даёт «Разрешить» одним нажатием (код-ревью E.5).
+				"web_only": approval.WebOnly(a.Action)})
 		}
 		_, n := u.D.Config.CurrentRaw()
 		seq, _, _ := u.D.Journal.Head()
@@ -438,7 +453,10 @@ func (u *UI) originOK(m mount, r *http.Request) bool {
 	if m.remote {
 		return o == "https://"+r.Host
 	}
-	return o == "http://"+u.Addr || strings.HasPrefix(o, "http://localhost:")
+	// Точно свой адрес: страница чужого сервера на localhost:<другой порт>
+	// проходила бы проверку (SameSite порт не различает).
+	_, port, _ := net.SplitHostPort(u.Addr)
+	return o == "http://"+u.Addr || (port != "" && o == "http://localhost:"+port)
 }
 
 // guard — проверка Host (защита от DNS rebinding) и заголовки безопасности.
@@ -516,18 +534,21 @@ func (u *UI) counts(v *view) {
 
 func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, s, ok := u.session(m, r)
+		sid, s, ok := u.session(m, r)
 		if !ok {
 			u.loginPage(w, m)
 			return
 		}
 		name, data, err := f(r)
-		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: data, Flash: r.URL.Query().Get("flash")}
+		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: data}
 		if err != nil {
 			v.Error = err.Error()
 		}
-		if e := r.URL.Query().Get("error"); e != "" && v.Error == "" {
-			v.Error = e
+		if fl, e := u.takeMessage(sid, r.URL.Query().Get("msg")); fl != "" || e != "" {
+			v.Flash = fl
+			if v.Error == "" {
+				v.Error = e
+			}
 		}
 		u.counts(&v)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -540,7 +561,7 @@ func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, erro
 // post — действие формы: сессия, CSRF-токен, Origin; результат — редирект или страница.
 func (u *UI) post(m mount, f func(w http.ResponseWriter, r *http.Request) map[string]any) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, s, ok := u.session(m, r)
+		sid, s, ok := u.session(m, r)
 		if !ok {
 			http.Error(w, "login required", 401)
 			return
@@ -563,7 +584,7 @@ func (u *UI) post(m mount, f func(w http.ResponseWriter, r *http.Request) map[st
 			return
 		}
 		if red, ok := res["redirect"].(string); ok {
-			http.Redirect(w, r, m.base+red, http.StatusSeeOther)
+			http.Redirect(w, r, m.base+u.stashMessage(sid, localPath(red)), http.StatusSeeOther)
 			return
 		}
 		name, _ := res["page"].(string)
@@ -583,6 +604,62 @@ func (u *UI) post(m mount, f func(w http.ResponseWriter, r *http.Request) map[st
 			http.Error(w, err.Error(), 500)
 		}
 	}
+}
+
+// localPath — адрес перехода внутри Web UI: путь от корня, без «//host» и
+// «\» (back приходит из формы — открытый редирект недопустим).
+func localPath(to string) string {
+	if !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") || strings.ContainsAny(to, "\\\r\n") {
+		return "/"
+	}
+	return to
+}
+
+// stashMessage переносит flash= и error= из адреса перехода в хранилище
+// сообщений сессии и оставляет в адресе только msg=<id>.
+func (u *UI) stashMessage(sid, to string) string {
+	path, frag, hasFrag := strings.Cut(to, "#")
+	p, rawq, _ := strings.Cut(path, "?")
+	q, err := url.ParseQuery(rawq)
+	if err != nil {
+		return to
+	}
+	fl, e := q.Get("flash"), q.Get("error")
+	if fl == "" && e == "" {
+		return to
+	}
+	q.Del("flash")
+	q.Del("error")
+	id := random()[:16]
+	now := u.Now()
+	u.mu.Lock()
+	for k, mm := range u.messages {
+		if now.After(mm.expires) {
+			delete(u.messages, k)
+		}
+	}
+	u.messages[id] = message{session: sid, flash: fl, error: e, expires: now.Add(messageTTL)}
+	u.mu.Unlock()
+	q.Set("msg", id)
+	out := p + "?" + q.Encode()
+	if hasFrag {
+		out += "#" + frag
+	}
+	return out
+}
+
+// takeMessage — сообщение по id из адреса, только для своей сессии.
+func (u *UI) takeMessage(sid, id string) (flash, errText string) {
+	if id == "" {
+		return "", ""
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	mm, ok := u.messages[id]
+	if !ok || mm.session != sid || u.Now().After(mm.expires) {
+		return "", ""
+	}
+	return mm.flash, mm.error
 }
 
 var owner = auth.OwnerVia("webui")

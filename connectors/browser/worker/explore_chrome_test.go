@@ -201,9 +201,27 @@ func TestRedactBody(t *testing.T) {
 		{"https://a/oauth/token", `{"x":1}`, "[hidden: response of a sign-in or token request]"},
 		{"https://a/api/x", `{"refresh_token":"abc","items":[1,2`, `{"refresh_token":"***","items":[1,2`},
 		{"https://a/api/x", `plain text`, `plain text`},
+		// под чувствительным ключом объект скрывается целиком
+		{"https://a/api/x", `{"session":{"id":"s1","key":"k1"},"debt":1}`, `{"debt":1,"session":"***"}`},
 	} {
 		if got := RedactBody(c.url, c.body); got != c.want {
 			t.Errorf("%s %s: %s", c.url, c.body, got)
+		}
+	}
+}
+
+func TestRedactURL(t *testing.T) {
+	hide := func(k string) bool { return k == "ehrId" }
+	for in, want := range map[string]string{
+		"https://a/cb?code=c1&x=1":                         "https://a/cb?code=***&x=1",
+		"https://a/cb#access_token=t1&id_token=t2&scope=s": "https://a/cb#access_token=***&id_token=***&scope=s",
+		"https://a/cb?x=1#code=c1&state=st":                "https://a/cb?x=1#code=***&state=***",
+		"https://a/#/callback?code=c1&ehrId=5&y=2":         "https://a/#/callback?code=***&ehrId=***&y=2",
+		"https://a/page#section-2":                         "https://a/page#section-2",
+		"https://a/page":                                   "https://a/page",
+	} {
+		if got := RedactURL(in, hide); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
 		}
 	}
 }

@@ -101,6 +101,13 @@ func buildMenu(t *tray.Tray, st *tray.State, refresh chan<- struct{}) {
 			sub := systray.AddMenuItem(p.Title(), p.Summary)
 			sub.AddSubMenuItem(p.Summary, "").Disable()
 			sub.AddSubMenuItem(tray.T("why")+p.Reason, "").Disable()
+			if p.NeedsWebUI() {
+				// Самонастройка: правки видны целиком только в Web UI — разрешить
+				// можно только там; отклонить — и здесь (как approval.WebOnly).
+				onClick(sub.AddSubMenuItem(tray.T("decide_in_ui"), ""), func() { openUI(t) })
+				onClick(sub.AddSubMenuItem(tray.T("deny"), ""), func() { decide(t, p.ID, false, refresh) })
+				continue
+			}
 			onClick(sub.AddSubMenuItem(tray.T("allow"), ""), func() { decide(t, p.ID, true, refresh) })
 			onClick(sub.AddSubMenuItem(tray.T("deny"), ""), func() { decide(t, p.ID, false, refresh) })
 			onClick(sub.AddSubMenuItem(tray.T("details"), ""), func() { openUI(t) })
@@ -139,7 +146,7 @@ func openUI(t *tray.Tray) {
 	defer cancel()
 	u, err := t.LoginURL(ctx)
 	if err == nil {
-		err = cli.OpenURL(u)
+		err = cli.OpenLoginURL(u)
 	}
 	if err != nil {
 		_, body := tray.Problem(err)

@@ -13,9 +13,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Уровни доверия издателя.
@@ -30,8 +32,13 @@ var TrustLevels = []string{TrustVerified, TrustPublisher, TrustCommunity}
 
 // Index — индекс registry (index.json) с подписью index.json.sig.
 type Index struct {
-	Version    int                  `json:"version"`
-	Updated    string               `json:"updated,omitempty"`
+	Version int `json:"version"`
+	// Updated — дата (YYYY-MM-DD) или время RFC 3339 публикации индекса: хост
+	// не принимает индекс старше уже виденного (CheckNewer, защита от отката).
+	Updated string `json:"updated,omitempty"`
+	// Expires — срок годности индекса (YYYY-MM-DD или RFC 3339; пусто — без
+	// срока): просроченный индекс хост не принимает (защита от заморозки).
+	Expires    string               `json:"expires,omitempty"`
 	Publishers map[string]Publisher `json:"publishers"`
 	Connectors map[string]Entry     `json:"connectors"`
 	Revoked    []Revocation         `json:"revoked,omitempty"`
@@ -70,6 +77,84 @@ type Revocation struct {
 	Connector string `json:"connector"`
 	Version   string `json:"version"`
 	Reason    string `json:"reason"`
+}
+
+// ReservedNames — имена, которые коннектор в registry и магазине носить не
+// может: каталоги и служебные имена хоста в каталоге коннекторов (data — KV
+// всех коннекторов) и имена действий ядра (gate4ai.*, egress.*, secret.use).
+var ReservedNames = []string{"data", "gate4ai", "egress", "secret"}
+
+// Reserved — имя коннектора зарезервировано (ReservedNames).
+func Reserved(name string) bool {
+	for _, r := range ReservedNames {
+		if r == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ErrRollback — индекс старше уже виденного (откат) или просрочен.
+var ErrRollback = errors.New("registry: index is older than the one seen before (rollback) or expired")
+
+// parseWhen — дата YYYY-MM-DD или время RFC 3339.
+func parseWhen(s string) (time.Time, bool) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
+// compareWhen сравнивает отметки времени индекса; пустая — самая старая.
+func compareWhen(a, b string) int {
+	ta, oka := parseWhen(a)
+	tb, okb := parseWhen(b)
+	switch {
+	case a == b:
+		return 0
+	case a == "":
+		return -1
+	case b == "":
+		return 1
+	case oka && okb:
+		return ta.Compare(tb)
+	}
+	return strings.Compare(a, b)
+}
+
+// CheckNewer — индекс ix можно принять вместо уже виденного prev (nil — не было):
+// updated не старше, при той же отметке не пропал ни один отзыв, срок
+// expires не истёк к now. Иначе ErrRollback.
+func (ix *Index) CheckNewer(prev *Index, now time.Time) error {
+	if ix.Expires != "" {
+		t, ok := parseWhen(ix.Expires)
+		if !ok {
+			return fmt.Errorf("%w: bad expires %q", ErrRollback, ix.Expires)
+		}
+		if len(ix.Expires) == len("2006-01-02") {
+			t = t.AddDate(0, 0, 1) // дата — до конца дня
+		}
+		if now.After(t) {
+			return fmt.Errorf("%w: expired %s", ErrRollback, ix.Expires)
+		}
+	}
+	if prev == nil {
+		return nil
+	}
+	switch c := compareWhen(ix.Updated, prev.Updated); {
+	case c < 0:
+		return fmt.Errorf("%w: updated %q, seen %q", ErrRollback, ix.Updated, prev.Updated)
+	case c == 0:
+		for _, r := range prev.Revoked {
+			if !slices.Contains(ix.Revoked, r) {
+				return fmt.Errorf("%w: revocation of %s %s is missing in an index with the same updated %q", ErrRollback, r.Connector, r.Version, ix.Updated)
+			}
+		}
+	}
+	return nil
 }
 
 // Ошибки ParseIndex.
@@ -138,6 +223,9 @@ func (ix *Index) Check() error {
 		}
 	}
 	for name, e := range ix.Connectors {
+		if Reserved(name) {
+			errs = append(errs, fmt.Sprintf("connector %s: the name is reserved", name))
+		}
 		if _, ok := ix.Publishers[e.Publisher]; !ok {
 			errs = append(errs, fmt.Sprintf("connector %s: unknown publisher %q", name, e.Publisher))
 		}

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/approval"
 	"github.com/gate4ai/gate4ai/internal/daemon"
@@ -69,8 +70,9 @@ func setup(ctx context.Context, d *daemon.Daemon, log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		srv := &http.Server{Handler: u.Handler()}
-		go func() { <-ctx.Done(); srv.Close() }()
+		// Останавливается вместе с API daemon (Shutdown), до закрытия баз.
+		srv := &http.Server{Handler: u.Handler(), ReadHeaderTimeout: 10 * time.Second}
+		d.TrackServer(srv)
 		go srv.Serve(l)
 		log.Info("web UI", "addr", "http://"+u.Addr, "login", "gate4ai ui")
 	}
