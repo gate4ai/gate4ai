@@ -2,6 +2,10 @@
 {{$d := .Data}}{{$m := $d.Manifest}}
 <div class="row between"><h2>{{$d.Name}} <span class="muted">{{$m.Version}}</span></h2><a href="{{.Base}}/connectors">← Коннекторы</a></div>
 <p>{{$m.Description}}</p>
+{{with $d.Calls}}<p class="help" style="margin-top:-.4rem">Работает через: {{range .}}<details class="chip"><summary>{{.Name}}</summary><div>
+<b><code>{{.Name}}</code></b>{{with .Description}} — {{.}}{{end}}
+{{with .Sites}}<details open><summary>Только на сайтах ({{len .}})</summary><ul style="margin:.2rem 0">{{range .}}<li><code>{{.}}</code></li>{{end}}</ul></details>{{else}}<p class="muted" style="margin:.3rem 0 0">Сайты не ограничены коннектором.</p>{{end}}
+<p class="muted" style="margin:.3rem 0 0">{{with .UsedBy}}Нужно действиям: {{join . ", "}}.{{else}}Нужно всем действиям.{{end}} Разрешение действия покрывает его подвызовы.</p></div></details>{{end}}</p>{{end}}
 
 <div class="card"><h3>Настройки</h3>
 {{if $d.Fields}}
@@ -25,14 +29,32 @@
 {{range $p := $d.Profiles}}{{$prof := index $d.Config.Profiles $p}}<label class="inline"><input type="checkbox" name="profiles" value="{{$p}}" {{if has $prof.Connectors $d.Name}}checked{{end}}> {{$p}}</label>{{else}}<p class="muted">Профилей нет.</p>{{end}}
 <p><button>Сохранить</button> <span class="help">Агенты профиля видят действия коннектора; что разрешено — в «Правилах».</span></p></form></div>
 
-<div class="card"><h3>Действия</h3>
-<table><tr><th>Действие</th><th>Класс</th><th>Без правил</th><th>Описание</th></tr>
-{{range $m.Actions}}<tr><td><code>{{$d.Name}}.{{.Name}}</code></td><td><span class="badge">{{classRu .Class}}</span></td><td>{{if eq .Class "read"}}<span class="allow">разрешено</span>{{else}}<span class="ask">спрашивать</span>{{end}}</td><td>{{.Description}}</td></tr>{{end}}
-</table></div>
+<div class="card" id="actions"><h3>Действия</h3>
+{{if gt (len $d.Access) 1}}<div class="tabs"><span class="muted" style="padding:.4rem 0">Решения в профиле:</span>{{range $d.Access}}<a href="{{$.Base}}/connectors/{{$d.Name}}?profile={{.}}#actions" class="{{if eq . $d.Profile}}on{{end}}">{{.}}</a>{{end}}</div>{{end}}
+<table><tr><th>Действие</th><th>Класс</th><th>Решение{{if eq (len $d.Access) 1}} <span class="muted">(профиль {{$d.Profile}})</span>{{end}}</th><th>Описание</th></tr>
+{{range $d.Actions}}<tr class="has-more"><td><code>{{.Full}}</code></td><td><span class="badge">{{classRu .Class}}</span></td>
+<td>{{if eq .Decision "mixed"}}<span class="muted">правила с условием</span><div class="help">{{range .RuleIDs}}<a href="{{$.Base}}/policy?profile={{$d.Profile}}#rule-{{.}}">{{.}}</a> {{end}}</div>
+{{else if not $d.Profile}}<span class="{{.Default}}">{{effectRu .Default}}</span><div class="help">без правил; нет профилей с доступом</div>
+{{else}}<form method="post" action="{{$.Base}}/connectors/{{$d.Name}}/decision"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="{{.Name}}"><input type="hidden" name="profile" value="{{$d.Profile}}">
+<select name="effect" data-autosubmit aria-label="Решение для {{.Full}}">
+<option value="" {{if eq .Decision ""}}selected{{end}}>без правил: {{effectRu .Default}}</option>
+<option value="allow" {{if eq .Decision "allow"}}selected{{end}}>разрешать</option>
+<option value="ask" {{if eq .Decision "ask"}}selected{{end}}>спрашивать</option>
+<option value="deny" {{if eq .Decision "deny"}}selected{{end}}>запрещать</option></select><noscript><button class="small">Сохранить</button></noscript></form>{{end}}</td>
+<td>{{.Description}}</td></tr>
+<tr class="more"><td colspan="4"><details><summary>Подробнее</summary>
+{{with .Calls}}<p style="margin:.3rem 0 .1rem"><b>Подвызовы</b> — разрешаются вместе с действием:</p><ul style="margin:0">{{range .}}<li><code>{{.Name}}</code>{{with .Reason}} — {{.}}{{end}}{{with .Sites}} <span class="muted">(сайты: {{join . ", "}})</span>{{end}}</li>{{end}}</ul>{{end}}
+{{with .Args}}<p style="margin:.3rem 0 .1rem"><b>Параметры</b></p><ul style="margin:0">{{range .}}<li><code>{{.Name}}</code>{{with .Description}} — {{.}}{{end}}</li>{{end}}</ul>{{end}}
+{{with .Example}}<p style="margin:.3rem 0 .1rem"><b>Пример</b> <code>{{.}}</code></p>{{end}}
+{{if .Untrusted}}<p class="help" style="margin:.3rem 0">Результат — недоверенный контент (со страницы или из письма): правила видят, откуда взяты данные.</p>{{end}}
+{{if and (not .Calls) (not .Args) (not .Example)}}<p class="muted" style="margin:.3rem 0">Без параметров и подвызовов.</p>{{end}}
+</details></td></tr>{{end}}
+</table>
+<p class="help">Решение — правило без условия в профиле{{with $d.Profile}} <code>{{.}}</code>{{end}}; «без правил» — по классу: чтение разрешено, остальное спрашивается. Правила с условиями — в <a href="{{.Base}}/policy{{with $d.Profile}}?profile={{.}}{{end}}">«Правилах»</a>.</p></div>
 
-{{if not $d.Builtin}}<div class="card"><h3>Возможности и установка</h3>
+{{if not $d.Builtin}}<div class="card"><details><summary>О коннекторе: возможности и установка</summary>
 <ul>{{range $d.Info.Capabilities}}<li>{{capRu .}} <span class="muted"><code>{{.}}</code></span></li>{{else}}<li class="muted">нет</li>{{end}}</ul>
-<p class="help">Издатель {{or $d.Info.Publisher "—"}} · доверие {{$d.Info.Trust}} · источник {{$d.Info.Source}} · установлен {{ts $d.Info.InstalledAt}}</p>
-<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/remove" data-confirm="Удалить коннектор {{$d.Name}}? Правила с его действиями тоже будут удалены (откат — в версиях политики)."><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger">Удалить коннектор</button></form>
+<p class="help">Издатель {{or $d.Info.Publisher "—"}} · доверие {{$d.Info.Trust}} · источник {{$d.Info.Source}} · установлен {{ts $d.Info.InstalledAt}}</p></details>
+<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/remove" data-confirm="Удалить коннектор {{$d.Name}}? Правила с его действиями тоже будут удалены (откат — в версиях политики)." style="margin-top:.6rem"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger small">Удалить коннектор</button></form>
 </div>{{end}}
 {{template "foot"}}

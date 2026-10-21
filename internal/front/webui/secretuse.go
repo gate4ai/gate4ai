@@ -12,11 +12,17 @@ import (
 	"github.com/gate4ai/gate4ai/internal/secrets/vault"
 )
 
-// SecretUse — место, где используется секрет Vault (колонка «Используется» на /vault).
+// SecretUse — место, где используется секрет Vault (колонка «Используется» на /vault):
+// Pre + Name + Post, ссылка — только на имени.
 type SecretUse struct {
-	Text string // «Telegram-бот (подтверждения)», «коннектор email»
-	Link string // страница Web UI с этой настройкой, без Base
+	Pre  string // «коннектор », «учётка »
+	Name string // «email», «@emias», «Telegram-бот»
+	Post string // « (подтверждения)», « (не установлен)»
+	Link string // страница Web UI с этой настройкой, без Base; «#…» — строка на этой же странице
 }
+
+// Text — место одной строкой.
+func (u SecretUse) Text() string { return u.Pre + u.Name + u.Post }
 
 // secretUses собирает ссылки на алиасы Vault из разобранной конфигурации и
 // манифестов установленных коннекторов — те же места, откуда ядро берёт
@@ -38,27 +44,27 @@ func secretUses(cfg *config.Config, ms []manifest.Manifest) map[string][]SecretU
 		out[a] = append(out[a], u)
 	}
 	if t := cfg.Approvals.Telegram; t != nil && t.Token != "" {
-		u := SecretUse{"Telegram-бот (подтверждения)", "/approvals/telegram"}
+		u := SecretUse{Name: "Telegram-бот", Post: " (подтверждения)", Link: "/approvals/telegram"}
 		if !cfg.ChannelOn("telegram") {
-			u.Text += ", канал выключен"
+			u.Post = " (подтверждения, канал выключен)"
 		}
 		add(t.Token, u)
 	}
 	if r := cfg.Relay; r.Token != "" {
-		add(r.Token, SecretUse{"relay (подключение устройства)", "/settings#relay"})
+		add(r.Token, SecretUse{Name: "relay", Post: " (подключение устройства)", Link: "/settings#relay"})
 	}
 	for _, s := range cfg.Egress.Secrets {
 		if s.Secret != "" {
-			add(s.Secret, SecretUse{"Egress Proxy: " + s.Domain, ""})
+			add(s.Secret, SecretUse{Pre: "Egress Proxy: ", Name: s.Domain})
 		}
 	}
 	for _, alias := range sortedAccounts(cfg) {
 		for _, sec := range cfg.Credentials[alias].Secrets() {
-			add(sec, SecretUse{"учётка " + alias + " (вход на " + strings.Join(cfg.Credentials[alias].Bind, ", ") + ")", "/vault#accounts"})
+			add(sec, SecretUse{Pre: "учётка ", Name: alias, Post: " (вход на " + strings.Join(cfg.Credentials[alias].Bind, ", ") + ")", Link: "#" + AccountAnchor(alias)})
 		}
 	}
 	if k := cfg.Browser.ModelKey; k != "" { // раздел browser до v0.6, переносится в connectors.browser
-		add(k, SecretUse{"браузер: ключ модели", ""})
+		add(k, SecretUse{Pre: "браузер: ", Name: "ключ модели"})
 	}
 	installed := map[string]manifest.Manifest{}
 	for _, m := range ms {
@@ -76,10 +82,10 @@ func secretUses(cfg *config.Config, ms []manifest.Manifest) map[string][]SecretU
 	sort.Strings(names)
 	for _, name := range names {
 		settings := cfg.Connectors[name]
-		u := SecretUse{"коннектор " + name, "/connectors/" + name}
+		u := SecretUse{Pre: "коннектор ", Name: name, Link: "/connectors/" + name}
 		m, ok := installed[name]
 		if !ok {
-			u = SecretUse{"коннектор " + name + " (не установлен)", ""}
+			u = SecretUse{Pre: "коннектор ", Name: name, Post: " (не установлен)"}
 		}
 		// Возможности манифеста с подставленными настройками экземпляра.
 		var tmpls []string
@@ -121,6 +127,12 @@ func settingAliases(v any, f func(string)) {
 		}
 	}
 }
+
+// AccountAnchor — якорь строки учётки на /vault («acc-emias» для «@emias»).
+func AccountAnchor(alias string) string { return "acc-" + strings.TrimPrefix(alias, "@") }
+
+// SecretAnchor — якорь строки секрета на /vault.
+func SecretAnchor(alias string) string { return "sec-" + strings.TrimPrefix(alias, "@") }
 
 func sortedAccounts(cfg *config.Config) []string {
 	out := make([]string, 0, len(cfg.Credentials))

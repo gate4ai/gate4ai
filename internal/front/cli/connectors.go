@@ -30,7 +30,7 @@ import (
 const connectorsUsage = `usage:
   gate4ai connectors list
   gate4ai connectors new <name> --site <domain> [-o folder]   a WASM connector over the browser to start from
-  gate4ai connectors install <file.g4c | name[@version]> [--dev] [--yes]
+  gate4ai connectors install <file.g4c | https://…/file.g4c | name[@version]> [--dev] [--yes]
   gate4ai connectors install <source folder> [--yes] [--watch]   build from Go sources (your own build, like --dev)
   gate4ai connectors update <name> [--yes] [--watch]           a connector from a folder is rebuilt from it;
                                                                 --watch: rebuild on every change of the sources

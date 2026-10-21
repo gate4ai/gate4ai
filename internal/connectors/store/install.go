@@ -134,7 +134,7 @@ func isFile(source string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-// Prepare проверяет пакет из файла (.g4c), из папки с исходниками (сборка,
+// Prepare проверяет пакет из файла или по адресу http(s) (.g4c), из папки с исходниками (сборка,
 // только с dev) или из registry (имя[@версия]).
 // dev — разрешить пакет владельца без доверенной подписи (доверие local).
 func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, error) {
@@ -142,7 +142,7 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 	var err error
 	if dir, ok := SourceFolder(source); ok {
 		p, err = o.prepareDir(ctx, dir, dev)
-	} else if isFile(source) {
+	} else if isURL(source) || isFile(source) {
 		p, err = o.prepareFile(ctx, source, dev)
 	} else {
 		p, err = o.prepareRegistry(ctx, source)
@@ -190,8 +190,9 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 	return p, nil
 }
 
+// prepareFile — пакет .g4c из файла или по адресу http(s) (сборка не из магазина).
 func (o Options) prepareFile(ctx context.Context, source string, dev bool) (*Plan, error) {
-	b, err := os.ReadFile(source)
+	b, err := fetchN(ctx, source, maxNativePackage)
 	if err != nil {
 		return nil, err
 	}

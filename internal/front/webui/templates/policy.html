@@ -17,15 +17,15 @@
 <div class="row between"><h3>Правила профиля</h3><a class="btn primary" href="{{.Base}}/policy/rule?profile={{$d.Profile}}">+ Правило</a></div>
 <p class="help">Порядок правил на решение не влияет: если сработало несколько, запрет сильнее вопроса, а вопрос сильнее разрешения. Стрелки — только для удобства чтения.</p>
 <table><tr><th>Действие</th><th>Решение</th><th>Условие</th><th>Причина</th><th></th></tr>
-{{range $p.Rules}}<tr id="rule-{{.ID}}"><td><code>{{.Action}}</code><div class="help">{{.ID}}</div></td>
+{{range $d.Groups}}{{if .Single}}{{with index .Rules 0}}<tr id="rule-{{.ID}}"><td><code>{{.Action}}</code><div class="help">{{.ID}}</div></td>
 <td class="{{.Effect}}"><b>{{effectRu .Effect}}</b></td>
 <td>{{if isCode .When}}<code>{{.When}}</code>{{else}}{{describe .When}}{{end}}</td><td>{{.Reason}}</td>
-<td><div class="row">
-<a class="btn small" href="{{$.Base}}/policy/rule?profile={{$d.Profile}}&id={{.ID}}">Изменить</a>
-<form method="post" action="{{$.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="-1"><button class="small" title="выше (на решение не влияет)">↑</button></form>
-<form method="post" action="{{$.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="1"><button class="small" title="ниже (на решение не влияет)">↓</button></form>
-<form method="post" action="{{$.Base}}/policy/rule/delete" class="inline" data-confirm="Удалить правило {{.ID}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><button class="small danger">Удалить</button></form>
-</div></td></tr>
+<td>{{template "rule_buttons" (dict "V" $ "Profile" $d.Profile "ID" .ID "Move" true)}}</td></tr>{{end}}
+{{else}}<tr class="group"{{range .Rules}} data-rule="{{.ID}}"{{end}}><td><details><summary title="Правила одинаковые, кроме действия, — собраны в группу. В политике они остаются отдельными."><code>{{.Label}}</code> <span class="muted">· правил: {{len .Rules}}</span></summary>
+<table>{{range .Rules}}<tr id="rule-{{.ID}}"><td><code>{{.Action}}</code><div class="help">{{.ID}}{{with .Reason}} · {{.}}{{end}}</div></td><td>{{template "rule_buttons" (dict "V" $ "Profile" $d.Profile "ID" .ID)}}</td></tr>{{end}}</table></details></td>
+<td class="{{.Effect}}"><b>{{effectRu .Effect}}</b></td>
+<td>{{if isCode .When}}<code>{{.When}}</code>{{else}}{{describe .When}}{{end}}</td><td>{{if .Mixed}}<span class="muted">разные — раскройте группу</span>{{else}}{{.Reason}}{{end}}</td>
+<td></td></tr>{{end}}
 {{else}}<tr><td colspan="5" class="muted">Правил нет — действуют значения по умолчанию. Начните с <a href="{{$.Base}}/policy/templates?profile={{$d.Profile}}">шаблона</a>.</td></tr>{{end}}
 {{range $p.Limits}}<tr><td><code>{{.Action}}</code><div class="help">{{.ID}}</div></td><td class="deny"><b>лимит</b></td>
 <td>{{if .PerDay}}не больше {{.PerDay}} в сутки{{end}}{{if .AmountPerDay}} сумма не больше {{.AmountPerDay}} в сутки{{end}}</td><td>{{.Reason}}</td>
@@ -66,3 +66,9 @@
 <td>{{if ne .N $d.Version}}<form method="post" action="{{$.Base}}/policy/rollback" data-confirm="Вернуть версию {{.N}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.N}}"><input type="hidden" name="back" value="/policy?profile={{$d.Profile}}"><button class="small">Вернуть</button></form>{{else}}<span class="muted">текущая</span>{{end}}</td></tr>{{end}}
 </table>
 {{template "foot"}}
+{{define "rule_buttons"}}{{$v := .V}}<div class="row">
+<a class="btn small" href="{{$v.Base}}/policy/rule?profile={{.Profile}}&id={{.ID}}">Изменить</a>
+{{if .Move}}<form method="post" action="{{$v.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="profile" value="{{.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="-1"><button class="small" title="выше (на решение не влияет)">↑</button></form>
+<form method="post" action="{{$v.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="profile" value="{{.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="1"><button class="small" title="ниже (на решение не влияет)">↓</button></form>{{end}}
+<form method="post" action="{{$v.Base}}/policy/rule/delete" class="inline" data-confirm="Удалить правило {{.ID}}?"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="profile" value="{{.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><button class="small danger">Удалить</button></form>
+</div>{{end}}

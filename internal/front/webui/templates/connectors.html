@@ -8,16 +8,28 @@
 <ul>{{range .Capabilities}}<li>{{capRu .}} <span class="muted"><code>{{.}}</code></span></li>{{else}}<li>никаких: только вычисления</li>{{end}}</ul>
 <p>Действия: {{range .Classes}}<span class="badge">{{classRu .}}</span> {{end}} — каждое проходит ваши правила; без правил чтение разрешено, остальное спрашивается.</p>
 {{range .Warnings}}<p class="warn">{{.}}</p>{{end}}
-<form method="post" action="{{$.Base}}/connectors/install"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="source" value="{{.Connector}}">
+{{if $d.Local}}<p class="help">Не из магазина: <code>{{$d.Src}}</code>{{if $d.Dev}} · своя сборка без подписи{{end}}</p>{{end}}
+<form method="post" action="{{$.Base}}/connectors/install"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="source" value="{{if $d.Local}}{{$d.Src}}{{else}}{{.Connector}}{{end}}">
+{{if $d.Local}}<input type="hidden" name="local" value="1">{{if $d.Dev}}<input type="hidden" name="dev" value="1">{{end}}{{end}}
 {{range .Capabilities}}<input type="hidden" name="consent" value="{{.}}">{{end}}
 {{if $d.Profiles}}<label>Сразу дать доступ профилям</label>{{range $d.Profiles}}<label class="inline"><input type="checkbox" name="profiles" value="{{.}}" checked> {{.}}</label>{{end}}{{end}}
 <p class="row"><button class="primary">Согласен, установить</button> <a href="{{$.Base}}/connectors">Отмена</a></p></form>
 </div>{{end}}
 
 <div class="row between"><h2>Коннекторы</h2>
-<form method="post" action="{{.Base}}/connectors/refresh"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">Обновить каталог</button></form></div>
+<div class="row"><a class="btn small" href="#m-local">Поставить не из магазина…</a>
+<form method="post" action="{{.Base}}/connectors/refresh"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">Обновить каталог</button></form></div></div>
+<div class="modal" id="m-local" role="dialog" aria-modal="true" aria-labelledby="m-local-h"><div class="box"><h3 id="m-local-h">Поставить не из магазина</h3>
+<form method="get" action="{{.Base}}/connectors"><input type="hidden" name="local" value="1">
+<label>Папка, файл или адрес сборки</label><input name="install" required placeholder="~/projects/lk_emias  ·  ~/bin/mail.g4c  ·  https://…/mail.g4c" value="{{if $d.Local}}{{$d.Src}}{{end}}">
+<ul class="help" style="padding-left:1.1rem"><li><b>Папка с исходниками</b> (где лежит <code>manifest.yaml</code>) — gate4.ai соберёт коннектор сам; нужен Go.</li>
+<li><b>Файл</b> <code>.g4c</code> на этом компьютере или <b>адрес</b> <code>https://…/*.g4c</code>.</li>
+<li>Путь вводится текстом: браузер не сообщает сайту, где лежит выбранная папка, а gate4.ai работает на этом же компьютере.</li></ul>
+<label class="inline"><input type="checkbox" name="dev" value="1" {{if or $d.Dev (not $d.Local)}}checked{{end}}> своя сборка: поставить без подписи доверенного издателя</label>
+<p class="help">Без галочки ставится только пакет, подписанный издателем магазина или ключом из <code>store.trusted_keys</code>. Сборку из папки ставят только с галочкой.</p>
+<div class="actions"><a class="btn" href="#" data-close>Отмена</a><button class="primary">Дальше — проверить возможности</button></div></form></div></div>
 <p class="muted">Коннектор — модуль, через который агент работает с почтой, файлами или сайтами. Он видит только то, что вы разрешили, и не знает ваших паролей.</p>
-{{if $d.IndexError}}<div class="note">Каталог магазина недоступен: {{$d.IndexError}}. {{if not $d.Registry}}<a href="{{.Base}}/settings#store">Настроить магазин</a>.{{end}} Коннектор из файла: <code>gate4ai connectors install файл.g4c</code>.</div>{{end}}
+{{if $d.IndexError}}<div class="note">Каталог магазина недоступен: {{$d.IndexError}}. {{if not $d.Registry}}<a href="{{.Base}}/settings#store">Настроить магазин</a>.{{end}} Коннектор из файла или папки — <a href="#m-local">«Поставить не из магазина»</a>.</div>{{end}}
 <div class="grid">
 {{range $d.Items}}
 <div class="card" style="margin:0">

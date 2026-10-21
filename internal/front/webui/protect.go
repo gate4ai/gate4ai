@@ -58,6 +58,25 @@ func (p Protection) valid() error {
 	return nil
 }
 
+// lastMethod — единственный включённый способ входа (link, password, telegram):
+// его не выключить, пока не включён другой. "" — включено несколько.
+func (p Protection) lastMethod() string {
+	var on []string
+	if !p.NoLink {
+		on = append(on, "link")
+	}
+	if p.Password != "" {
+		on = append(on, "password")
+	}
+	if p.Telegram {
+		on = append(on, "telegram")
+	}
+	if len(on) == 1 {
+		return on[0]
+	}
+	return ""
+}
+
 // Requires — что нужно для входа, кроме ссылки: password, telegram.
 func (p Protection) Requires() []string {
 	out := []string{}
@@ -464,6 +483,9 @@ func (u *UI) authorizeProtection(r *http.Request, p Protection) (string, error) 
 	}
 	if p.Password != "" {
 		if err := u.verifyPassword(local, p.Password, r.PostForm.Get("current")); err != nil {
+			if err.Error() == "неверный пароль" {
+				return "", errors.New("текущий пароль не подошёл")
+			}
 			return "", fmt.Errorf("текущий пароль: %v", err)
 		}
 	}
@@ -512,20 +534,25 @@ func (u *UI) setLoginPassword(w http.ResponseWriter, r *http.Request) map[string
 }
 
 func (u *UI) setLoginTelegram(w http.ResponseWriter, r *http.Request) map[string]any {
+	// Из мастера подключения бота — обратно в мастер.
+	back := "/settings#login"
+	if r.PostForm.Get("from") == "telegram" {
+		back = "/approvals/telegram?for=login#done"
+	}
 	p := u.Protection()
 	sid, err := u.authorizeProtection(r, p)
 	if err != nil {
-		return redirectErr("/settings#login", err)
+		return redirectErr(back, err)
 	}
 	on := r.PostForm.Get("on") == "1"
 	if on && u.confirmer() == nil {
-		return redirectErr("/settings#login", errors.New("сначала подключите Telegram-бот: Подтверждения → Каналы → Telegram"))
+		return redirectErr(back, errors.New("сначала подключите Telegram-бот: Подтверждения → Каналы → Telegram"))
 	}
 	p.Telegram = on
 	if err := u.saveProtection(sid, p); err != nil {
-		return redirectErr("/settings#login", err)
+		return redirectErr(back, err)
 	}
-	return redirect("/settings#login", map[bool]string{true: "Вход в Web UI теперь подтверждается в Telegram. Остальные сессии закрыты.",
+	return redirect(back, map[bool]string{true: "Вход в Web UI теперь подтверждается в Telegram. Остальные сессии закрыты.",
 		false: "Подтверждение входа в Telegram выключено."}[on])
 }
 

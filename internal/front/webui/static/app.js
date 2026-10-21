@@ -19,6 +19,69 @@
     if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function () {});
   });
 
+  // Ошибка действия — окном по центру экрана, а не строкой сверху: строку не
+  // видно, если страница прокручена вниз. Без JS остаётся строка.
+  var err = document.querySelector("[data-error]");
+  if (err) {
+    var m = document.createElement("div");
+    m.className = "modal err open";
+    m.setAttribute("role", "alertdialog");
+    m.setAttribute("aria-modal", "true");
+    m.innerHTML = '<div class="box"><h3>Не получилось</h3><div class="msg"></div><div class="actions"><button class="primary" data-close>Понятно</button></div></div>';
+    while (err.firstChild) m.querySelector(".msg").appendChild(err.firstChild);
+    err.replaceWith(m);
+    m.querySelector("[data-close]").focus();
+  }
+  // Сообщение об успехе — всплывающей плашкой, видной и на прокрученной
+  // странице (после действия она открывается на нужном блоке); гаснет сама.
+  var flash = document.querySelector("[data-flash]");
+  if (flash && location.hash) {
+    flash.classList.add("toast");
+    var hide = function () { flash.style.opacity = "0"; setTimeout(function () { flash.remove(); }, 400); };
+    setTimeout(hide, 6000);
+    flash.addEventListener("click", hide);
+  }
+
+  var closeModal = function (m) {
+    if (m.classList.contains("open")) { m.classList.remove("open"); return; }
+    location.hash = m.getAttribute("data-back") || "#"; // окно по якорю: возвращаемся к своему блоку
+  };
+  document.addEventListener("click", function (e) {
+    var m = e.target.closest(".modal");
+    if (!m) return;
+    var c = e.target.closest("[data-close]");
+    if (c && c.tagName === "A") return; // ссылка закрытия работает и без JS
+    if (c || e.target === m) { e.preventDefault(); closeModal(m); } // кнопка или клик по фону
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    document.querySelectorAll(".modal.open, .modal:target").forEach(closeModal);
+  });
+  // Окно по якорю: фокус в первое поле.
+  var focusTarget = function () {
+    var m = location.hash.length > 1 && document.getElementById(location.hash.slice(1));
+    if (m && m.classList.contains("modal")) {
+      var f = m.querySelector("input:not([type=hidden]),button");
+      if (f) f.focus();
+    }
+  };
+  // Ссылка на строку внутри закрытого блока (#rule-… в группе правил) раскрывает его.
+  var openTarget = function () {
+    var t = location.hash.length > 1 && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    for (var d = t && t.closest("details"); d; d = d.parentElement.closest("details")) d.open = true;
+    if (t && t.tagName === "TR") t.scrollIntoView({ block: "center" });
+  };
+  window.addEventListener("hashchange", openTarget);
+  openTarget();
+  window.addEventListener("hashchange", focusTarget);
+  focusTarget();
+
+  // Чип с описанием (<details class="chip">): открыт только один, клик мимо закрывает.
+  document.addEventListener("click", function (e) {
+    var mine = e.target.closest("details.chip");
+    document.querySelectorAll("details.chip[open]").forEach(function (d) { if (d !== mine) d.open = false; });
+  });
+
   // Подтверждение опасных действий: <form data-confirm="Текст?">.
   document.addEventListener("submit", function (e) {
     var f = e.target, q = f.getAttribute("data-confirm");
