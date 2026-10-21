@@ -1,14 +1,14 @@
 {{define "head"}}<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="{{Lang}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="csrf" content="{{.CSRF}}"><meta name="base" content="{{.Base}}">
 <title>gate4.ai — {{title .Nav}}</title>
 <style>
 :root{--bg:#fafafa;--fg:#1d1d1f;--muted:#6e6e73;--line:#e3e3e8;--accent:#0a58ca;--ok:#1a7f37;--bad:#b42318;--warn:#9a6700;--card:#fff}
 @media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f4;--muted:#a1a1a8;--line:#2c2c31;--accent:#6ea8fe;--ok:#4ac26b;--bad:#ff7b72;--warn:#d29922;--card:#1c1c1f}}
 *{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
-header{display:flex;gap:1.1rem;align-items:center;padding:.7rem 1.2rem;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
+header{display:flex;gap:1.1rem;align-items:center;padding:.7rem 1.2rem;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}header nav{display:flex;gap:1.1rem;align-items:center;flex-wrap:wrap}
 header b{margin-right:.6rem}header a{color:var(--muted);text-decoration:none;white-space:nowrap}header a.on{color:var(--fg);font-weight:600}
-.count{display:inline-block;min-width:1.3em;padding:0 .35em;margin-left:.25em;border-radius:1em;background:var(--accent);color:#fff;font-size:.75rem;text-align:center;font-weight:600}
+.count{display:inline-block;min-width:1.3em;padding:0 .35em;margin-left:.25em;border-radius:1em;background:var(--bad);color:#fff;font-size:.75rem;text-align:center;font-weight:600}
 main{max-width:72rem;margin:0 auto;padding:1.2rem}
 h2{margin:1.4rem 0 .6rem}h2:first-child{margin-top:0}h3{margin:1.2rem 0 .5rem}
 a{color:var(--accent)}
@@ -65,43 +65,72 @@ button.link{border:0;background:none;padding:0 .1rem;color:var(--muted);font-siz
 .cond2{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;padding:.6rem;border:1px solid var(--line);border-radius:8px;margin:.4rem 0;background:var(--bg)}
 [data-collapsed]:not(:target){display:none}
 tr.more>td{padding-top:0;border-bottom:1px solid var(--line)}tr.more details{margin:0 0 .3rem}tr.has-more>td{border-bottom:0}
-@media (max-width:640px){main{padding:.8rem}td,th{padding:.35rem .3rem}}
+
+.sp{flex:1}.hstate{color:var(--muted);font-size:.85rem;white-space:nowrap}.dot{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;background:var(--ok);margin-right:.35rem;vertical-align:middle}.dot.off{background:var(--line)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+.lang a{color:var(--muted);text-decoration:none;font-size:.85rem}.lang a.on{color:var(--fg);font-weight:600}
+.ask-card{border:1.5px solid var(--accent)}.ask-card .what{font-size:1.05rem}.preview{margin:.5rem 0;padding:.5rem .7rem;border-radius:8px;background:var(--bg);border:1px solid var(--line);font:13px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word;max-height:16rem;overflow:auto}.preview .add{color:var(--ok)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card);vertical-align:middle}.seg label{margin:0;font-weight:400;cursor:pointer}.seg input{position:absolute;opacity:0;width:1px;height:1px}.seg span{display:inline-block;padding:.3rem .75rem;border-right:1px solid var(--line);font-size:.92rem;color:var(--muted)}.seg label:last-child span{border-right:0}
+.seg input:checked+span{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--fg);font-weight:600}.seg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:-2px}.seg button{border:0;border-right:1px solid var(--line);border-radius:0;padding:.3rem .75rem;font-size:.92rem;color:var(--muted);background:none}.seg button:last-child{border-right:0}.seg button.on{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--fg);font-weight:600}
+.grp{display:flex;justify-content:space-between;gap:.8rem;align-items:center;padding:.5rem 0;border-bottom:1px solid var(--line);flex-wrap:wrap}.grp:last-child{border-bottom:0}
+details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:600}
+.layout{display:grid;grid-template-columns:13rem 1fr;gap:1.4rem}.side a{display:block;padding:.4rem .6rem;border-radius:8px;color:var(--fg);text-decoration:none}.side a.on{background:color-mix(in srgb,var(--accent) 10%,transparent);font-weight:600}.side .sep{margin:.9rem .6rem .3rem;color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.04em}
+.set{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:.8rem 0;border-bottom:1px solid var(--line);flex-wrap:wrap}.set:last-child{border-bottom:0}.set .d{max-width:36rem}
+.stepper{display:flex;gap:.4rem;margin:0 0 1.2rem;padding:0;list-style:none}.stepper li{flex:1;padding:.5rem .6rem;border-top:3px solid var(--line);color:var(--muted);font-size:.9rem}.stepper li.done{border-color:var(--ok);color:var(--fg)}.stepper li.on{border-color:var(--accent);color:var(--fg);font-weight:600}
+.tiles{display:grid;gap:.8rem;grid-template-columns:repeat(auto-fill,minmax(13rem,1fr));border:0;padding:0;margin:0}.tiles label{margin:0;font-weight:400}.tiles input{position:absolute;opacity:0;width:1px;height:1px}.tiles .tile{height:100%;cursor:pointer;border-width:1.5px}.tiles input:checked+.tile{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--card))}.tiles input:focus-visible+.tile{outline:2px solid var(--accent)}
+.found{color:var(--ok);font-size:.82rem;font-weight:600}.prompt{font:1rem/1.5 ui-monospace,Menlo,monospace;background:var(--bg);border:1px dashed var(--accent);border-radius:8px;padding:.6rem .8rem;flex:1}
+.feed{list-style:none;margin:0;padding:0}.feed li{display:flex;gap:.7rem;padding:.5rem 0;border-bottom:1px solid var(--line)}.feed li:last-child{border:0}.feed .t{flex:0 0 4rem;color:var(--muted);font-size:.85rem}
+.big{font-size:1.02rem;padding:.6rem 1.2rem}
+.skip{position:absolute;left:-9999px}.skip:focus{left:1rem;top:1rem;z-index:30;background:var(--card);padding:.4rem .8rem;border:1px solid var(--accent)}
+@media (max-width:700px){.layout{grid-template-columns:1fr}.side{display:flex;flex-wrap:wrap;gap:.2rem}.side .sep{flex-basis:100%}}
+@media (max-width:640px){main{padding:.8rem .8rem 5rem}td,th{padding:.35rem .3rem}header nav.main{position:fixed;bottom:0;left:0;right:0;z-index:12;background:var(--card);border-top:1px solid var(--line);justify-content:space-around;padding:.45rem .3rem calc(.45rem + env(safe-area-inset-bottom));gap:.2rem}header nav.main a{font-size:.82rem;text-align:center}}
+@media print{header nav.main,.lang{display:none}}
 </style>
 <script src="{{.Base}}/static/app.js" defer></script>
 </head><body>
+<a class="skip" href="#main">{{T "Skip to content"}}</a>
 <header><b>gate4.ai</b>
-<a href="{{.Base}}/" class="{{if eq .Nav "overview"}}on{{end}}">Обзор</a>
-<a href="{{.Base}}/approvals" class="{{if or (eq .Nav "approvals") (eq .Nav "telegram")}}on{{end}}">Подтверждения<span class="count" data-pending-count{{if not .Pending}} hidden{{end}}>{{.Pending}}</span></a>
-{{if not .Remote}}<a href="{{.Base}}/agents" class="{{if or (eq .Nav "agents") (eq .Nav "agent") (eq .Nav "agent_new")}}on{{end}}">Агенты</a>
-<a href="{{.Base}}/connectors" class="{{if or (eq .Nav "connectors") (eq .Nav "connector")}}on{{end}}">Коннекторы</a>
-<a href="{{.Base}}/policy" class="{{if or (eq .Nav "policy") (eq .Nav "rule") (eq .Nav "templates") (eq .Nav "policy_yaml")}}on{{end}}">Правила</a>{{end}}
-<a href="{{.Base}}/journal" class="{{if or (eq .Nav "journal") (eq .Nav "receipt")}}on{{end}}">Журнал</a>
-{{if not .Remote}}<a href="{{.Base}}/vault" class="{{if eq .Nav "vault"}}on{{end}}">Секреты</a>
-<a href="{{.Base}}/settings" class="{{if or (eq .Nav "settings") (eq .Nav "relay")}}on{{end}}">Настройки</a>{{end}}
-<form method="post" action="{{$.Base}}/logout" style="margin-left:auto"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">Выйти</button></form>
-</header><main>
-{{if .Remote}}<div class="note">Удалённый вход: подтверждения и журнал. Правила, агенты, коннекторы и секреты меняются только на самом компьютере.</div>{{end}}
-{{if .Flash}}<div class="flash" role="status" data-flash>{{.Flash}}</div>{{end}}
-{{if .Error}}{{with errView .Error}}<div class="error" role="alert" data-error>{{.Text}}{{with .Detail}}<details><summary>Подробности</summary><code>{{.}}</code></details>{{end}}</div>{{end}}{{end}}
+{{$s := .Section}}
+<nav class="main" aria-label="{{T "Sections"}}">
+<a href="{{.Base}}/" class="{{if eq $s "home"}}on{{end}}"{{if eq $s "home"}} aria-current="page"{{end}}>{{T "Home"}}<span class="count" data-pending-count{{if not .Pending}} hidden{{end}} aria-label="{{T "waiting for you"}}">{{.Pending}}</span></a>
+{{if not .Remote}}<a href="{{.Base}}/agents" class="{{if eq $s "agents"}}on{{end}}"{{if eq $s "agents"}} aria-current="page"{{end}}>{{T "Agents"}}</a>
+<a href="{{.Base}}/connectors" class="{{if eq $s "access"}}on{{end}}"{{if eq $s "access"}} aria-current="page"{{end}}>{{T "Access"}}</a>{{end}}
+<a href="{{.Base}}/journal" class="{{if eq $s "journal"}}on{{end}}"{{if eq $s "journal"}} aria-current="page"{{end}}>{{T "Journal"}}</a>
+{{if not .Remote}}<a href="{{.Base}}/settings" class="{{if eq $s "settings"}}on{{end}}"{{if eq $s "settings"}} aria-current="page"{{end}}>{{T "Settings"}}</a>{{end}}
+</nav>
+<span class="sp"></span>
+<span class="lang" aria-label="{{T "Language"}}">{{$p := .Path}}{{$b := .Base}}{{range langs}}<a href="{{$b}}/lang?l={{.Code}}&amp;back={{$p}}" class="{{if eq .Code Lang}}on{{end}}" lang="{{.Code}}">{{.Code | printf "%s"}}</a> {{end}}</span>
+<form method="post" action="{{$.Base}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">{{T "Sign out"}}</button></form>
+</header><main id="main">
+{{if .Remote}}<div class="note">{{T "Remote access: approvals and the journal. Agents, access rules and settings change only on the computer itself."}}</div>{{end}}
+{{if .Flash}}<div class="flash" role="status" data-flash>{{.Flash}}{{with .Detail}}<details><summary>{{T "Details"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}
+{{if .Error}}{{with errView .Error}}<div class="error" role="alert" data-error>{{.Text}}{{with .Detail}}<details><summary>{{T "Details"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}{{end}}
 {{end}}
 {{define "foot"}}</main></body></html>{{end}}
 
 {{define "pending"}}{{$v := .V}}{{$back := .Back}}
 {{range .List}}{{template "approval_card" (dict "V" $v "A" . "Back" $back)}}{{end}}
-<p class="muted" data-live-empty{{if .List}} hidden{{end}}>Нет запросов, ожидающих решения.</p>
+<p class="muted" data-live-empty{{if .List}} hidden{{end}}>{{T "Nothing is waiting for your decision."}}</p>
 {{end}}
-{{/* approval_card — карточка запроса; её же отдаёт /approvals/live для живого обновления. */}}
+{{/* approval_card — запрос подтверждения человеческим языком; её же отдаёт /approvals/live. */}}
 {{define "approval_card"}}{{$v := .V}}{{with .A}}
-<div class="card" data-approval="{{.ID}}">
-  <div class="row between"><div><b>{{.Agent}}</b> хочет <code>{{.Action}}</code> <span class="badge">{{classRu .Class}}</span></div>
-  <span class="muted">#{{short .PreviewHash}} · до {{ts .Expires}}</span></div>
-  <p style="margin:.4rem 0">Почему спрашиваем: {{.Decision.Reason}}{{if .Decision.RuleIDs}} <span class="muted">(правило {{join .Decision.RuleIDs ", "}})</span>{{end}}</p>
-  <pre class="box">{{.Preview}}</pre>
-  <form method="post" action="{{$v.Base}}/approvals/{{.ID}}" class="row" style="margin-top:.6rem" data-decide>
+<div class="card ask-card" data-approval="{{.ID}}">
+  <div class="row between"><div class="what"><b>{{.Agent}}</b> {{T "wants to"}} <b>{{.Title}}</b>{{with .Target}} <code>{{.}}</code>{{end}}</div>
+  <span class="muted" title="{{ts .Expires}}">{{left .Expires}}</span></div>
+  {{with .Preview}}<div class="preview" aria-label="{{T "What will be written or sent"}}">{{if $.A.Append}}<span class="add">+ {{.}}</span>{{else}}{{.}}{{end}}</div>{{end}}
+  {{range .Args}}<div class="help"><code>{{.K}}</code>: {{.V}}</div>{{end}}
+  <p class="help" style="margin:.4rem 0">{{T "Why you are asked:"}} {{.Why}}</p>
+  <form method="post" action="{{$v.Base}}/approvals/{{.ID}}" class="row" style="margin-top:.5rem" data-decide>
     <input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}">
-    <button class="primary" name="decision" value="approve">Разрешить</button>
-    <button class="danger" name="decision" value="reject">Отклонить</button>
-    {{if not $v.Remote}}<button name="decision" value="approve_rule" title="Разрешить и перейти к созданию правила">Разрешить и не спрашивать впредь…</button>{{end}}
+    <button class="primary" name="decision" value="approve">{{T "Allow"}}</button>
+    {{if and (not $v.Remote) .Always}}<button name="decision" value="approve_always">{{.Always}}</button>{{end}}
+    <span class="sp"></span>
+    <button class="danger" name="decision" value="reject">{{T "Deny"}}</button>
   </form>
+  <details><summary>{{T "Technical details"}}</summary><p class="help"><code>{{.Action}}</code> · {{class .Class}} · #{{short .PreviewHash}} · {{T "until"}} {{ts .Expires}}{{if .Decision.RuleIDs}} · {{T "rule"}} {{join .Decision.RuleIDs ", "}}{{end}}</p>
+  {{with .Desc}}<p class="help">{{.}}</p>{{end}}
+  {{if not $v.Remote}}<form method="post" action="{{$v.Base}}/approvals/{{.ID}}" data-decide><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}"><button class="small" name="decision" value="approve_rule">{{T "Allow and write a custom rule…"}}</button></form>{{end}}</details>
 </div>
 {{end}}{{end}}
+
+{{/* entry_line — действие из журнала одной строкой. */}}
+{{define "entry_line"}}{{.Title}}{{with .Target}} · <code>{{.}}</code>{{end}}{{end}}

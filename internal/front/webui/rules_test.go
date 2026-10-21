@@ -37,7 +37,7 @@ func TestBuildWhenCompilesAndReads(t *testing.T) {
 			t.Fatalf("%s does not compile: %v", got, err)
 		}
 		if tc.read != "" {
-			if s, ok := DescribeWhen(got); !ok || s != tc.read {
+			if s, ok := describeWhen(langRU, got); !ok || s != tc.read {
 				t.Fatalf("describe %q: %q %v", got, s, ok)
 			}
 		}
@@ -49,7 +49,14 @@ func TestBuildWhenCompilesAndReads(t *testing.T) {
 		t.Fatal("bad argument accepted")
 	}
 	both, _ := BuildWhen([]Cond{cases[0].c, cases[1].c}, args)
-	if s, ok := DescribeWhen(both); !ok || s != "все to — из списка «trusted» и path внутри папки ~/notes" {
+	if s, ok := describeWhen(langRU, both); !ok || s != "все to — из списка «trusted» и path внутри папки ~/notes" {
+		t.Fatal(s)
+	}
+}
+
+// Основной язык описаний — английский.
+func TestDescribeWhenEnglish(t *testing.T) {
+	if s, ok := DescribeWhen(`to.all(x, x in lists.trusted) && glob(path, "~/notes/**")`); !ok || s != "every to is in the list “trusted” and path is inside the folder ~/notes" {
 		t.Fatal(s)
 	}
 }

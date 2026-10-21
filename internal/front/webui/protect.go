@@ -53,7 +53,7 @@ func (p Protection) linkRequired(m mount) bool { return !p.NoLink }
 // valid — хотя бы один способ входа остаётся.
 func (p Protection) valid() error {
 	if p.NoLink && !p.Extra() {
-		return errors.New("должен остаться хотя бы один способ входа: ссылка, пароль или Telegram")
+		return errors.New("at least one way to sign in must stay on: the link, the password or Telegram")
 	}
 	return nil
 }
@@ -201,17 +201,23 @@ func (u *UI) setAttemptCookie(w http.ResponseWriter, m mount, id string) {
 
 // loginPage — страница «нужен вход»: без попытки входа. Если ссылка не нужна —
 // начало входа (пароль и/или кнопка «Войти»), иначе — как получить ссылку.
-func (u *UI) loginPage(w http.ResponseWriter, m mount) {
+func (u *UI) loginPage(w http.ResponseWriter, r *http.Request, m mount) {
 	p := u.Protection()
+	l := u.lang(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(401)
+	v := view{Base: m.base, Remote: m.remote, Lang: l, Path: m.base + "/"}
 	if !p.linkRequired(m) {
-		_ = tpl.ExecuteTemplate(w, "login_step.html", view{Base: m.base, Remote: m.remote,
-			Data: map[string]any{"Start": true, "Password": p.Password != "", "Telegram": map[bool]string{true: tgNeed}[p.Telegram]}})
+		v.Data = map[string]any{"Start": true, "Password": p.Password != "", "Telegram": map[bool]string{true: tgNeed}[p.Telegram]}
+		_ = tplIn(l).ExecuteTemplate(w, "login_step.html", v)
 		return
 	}
-	_ = tpl.ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote})
+	v.Data = map[string]any{"Password": p.Password != ""}
+	_ = tplIn(l).ExecuteTemplate(w, "login.html", v)
 }
+
+// errWrongPassword — неверный пароль Web UI.
+var errWrongPassword = errors.New("wrong password")
 
 func loginCode() string {
 	n, _ := rand.Int(rand.Reader, big.NewInt(1000000))
@@ -326,14 +332,14 @@ func (u *UI) verifyPassword(m mount, enc, pw string) error {
 	wait, ok := u.passwordAllowed(m)
 	u.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("слишком много неверных паролей: подождите %d с", int(wait.Seconds())+1)
+		return M("Too many wrong passwords: wait %d s", int(wait.Seconds())+1)
 	}
 	good := checkPassword(enc, pw)
 	u.mu.Lock()
 	u.passwordResult(m, good)
 	u.mu.Unlock()
 	if !good {
-		return errors.New("неверный пароль")
+		return errWrongPassword
 	}
 	return nil
 }
@@ -372,7 +378,7 @@ func (u *UI) loginPost(m mount) http.HandlerFunc {
 		}
 		if a == nil || subtle.ConstantTimeCompare([]byte(r.PostForm.Get("csrf")), []byte(a.csrf)) != 1 {
 			u.mu.Unlock()
-			u.loginPage(w, m)
+			u.loginPage(w, r, m)
 			return
 		}
 		needPw, tg := a.password, a.telegram
@@ -380,14 +386,14 @@ func (u *UI) loginPost(m mount) http.HandlerFunc {
 		msg := ""
 		if needPw {
 			if err := u.verifyPassword(m, u.Protection().Password, r.PostForm.Get("password")); err != nil {
-				msg = err.Error()
+				msg = say(u.lang(r), err)
 				u.mu.Lock()
 				if a.tries++; a.tries >= maxTries {
 					delete(u.attempts, id)
 					u.mu.Unlock()
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					w.WriteHeader(401)
-					_ = tpl.ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote, Error: "Слишком много неверных паролей — начните вход заново."})
+					_ = tplIn(u.lang(r)).ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote, Lang: u.lang(r), Error: tr(u.lang(r), "Too many wrong passwords — start signing in again.")})
 					return
 				}
 				u.mu.Unlock()
@@ -412,14 +418,14 @@ func (u *UI) loginStep(w http.ResponseWriter, r *http.Request, m mount, id, errM
 	a, ok := u.attempts[id]
 	if !ok {
 		u.mu.Unlock()
-		u.loginPage(w, m)
+		u.loginPage(w, r, m)
 		return
 	}
 	send := !a.password && a.telegram == tgNeed
 	if send && u.telegramBusy(m, id) {
 		// Одновременно ждёт ответа не больше одного запроса: кнопкой «Войти» из
 		// интернета Telegram не засыпать.
-		send, a.telegram, a.tgErr = false, tgError, "запрос на вход уже ждёт ответа в Telegram — ответьте на него или подождите 5 минут"
+		send, a.telegram, a.tgErr = false, tgError, tr(u.lang(r), "a sign-in request is already waiting in Telegram — answer it or wait 5 minutes")
 	}
 	if send {
 		a.telegram = tgSent
@@ -427,13 +433,13 @@ func (u *UI) loginStep(w http.ResponseWriter, r *http.Request, m mount, id, errM
 	code := a.code
 	u.mu.Unlock()
 	if send {
-		err := errors.New("Telegram-бот не настроен или не работает (Подтверждения → Каналы)")
+		var err error = M("The Telegram bot is not set up or does not work (Settings → Notifications)")
 		if c := u.confirmer(); c != nil {
-			where := "на этом компьютере"
+			where := Word("on this computer")
 			if m.remote {
-				where = "через адрес устройства (удалённо)"
+				where = Word("through the device address (remotely)")
 			}
-			text := fmt.Sprintf("🔐 Вход в Web UI gate4.ai %s, код %s.\nРазрешайте, только если вы входите сами и этот код сейчас у вас на экране.", where, code)
+			text := M("Sign-in to the gate4.ai Web UI %s, code %s.\nAllow only if you are signing in yourself and this code is on your screen now.", where, code).In(u.lang(r))
 			err = c.ConfirmLogin(id, text, func(ok bool) {
 				u.mu.Lock()
 				defer u.mu.Unlock()
@@ -466,7 +472,7 @@ func (u *UI) loginStep(w http.ResponseWriter, r *http.Request, m mount, id, errM
 		"Refresh": st.telegram == tgSent}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(401)
-	_ = tpl.ExecuteTemplate(w, "login_step.html", view{Base: m.base, Remote: m.remote, CSRF: st.csrf, Error: errMsg, Data: data})
+	_ = tplIn(u.lang(r)).ExecuteTemplate(w, "login_step.html", view{Base: m.base, Remote: m.remote, Lang: u.lang(r), Path: m.base + "/", CSRF: st.csrf, Error: tr(u.lang(r), errMsg), Data: data})
 }
 
 // ---- Настройки → Защита входа ----
@@ -479,14 +485,14 @@ func (u *UI) authorizeProtection(r *http.Request, p Protection) (string, error) 
 		return "", errors.New("login required")
 	}
 	if p.Custom() && !s.protected {
-		return "", errors.New("эта сессия открыта без защиты входа: войдите заново (выход → gate4ai ui), чтобы изменить защиту")
+		return "", errors.New("this session was opened without the sign-in protection: sign in again (Sign out → gate4ai ui) to change it")
 	}
 	if p.Password != "" {
 		if err := u.verifyPassword(local, p.Password, r.PostForm.Get("current")); err != nil {
-			if err.Error() == "неверный пароль" {
-				return "", errors.New("текущий пароль не подошёл")
+			if errors.Is(err, errWrongPassword) {
+				return "", errors.New("the current password is wrong")
 			}
-			return "", fmt.Errorf("текущий пароль: %v", err)
+			return "", M("Current password: %s", err)
 		}
 	}
 	return sid, nil
@@ -510,32 +516,32 @@ func (u *UI) setLoginPassword(w http.ResponseWriter, r *http.Request) map[string
 	p := u.Protection()
 	sid, err := u.authorizeProtection(r, p)
 	if err != nil {
-		return redirectErr("/settings#login", err)
+		return redirectErr("/settings/login", err)
 	}
 	f := r.PostForm
-	flash := "Пароль снят."
+	flash := "The password is removed."
 	if f.Get("remove") == "1" {
 		p.Password = ""
 	} else {
 		pw := f.Get("password")
 		switch {
 		case len([]rune(pw)) < 8:
-			return redirectErr("/settings#login", errors.New("пароль — не короче 8 символов"))
+			return redirectErr("/settings/login", errors.New("the password must be at least 8 characters"))
 		case pw != f.Get("repeat"):
-			return redirectErr("/settings#login", errors.New("пароли не совпадают"))
+			return redirectErr("/settings/login", errors.New("the passwords do not match"))
 		}
-		flash = "Пароль задан: вход в Web UI теперь требует пароль. Остальные сессии закрыты."
+		flash = "The password is set: signing in to the Web UI now needs it. Other sessions are closed."
 		p.Password = hashPassword(pw)
 	}
 	if err := u.saveProtection(sid, p); err != nil {
-		return redirectErr("/settings#login", err)
+		return redirectErr("/settings/login", err)
 	}
-	return redirect("/settings#login", flash)
+	return redirect("/settings/login", flash)
 }
 
 func (u *UI) setLoginTelegram(w http.ResponseWriter, r *http.Request) map[string]any {
 	// Из мастера подключения бота — обратно в мастер.
-	back := "/settings#login"
+	back := "/settings/login"
 	if r.PostForm.Get("from") == "telegram" {
 		back = "/approvals/telegram?for=login#done"
 	}
@@ -546,26 +552,26 @@ func (u *UI) setLoginTelegram(w http.ResponseWriter, r *http.Request) map[string
 	}
 	on := r.PostForm.Get("on") == "1"
 	if on && u.confirmer() == nil {
-		return redirectErr(back, errors.New("сначала подключите Telegram-бот: Подтверждения → Каналы → Telegram"))
+		return redirectErr(back, errors.New("connect a Telegram bot first: Settings → Notifications → Telegram"))
 	}
 	p.Telegram = on
 	if err := u.saveProtection(sid, p); err != nil {
 		return redirectErr(back, err)
 	}
-	return redirect(back, map[bool]string{true: "Вход в Web UI теперь подтверждается в Telegram. Остальные сессии закрыты.",
-		false: "Подтверждение входа в Telegram выключено."}[on])
+	return redirect(back, map[bool]string{true: "Signing in to the Web UI is now confirmed in Telegram. Other sessions are closed.",
+		false: "Sign-in confirmation in Telegram is off."}[on])
 }
 
 func (u *UI) setLoginLink(w http.ResponseWriter, r *http.Request) map[string]any {
 	p := u.Protection()
 	sid, err := u.authorizeProtection(r, p)
 	if err != nil {
-		return redirectErr("/settings#login", err)
+		return redirectErr("/settings/login", err)
 	}
 	p.NoLink = r.PostForm.Get("on") != "1"
 	if err := u.saveProtection(sid, p); err != nil {
-		return redirectErr("/settings#login", err)
+		return redirectErr("/settings/login", err)
 	}
-	return redirect("/settings#login", map[bool]string{true: "Вход на этом компьютере — по одноразовой ссылке (gate4ai ui, трей).",
-		false: "Одноразовая ссылка больше не нужна: входите на " + "http://" + u.Addr + "/ — с паролем и/или подтверждением в Telegram. Остальные сессии закрыты."}[!p.NoLink])
+	return redirect("/settings/login", map[bool]any{true: "On this computer you sign in with a one-time link (gate4ai ui, tray).",
+		false: M("The one-time link is no longer needed: sign in at http://%s/ with the password and/or Telegram confirmation. Other sessions are closed.", u.Addr)}[!p.NoLink])
 }

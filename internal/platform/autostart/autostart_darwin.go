@@ -91,7 +91,12 @@ func State(home string) map[string]any {
 			files = append(files, f)
 		}
 	}
-	return map[string]any{"installed": len(files) > 0, "files": files}
+	res := map[string]any{"installed": len(files) > 0, "files": files, "enabled": fileExists(plistPath(home, launchDaemon))}
+	if res["enabled"] == true {
+		_, err := runCmd("launchctl", "print", gui()+"/"+launchDaemon)
+		res["running"] = err == nil
+	}
+	return res
 }
 
 // Restart перезапускает daemon, если он загружен в launchd (false — не служба).

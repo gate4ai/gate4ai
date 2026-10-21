@@ -3,7 +3,6 @@
 package webui
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 	"path"
@@ -24,6 +23,8 @@ const decisionMixed = "mixed"
 type ActionView struct {
 	manifest.Action
 	Full     string // lk_emias.appointments
+	Title    string // название на языке страницы
+	Desc     string // описание на языке страницы
 	Default  string // решение без правил по классу
 	Decision string // "" — без правил (по классу); allow | ask | deny — правило без условия; mixed
 	RuleIDs  []string
@@ -117,10 +118,15 @@ func actionDecision(p config.Profile, action string) (string, []string) {
 }
 
 // connectorProfile — профиль, для которого страница коннектора показывает решения:
-// из запроса, иначе default или первый с доступом.
-func connectorProfile(access []string, want string) string {
+// из запроса, иначе первый с агентами, иначе default или первый с доступом.
+func connectorProfile(cfg *config.Config, access []string, want string) string {
 	if slices.Contains(access, want) {
 		return want
+	}
+	for _, p := range access {
+		if len(profileAgents(cfg, p)) > 0 {
+			return p
+		}
 	}
 	if slices.Contains(access, "default") {
 		return "default"
@@ -132,7 +138,7 @@ func connectorProfile(access []string, want string) string {
 }
 
 // actionViews — действия коннектора для его страницы и чипы подвызовов (каждый один раз).
-func (u *UI) actionViews(name string, m manifest.Manifest, cfg *config.Config, profile string) ([]ActionView, []CallView) {
+func (u *UI) actionViews(l, name string, m manifest.Manifest, cfg *config.Config, profile string) ([]ActionView, []CallView) {
 	settings := cfg.Connectors[name]
 	tools := u.tools()
 	var acts []ActionView
@@ -142,7 +148,7 @@ func (u *UI) actionViews(name string, m manifest.Manifest, cfg *config.Config, p
 		if a.ServiceOnly {
 			continue
 		}
-		v := ActionView{Action: a, Full: name + "." + a.Name, Default: defaultEffect(a.Class)}
+		v := ActionView{Action: a, Full: name + "." + a.Name, Default: defaultEffect(a.Class), Title: a.TitleIn(l), Desc: a.DescriptionIn(l)}
 		if profile != "" {
 			v.Decision, v.RuleIDs = actionDecision(cfg.Profiles[profile], v.Full)
 		}
@@ -180,18 +186,18 @@ func (u *UI) saveActionDecision(w http.ResponseWriter, r *http.Request) map[stri
 	back := "/connectors/" + url.PathEscape(name) + "?profile=" + url.QueryEscape(prof) + "#actions"
 	act, effect := r.PostForm.Get("action"), r.PostForm.Get("effect")
 	if effect != "" && effect != config.EffectAllow && effect != config.EffectAsk && effect != config.EffectDeny {
-		return redirectErr(back, fmt.Errorf("unknown decision %q", effect))
+		return redirectErr(back, M("Unknown decision %q", effect))
 	}
 	full := name + "." + act
 	if _, ok := toolSchema(u.tools(), full); !ok {
-		return redirectErr(back, fmt.Errorf("connector %s has no action %s", name, act))
+		return redirectErr(back, M("%s has no action %s", name, act))
 	}
 	cfg := u.D.Config.Current()
 	if !slices.Contains(accessProfiles(cfg, name), prof) {
-		return redirectErr(back, fmt.Errorf("у профиля %q нет доступа к коннектору: отметьте его в «Кому доступен»", prof))
+		return redirectErr(back, M("These agent permissions (%s) have no access to the connector: turn it on in “Who may use it”", prof))
 	}
 	if d, _ := actionDecision(cfg.Profiles[prof], full); d == decisionMixed {
-		return redirectErr(back, fmt.Errorf("для %s в профиле %s есть правила с условием или по маске — измените их в «Правилах»", full, prof))
+		return redirectErr(back, M("%s has rules with conditions in %s — change them in Access → Rules", full, prof))
 	}
 	err := u.edit("decision for "+full+" in "+prof, func(c *config.Config) error {
 		p := c.Profiles[prof]
@@ -205,11 +211,10 @@ func (u *UI) saveActionDecision(w http.ResponseWriter, r *http.Request) map[stri
 	if err != nil {
 		return redirectErr(back, err)
 	}
-	what := "без правил — " + effectWord(defaultEffect(classOf(u, full)))
-	if effect != "" {
-		what = effectWord(effect)
+	if effect == "" {
+		return redirect(back, M("%s for %s: no rule — %s.", full, prof, Word(effectWords[defaultEffect(classOf(u, full))])))
 	}
-	return redirect(back, fmt.Sprintf("%s в профиле %s: %s.", full, prof, what))
+	return redirect(back, M("%s for %s: %s.", full, prof, Word(effectWords[effect])))
 }
 
 func classOf(u *UI, action string) string {

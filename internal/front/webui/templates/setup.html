@@ -1,0 +1,94 @@
+{{template "head" .}}
+{{$d := .Data}}
+<div style="max-width:48rem;margin:0 auto">
+<div class="row between"><span class="muted">{{T "Getting started"}}</span><a href="{{.Base}}/setup/skip" class="muted">{{T "Skip, I will set it up myself"}}</a></div>
+<ol class="stepper">
+<li class="{{if eq $d.Step 1}}on{{else}}done{{end}}">{{T "Assistant"}}{{if gt $d.Step 1}}: {{$d.ClientTitle}}{{end}}</li>
+<li class="{{if eq $d.Step 2}}on{{else if gt $d.Step 2}}done{{end}}">{{T "What it may do"}}</li>
+<li class="{{if eq $d.Step 3}}on{{end}}">{{T "Check"}}</li></ol>
+
+{{if eq $d.Step 1}}
+<h1>{{T "Which AI assistant will work through gate4.ai?"}}</h1>
+<p class="muted">{{T "gate4.ai adds itself to the assistant's settings — no tokens to copy."}}</p>
+<form method="get" action="{{.Base}}/setup/access">
+<fieldset class="tiles"><legend class="skip">{{T "Assistant"}}</legend>
+{{range $d.Clients}}{{if or .Found .Cloud}}<label><input type="radio" name="client" value="{{.ID}}" {{if eq .ID $d.Client}}checked{{end}} required><span class="tile">{{if .Found}}<span class="found">● {{T "found on this computer"}}</span>{{end}}<b>{{T .Title}}</b>{{with .Note}}<span class="muted">{{T .}}</span>{{end}}</span></label>{{end}}{{end}}
+</fieldset>
+<details class="adv"{{if not $d.Client}} open{{end}}><summary>{{T "Others: VS Code, Codex, Gemini CLI, a script"}}</summary>
+<fieldset class="tiles" style="margin-top:.6rem"><legend class="skip">{{T "Other assistants"}}</legend>
+{{range $d.Clients}}{{if not (or .Found .Cloud)}}<label><input type="radio" name="client" value="{{.ID}}" {{if eq .ID $d.Client}}checked{{end}}><span class="tile"><b>{{T .Title}}</b>{{with .Note}}<span class="muted">{{T .}}</span>{{end}}</span></label>{{end}}{{end}}
+</fieldset></details>
+<p class="row between" style="margin-top:1.4rem"><span></span><button class="primary big">{{T "Next: what it may do →"}}</button></p>
+</form>
+{{end}}
+
+{{if eq $d.Step 2}}
+<h1>{{T "What may %s do?" $d.ClientTitle}}</h1>
+<p class="muted">{{T "Start small: you can allow more at any time, also right from an approval request."}}</p>
+<form method="post" action="{{.Base}}/setup"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="client" value="{{$d.Client}}">
+<div class="card">
+{{range $d.Conns}}{{$c := .}}
+<div style="padding:.6rem 0;border-bottom:1px solid var(--line)">
+<label class="inline" style="font-weight:600;font-size:1.05rem"><input type="checkbox" name="conn" value="{{.Name}}" {{if .On}}checked{{end}}> {{.Title}}</label>
+<div class="help">{{.Desc}}</div>
+{{if eq .Name "files"}}<label for="s-folders">{{T "Folders"}}</label><textarea id="s-folders" name="folders" rows="2" placeholder="~/Documents/notes">{{.Folders}}</textarea>
+<div class="help">{{T "One per line. Only these folders; hidden folders (.ssh, .aws…) and keys stay closed anyway."}}</div>{{end}}
+{{if eq .Name "browser"}}<label for="s-sites">{{T "Sites"}}</label><input id="s-sites" name="sites" value="{{.Sites}}" placeholder="github.com, *.notion.so" style="width:100%">
+<div class="help">{{T "The browser opens only these sites; *.example.com means all subdomains. You can add sites later."}}</div>{{end}}
+{{range .Groups}}<div class="grp"><span id="g-{{$c.Name}}-{{.Class}}">{{T .Title}}</span>
+<span class="seg" role="radiogroup" aria-labelledby="g-{{$c.Name}}-{{.Class}}">{{$g := .}}{{range (list "allow" "ask" "deny")}}<label><input type="radio" name="effect.{{$c.Name}}.{{$g.Class}}" value="{{.}}" {{if eq . $g.Effect}}checked{{end}}><span>{{effect .}}</span></label>{{end}}</span></div>{{end}}
+</div>{{else}}<p class="warn">{{T "No connectors yet."}} <a href="{{$.Base}}/connectors">{{T "Install one"}}</a></p>{{end}}
+<p class="help" style="margin-top:.6rem">{{T "More connectors (email, sites without an API) — in Access after the setup."}}</p>
+</div>
+{{if $d.Cloud}}<div class="note">{{if $d.PublicURL}}{{T "Internet access is already on:"}} <code>{{$d.PublicURL}}</code>{{else}}{{T "Claude.ai and ChatGPT reach this computer through relay.gate4.ai: it gets an address like xxxx.relay.gate4.ai, no ports to open; the relay sees only encrypted traffic. It is turned on in the next step."}}{{end}}</div>{{end}}
+{{if and $d.Autostart (not $d.AutostartOn)}}<label class="inline"><input type="checkbox" name="autostart" value="1" checked> {{T "Start gate4.ai when I log in (otherwise agents stop working after a restart)"}}</label>{{end}}
+<details class="adv"><summary>{{T "Name in the journal"}}</summary><label for="s-name">{{T "Agent name"}}</label><input id="s-name" name="name" value="{{$d.Name}}" pattern="[a-z0-9][a-z0-9._\-]*">
+<div class="help">{{T "Lowercase Latin letters, digits and “-”."}}</div></details>
+<p class="row between" style="margin-top:1.2rem"><a class="btn" href="{{.Base}}/setup?client={{$d.Client}}">← {{T "Back"}}</a><button class="primary big">{{if $d.Cloud}}{{T "Turn on internet access and continue →"}}{{else if eq $d.Client "cli"}}{{T "Create the agent →"}}{{else}}{{T "Connect %s →" $d.ClientTitle}}{{end}}</button></p>
+</form>
+{{end}}
+
+{{if eq $d.Step 3}}
+{{if $d.Cloud}}
+<h1>{{T "Connect Claude.ai or ChatGPT"}}</h1>
+{{if $d.PublicURL}}
+<ol><li>{{T "Copy the address of this computer:"}} <code id="mcpurl">{{$d.PublicURL}}</code> <button class="small" data-copy="#mcpurl">{{T "Copy"}}</button></li>
+<li>{{TH "<b>Claude.ai:</b> Settings → Connectors → Add custom connector → paste the address. <b>ChatGPT:</b> Settings → Connectors → Advanced → Developer mode → Create → the address, OAuth authentication."}}</li>
+<li>{{T "The assistant opens the gate4.ai sign-in page — enter the connection code:"}}
+{{if $d.ConnectCode}}<code style="font-size:1.5rem" id="ccode">{{$d.ConnectCode}}</code> <button class="small" data-copy="#ccode">{{T "Copy"}}</button> <span class="help">{{T "one-time, valid until %s" (ts $d.ConnectExpires)}}</span>
+{{else}}<form method="post" action="{{.Base}}/setup/code" class="inline"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="agent" value="{{$d.Agent}}"><button class="primary">{{T "Get a connection code"}}</button></form>{{end}}</li></ol>
+<p class="help">{{T "Turn off the assistant's own Gmail, Drive and similar connectors — otherwise it can bypass gate4.ai rules."}}</p>
+{{else}}<p class="warn">{{T "Internet access is not on yet."}} <a href="{{.Base}}/settings/internet">{{T "Internet access →"}}</a></p>{{end}}
+{{else if eq $d.Client "cli"}}
+<h1>{{T "The agent %s is created" $d.Agent}}</h1>
+<p>{{T "Give it a token on the agent page: it shows the command and the token once."}} <a class="btn" href="{{.Base}}/agents/{{$d.Agent}}?client=cli">{{T "Agent page →"}}</a></p>
+{{else}}
+<h1>{{T "%s is connected ✓" $d.ClientTitle}}</h1>
+<p class="muted">{{with $d.Restart}}{{T .}} {{end}}{{T "Then ask it:"}}</p>
+{{end}}
+{{with $d.Prompt}}<div class="row"><div class="prompt" id="prompt">{{.}}</div><button data-copy="#prompt">{{T "Copy"}}</button></div>{{end}}
+
+<h2>{{T "What is happening now"}}</h2>
+<div data-live-pending data-back="/setup/check?agent={{$d.Agent}}&amp;client={{$d.Client}}">{{template "pending" (dict "V" . "List" $d.Pending "Back" (printf "/setup/check?agent=%s&client=%s" $d.Agent $d.Client))}}</div>
+<div class="card" data-refresh="{{.Base}}/setup/feed?agent={{$d.Agent}}" aria-live="polite">{{template "setup_feed" .}}</div>
+
+<h2>{{T "Where else to ask you when you are away from the computer?"}}</h2>
+<div class="card">
+{{range $d.Channels}}{{if ne .Name "webui"}}<div class="set"><div class="d"><span class="dot {{if not .On}}off{{else if ne .State "ok"}}bad{{end}}" aria-hidden="true"></span><b>{{T .Title}}</b> — {{if .On}}{{if eq .State "ok"}}{{T "on"}}{{else}}<span class="bad">{{T "error"}}</span>{{end}}{{else}}{{T "off"}}{{end}}
+{{if eq .Name "telegram"}}<div class="help">{{T "Allow / Deny buttons in your own bot, about 2 minutes to set up."}}</div>{{end}}
+{{if eq .Name "webpush"}}<div class="help">{{T "A notification in the browser on your phone; needs internet access."}}</div>{{end}}</div>
+<div>{{if and .On (eq .State "ok")}}<form method="post" action="{{$.Base}}/channels/{{.Name}}/test"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/setup/check?agent={{$d.Agent}}&amp;client={{$d.Client}}"><button>{{T "Send a test"}}</button></form>
+{{else if eq .Name "telegram"}}<a class="btn" href="{{$.Base}}/approvals/telegram?for=setup">{{T "Connect"}}</a>
+{{else}}<a class="btn" href="{{$.Base}}/settings/notifications">{{T "Set up"}}</a>{{end}}</div></div>{{end}}{{end}}
+</div>
+{{with $d.Autostart}}{{if not .installed}}<div class="card row between"><span><b>{{T "Start gate4.ai when I log in"}}</b><br><span class="muted">{{T "otherwise agents stop working after a restart"}}</span></span>
+<form method="post" action="{{$.Base}}/settings/autostart"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="on" value="1"><input type="hidden" name="back" value="/setup/check?agent={{$d.Agent}}&amp;client={{$d.Client}}"><button class="primary">{{T "Turn on"}}</button></form></div>{{end}}{{end}}
+<p class="row between" style="margin-top:1.2rem"><a class="btn" href="{{.Base}}/agents/{{$d.Agent}}">{{T "Agent page"}}</a><a class="btn primary big" href="{{.Base}}/">{{T "Done — go to Home"}}</a></p>
+{{end}}
+</div>
+{{template "foot"}}
+
+{{define "setup_feed"}}{{$d := .Data}}<ul class="feed">
+{{range $d.Feed}}<li><span class="t">{{ago .At}}</span><span>{{if .Effect}}<span class="dot {{if eq .Effect "deny"}}bad{{else if eq .Effect "ask"}}warn{{end}}" aria-hidden="true"></span>{{else}}<span class="dot" aria-hidden="true"></span>{{end}}{{.Text}}{{with .Effect}} — <span class="{{.}}">{{effect .}}</span>{{end}}{{with .Hash}} · <a href="{{$.Base}}/journal/{{.}}">{{T "entry"}}</a>{{end}}</span></li>
+{{else}}<li class="muted">{{T "Waiting for the assistant's first request…"}}</li>{{end}}
+</ul>{{end}}

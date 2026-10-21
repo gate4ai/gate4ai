@@ -136,10 +136,16 @@ func State(home string) map[string]any {
 			files = append(files, f)
 		}
 	}
-	res := map[string]any{"installed": len(files) > 0, "files": files}
+	res := map[string]any{"installed": len(files) > 0, "files": files,
+		"enabled": fileExists(desktopPath(home, "gate4ai"))}
 	if fileExists(unitPath(home)) {
 		out, _ := runCmd("systemctl", "--user", "is-active", systemdUnit)
 		res["systemd"] = strings.TrimSpace(string(out))
+		res["running"] = res["systemd"] == "active"
+		out, _ = runCmd("systemctl", "--user", "is-enabled", systemdUnit)
+		en := strings.TrimSpace(string(out))
+		res["systemd_enabled"] = en
+		res["enabled"] = en == "enabled" || res["enabled"] == true
 	}
 	return res
 }

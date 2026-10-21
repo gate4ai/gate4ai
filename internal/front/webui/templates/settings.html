@@ -1,121 +1,159 @@
 {{template "head" .}}
 {{$d := .Data}}
-<h2>Настройки</h2>
+<div class="layout">{{template "settings_nav" (dict "V" . "On" $d.Sub)}}<div>
 
-<div class="card" id="relay"{{with $d.Relay}}{{if and .Configured (not $d.Direct) (not .Online) (ne .Phase "failed")}} data-live-relay="{{.Phase}}"{{end}}{{end}}><h3>Доступ из интернета</h3>
+{{if eq $d.Sub "main"}}
+<h2>{{T "Main"}}</h2><p class="muted">{{T "Worth checking once. Everything else has sensible defaults."}}</p>
+<div class="card">
+<div class="set" id="autostart"><div class="d"><b>{{T "Start gate4.ai when I log in"}}</b>
+<div class="help">{{if eq $d.AutostartState "on-running"}}<span class="ok">{{T "On: gate4.ai runs as a service."}}</span>{{else if eq $d.AutostartState "on"}}{{T "On: gate4.ai starts at the next login. Right now it runs without the service."}}{{else}}{{T "Off: after a restart gate4.ai does not start, and agents get “device offline”."}}{{end}}</div></div>
+{{if $d.Autostart}}<form method="post" action="{{.Base}}/settings/autostart"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="/settings#autostart">
+<span class="seg" role="group" aria-label="{{T "Start gate4.ai when I log in"}}"><button name="on" value="1" class="{{if ne $d.AutostartState "off"}}on{{end}}" aria-pressed="{{if ne $d.AutostartState "off"}}true{{else}}false{{end}}">{{T "on"}}</button><button name="on" value="0" class="{{if eq $d.AutostartState "off"}}on{{end}}" aria-pressed="{{if eq $d.AutostartState "off"}}true{{else}}false{{end}}">{{T "off"}}</button></span></form>{{end}}</div>
+<div class="set"><div class="d"><b><label for="s-timeout" style="margin:0">{{T "How long to wait for your answer"}}</label></b><div class="help">{{T "If nobody answers, the action is denied."}}</div></div>
+<form method="post" action="{{.Base}}/settings/approvals" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="/settings">
+<select id="s-timeout" name="timeout" data-autosubmit>{{range $d.Timeouts}}<option value="{{.}}" {{if eq . $d.Timeout}}selected{{end}}>{{T .}}</option>{{end}}{{if not (has $d.Timeouts $d.Timeout)}}<option selected>{{$d.Timeout}}</option>{{end}}</select><noscript><button class="small">{{T "Save"}}</button></noscript></form></div>
+<div class="set"><div class="d"><b>{{T "Agents may change gate4.ai settings"}}</b><div class="help">{{TH "With <code>gate4ai.change_policy</code> an agent proposes a rule, a list or a connector; you approve each change. Passwords — never."}}</div></div>
+<form method="post" action="{{.Base}}/settings/self"><input type="hidden" name="csrf" value="{{.CSRF}}"><span class="seg" role="group" aria-label="{{T "Agents may change gate4.ai settings"}}"><button name="self" value="ask" class="{{if not $d.SelfDenied}}on{{end}}" aria-pressed="{{if not $d.SelfDenied}}true{{else}}false{{end}}">{{effect "ask"}}</button><button name="self" value="deny" class="{{if $d.SelfDenied}}on{{end}}" aria-pressed="{{if $d.SelfDenied}}true{{else}}false{{end}}">{{effect "deny"}}</button></span></form></div>
+<div class="set"><div class="d"><b>{{T "Access from the phone and for Claude.ai / ChatGPT"}}</b><div class="help">{{if $d.PublicURL}}<code>{{$d.PublicURL}}</code>{{else}}{{T "An address like xxxx.relay.gate4.ai; no ports to open, the relay sees only encrypted traffic."}}{{end}}</div></div>
+<a class="btn" href="{{.Base}}/settings/internet">{{if $d.PublicURL}}{{T "Open"}}{{else}}{{T "Turn on"}}{{end}}</a></div>
+<div class="set"><div class="d"><b>{{T "Language"}}</b></div><span class="seg">{{$p := .Path}}{{$b := .Base}}{{range langs}}<a class="btn small{{if eq .Code Lang}} primary{{end}}" href="{{$b}}/lang?l={{.Code}}&amp;back={{$p}}" lang="{{.Code}}">{{.Title}}</a>{{end}}</span></div>
+</div>
+{{$p := $d.Protection}}<div class="card row between"><span><b>{{T "Signing in to gate4.ai"}}</b><br><span class="muted">{{if $p.Password}}{{T "with a password"}}{{if $p.Telegram}} {{T "and Telegram confirmation"}}{{end}}{{else if $p.Telegram}}{{T "with Telegram confirmation"}}{{else}}{{T "a link from the tray or gate4ai ui. An agent on this computer can get it too."}}{{end}}</span></span>
+<a class="btn{{if not (or $p.Password $p.Telegram)}} primary{{end}}" href="{{.Base}}/settings/login">{{if or $p.Password $p.Telegram}}{{T "Change"}}{{else}}{{T "Add a password"}}{{end}}</a></div>
+{{end}}
+
+{{if eq $d.Sub "notifications"}}
+<h2 id="channels">{{T "Notifications"}}</h2>
+<p class="muted">{{T "Where gate4.ai tells you about approval requests. You decide with a button in the channel or in the Web UI; without an answer in %s the action is denied." (T $d.Timeout)}} <a href="{{.Base}}/settings">{{T "Change"}}</a></p>
+<div class="card">
+{{range $d.Channels}}<div class="set"><div class="d"><span class="dot {{if not .On}}off{{else if ne .State "ok"}}bad{{end}}" aria-hidden="true"></span><b>{{T .Title}}</b> — {{if not .On}}{{T "off"}}{{else if eq .State "ok"}}<span class="ok">{{T "on"}}</span>{{else if eq .State "not_configured"}}<span class="warn">{{T "not set up"}}</span>{{else}}<span class="bad">{{T "error"}}</span>{{end}}
+{{if and .On (ne .State "ok") .Detail}}<div class="help">{{T .Detail}}</div>{{end}}
+{{if ne .Name "webui"}}<div class="help">{{T "sent: %d" .Stat.Sent}}{{if .Stat.Failed}} · <span class="bad">{{T "failed: %d" .Stat.Failed}}</span>{{end}} · {{T "decided here: %d" .Decided}}{{if not .Stat.LastOK.IsZero}} · {{T "last: %s" (ago .Stat.LastOK)}}{{end}}</div>{{end}}
+{{if eq .Name "desktop"}}<details><summary class="help">{{T "No notifications?"}}</summary><p class="help">{{TH "Linux — install <code>libnotify</code> (notify-send); macOS — allow notifications for “Script Editor”; Windows — turn notifications on in Settings → System. You can also decide in the gate4.ai tray icon."}}</p></details>{{end}}
+{{if eq .Name "webpush"}}<div class="help">{{T "A notification in the browser — on this computer or on the phone. On the phone open the Web UI through the link in Internet access (the relay is needed) and press the button there."}}</div>
+{{if $d.PushKey}}<div class="help" data-push-status>{{if not $d.PushOn}}{{T "The channel is off — subscribing turns it on."}}{{end}}</div>{{end}}{{end}}</div>
+<div class="row">{{if eq .Name "webui"}}<span class="muted">{{T "always on"}}</span>
+{{else if eq .Name "telegram"}}{{if not $d.TelegramSet}}<a class="btn primary" href="{{$.Base}}/approvals/telegram">{{T "Connect"}}</a>{{else}}{{template "chan_buttons" (dict "V" $ "C" .)}}<a class="btn small" href="{{$.Base}}/approvals/telegram">{{T "Set up"}}</a>{{end}}
+{{else if eq .Name "webpush"}}{{if $d.PushKey}}<button class="primary" data-push-key="{{$d.PushKey}}">{{T "Turn on in this browser"}}</button>{{else}}<span class="muted">{{T "not available: no VAPID key"}}</span>{{end}}{{if .On}}{{template "chan_buttons" (dict "V" $ "C" .)}}{{end}}
+{{else}}{{template "chan_buttons" (dict "V" $ "C" .)}}{{end}}</div></div>{{end}}
+</div>
+{{end}}
+
+{{if eq $d.Sub "login"}}
+<h2 id="login">{{T "Signing in to gate4.ai"}}</h2>
+<p>{{T "Three ways to sign in to the Web UI; combine them as you like: all that are on must be passed, at least one is always on. The link (gate4ai ui, the tray) can also be obtained by an agent running on this computer — a password and a confirmation on another device (your Telegram bot) are out of its reach."}}</p>
+{{$p := $d.Protection}}{{$last := $d.LastMethod}}
+{{if $d.SessionUnprotected}}<p class="warn">{{T "This session was opened before the protection was turned on, so the protection cannot be changed from it. Sign out and sign in again (gate4ai ui)."}}</p>{{end}}
+<table><colgroup><col style="width:52%"><col style="width:14%"><col></colgroup><tbody>
+<tr><td><b>{{T "One-time link"}}</b><br><span class="help">{{if $p.Link}}{{T "a link from gate4ai ui or the tray"}}{{else}}{{TH "not needed: sign in at the permanent address <code>http://%s/</code>" $d.Addr}}{{with $d.PublicURL}}{{TH ", from the phone — <code>%s/ui/</code>" .}}{{end}}{{end}}</span></td>
+<td>{{if $p.Link}}<b class="ok">{{T "on"}}</b>{{else}}<b>{{T "off"}}</b>{{end}}</td>
+<td>{{if and $p.Link (eq $last "link")}}<button disabled>{{T "Turn off"}}</button><div class="help">{{T "the only way to sign in — turn on another one first"}}</div>
+{{else if $p.Password}}<a class="btn" href="#m-link">{{if $p.Link}}{{T "Turn off"}}{{else}}{{T "Turn on"}}{{end}}</a>
+{{else}}<form method="post" action="{{.Base}}/settings/login/link"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="{{if $p.Link}}0{{else}}1{{end}}"><button>{{if $p.Link}}{{T "Turn off"}}{{else}}{{T "Turn on"}}{{end}}</button></form>{{end}}</td></tr>
+<tr><td><b>{{T "Password"}}</b><br><span class="help">{{T "only its hash is kept"}}</span></td>
+<td>{{if $p.Password}}<b class="ok">{{T "set"}}</b>{{else}}<b>{{T "not set"}}</b>{{end}}</td>
+<td><div class="row">{{if $p.Password}}<a class="btn" href="#m-pw-change">{{T "Change password"}}</a>
+{{if eq $last "password"}}<button disabled>{{T "Remove password"}}</button></div><div class="help">{{T "the only way to sign in — turn on another one first"}}</div>{{else}}<a class="btn danger" href="#m-pw-remove">{{T "Remove password"}}</a></div>{{end}}
+{{else}}<a class="btn primary" href="#m-pw-set">{{T "Set"}}</a></div>{{end}}</td></tr>
+<tr><td><b>{{T "Confirmation in Telegram"}}</b><br><span class="help">{{T "an “Allow sign-in” button in your bot, with the code from the sign-in page"}}</span></td>
+<td>{{if $p.Telegram}}<b class="ok">{{T "on"}}</b>{{else}}<b>{{T "off"}}</b>{{end}}</td>
+<td>{{if and $p.Telegram (eq $last "telegram")}}<button disabled>{{T "Turn off"}}</button><div class="help">{{T "the only way to sign in — turn on another one first"}}</div>
+{{else if and (not $p.Telegram) (not $d.TelegramReady)}}<a class="btn" href="{{.Base}}/approvals/telegram?for=login">{{T "Turn on"}}</a><div class="help">{{T "first we connect your bot"}}</div>
+{{else}}{{template "login_telegram_button" (dict "V" . "On" (not $p.Telegram) "Password" $p.Password)}}{{end}}</td></tr>
+</tbody></table>
+<details><summary>{{T "How it works"}}</summary><p class="help">{{TH "The protection settings are kept outside the configuration: an agent cannot remove them by changing the policy. They change only from a session opened with the current protection, and with a password — by entering it. A change closes all other sessions. The same ways work for signing in from the phone (<code>/ui/</code> at the device address): without the link you sign in from a bookmark. Against password guessing: after 5 wrong in a row every attempt waits twice as long (up to 15 minutes); the phone has its own counter. Forgot the password or lost Telegram: stop gate4.ai and run <code>gate4ai daemon --reset-ui-login</code> (Telegram gets a notice about the reset)."}}</p></details>
+
+<div class="modal" id="m-pw-set" data-back="#login" role="dialog" aria-modal="true" aria-labelledby="m-pw-set-h"><div class="box"><h3 id="m-pw-set-h">{{T "Set a password"}}</h3>
+<form method="post" action="{{.Base}}/settings/login/password"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="pw1">{{T "Password"}} <span class="muted">({{T "at least 8 characters"}})</span></label><input id="pw1" type="password" name="password" autocomplete="new-password" minlength="8" required>
+<label for="pw2">{{T "Repeat the password"}}</label><input id="pw2" type="password" name="repeat" autocomplete="new-password" minlength="8" required>
+<p class="help">{{T "Signing in to the Web UI will need the password; other sessions are closed."}}</p>
+<div class="actions"><a class="btn" href="#login" data-close>{{T "Cancel"}}</a><button class="primary">{{T "Set the password"}}</button></div></form></div></div>
+<div class="modal" id="m-pw-change" data-back="#login" role="dialog" aria-modal="true" aria-labelledby="m-pw-change-h"><div class="box"><h3 id="m-pw-change-h">{{T "Change the password"}}</h3>
+<form method="post" action="{{.Base}}/settings/login/password"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="pwc0">{{T "Current password"}}</label><input id="pwc0" type="password" name="current" autocomplete="current-password" required>
+<label for="pwc1">{{T "New password"}} <span class="muted">({{T "at least 8 characters"}})</span></label><input id="pwc1" type="password" name="password" autocomplete="new-password" minlength="8" required>
+<label for="pwc2">{{T "Repeat the new password"}}</label><input id="pwc2" type="password" name="repeat" autocomplete="new-password" minlength="8" required>
+<div class="actions"><a class="btn" href="#login" data-close>{{T "Cancel"}}</a><button class="primary">{{T "Change the password"}}</button></div></form></div></div>
+<div class="modal" id="m-pw-remove" data-back="#login" role="dialog" aria-modal="true" aria-labelledby="m-pw-remove-h"><div class="box"><h3 id="m-pw-remove-h">{{T "Remove the password?"}}</h3>
+<form method="post" action="{{.Base}}/settings/login/password"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="remove" value="1">
+<p>{{T "Signing in to the Web UI will no longer need the password."}}</p>
+<label for="pwr0">{{T "Current password"}}</label><input id="pwr0" type="password" name="current" autocomplete="current-password" required>
+<div class="actions"><a class="btn" href="#login" data-close>{{T "Cancel"}}</a><button class="danger">{{T "Remove the password"}}</button></div></form></div></div>
+{{if $p.Password}}<div class="modal" id="m-link" data-back="#login" role="dialog" aria-modal="true" aria-labelledby="m-link-h"><div class="box"><h3 id="m-link-h">{{if $p.Link}}{{T "Turn off signing in with a one-time link"}}{{else}}{{T "Turn on signing in with a one-time link"}}{{end}}</h3>
+<form method="post" action="{{.Base}}/settings/login/link"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="{{if $p.Link}}0{{else}}1{{end}}">
+<label for="pwl0">{{T "Current password"}}</label><input id="pwl0" type="password" name="current" autocomplete="current-password" required>
+<div class="actions"><a class="btn" href="#login" data-close>{{T "Cancel"}}</a><button class="primary">{{if $p.Link}}{{T "Turn off"}}{{else}}{{T "Turn on"}}{{end}}</button></div></form></div></div>{{end}}
+{{end}}
+
+{{if eq $d.Sub "internet"}}
+<h2>{{T "Internet access"}}</h2>
+<div class="card" id="relay"{{with $d.Relay}}{{if and .Configured (not $d.Direct) (not .Online) (ne .Phase "failed")}} data-live-relay="{{.Phase}}"{{end}}{{end}}>
 {{if $d.Direct}}{{template "relay_direct" .}}
 {{else if $d.Relay.Configured}}{{template "relay_state" $d.Relay}}
 {{template "cloud_addr" (dict "Addr" $d.Relay.MCPURL "Base" .Base)}}
-<details><summary>Технические детали</summary><p class="help">
-Relay: <code>{{$d.Relay.URL}}</code><br>ID устройства: <code>{{$d.Relay.DeviceID}}</code><br>
-MCP отвечает и по корню адреса, и по <code>{{$d.Relay.MCPURL}}/mcp</code> — коннекторы, добавленные раньше с <code>/mcp</code>, продолжают работать. Web UI для телефона — <code>{{$d.Relay.MCPURL}}/ui/</code>.</p></details>
-<p><a href="{{.Base}}/settings/relay">Сменить relay или адрес устройства…</a></p>
-{{else}}<p>Нужен только облачным агентам (Claude.ai, ChatGPT) и для входа с телефона. Локальные агенты работают и без него.</p>
+<details><summary>{{T "Technical details"}}</summary><p class="help">
+{{T "Relay:"}} <code>{{$d.Relay.URL}}</code><br>{{T "Device ID:"}} <code>{{$d.Relay.DeviceID}}</code><br>
+{{TH "MCP answers both at the root of the address and at <code>%s/mcp</code>. The Web UI for the phone is <code>%s/ui/</code>." $d.Relay.MCPURL $d.Relay.MCPURL}}</p></details>
+{{else}}<p>{{T "Needed only for cloud assistants (Claude.ai, ChatGPT) and for signing in from the phone. Local assistants work without it."}}</p>
 <form method="post" action="{{.Base}}/settings/relay"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="url" value="{{$d.RelayDefault}}">
-<button class="primary">Зарегистрироваться на {{$d.RelayDefaultHost}}</button></form>
-<p class="help">Компьютер получит адрес вида <code>&lt;id&gt;.{{$d.RelayDefaultHost}}</code>, открывать порты не нужно. Трафик шифруется до этого компьютера: relay видит только шифротекст.</p>
-<p><a href="{{.Base}}/settings/relay#custom">Свой relay</a> · <a href="{{.Base}}/settings/relay#public">Свой HTTPS-адрес без relay</a></p>
+<button class="primary">{{T "Turn on through %s" $d.RelayDefaultHost}}</button></form>
+<p class="help">{{T "The computer gets an address like <id>.%s, no ports to open. Traffic is encrypted all the way to this computer: the relay sees only encrypted data." $d.RelayDefaultHost}}</p>
 {{end}}</div>
 
-<div class="card" id="remote"><h3>Вход с телефона</h3>
-<p>Подтверждения и журнал с телефона или другого компьютера — на адресе устройства, под <code>/ui/</code>. Правила, агенты и секреты оттуда не меняются.</p>
-{{with $d.RemoteLink}}<div class="row" style="align-items:flex-start">{{with $d.RemoteQR}}<img src="{{.}}" alt="QR-код ссылки входа" width="180" height="180" style="image-rendering:pixelated;background:#fff;padding:6px;border-radius:6px">{{end}}
-<div><p>Отсканируйте QR-код телефоном или откройте ссылку. Она одноразовая и действует 2 минуты.</p><pre class="box" id="rlink">{{.}}</pre><button class="small" data-copy="#rlink">Копировать</button>
-<p class="help">На телефоне откройте «Подтверждения» и нажмите «Включить в этом браузере» — запросы будут приходить push-уведомлением.</p></div></div>
-{{else}}{{if $d.RemoteLinkOffline}}<p class="warn">Устройство не подключено к relay — ссылка не откроется. Дождитесь состояния «подключён» выше.</p>{{else if $d.RemoteLinkError}}<p class="warn">Нет публичного адреса: включите relay выше.</p>{{end}}
-<form method="post" action="{{.Base}}/settings/remote-link"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Показать ссылку и QR-код</button></form>{{end}}
+<div class="card" id="remote"><h3>{{T "Sign in from the phone"}}</h3>
+<p>{{TH "Approvals and the journal from the phone or another computer — at the device address under <code>/ui/</code>. Agents, access and settings do not change from there."}}</p>
+{{with $d.RemoteLink}}<div class="row" style="align-items:flex-start">{{with $d.RemoteQR}}<img src="{{.}}" alt="{{T "QR code of the sign-in link"}}" width="180" height="180" style="image-rendering:pixelated;background:#fff;padding:6px;border-radius:6px">{{end}}
+<div><p>{{T "Scan the QR code with the phone or open the link. It is one-time and valid for 2 minutes."}}</p><pre class="box" id="rlink">{{.}}</pre><button class="small" data-copy="#rlink">{{T "Copy"}}</button>
+<p class="help">{{T "On the phone open Settings → Notifications and press “Turn on in this browser” — requests will come as push notifications."}}</p></div></div>
+{{else}}{{if $d.RemoteLinkOffline}}<p class="warn">{{T "The computer is not connected to the relay — the link would not open. Wait for “connected” above."}}</p>{{end}}
+{{if or $d.PublicURL $d.Relay.Configured}}<form method="post" action="{{.Base}}/settings/remote-link"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>{{T "Show the link and the QR code"}}</button></form>
+{{else}}<button disabled>{{T "Show the link and the QR code"}}</button><p class="help">{{T "First turn on internet access above."}}</p>{{end}}{{end}}
 </div>
-
-<div class="card" id="login"><h3>Защита входа</h3>
-<p>Три способа входа в Web UI, их можно сочетать: нужно пройти все включённые, хотя бы один включён всегда. Ссылку (<code>gate4ai ui</code>, трей) может получить и агент, запущенный на этом компьютере, — пароль и подтверждение на другом устройстве (в вашем Telegram-боте) ему недоступны.</p>
-{{$p := $d.Protection}}{{$last := $d.LastMethod}}
-{{if $d.SessionUnprotected}}<p class="warn">Эта сессия открыта до включения защиты, поэтому менять защиту из неё нельзя. Выйдите и войдите заново (<code>gate4ai ui</code>).</p>{{end}}
-<table><colgroup><col style="width:52%"><col style="width:14%"><col></colgroup><tbody>
-<tr><td><b>Одноразовая ссылка</b><br><span class="help">{{if $p.Link}}вход по ссылке из <code>gate4ai ui</code> или трея{{else}}не нужна: вход по постоянному адресу <code>http://{{$d.Addr}}/</code>{{with $d.PublicURL}}, с телефона — <code>{{.}}/ui/</code>{{end}}{{end}}</span></td>
-<td>{{if $p.Link}}<b class="ok">включена</b>{{else}}<b>выключена</b>{{end}}</td>
-<td>{{if and $p.Link (eq $last "link")}}<button disabled>Выключить</button><div class="help">единственный способ входа — сначала включите другой</div>
-{{else if $p.Password}}<a class="btn" href="#m-link">{{if $p.Link}}Выключить{{else}}Включить{{end}}</a>
-{{else}}<form method="post" action="{{.Base}}/settings/login/link"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="{{if $p.Link}}0{{else}}1{{end}}"><button>{{if $p.Link}}Выключить{{else}}Включить{{end}}</button></form>{{end}}</td></tr>
-<tr><td><b>Пароль</b><br><span class="help">хранится только хэшем</span></td>
-<td>{{if $p.Password}}<b class="ok">задан</b>{{else}}<b>не задан</b>{{end}}</td>
-<td><div class="row">{{if $p.Password}}<a class="btn" href="#m-pw-change">Сменить</a>
-{{if eq $last "password"}}<button disabled>Снять</button></div><div class="help">единственный способ входа — сначала включите другой</div>{{else}}<a class="btn danger" href="#m-pw-remove">Снять</a></div>{{end}}
-{{else}}<a class="btn" href="#m-pw-set">Задать</a></div>{{end}}</td></tr>
-<tr><td><b>Подтверждение в Telegram</b><br><span class="help">кнопка «Разрешить вход» в вашем боте, с кодом со страницы входа</span></td>
-<td>{{if $p.Telegram}}<b class="ok">включено</b>{{else}}<b>выключено</b>{{end}}</td>
-<td>{{if and $p.Telegram (eq $last "telegram")}}<button disabled>Выключить</button><div class="help">единственный способ входа — сначала включите другой</div>
-{{else if and (not $p.Telegram) (not $d.TelegramReady)}}<a class="btn" href="{{.Base}}/approvals/telegram?for=login">Включить</a><div class="help">сначала подключим вашего бота</div>
-{{else}}{{template "login_telegram_button" (dict "V" . "On" (not $p.Telegram) "Password" $p.Password)}}{{end}}</td></tr>
-</tbody></table>
-<p class="help">Настройки защиты хранятся в State Store, а не в конфигурации: агент не снимет защиту правкой политики. Менять их можно только из сессии, открытой с текущей защитой, а если задан пароль — введя его. Изменение закрывает все остальные сессии. Те же способы действуют и для входа с телефона (<code>/ui/</code> на адресе устройства): без ссылки туда входят по закладке. От перебора пароля: после 5 неверных подряд каждая попытка ждёт вдвое дольше (до 15 минут), у входа с телефона свой счётчик — перебор из интернета не закрывает вход на компьютере. Забыли пароль или нет доступа к Telegram: остановите daemon и запустите <code>gate4ai daemon --reset-ui-login</code> (в Telegram придёт уведомление о сбросе).</p>
-</div>
-
-{{/* Окна защиты входа: открываются якорем из строк выше, закрываются «Отмена» (назад к #login). */}}
-<div class="modal" id="m-pw-set" data-back="#login" role="dialog" aria-modal="true" aria-labelledby="m-pw-set-h"><div class="box"><h3 id="m-pw-set-h">Задать пароль</h3>
-<form method="post" action="{{.Base}}/settings/login/password"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<label>Пароль <span class="muted">(не короче 8 символов)</span></label><input type="password" name="password" autocomplete="new-password" minlength="8" required>
-<label>Повторите пароль</label><input type="password" name="repeat" autocomplete="new-password" minlength="8" required>
-<p class="help">Вход в Web UI будет требовать пароль, остальные сессии закроются.</p>
-<div class="actions"><a class="btn" href="#login" data-close>Отмена</a><button class="primary">Задать пароль</button></div></form></div></div>
-<div class="modal" id="m-pw-change" data-back="#login" role="dialog" aria-modal="true" aria-labelledby="m-pw-change-h"><div class="box"><h3 id="m-pw-change-h">Сменить пароль</h3>
-<form method="post" action="{{.Base}}/settings/login/password"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<label>Текущий пароль</label><input type="password" name="current" autocomplete="current-password" required>
-<label>Новый пароль <span class="muted">(не короче 8 символов)</span></label><input type="password" name="password" autocomplete="new-password" minlength="8" required>
-<label>Повторите новый пароль</label><input type="password" name="repeat" autocomplete="new-password" minlength="8" required>
-<div class="actions"><a class="btn" href="#login" data-close>Отмена</a><button class="primary">Сменить пароль</button></div></form></div></div>
-<div class="modal" id="m-pw-remove" data-back="#login" role="dialog" aria-modal="true" aria-labelledby="m-pw-remove-h"><div class="box"><h3 id="m-pw-remove-h">Снять пароль?</h3>
-<form method="post" action="{{.Base}}/settings/login/password"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="remove" value="1">
-<p>Вход в Web UI перестанет требовать пароль.</p>
-<label>Текущий пароль</label><input type="password" name="current" autocomplete="current-password" required>
-<div class="actions"><a class="btn" href="#login" data-close>Отмена</a><button class="danger">Снять пароль</button></div></form></div></div>
-{{if $p.Password}}<div class="modal" id="m-link" data-back="#login" role="dialog" aria-modal="true" aria-labelledby="m-link-h"><div class="box"><h3 id="m-link-h">{{if $p.Link}}Выключить{{else}}Включить{{end}} вход по одноразовой ссылке</h3>
-<form method="post" action="{{.Base}}/settings/login/link"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="{{if $p.Link}}0{{else}}1{{end}}">
-<label>Текущий пароль</label><input type="password" name="current" autocomplete="current-password" required>
-<div class="actions"><a class="btn" href="#login" data-close>Отмена</a><button class="primary">{{if $p.Link}}Выключить{{else}}Включить{{end}}</button></div></form></div></div>{{end}}
-
-<div class="card" id="autostart"><h3>Автозапуск</h3>
-{{with $d.Autostart}}
-<p>{{if .installed}}<b class="ok">Включён</b>: gate4.ai запускается при входе в систему{{with .systemd}} (systemd: {{.}}){{end}}.{{else}}<b>Выключен</b>: после перезагрузки gate4.ai не запустится сам, и агенты получат «устройство офлайн».{{end}}</p>
-<form method="post" action="{{$.Base}}/settings/autostart"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="on" value="{{if .installed}}0{{else}}1{{end}}">
-<button class="{{if not .installed}}primary{{end}}">{{if .installed}}Выключить автозапуск{{else}}Включить автозапуск{{end}}</button></form>
-{{with .files}}<p class="help">{{join . ", "}}</p>{{end}}
+<details class="adv"><summary>{{T "Advanced: your own relay or HTTPS address"}}</summary><p><a href="{{.Base}}/settings/relay">{{T "Your own relay, your own HTTPS address without a relay, registering again →"}}</a></p></details>
 {{end}}
-<p class="help">То же в терминале: <code>gate4ai service install</code> / <code>uninstall</code>. Трей тоже запускается при входе, если лежит рядом с gate4ai.</p>
-</div>
 
-<div class="card"><h3>Подтверждения</h3>
-<form method="post" action="{{.Base}}/settings/approvals" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="/settings">
-<label class="inline">Ждать решения <input name="timeout" value="{{$d.Timeout}}" size="6"></label><span class="help">затем — отказ</span><button>Сохранить</button></form>
-<p><a href="{{.Base}}/approvals#channels">Каналы уведомлений →</a></p></div>
-
-<div class="card"><h3>Агенты меняют настройки gate4.ai</h3>
-<p>Агент может сам изменить политику — правило, список, настройку или установку коннектора — действием <code>gate4ai.change_policy</code>. Это обычное действие под обычными правилами: по умолчанию оно требует вашего подтверждения в любом канале (в запросе — что именно изменится), правилом его можно разрешить или запретить (шаблон «Агентам нельзя менять настройки»). Секреты так задать нельзя. Каждое изменение — версия политики с откатом.</p></div>
-
-<div class="card" id="store"><h3>Магазин коннекторов</h3>
+{{if eq $d.Sub "advanced"}}
+<h2>{{T "Advanced"}}</h2><p class="muted">{{T "Defaults suit almost everyone."}}</p>
+<div class="card" id="store"><h3>{{T "Connector store"}}</h3>
 <form method="post" action="{{.Base}}/settings/general"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<label>Адрес каталога (index.json)</label><input name="registry" value="{{$d.Config.Store.Registry}}" size="70">
-<label>Ключи подписи каталога</label><textarea name="registry_keys" rows="2" class="code">{{join $d.Config.Store.RegistryKeys "\n"}}</textarea>
-<button>Сохранить</button></form></div>
-
-<div class="card"><h3>Хранение журнала</h3>
+<label for="st-reg">{{T "Catalog address (index.json)"}}</label><input id="st-reg" name="registry" value="{{$d.Config.Store.Registry}}" size="70">
+<label for="st-keys">{{T "Catalog signing keys"}}</label><textarea id="st-keys" name="registry_keys" rows="2" class="code">{{join $d.Config.Store.RegistryKeys "\n"}}</textarea>
+<button>{{T "Save"}}</button></form></div>
+<div class="card"><h3>{{T "Keeping the journal"}}</h3>
 <form method="post" action="{{.Base}}/settings/general" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<label class="inline">Квитанции <input name="ret_receipts" value="{{index $d.Retention "receipts"}}" size="6"></label>
-<label class="inline">Отказы <input name="ret_denied" value="{{index $d.Retention "denied"}}" size="6"></label>
-<label class="inline">Доказательства <input name="ret_evidence_other" value="{{index $d.Retention "evidence_other"}}" size="6"></label>
-<label class="inline">Доказательства для правила деньги <input name="ret_evidence_money" value="{{index $d.Retention "evidence_money"}}" size="6"></label>
-<button>Сохранить</button></form><p class="help">0s — бессрочно; 90d, 1y, 3y.</p></div>
-
-<div class="card"><h3>О программе</h3>
-<p>gate4ai {{$d.Version}} · данные: <code>{{$d.Home}}</code> · журнал daemon: <code>{{$d.Log}}</code></p></div>
+{{$rs := $d.Retentions}}{{range (list "receipts" "denied" "evidence_other" "evidence_money")}}{{$k := .}}{{$cur := index $d.Retention $k}}<label class="inline" for="ret-{{$k}}">{{T (printf "retention.%s" $k)}}</label><select id="ret-{{$k}}" name="ret_{{$k}}">{{range $rs}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{T (printf "keep.%s" .)}}</option>{{end}}{{if not (has $rs $cur)}}<option selected>{{$cur}}</option>{{end}}</select>{{end}}
+<button>{{T "Save"}}</button></form></div>
+<div class="card"><h3>{{T "Rules as YAML and versions"}}</h3><p><a href="{{.Base}}/policy/yaml">{{T "YAML for technical users →"}}</a> · <a href="{{.Base}}/policy#advanced">{{T "Lists, check, versions →"}}</a></p></div>
+<div class="card"><h3>{{T "About"}}</h3>
+<p>gate4ai {{$d.Version}} · {{T "data:"}} <code>{{$d.Home}}</code> · {{T "log:"}} <code>{{$d.Log}}</code></p>
+{{with $d.Autostart}}{{with .files}}<p class="help">{{T "Autostart files:"}} {{join . ", "}}</p>{{end}}{{end}}
+<p class="help">{{TH "The same in the terminal: <code>gate4ai service install</code> / <code>uninstall</code>, <code>gate4ai status</code>."}}</p></div>
+{{end}}
+</div></div>
 {{template "foot"}}
+
+{{define "settings_nav"}}{{$v := .V}}<nav class="side" aria-label="{{T "Settings"}}">
+<a href="{{$v.Base}}/settings" class="{{if eq .On "main"}}on{{end}}">{{T "Main"}}</a>
+<a href="{{$v.Base}}/settings/notifications" class="{{if eq .On "notifications"}}on{{end}}">{{T "Notifications"}}</a>
+<a href="{{$v.Base}}/vault" class="{{if eq .On "vault"}}on{{end}}">{{T "Passwords and accounts"}}</a>
+<a href="{{$v.Base}}/settings/login" class="{{if eq .On "login"}}on{{end}}">{{T "Signing in"}}</a>
+<div class="sep">{{T "Advanced"}}</div>
+<a href="{{$v.Base}}/settings/internet" class="{{if eq .On "internet"}}on{{end}}">{{T "Internet access"}}</a>
+<a href="{{$v.Base}}/settings/advanced" class="{{if eq .On "advanced"}}on{{end}}">{{T "Store, journal, about"}}</a>
+</nav>{{end}}
+
+{{define "chan_buttons"}}{{$v := .V}}{{with .C}}{{if .On}}<form method="post" action="{{$v.Base}}/channels/{{.Name}}/test" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><button class="small">{{T "Test"}}</button></form>
+<form method="post" action="{{$v.Base}}/channels/{{.Name}}/toggle" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="on" value="0"><button class="small">{{T "Turn off"}}</button></form>
+{{else}}<form method="post" action="{{$v.Base}}/channels/{{.Name}}/toggle" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="on" value="1"><button class="small primary">{{T "Turn on"}}</button></form>{{end}}{{end}}{{end}}
 
 {{/* login_telegram_button — включить/выключить подтверждение входа в Telegram; при заданном пароле — через окно с паролем.
    Ею же заканчивается мастер Telegram (/approvals/telegram). */}}
-{{define "login_telegram_button"}}{{$v := .V}}{{$label := "Выключить"}}{{if .On}}{{$label = "Включить"}}{{end}}{{with .Label}}{{$label = .}}{{end}}
-{{if .Password}}<a class="btn{{if .Primary}} primary{{end}}" href="#m-tg">{{$label}}</a>
-<div class="modal" id="m-tg" data-back="{{or .Back "#login"}}" role="dialog" aria-modal="true" aria-labelledby="m-tg-h"><div class="box"><h3 id="m-tg-h">{{if .On}}Включить{{else}}Выключить{{end}} подтверждение входа в Telegram</h3>
+{{define "login_telegram_button"}}{{$v := .V}}{{$label := "Turn off"}}{{if .On}}{{$label = "Turn on"}}{{end}}{{with .Label}}{{$label = .}}{{end}}
+{{if .Password}}<a class="btn{{if .Primary}} primary{{end}}" href="#m-tg">{{T $label}}</a>
+<div class="modal" id="m-tg" data-back="{{or .Back "#login"}}" role="dialog" aria-modal="true" aria-labelledby="m-tg-h"><div class="box"><h3 id="m-tg-h">{{if .On}}{{T "Turn on sign-in confirmation in Telegram"}}{{else}}{{T "Turn off sign-in confirmation in Telegram"}}{{end}}</h3>
 <form method="post" action="{{$v.Base}}/settings/login/telegram"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="on" value="{{if .On}}1{{else}}0{{end}}">{{with .From}}<input type="hidden" name="from" value="{{.}}">{{end}}
-<label>Текущий пароль</label><input type="password" name="current" autocomplete="current-password" required>
-<div class="actions"><a class="btn" href="{{or .Back "#login"}}" data-close>Отмена</a><button class="primary">{{if .On}}Включить{{else}}Выключить{{end}}</button></div></form></div></div>
-{{else}}<form method="post" action="{{$v.Base}}/settings/login/telegram"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="on" value="{{if .On}}1{{else}}0{{end}}">{{with .From}}<input type="hidden" name="from" value="{{.}}">{{end}}<button{{if .Primary}} class="primary"{{end}}>{{$label}}</button></form>{{end}}
+<label for="tgpw">{{T "Current password"}}</label><input id="tgpw" type="password" name="current" autocomplete="current-password" required>
+<div class="actions"><a class="btn" href="{{or .Back "#login"}}" data-close>{{T "Cancel"}}</a><button class="primary">{{if .On}}{{T "Turn on"}}{{else}}{{T "Turn off"}}{{end}}</button></div></form></div></div>
+{{else}}<form method="post" action="{{$v.Base}}/settings/login/telegram"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="on" value="{{if .On}}1{{else}}0{{end}}">{{with .From}}<input type="hidden" name="from" value="{{.}}">{{end}}<button{{if .Primary}} class="primary"{{end}}>{{T $label}}</button></form>{{end}}
 {{end}}

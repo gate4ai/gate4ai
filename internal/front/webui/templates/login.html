@@ -1,7 +1,9 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>gate4.ai — вход</title>
-<style>body{font:15px/1.5 system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1rem}pre{background:#8881;padding:.6rem;border-radius:6px}</style></head>
-<body><h1>gate4.ai</h1>
+<!doctype html><html lang="{{Lang}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>gate4.ai — {{T "sign in"}}</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1rem}pre{background:#8881;padding:.6rem;border-radius:6px;margin:0;flex:1}.row{display:flex;gap:.5rem;align-items:center}button{font:inherit;padding:.4rem .8rem;border-radius:8px;border:1px solid #8885;background:none;cursor:pointer}.muted{color:#777}.lang a{color:#777;margin-right:.5rem}</style>
+<script src="{{.Base}}/static/app.js" defer></script></head>
+<body><p class="lang">{{range langs}}<a href="{{$.Base}}/lang?l={{.Code}}&amp;back={{$.Base}}/" lang="{{.Code}}">{{.Title}}</a>{{end}}</p><h1>gate4.ai</h1>
 {{with .Error}}<p style="color:#b3261e" role="alert">{{.}}</p>{{end}}
-{{if .Remote}}<p>Нужен вход. Ссылку для этого устройства выдаёт компьютер с gate4.ai: <b>Настройки → Вход с телефона</b> (QR-код) или команда</p><pre>gate4ai ui --remote</pre>
-{{else}}<p>Нужен вход. Откройте Web UI из трея — значок gate4.ai → <b>Открыть Web UI</b>, — или выполните на этом компьютере:</p><pre>gate4ai ui</pre>{{end}}
-<p>Ссылка входа одноразовая и действует 2 минуты; сессия — 12 часов. Если в Настройках включена защита входа, после ссылки нужен пароль и/или подтверждение в Telegram.</p></body></html>
+{{if .Remote}}<p>{{TH "Sign-in is needed. The computer with gate4.ai gives a link for this device: <b>Settings → Internet access → Sign in from the phone</b> (QR code) or the command"}}</p><div class="row"><pre id="cmd">gate4ai ui --remote</pre><button data-copy="#cmd">{{T "Copy"}}</button></div>
+{{else}}<p>{{TH "Sign-in is needed. Open the Web UI from the tray — the gate4.ai icon → <b>Open Web UI</b> — or run on this computer:"}}</p><div class="row"><pre id="cmd">gate4ai ui</pre><button data-copy="#cmd">{{T "Copy"}}</button></div>{{end}}
+<p class="muted">{{T "The sign-in link is one-time and valid for 2 minutes; a session lasts 12 hours."}}</p>
+<p class="muted">{{T "Want to sign in from a bookmark instead? Set a password in Settings → Signing in and turn the link off."}}</p></body></html>

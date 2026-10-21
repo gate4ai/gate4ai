@@ -1,74 +1,76 @@
 {{template "head" .}}
 {{$d := .Data}}{{$p := $d.P}}
-<div class="row between"><h2>Правила</h2>
-<div class="row"><a class="btn" href="{{.Base}}/policy/templates?profile={{$d.Profile}}">Готовые шаблоны</a><a class="btn" href="{{.Base}}/policy/yaml">YAML</a></div></div>
-<p class="muted">Агенту назначен <b>профиль</b>: к каким коннекторам у него доступ и какие правила действуют. Если правило не сработало: чтение — разрешено, изменение и отправка — спрашивать. Запрет важнее вопроса, вопрос важнее разрешения.</p>
-<div class="tabs">{{range $d.Profiles}}<a href="{{$.Base}}/policy?profile={{.}}" class="{{if eq . $d.Profile}}on{{end}}">{{.}}</a>{{end}}
-<details style="margin:0 0 0 auto"><summary class="btn small">+ профиль</summary><form method="post" action="{{.Base}}/policy/profile" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input name="name" placeholder="имя" required size="12"><button class="small">Создать</button></form></details></div>
+{{template "access_tabs" (dict "V" . "On" "rules")}}
+<p class="muted">{{T "Each agent has its permissions: which connectors it sees and which rules apply. Without a rule reading is allowed and changing or sending asks you. Deny beats ask, ask beats allow."}}</p>
+<nav class="tabs" aria-label="{{T "Permissions"}}">{{range $d.Profiles}}{{$ag := index $d.ProfileAgents .}}<a href="{{$.Base}}/policy?profile={{.}}" class="{{if eq . $d.Profile}}on{{end}}">{{if $ag}}{{join $ag ", "}}{{else}}{{.}} <span class="muted">({{T "no agents"}})</span>{{end}}</a>{{end}}</nav>
 
 {{if $d.Profile}}
-<p>Агенты с этим профилем: {{range $d.Agents}}<a href="{{$.Base}}/agents/{{.}}">{{.}}</a> {{else}}<span class="muted">нет</span>{{end}}</p>
+<p>{{T "Permissions"}} <code>{{$d.Profile}}</code> · {{T "agents:"}} {{range $d.Agents}}<a href="{{$.Base}}/agents/{{.}}">{{.}}</a> {{else}}<span class="muted">{{T "none"}}</span>{{end}}</p>
 
-<div class="card"><h3>Доступ к коннекторам</h3>
+<div class="card"><h3>{{T "Connectors it sees"}}</h3>
 <form method="post" action="{{.Base}}/policy/profile/connectors" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}">
-{{range $d.Connectors}}<label class="inline"><input type="checkbox" name="connectors" value="{{.}}" {{if has $p.Connectors .}}checked{{end}}> {{.}}</label>{{else}}<span class="muted">Коннекторов нет — <a href="{{$.Base}}/connectors">поставьте</a>.</span>{{end}}
-{{if $d.Connectors}}<button class="small">Сохранить</button>{{end}}</form></div>
+{{range $d.Connectors}}<label class="inline"><input type="checkbox" name="connectors" value="{{.Name}}" {{if has $p.Connectors .Name}}checked{{end}}> {{.Title}}</label>{{else}}<span class="muted">{{T "No connectors —"}} <a href="{{$.Base}}/connectors">{{T "install one"}}</a>.</span>{{end}}
+{{if $d.Connectors}}<button class="small">{{T "Save"}}</button>{{end}}</form></div>
 
-<div class="row between"><h3>Правила профиля</h3><a class="btn primary" href="{{.Base}}/policy/rule?profile={{$d.Profile}}">+ Правило</a></div>
-<p class="help">Порядок правил на решение не влияет: если сработало несколько, запрет сильнее вопроса, а вопрос сильнее разрешения. Стрелки — только для удобства чтения.</p>
-<table><tr><th>Действие</th><th>Решение</th><th>Условие</th><th>Причина</th><th></th></tr>
+<div class="row between"><h3>{{T "Rules"}}</h3><a class="btn primary" href="{{.Base}}/policy/rule?profile={{$d.Profile}}">+ {{T "Rule"}}</a></div>
+<p class="help">{{T "The order of rules does not change the decision: if several match, deny beats ask and ask beats allow. The arrows only help reading."}}</p>
+<table><tr><th>{{T "Action"}}</th><th>{{T "Decision"}}</th><th>{{T "Condition"}}</th><th>{{T "Reason"}}</th><th></th></tr>
 {{range $d.Groups}}{{if .Single}}{{with index .Rules 0}}<tr id="rule-{{.ID}}"><td><code>{{.Action}}</code><div class="help">{{.ID}}</div></td>
-<td class="{{.Effect}}"><b>{{effectRu .Effect}}</b></td>
-<td>{{if isCode .When}}<code>{{.When}}</code>{{else}}{{describe .When}}{{end}}</td><td>{{.Reason}}</td>
+<td class="{{.Effect}}"><b>{{effect .Effect}}</b></td>
+<td>{{if isCode .When}}<code>{{.When}}</code>{{else}}{{describe .When}}{{end}}</td><td>{{reason .Reason}}</td>
 <td>{{template "rule_buttons" (dict "V" $ "Profile" $d.Profile "ID" .ID "Move" true)}}</td></tr>{{end}}
-{{else}}<tr class="group"{{range .Rules}} data-rule="{{.ID}}"{{end}}><td><details><summary title="Правила одинаковые, кроме действия, — собраны в группу. В политике они остаются отдельными."><code>{{.Label}}</code> <span class="muted">· правил: {{len .Rules}}</span></summary>
-<table>{{range .Rules}}<tr id="rule-{{.ID}}"><td><code>{{.Action}}</code><div class="help">{{.ID}}{{with .Reason}} · {{.}}{{end}}</div></td><td>{{template "rule_buttons" (dict "V" $ "Profile" $d.Profile "ID" .ID)}}</td></tr>{{end}}</table></details></td>
-<td class="{{.Effect}}"><b>{{effectRu .Effect}}</b></td>
-<td>{{if isCode .When}}<code>{{.When}}</code>{{else}}{{describe .When}}{{end}}</td><td>{{if .Mixed}}<span class="muted">разные — раскройте группу</span>{{else}}{{.Reason}}{{end}}</td>
+{{else}}<tr class="group"{{range .Rules}} data-rule="{{.ID}}"{{end}}><td><details><summary title="{{T "The rules are the same except for the action, so they are grouped. In the policy they stay separate."}}"><code>{{.Label}}</code> <span class="muted">· {{T "rules: %d" (len .Rules)}}</span></summary>
+<table>{{range .Rules}}<tr id="rule-{{.ID}}"><td><code>{{.Action}}</code><div class="help">{{.ID}}{{with .Reason}} · {{reason .}}{{end}}</div></td><td>{{template "rule_buttons" (dict "V" $ "Profile" $d.Profile "ID" .ID)}}</td></tr>{{end}}</table></details></td>
+<td class="{{.Effect}}"><b>{{effect .Effect}}</b></td>
+<td>{{if isCode .When}}<code>{{.When}}</code>{{else}}{{describe .When}}{{end}}</td><td>{{if .Mixed}}<span class="muted">{{T "different — open the group"}}</span>{{else}}{{reason .Reason}}{{end}}</td>
 <td></td></tr>{{end}}
-{{else}}<tr><td colspan="5" class="muted">Правил нет — действуют значения по умолчанию. Начните с <a href="{{$.Base}}/policy/templates?profile={{$d.Profile}}">шаблона</a>.</td></tr>{{end}}
-{{range $p.Limits}}<tr><td><code>{{.Action}}</code><div class="help">{{.ID}}</div></td><td class="deny"><b>лимит</b></td>
-<td>{{if .PerDay}}не больше {{.PerDay}} в сутки{{end}}{{if .AmountPerDay}} сумма не больше {{.AmountPerDay}} в сутки{{end}}</td><td>{{.Reason}}</td>
-<td><form method="post" action="{{$.Base}}/policy/rule/delete" class="inline" data-confirm="Удалить лимит {{.ID}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><button class="small danger">Удалить</button></form></td></tr>{{end}}
+{{else}}<tr><td colspan="5" class="muted">{{T "No rules — the defaults apply. Start with"}} <a href="{{$.Base}}/policy/templates?profile={{$d.Profile}}">{{T "ready-made rules"}}</a>.</td></tr>{{end}}
+{{range $p.Limits}}<tr><td><code>{{.Action}}</code><div class="help">{{.ID}}</div></td><td class="deny"><b>{{T "limit"}}</b></td>
+<td>{{if .PerDay}}{{T "at most %d a day" .PerDay}}{{end}}{{if .AmountPerDay}} {{T "total at most %v a day" .AmountPerDay}}{{end}}</td><td>{{reason .Reason}}</td>
+<td><form method="post" action="{{$.Base}}/policy/rule/delete" class="inline" data-confirm="{{T "Remove the limit %s?" .ID}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><button class="small danger">{{T "Remove"}}</button></form></td></tr>{{end}}
 </table>
 
-{{if $d.Acts}}<details><summary>Все действия профиля и что с ними будет без правил</summary>
-<table><tr><th>Действие</th><th>Класс</th><th>Без правил</th><th>Правила</th></tr>
-{{range $d.Acts}}<tr><td><code>{{.Tool.Name}}</code><div class="help">{{.Tool.Description}}</div></td><td>{{classRu .Tool.Class}}</td><td class="{{.Default}}">{{effectRu .Default}}</td>
-<td>{{range .Rules}}<a href="#rule-{{.}}">{{.}}</a> {{else}}<a class="small" href="{{$.Base}}/policy/rule?profile={{$d.Profile}}&action={{.Tool.Name}}">добавить</a>{{end}}</td></tr>{{end}}
+{{if $d.Acts}}<details><summary>{{T "Every action and what happens without rules"}}</summary>
+<table><tr><th>{{T "Action"}}</th><th>{{T "Kind"}}</th><th>{{T "Without rules"}}</th><th>{{T "Rules"}}</th></tr>
+{{range $d.Acts}}<tr><td><code>{{.Tool.Name}}</code><div class="help">{{.Title}}</div></td><td>{{class .Tool.Class}}</td><td class="{{.Default}}">{{effect .Default}}</td>
+<td>{{range .Rules}}<a href="#rule-{{.}}">{{.}}</a> {{else}}<a class="small" href="{{$.Base}}/policy/rule?profile={{$d.Profile}}&amp;action={{.Tool.Name}}">{{T "add"}}</a>{{end}}</td></tr>{{end}}
 </table></details>{{end}}
 {{end}}
 
-<h3 id="lists">Списки</h3>
-<p class="help">Доверенные адресаты, получатели платежей и т.п. В условиях — «из списка».</p>
+<details class="adv card" id="advanced"><summary>{{T "Advanced: lists, check, versions, YAML"}}</summary>
+<h3 id="lists">{{T "Lists"}}</h3>
+<p class="help">{{T "Trusted recipients, payees and so on. In conditions — “is in the list”."}}</p>
 {{range $name, $items := $d.Lists}}
 <form method="post" action="{{$.Base}}/policy/lists" class="card"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="back" value="/policy?profile={{$d.Profile}}">
-<b>{{$name}}</b><textarea name="items" rows="3">{{join $items "\n"}}</textarea><div class="row"><button class="small">Сохранить</button><span class="help">пустой список удаляется</span></div></form>{{end}}
+<label for="l-{{$name}}">{{$name}}</label><textarea id="l-{{$name}}" name="items" rows="3">{{join $items "\n"}}</textarea><div class="row"><button class="small">{{T "Save"}}</button><span class="help">{{T "an empty list is removed"}}</span></div></form>{{end}}
 <form method="post" action="{{.Base}}/policy/lists" class="card"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="/policy?profile={{$d.Profile}}">
-<b>Новый список</b> <input name="name" placeholder="contacts_trusted" required><textarea name="items" rows="2" placeholder="по одному на строку"></textarea><button class="small">Создать</button></form>
+<label for="l-new">{{T "New list"}}</label><input id="l-new" name="name" placeholder="contacts_trusted" required><label for="l-new-items">{{T "Items, one per line"}}</label><textarea id="l-new-items" name="items" rows="2"></textarea><button class="small">{{T "Create"}}</button></form>
 
-<h3 id="sim">Проверка: что будет, если агент попробует…</h3>
+<h3 id="sim">{{T "Check: what happens if the agent tries…"}}</h3>
 <div class="card">
 <form method="get" action="{{.Base}}/policy" class="row"><input type="hidden" name="profile" value="{{$d.Profile}}">
-<label class="inline">Действие <select name="sim" data-autosubmit>{{range $d.Tools}}<option {{if eq .Name $d.SimAction}}selected{{end}}>{{.Name}}</option>{{end}}</select></label><noscript><button class="small">Выбрать</button></noscript></form>
+<label class="inline" for="sim-a">{{T "Action"}}</label><select id="sim-a" name="sim" data-autosubmit>{{range $d.Tools}}<option {{if eq .Name $d.SimAction}}selected{{end}}>{{.Name}}</option>{{end}}</select><noscript><button class="small">{{T "Choose"}}</button></noscript></form>
 {{with $d.SimTool}}
 <form method="post" action="{{$.Base}}/policy/simulate#sim"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="{{.Name}}"><input type="hidden" name="profile" value="{{$d.Profile}}">
-<label class="inline">Агент <select name="agent">{{range $n, $a := $d.AllAgents}}<option {{if eq $n (or $d.SimAgent "")}}selected{{end}}>{{$n}}</option>{{end}}</select></label>
-{{range .Schema.Properties}}<label>{{.Name}}{{if .Schema.Description}} <span class="muted">— {{.Schema.Description}}</span>{{end}}</label>
-<input name="arg.{{.Name}}" size="50" value="{{if $d.SimArgs}}{{index $d.SimArgs (print "arg." .Name)}}{{end}}" placeholder="{{if eq .Schema.Type "array"}}через запятую{{else}}{{.Schema.Type}}{{end}}">{{end}}
-<p><button>Проверить</button></p></form>{{end}}
-{{with $d.Sim}}<p class="note">Решение: <b class="{{.Effect}}">{{effectRu .Effect}}</b> — {{.Reason}}{{if .RuleIDs}} <span class="muted">[{{join .RuleIDs ", "}}]</span>{{end}}{{if .Obligations}} · обязательства: {{join .Obligations ", "}}{{end}}</p>{{end}}
+{{if $d.AllAgents}}<label class="inline" for="sim-ag">{{T "Agent"}}</label><select id="sim-ag" name="agent">{{range $n, $a := $d.AllAgents}}<option {{if eq $n (or $d.SimAgent "")}}selected{{end}}>{{$n}}</option>{{end}}</select>{{else}}<p class="muted">{{T "No agents yet — the check needs one."}}</p>{{end}}
+{{range .Schema.Properties}}<label for="sim-{{.Name}}">{{.Name}}{{if .Schema.Description}} <span class="muted">— {{.Schema.Description}}</span>{{end}}</label>
+<input id="sim-{{.Name}}" name="arg.{{.Name}}" size="50" value="{{if $d.SimArgs}}{{index $d.SimArgs (print "arg." .Name)}}{{end}}" placeholder="{{if eq .Schema.Type "array"}}{{T "comma-separated"}}{{else if eq .Schema.Format "path"}}~/Documents/notes/todo.md{{else if eq .Schema.Format "url"}}https://example.com{{end}}">{{end}}
+<p><button>{{T "Check"}}</button></p></form>{{end}}
+{{with $d.Sim}}<p class="note">{{T "Decision:"}} <b class="{{.Effect}}">{{effect .Effect}}</b> — {{reason .Reason}}{{if .RuleIDs}} <span class="muted">[{{join .RuleIDs ", "}}]</span>{{end}}{{if .Obligations}} · {{T "obligations:"}} {{join .Obligations ", "}}{{end}}</p>{{end}}
 </div>
 
-<h3>Версии</h3>
-<table><tr><th>№</th><th>Когда</th><th>Кто</th><th>Что</th><th></th></tr>
-{{range $d.Versions}}<tr><td>{{.N}}</td><td>{{ts .At}}</td><td>{{.Author}}</td><td>{{.Comment}}</td>
-<td>{{if ne .N $d.Version}}<form method="post" action="{{$.Base}}/policy/rollback" data-confirm="Вернуть версию {{.N}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.N}}"><input type="hidden" name="back" value="/policy?profile={{$d.Profile}}"><button class="small">Вернуть</button></form>{{else}}<span class="muted">текущая</span>{{end}}</td></tr>{{end}}
+<h3>{{T "Versions"}}</h3>
+<table><tr><th>№</th><th>{{T "When"}}</th><th>{{T "Who"}}</th><th>{{T "What"}}</th><th></th></tr>
+{{range $d.Versions}}<tr><td>{{.N}}</td><td>{{ts .At}}</td><td>{{.Author}}</td><td>{{version .Comment}}</td>
+<td>{{if ne .N $d.Version}}<form method="post" action="{{$.Base}}/policy/rollback" data-confirm="{{T "Bring back version %d?" .N}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.N}}"><input type="hidden" name="back" value="/policy?profile={{$d.Profile}}"><button class="small">{{T "Bring back"}}</button></form>{{else}}<span class="muted">{{T "current"}}</span>{{end}}</td></tr>{{end}}
 </table>
+<p class="row"><a class="btn" href="{{.Base}}/policy/yaml">{{T "YAML for technical users"}}</a>
+<details style="display:inline-block;margin:0"><summary class="btn small">+ {{T "shared permissions"}}</summary><form method="post" action="{{.Base}}/policy/profile" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><label class="inline" for="np">{{T "Name"}}</label><input id="np" name="name" required size="12"><button class="small">{{T "Create"}}</button></form></details></p>
+</details>
 {{template "foot"}}
 {{define "rule_buttons"}}{{$v := .V}}<div class="row">
-<a class="btn small" href="{{$v.Base}}/policy/rule?profile={{.Profile}}&id={{.ID}}">Изменить</a>
-{{if .Move}}<form method="post" action="{{$v.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="profile" value="{{.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="-1"><button class="small" title="выше (на решение не влияет)">↑</button></form>
-<form method="post" action="{{$v.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="profile" value="{{.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="1"><button class="small" title="ниже (на решение не влияет)">↓</button></form>{{end}}
-<form method="post" action="{{$v.Base}}/policy/rule/delete" class="inline" data-confirm="Удалить правило {{.ID}}?"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="profile" value="{{.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><button class="small danger">Удалить</button></form>
+<a class="btn small" href="{{$v.Base}}/policy/rule?profile={{.Profile}}&amp;id={{.ID}}">{{T "Edit"}}</a>
+{{if .Move}}<form method="post" action="{{$v.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="profile" value="{{.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="-1"><button class="small" title="{{T "up (does not change the decision)"}}" aria-label="{{T "up (does not change the decision)"}}">↑</button></form>
+<form method="post" action="{{$v.Base}}/policy/rule/move" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="profile" value="{{.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="delta" value="1"><button class="small" title="{{T "down (does not change the decision)"}}" aria-label="{{T "down (does not change the decision)"}}">↓</button></form>{{end}}
+<form method="post" action="{{$v.Base}}/policy/rule/delete" class="inline" data-confirm="{{T "Remove the rule %s?" .ID}}"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="profile" value="{{.Profile}}"><input type="hidden" name="id" value="{{.ID}}"><button class="small danger">{{T "Remove"}}</button></form>
 </div>{{end}}

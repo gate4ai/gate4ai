@@ -1,47 +1,48 @@
 {{template "head" .}}
 {{$d := .Data}}{{$f := $d.F}}
-<div class="row between"><h2>{{if $f.Action}}Правило для <code>{{$f.Action}}</code>{{else}}Новое правило{{end}}</h2><a href="{{.Base}}/policy?profile={{$f.Profile}}">← Правила</a></div>
-{{if $d.Note}}<div class="note">{{$d.Note}}</div>{{end}}
+{{template "access_tabs" (dict "V" . "On" "rules")}}
+<div class="row between"><h2>{{if $f.Action}}{{T "Rule for"}} <code>{{$f.Action}}</code>{{else}}{{T "New rule"}}{{end}}</h2><a href="{{.Base}}/policy?profile={{$f.Profile}}">← {{T "Rules"}}</a></div>
+{{if $d.Note.F}}<div class="note">{{say $d.Note}}</div>{{end}}
 {{/* Одна форма: правило одной фразой. «+ условие» и «×» отправляют форму без сохранения (add_cond, drop),
    смена профиля или действия — перезагрузка страницы (data-reload; без JS — кнопка «Выбрать»). */}}
 <form method="post" action="{{.Base}}/policy/rule" class="card" id="rule-form"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<button class="primary" style="position:absolute;left:-9999px" tabindex="-1" aria-hidden="true">Сохранить правило</button>
+<button class="primary" style="position:absolute;left:-9999px" tabindex="-1" aria-hidden="true">{{T "Save the rule"}}</button>
 <input type="hidden" name="id" value="{{$f.ID}}"><input type="hidden" name="approval" value="{{$d.Approval}}">
-<p class="sentence">В профиле <select name="profile" data-reload aria-label="Профиль">{{range $d.Profiles}}<option {{if eq . $f.Profile}}selected{{end}}>{{.}}</option>{{end}}</select>,
-когда агент вызывает <select name="action" data-reload aria-label="Действие"><option value="">— действие —</option>
+<p class="sentence">{{T "For the permissions"}} <select name="profile" data-reload aria-label="{{T "Permissions"}}">{{range $d.Profiles}}<option {{if eq . $f.Profile}}selected{{end}}>{{.}}</option>{{end}}</select>,
+{{T "when the agent calls"}} <select name="action" data-reload aria-label="{{T "Action"}}"><option value="">— {{T "action"}} —</option>
 {{range $d.Tools}}<option value="{{.Name}}" {{if eq .Name $f.Action}}selected{{end}}>{{.Name}}</option>{{end}}
 {{if and $f.Action (not $d.Tool)}}<option selected>{{$f.Action}}</option>{{end}}</select>{{if $f.Action}},{{end}}
-<noscript><button class="small" formmethod="get" formaction="{{.Base}}/policy/rule">Выбрать</button></noscript>
+<noscript><button class="small" formmethod="get" formaction="{{.Base}}/policy/rule">{{T "Choose"}}</button></noscript>
 {{if $f.Action}}<br>
-<select name="effect" class="{{$f.Effect}}" style="font-weight:600" aria-label="Решение">
-<option value="allow" {{if eq $f.Effect "allow"}}selected{{end}}>разрешать без вопроса</option>
-<option value="ask" {{if eq $f.Effect "ask"}}selected{{end}}>спрашивать меня</option>
-<option value="deny" {{if eq $f.Effect "deny"}}selected{{end}}>запрещать</option></select>
-{{if not $d.Chips}}<span class="muted">всегда</span>{{end}}
-{{range $i, $c := $d.Chips}}<span class="pill solid">{{if $i}}и {{else}}если {{end}}{{if .Code}}<code>{{.Text}}</code>{{else}}{{.Text}}{{end}} <button class="link" name="drop" value="{{.Drop}}" title="убрать условие" aria-label="убрать условие">×</button></span> {{end}}
-<a class="pill" href="#new-cond" data-toggle="#new-cond">+ условие</a>{{end}}</p>
+<select name="effect" class="{{$f.Effect}}" style="font-weight:600" aria-label="{{T "Decision"}}">
+<option value="allow" {{if eq $f.Effect "allow"}}selected{{end}}>{{T "allow without asking"}}</option>
+<option value="ask" {{if eq $f.Effect "ask"}}selected{{end}}>{{T "ask me"}}</option>
+<option value="deny" {{if eq $f.Effect "deny"}}selected{{end}}>{{T "deny"}}</option></select>
+{{if not $d.Chips}}<span class="muted">{{T "always"}}</span>{{end}}
+{{range $i, $c := $d.Chips}}<span class="pill solid">{{if $i}}{{T "and"}} {{else}}{{T "if"}} {{end}}{{if .Code}}<code>{{.Text}}</code>{{else}}{{.Text}}{{end}} <button class="link" name="drop" value="{{.Drop}}" title="{{T "remove the condition"}}" aria-label="{{T "remove the condition"}}">×</button></span> {{end}}
+<a class="pill" href="#new-cond" data-toggle="#new-cond">+ {{T "condition"}}</a>{{end}}</p>
 {{range $f.WhenParts}}<input type="hidden" name="when_part" value="{{.}}">{{end}}
 {{range $i, $c := $f.Conds}}<input type="hidden" name="cond_kind" value="{{$c.Kind}}"><input type="hidden" name="cond_arg" value="{{$c.Arg}}"><input type="hidden" name="cond_value" value="{{$c.Value}}">{{if $c.Not}}<input type="hidden" name="cond_not_{{$i}}" value="1">{{end}}{{with $c.Items}}<input type="hidden" name="list_items_{{$i}}" value="{{.}}">{{end}}{{end}}
 
 {{if $f.Action}}
 {{with $d.Tool}}<p class="help" style="margin-top:-.4rem"><code>{{.Name}}</code> — {{.Description}}</p>{{end}}
 <div id="new-cond" class="cond2 newcond"{{if not $f.New.Kind}} data-collapsed{{end}}>
-<b style="margin-right:.3rem">Новое условие:</b>
-<select name="new_arg" aria-label="Аргумент"><option value="">аргумент…</option>{{range $d.Args}}<option value="{{.Name}}" {{if eq .Name $f.New.Arg}}selected{{end}}>{{.Name}}{{if .Array}} (список){{end}}{{with .Description}} — {{.}}{{end}}</option>{{end}}</select>
-<label class="inline" style="margin:0"><input type="checkbox" name="new_not" value="1" {{if $f.New.Not}}checked{{end}}> не</label>
-<select name="new_kind" aria-label="Проверка"><option value="">проверка…</option>{{range $d.Kinds}}<option value="{{.ID}}" {{if eq .ID $f.New.Kind}}selected{{end}}>{{.Title}}</option>{{end}}</select>
-<input name="new_value" value="{{$f.New.Value}}" placeholder="значение, папка, сайты или имя списка" size="28" aria-label="Значение" data-enter="add_cond">
-<input name="new_items" value="{{$f.New.Items}}" placeholder="элементы нового списка через запятую" size="28" data-show-when="new_kind=in_list" aria-label="Элементы нового списка">
-<button class="small primary" name="add_cond" value="1">Добавить</button>
-{{if $d.Lists}}<div class="help" style="flex-basis:100%">Списки: {{range $n, $_ := $d.Lists}}<code>{{$n}}</code> {{end}}</div>{{end}}
+<b style="margin-right:.3rem">{{T "New condition:"}}</b>
+<select name="new_arg" aria-label="{{T "Argument"}}"><option value="">{{T "argument…"}}</option>{{range $d.Args}}<option value="{{.Name}}" {{if eq .Name $f.New.Arg}}selected{{end}}>{{.Name}}{{if .Array}} ({{T "list"}}){{end}}{{with .Description}} — {{.}}{{end}}</option>{{end}}</select>
+<label class="inline" style="margin:0"><input type="checkbox" name="new_not" value="1" {{if $f.New.Not}}checked{{end}}> {{T "not"}}</label>
+<select name="new_kind" aria-label="{{T "Check"}}"><option value="">{{T "check…"}}</option>{{range $d.Kinds}}<option value="{{.ID}}" {{if eq .ID $f.New.Kind}}selected{{end}}>{{T .Title}}</option>{{end}}</select>
+<input name="new_value" value="{{$f.New.Value}}" placeholder="{{T "value, folder, sites or list name"}}" size="28" aria-label="{{T "Value"}}" data-enter="add_cond">
+<input name="new_items" value="{{$f.New.Items}}" placeholder="{{T "new list items, comma-separated"}}" size="28" data-show-when="new_kind=in_list" aria-label="{{T "New list items"}}">
+<button class="small primary" name="add_cond" value="1">{{T "Add"}}</button>
+{{if $d.Lists}}<div class="help" style="flex-basis:100%">{{T "Lists:"}} {{range $n, $_ := $d.Lists}}<code>{{$n}}</code> {{end}}</div>{{end}}
 </div>
-<p class="help">Без условий — всегда; несколько условий — все вместе. <a href="#cel" data-toggle="#cel">Условие на CEL</a> — для технических пользователей.</p>
-<div id="cel" data-collapsed><input name="when" size="80" placeholder='glob(path, "~/notes/**") && !text.contains("password")' aria-label="Условие на CEL" data-enter="add_cond">
-<p class="help">Переменные — аргументы действия, <code>lists.*</code>, <code>provenance</code>, <code>counters</code>, <code>now</code>, <code>hour</code>; функции <code>glob()</code>, <code>domain_matches()</code>, <code>email_domain()</code>. Объединяется с остальными условиями через «и».</p></div>
+<p class="help">{{T "No conditions — always; several conditions — all at once."}} <a href="#cel" data-toggle="#cel">{{T "Condition in CEL"}}</a> — {{T "for technical users."}}</p>
+<div id="cel" data-collapsed><input name="when" size="80" placeholder='glob(path, "~/notes/**") && !text.contains("password")' aria-label="{{T "Condition in CEL"}}" data-enter="add_cond">
+<p class="help">{{TH "Variables: the action arguments, <code>lists.*</code>, <code>provenance</code>, <code>counters</code>, <code>now</code>, <code>hour</code>; functions <code>glob()</code>, <code>domain_matches()</code>, <code>email_domain()</code>. Joined with the other conditions by “and”."}}</p></div>
 
-<label>Причина <span class="muted">— видят агент и вы в запросе подтверждения</span></label>
-<input name="reason" value="{{$f.Reason}}" size="60" placeholder="например: только папка заметок">
-<p class="row" style="margin-top:1rem"><button class="primary">Сохранить правило</button><a href="{{.Base}}/policy?profile={{$f.Profile}}">Отмена</a>{{with $f.ID}}<span class="help" style="margin-left:auto">id: {{.}}</span>{{end}}</p>
+<label for="r-reason">{{T "Reason"}} <span class="muted">— {{T "the agent and you see it in approval requests"}}</span></label>
+<input id="r-reason" name="reason" value="{{$f.Reason}}" size="60" placeholder="{{T "e.g. only the notes folder"}}">
+<p class="row" style="margin-top:1rem"><button class="primary">{{T "Save the rule"}}</button><a href="{{.Base}}/policy?profile={{$f.Profile}}">{{T "Cancel"}}</a>{{with $f.ID}}<span class="help" style="margin-left:auto">id: {{.}}</span>{{end}}</p>
 {{end}}
 </form>
 {{template "foot"}}

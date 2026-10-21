@@ -330,3 +330,47 @@ actions: [ { name: a, class: read } ]
 		t.Fatal("unknown type")
 	}
 }
+
+// Переводы title/description: язык — две строчные буквы; без перевода —
+// английский title, без него — имя. Same учитывает переводы.
+func TestI18n(t *testing.T) {
+	y := `connector: files
+title: Files
+description: Files in allowed folders
+i18n: { ru: { title: Файлы, description: Файлы в разрешённых папках } }
+actions:
+  - name: read
+    title: Read a file
+    description: Read a file
+    class: read
+    i18n: { ru: { title: Прочитать файл } }
+  - { name: list, description: List, class: read }
+`
+	m, err := Parse([]byte(y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.TitleIn("ru") != "Файлы" || m.TitleIn("de") != "Files" || m.DescriptionIn("ru") != "Файлы в разрешённых папках" || m.DescriptionIn("") != "Files in allowed folders" {
+		t.Fatal(m.TitleIn("ru"), m.TitleIn("de"), m.DescriptionIn("ru"))
+	}
+	r, _ := m.Find("read")
+	l, _ := m.Find("list")
+	if r.TitleIn("ru") != "Прочитать файл" || r.TitleIn("en") != "Read a file" || r.DescriptionIn("ru") != "Read a file" || l.TitleIn("ru") != "list" {
+		t.Fatal(r.TitleIn("ru"), r.TitleIn("en"), l.TitleIn("ru"))
+	}
+	if (Manifest{Connector: "x"}).TitleIn("ru") != "x" {
+		t.Fatal("fallback to connector name")
+	}
+	m2, _ := Parse([]byte(strings.Replace(y, "Прочитать файл", "Читать", 1)))
+	if Same(m, m2) || !Same(m, m) {
+		t.Fatal("Same must see translations")
+	}
+	for _, bad := range []string{"RU", "rus", "r1"} {
+		if _, err := Parse([]byte(strings.Replace(y, "{ ru: { title: Файлы", "{ "+bad+": { title: Файлы", 1))); err == nil || !strings.Contains(err.Error(), "i18n") {
+			t.Fatal(bad, err)
+		}
+		if _, err := Parse([]byte(strings.Replace(y, "{ ru: { title: Прочитать", "{ "+bad+": { title: Прочитать", 1))); err == nil || !strings.Contains(err.Error(), "i18n") {
+			t.Fatal(bad, err)
+		}
+	}
+}

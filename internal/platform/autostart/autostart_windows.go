@@ -59,15 +59,18 @@ func Uninstall(string, bool) ([]string, []string, error) {
 
 func State(string) map[string]any {
 	var files []string
+	enabled := false
 	if k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE); err == nil {
 		for _, v := range []string{runDaemon, runTray} {
 			if _, _, err := k.GetStringValue(v); err == nil {
 				files = append(files, `HKCU\`+runKey+`\`+v)
+				enabled = enabled || v == runDaemon
 			}
 		}
 		k.Close()
 	}
-	return map[string]any{"installed": len(files) > 0, "files": files}
+	// running неизвестен: ключ Run только запускает daemon при входе.
+	return map[string]any{"installed": len(files) > 0, "files": files, "enabled": enabled}
 }
 
 // Restart — служба автозапуска здесь daemon не перезапускает: это делает вызывающий.

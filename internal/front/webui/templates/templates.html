@@ -1,13 +1,24 @@
 {{template "head" .}}
 {{$d := .Data}}
-<div class="row between"><h2>Готовые шаблоны правил</h2><a href="{{.Base}}/policy?profile={{$d.Profile}}">← Правила</a></div>
-<p class="muted">Шаблон добавляет правила в профиль; посмотреть и изменить их можно потом в таблице правил, откатить — в версиях.</p>
+{{template "access_tabs" (dict "V" . "On" "templates")}}
+<p class="muted">{{T "A ready-made set adds rules to the agent's permissions; first you see which rules, then you apply. You can change them in Rules and roll back in the versions."}}</p>
+
+{{with $d.PreviewT}}<div class="card" style="border-color:var(--accent)" id="preview"><h3>{{T "“%s” will change these rules" (T .Title)}}</h3>
+{{if $d.Preview}}<table><tr><th></th><th>{{T "Action"}}</th><th>{{T "Decision"}}</th><th>{{T "Condition"}}</th></tr>
+{{range $d.Preview}}<tr><td>{{if eq .Kind "add"}}<span class="ok">+ {{T "new"}}</span>{{else if eq .Kind "replace"}}<span class="warn">~ {{T "replaces"}}</span>{{else}}<span class="ok">+ {{T "limit"}}</span>{{end}}</td>
+<td><code>{{.Rule.Action}}</code></td><td class="{{.Rule.Effect}}">{{if .Rule.Effect}}{{effect .Rule.Effect}}{{else}}{{reason .Rule.Reason}}{{end}}</td><td>{{if isCode .Rule.When}}<code>{{.Rule.When}}</code>{{else}}{{describe .Rule.When}}{{end}}</td></tr>{{end}}</table>
+{{else}}<p class="muted">{{T "Nothing changes: these rules are already there."}}</p>{{end}}
+<form method="post" action="{{$.Base}}/policy/template" class="row" style="margin-top:.6rem"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="template" value="{{.ID}}"><input type="hidden" name="profile" value="{{$d.PreviewProfile}}"><input type="hidden" name="confirm" value="1">
+{{range $k, $v := $d.PreviewParams}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}
+<button class="primary"{{if not $d.Preview}} disabled{{end}}>{{T "Apply"}}</button><a href="{{$.Base}}/policy/templates?profile={{$d.PreviewProfile}}">{{T "Cancel"}}</a></form></div>{{end}}
+
 <div class="grid">
-{{range $d.Templates}}<form method="post" action="{{$.Base}}/policy/template" class="card" style="margin:0"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="template" value="{{.ID}}">
-<h3>{{.Title}}</h3><p>{{.Description}}</p>
-{{if .Missing}}<p class="warn">Нужен коннектор: {{join .Missing ", "}}. <a href="{{$.Base}}/connectors">Поставить</a></p>{{else}}
-{{range .Params}}<label>{{.Label}}</label>{{if .Multiline}}<textarea name="{{.Name}}" rows="2" placeholder="{{.Placeholder}}"></textarea>{{else}}<input name="{{.Name}}" placeholder="{{.Placeholder}}" size="30">{{end}}{{end}}
-<p class="row"><select name="profile">{{range $d.Profiles}}<option {{if eq . $d.Profile}}selected{{end}}>{{.}}</option>{{end}}</select><button class="primary">Применить</button></p>{{end}}
+{{range $d.Templates}}{{$t := .}}<form method="post" action="{{$.Base}}/policy/template" class="card" style="margin:0"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="template" value="{{.ID}}">
+<h3>{{T .Title}}</h3><p>{{T .Description}}</p>
+{{range .Params}}<label for="t-{{$t.ID}}-{{.Name}}">{{T .Label}}</label>{{if .Multiline}}<textarea id="t-{{$t.ID}}-{{.Name}}" name="{{.Name}}" rows="2" placeholder="{{.Placeholder}}"></textarea>{{else}}<input id="t-{{$t.ID}}-{{.Name}}" name="{{.Name}}" placeholder="{{.Placeholder}}" size="30">{{end}}{{end}}
+<p class="row"><label class="inline" for="t-{{.ID}}-p">{{T "For"}}</label><select id="t-{{.ID}}-p" name="profile">{{range $d.Grants}}<option value="{{.Profile}}" {{if eq .Profile $d.Profile}}selected{{end}}>{{if .Agents}}{{join .Agents ", "}}{{else}}{{.Profile}} ({{T "no agents"}}){{end}}</option>{{end}}</select><button class="primary">{{T "Preview"}}</button></p>
 </form>{{end}}
 </div>
+{{if $d.Missing}}<details class="adv"><summary>{{T "Need a connector that is not installed (%d)" (len $d.Missing)}}</summary><ul>
+{{range $d.Missing}}<li><b>{{T .Title}}</b> — {{T .Description}} <span class="warn">{{T "Needs:"}} {{join .Missing ", "}}.</span> <a href="{{$.Base}}/connectors">{{T "Install"}}</a></li>{{end}}</ul></details>{{end}}
 {{template "foot"}}

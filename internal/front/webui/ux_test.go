@@ -77,13 +77,15 @@ func TestFirstRunPaths(t *testing.T) {
 
 	// Обзор: чек-лист первого запуска.
 	p := get("/")
-	if !strings.Contains(p, "Начало работы") || !strings.Contains(p, "Добавьте агента") {
+	if !strings.Contains(p, "Начало работы") || !strings.Contains(p, "Проверьте, что всё работает") {
 		t.Fatal("checklist", p)
 	}
 	// Все страницы отрисовываются.
 	for _, path := range []string{"/approvals", "/approvals/telegram", "/agents", "/agents/new", "/agents/new?client=cursor", "/agents/bot",
 		"/agents/bot?client=cloud", "/agents/bot?client=codex", "/connectors", "/connectors/notes", "/policy", "/policy?sim=notes.append",
-		"/policy/rule", "/policy/rule?profile=p&action=notes.append", "/policy/templates", "/policy/yaml", "/journal", "/vault", "/settings", "/settings?link=1", "/settings/relay"} {
+		"/policy/rule", "/policy/rule?profile=p&action=notes.append", "/policy/templates", "/policy/yaml", "/journal", "/vault", "/settings", "/settings/relay",
+		"/setup", "/setup/access?client=cursor", "/setup/access?client=cloud", "/setup/check?agent=bot&client=cursor", "/settings/notifications", "/settings/login",
+		"/settings/internet", "/settings/internet?link=1", "/settings/advanced"} {
 		get(path)
 	}
 
@@ -96,9 +98,9 @@ func TestFirstRunPaths(t *testing.T) {
 	if cfg.Agents["cursor"].Profile != "cursor" || !cfg.Profiles["cursor"].HasConnector("notes") || len(cfg.Profiles["cursor"].Rules) != 1 {
 		t.Fatalf("%+v", cfg.Profiles["cursor"])
 	}
-	// Блок «для нового профиля» помечен для показа только при profile=_new.
-	if p := get("/agents/new?client=cli"); !strings.Contains(p, `data-show-when="profile=_new"`) || !strings.Contains(p, `value="cursor">существующий: cursor`) {
-		t.Fatal("new-profile block", p)
+	// Прежний адрес мастера агента ведёт в мастер первого запуска.
+	if p := get("/agents/new?client=cli"); !strings.Contains(p, `name="conn" value="notes"`) || !strings.Contains(p, `name="effect.notes.write"`) {
+		t.Fatal("setup access step", p)
 	}
 	// С существующим профилем поля нового профиля не приходят и не нужны.
 	if p := post("/agents", url.Values{"name": {"cli2"}, "client": {"cli"}, "profile": {"cursor"}}); !strings.Contains(p, "Агент cli2 добавлен") {
@@ -154,7 +156,11 @@ func TestFirstRunPaths(t *testing.T) {
 		t.Fatal(l, p[strings.Index(p, "<main>"):][:600])
 	}
 	// Шаблон.
-	post("/policy/template", url.Values{"profile": {"p"}, "template": {"daily-limit"}, "n": {"5"}})
+	// Шаблон: сначала предпросмотр (ничего не меняется), затем применение.
+	if p := post("/policy/template", url.Values{"profile": {"p"}, "template": {"daily-limit"}, "n": {"5"}}); !strings.Contains(p, "изменит эти правила") || len(d.Config.Current().Profiles["p"].Limits) != 0 {
+		t.Fatal("template preview", p)
+	}
+	post("/policy/template", url.Values{"profile": {"p"}, "template": {"daily-limit"}, "n": {"5"}, "confirm": {"1"}})
 	if l := d.Config.Current().Profiles["p"].Limits; len(l) != 1 || l[0].PerDay != 5 {
 		t.Fatalf("%+v", l)
 	}
@@ -177,9 +183,9 @@ func TestFirstRunPaths(t *testing.T) {
 	if p := post("/channels/telegram/toggle", url.Values{"on": {"1"}}); !strings.Contains(p, "@BotFather") {
 		t.Fatal("telegram without setup must open the wizard")
 	}
-	// Карточка Telegram: до настройки — инструкция и «Подключить», после — статус «подключён».
-	if p := get("/approvals"); !strings.Contains(p, "Подключить Telegram") || strings.Contains(p, "Telegram подключён") {
-		t.Fatal("telegram card before setup", p)
+	// Telegram в уведомлениях: до настройки — одна кнопка «Подключить», после — тест и «Выключить».
+	if p := get("/settings/notifications"); !strings.Contains(p, `class="btn primary" href="/approvals/telegram">Подключить`) {
+		t.Fatal("telegram row before setup", p)
 	}
 	if err := u.edit("test", func(c *config.Config) error {
 		c.Approvals.Telegram = &config.Telegram{Token: "@telegram.bot", OwnerID: 42}
@@ -187,8 +193,8 @@ func TestFirstRunPaths(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if p := get("/approvals"); strings.Contains(p, "Подключить Telegram") || strings.Contains(p, "@BotFather") || !strings.Contains(p, "Telegram подключён") {
-		t.Fatal("telegram card after setup", p)
+	if p := get("/settings/notifications"); strings.Contains(p, `class="btn primary" href="/approvals/telegram">Подключить`) || strings.Contains(p, "@BotFather") {
+		t.Fatal("telegram row after setup", p)
 	}
 
 	// Настройки: автозапуск, таймаут, предложения выключены.
@@ -200,14 +206,14 @@ func TestFirstRunPaths(t *testing.T) {
 	if c := d.Config.Current(); c.Approvals.Timeout.D().Hours() != 2 {
 		t.Fatalf("%+v", c.Approvals)
 	}
-	if p := get("/settings?link=1"); !strings.Contains(p, "Нет публичного адреса") {
-		t.Fatal("remote link without public address")
+	if p := get("/settings/internet?link=1"); !strings.Contains(p, "Сначала включите доступ из интернета") {
+		t.Fatal("remote link without public address", p)
 	}
 	// Relay включён: один адрес для облачных агентов, детали relay — в раскрывающемся блоке.
 	u.Relay = func() relayclient.Status {
 		return relayclient.Status{Configured: true, Online: true, URL: "https://relay.test", DeviceID: "dev1", Host: "dev1.relay.test", MCPURL: "https://dev1.relay.test"}
 	}
-	p = get("/settings")
+	p = get("/settings/internet")
 	if !strings.Contains(p, `<code id="mcp">https://dev1.relay.test</code>`) || !strings.Contains(p, "custom connector") ||
 		!strings.Contains(p, "<summary>Технические детали</summary>") || strings.Contains(p, "Адрес устройства") {
 		t.Fatal("relay block", p)
@@ -223,7 +229,7 @@ func TestChangePolicyApproval(t *testing.T) {
 	if res.Status != pipeline.StatusPending {
 		t.Fatalf("%+v", res)
 	}
-	if p := get("/approvals"); !strings.Contains(p, "Правило: разрешать notes.append") {
+	if p := get("/approvals"); !strings.Contains(p, "Правило: разрешать notes.append") || !strings.Contains(p, "append without asking") {
 		t.Fatal(p)
 	}
 	post("/approvals/"+res.ID, url.Values{"decision": {"approve"}})
@@ -231,7 +237,7 @@ func TestChangePolicyApproval(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	// Шаблон запрещает самонастройку правилом.
-	post("/policy/template", url.Values{"profile": {"p"}, "template": {"no-self-config"}})
+	post("/policy/template", url.Values{"profile": {"p"}, "template": {"no-self-config"}, "confirm": {"1"}})
 	if r := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "gate4ai.change_policy", Args: map[string]any{
 		"summary": "x", "changes": []any{map[string]any{"op": "remove_rule", "rule_id": "no-self-config"}}}}); r.Status != pipeline.StatusDenied {
 		t.Fatalf("%+v", r)
@@ -271,7 +277,7 @@ func TestRemoteUIIsLimited(t *testing.T) {
 		t.Fatal("no remote session")
 	}
 	p := body(t, do("GET", "/ui/", ck, nil))
-	if strings.Contains(p, `href="/ui/agents"`) || !strings.Contains(p, "Удалённый вход") {
+	if strings.Contains(p, `href="/ui/agents"`) || !strings.Contains(p, "Удалённый вход") || !strings.Contains(p, `href="/ui/journal"`) {
 		t.Fatal("remote nav", p)
 	}
 	if p := body(t, do("GET", "/ui/settings", ck, nil)); !strings.Contains(p, "Только на этом компьютере") {
@@ -326,8 +332,8 @@ func TestRelaySettings(t *testing.T) {
 	u, d, _, base := setup(t)
 	_, _, post, get := loginAs(t, u, base)
 
-	p := get("/settings")
-	for _, want := range []string{"Зарегистрироваться на relay.gate4.ai", `value="https://relay.gate4.ai"`, "/settings/relay#custom", "/settings/relay#public"} {
+	p := get("/settings/internet")
+	for _, want := range []string{"Включить через relay.gate4.ai", `value="https://relay.gate4.ai"`, `href="/settings/relay"`} {
 		if !strings.Contains(p, want) {
 			t.Fatal(want, p)
 		}
@@ -343,13 +349,13 @@ func TestRelaySettings(t *testing.T) {
 	st := relayclient.Status{Configured: true, Phase: relayclient.PhaseIssuing, URL: "https://relay.gate4.ai", DeviceID: "abc",
 		Host: "abc.relay.gate4.ai", MCPURL: "https://abc.relay.gate4.ai"}
 	u.Relay = func() relayclient.Status { return st }
-	p = get("/settings")
-	for _, want := range []string{`data-live-relay="issuing"`, "выпускаем сертификат", `<code id="mcp">https://abc.relay.gate4.ai</code>`, "Сменить relay или адрес устройства"} {
+	p = get("/settings/internet")
+	for _, want := range []string{`data-live-relay="issuing"`, "выпускаем сертификат", `<code id="mcp">https://abc.relay.gate4.ai</code>`, "Свой relay, свой HTTPS-адрес"} {
 		if !strings.Contains(p, want) {
 			t.Fatal(want, p)
 		}
 	}
-	for _, bad := range []string{"Зарегистрировать заново", "Зарегистрироваться на", "нет связи"} {
+	for _, bad := range []string{"Зарегистрировать заново", "Включить через", "нет связи"} {
 		if strings.Contains(p, bad) {
 			t.Fatal(bad, p)
 		}
@@ -359,11 +365,11 @@ func TestRelaySettings(t *testing.T) {
 		t.Fatal("relay url in main view", p)
 	}
 	st.Phase, st.Online = relayclient.PhaseOnline, true
-	if p := get("/settings"); !strings.Contains(p, "подключён") || strings.Contains(p, "data-live-relay") {
+	if p := get("/settings/internet"); !strings.Contains(p, "подключён") || strings.Contains(p, "data-live-relay") {
 		t.Fatal("online", p)
 	}
 	st.Phase, st.Online, st.Error = relayclient.PhaseFailed, false, "acme: boom"
-	if p := get("/settings"); !strings.Contains(p, "не удалось подключиться") || !strings.Contains(p, "acme: boom") || strings.Contains(p, "data-live-relay") {
+	if p := get("/settings/internet"); !strings.Contains(p, "не удалось подключиться") || !strings.Contains(p, "acme: boom") || strings.Contains(p, "data-live-relay") {
 		t.Fatal("failed", p)
 	}
 	if p := get("/settings/relay"); !strings.Contains(p, `id="again"`) || !strings.Contains(p, `name="confirm"`) || strings.Contains(p, `id="custom"`) {
@@ -386,7 +392,7 @@ func TestRelaySettings(t *testing.T) {
 
 	// Daemon с --public: адрес и MCP, без формы регистрации.
 	d.AddPublicURL(func() string { return "https://gate.example.com" })
-	for _, path := range []string{"/settings", "/settings/relay"} {
+	for _, path := range []string{"/settings/internet", "/settings/relay"} {
 		p := get(path)
 		if !strings.Contains(p, `<code id="mcp">https://gate.example.com</code>`) || !strings.Contains(p, "Relay не нужен") ||
 			strings.Contains(p, `action="/settings/relay"`) || strings.Contains(p, "data-live-relay") {
@@ -395,16 +401,25 @@ func TestRelaySettings(t *testing.T) {
 	}
 }
 
-// Сообщение после действия — в запросе, а не во фрагменте «#…».
-func TestRedirectKeepsFragment(t *testing.T) {
-	for to, want := range map[string]string{
-		"/settings#relay":    "/settings?flash=ok#relay",
-		"/settings?link=1#x": "/settings?link=1&flash=ok#x",
-		"/settings":          "/settings?flash=ok",
-	} {
-		if got := redirect(to, "ok")["redirect"]; got != want {
-			t.Errorf("%s: %v, want %s", to, got, want)
-		}
+// Сообщение после действия — в сессии, а не в адресе; параметр для мастера
+// Telegram по-прежнему ставится перед «#…».
+func TestFlashNotInURL(t *testing.T) {
+	res := redirect("/settings#relay", "ok")
+	if res["redirect"] != "/settings#relay" || res["flash"] != "ok" {
+		t.Fatalf("%v", res)
+	}
+	if got := withParam("/approvals/telegram#done", "for", "login"); got != "/approvals/telegram?for=login#done" {
+		t.Fatal(got)
+	}
+	u, _, _, base := setup(t)
+	_, _, post, get := loginAs(t, u, base)
+	// После действия сообщение видно один раз и адрес без ?flash=.
+	p := post("/settings/approvals", url.Values{"timeout": {"2h"}, "back": {"/settings"}})
+	if !strings.Contains(p, "Сохранено") {
+		t.Fatal("flash after action", p)
+	}
+	if p := get("/settings"); strings.Contains(p, "Сохранено") {
+		t.Fatal("flash shown twice")
 	}
 }
 
@@ -420,7 +435,7 @@ func TestRemoteLinkRelayOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, _, get := loginAs(t, u, base)
-	if p := get("/settings?link=1"); !strings.Contains(p, "не подключено к relay") || !strings.Contains(p, "Последняя ошибка: obtaining certificate: no NS") ||
+	if p := get("/settings/internet?link=1"); !strings.Contains(p, "не подключён к relay") || !strings.Contains(p, "Последняя ошибка: obtaining certificate: no NS") ||
 		strings.Contains(p, "/ui/login?t=") {
 		t.Fatal(p)
 	}

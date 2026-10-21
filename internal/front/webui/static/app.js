@@ -234,6 +234,23 @@
     }, 3000);
   }
 
+  // Блок, который обновляется сам (лента мастера): <div data-refresh="адрес">.
+  document.querySelectorAll("[data-refresh]").forEach(function (el) {
+    var url = el.getAttribute("data-refresh");
+    setInterval(function () {
+      if (document.hidden) return;
+      fetch(url, { credentials: "same-origin" }).then(function (r) { return r.ok ? r.text() : null; })
+        .then(function (t) { if (t !== null && t !== el.innerHTML) el.innerHTML = t; }).catch(function () {});
+    }, 3000);
+  });
+
+  // Несохранённые изменения формы: <form data-dirty-warn> — предупреждение при уходе.
+  var dirty = false;
+  document.addEventListener("input", function (e) { if (e.target.form && e.target.form.matches("[data-dirty-warn]")) dirty = true; });
+  document.addEventListener("change", function (e) { if (e.target.form && e.target.form.matches("[data-dirty-warn]")) dirty = true; });
+  document.addEventListener("submit", function () { dirty = false; });
+  window.addEventListener("beforeunload", function (e) { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
   // Браузерный push: <button data-push-key="…">.
   function b64u(s) {
     var p = "=".repeat((4 - (s.length % 4)) % 4), raw = atob((s + p).replace(/-/g, "+").replace(/_/g, "/"));

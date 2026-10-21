@@ -43,17 +43,32 @@ func (x *notes) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, er
 
 const cfg = "agents:\n  bot: {profile: p}\nprofiles:\n  p:\n    connectors: [notes]\n"
 
-func setup(t *testing.T) (*UI, *daemon.Daemon, *notes, string) {
+func setup(t *testing.T, extra ...connectors.Connector) (*UI, *daemon.Daemon, *notes, string) {
+	return setupCfg(t, cfg, extra...)
+}
+
+// setupCfg — Web UI с начальной конфигурацией conf и коннекторами notes и extra.
+func setupCfg(t *testing.T, conf string, extra ...connectors.Connector) (*UI, *daemon.Daemon, *notes, string) {
 	home, _ := os.MkdirTemp("", "g4aui")
 	t.Cleanup(func() { os.RemoveAll(home) })
 	n := &notes{}
 	c, _ := connectors.NewInProcess(n)
-	d, err := daemon.New(daemon.Options{Home: filepath.Join(home, "d"), Keys: keys.NewMemory(), Connectors: []connectors.Client{c}, InitialConfig: []byte(cfg)})
+	cs := []connectors.Client{c}
+	for _, x := range extra {
+		xc, err := connectors.NewInProcess(x)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cs = append(cs, xc)
+	}
+	d, err := daemon.New(daemon.Options{Home: filepath.Join(home, "d"), Keys: keys.NewMemory(), Connectors: cs, InitialConfig: []byte(conf)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(d.Close)
 	u := New(d)
+	// Тексты в проверках — русский перевод (основной язык интерфейса — английский, его проверяет TestEnglishByDefault).
+	u.DefaultLang = langRU
 	l, err := u.Listen("127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +124,7 @@ func TestWebUI(t *testing.T) {
 	// Подтверждение из Web UI.
 	res := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "notes.append", Args: map[string]any{"text": "hello"}})
 	r, _ = c.Get(base + "/")
-	if p := body(t, r); !strings.Contains(p, "bot") || !strings.Contains(p, "text: hello") {
+	if p := body(t, r); !strings.Contains(p, "bot") || !strings.Contains(p, "+ hello") {
 		t.Fatal("pending not shown")
 	}
 	if r, _ := c.PostForm(base+"/approvals/"+res.ID, url.Values{"decision": {"approve"}}); r.StatusCode != 403 {
@@ -122,7 +137,7 @@ func TestWebUI(t *testing.T) {
 		t.Fatal("cross-origin accepted")
 	}
 	r, _ = c.PostForm(base+"/approvals/"+res.ID, url.Values{"decision": {"approve"}, "csrf": {csrf}})
-	if p := body(t, r); n.n != 1 || !strings.Contains(p, "ok #") {
+	if p := body(t, r); n.n != 1 || !strings.Contains(p, "Разрешено: bot → notes.append, итог: выполнено") || !strings.Contains(p, "<summary>Подробности</summary><code>#") {
 		t.Fatal("approve failed", n.n)
 	}
 	// Агенты: токен показывается один раз, код подключения, отзыв.
@@ -146,7 +161,7 @@ func TestWebUI(t *testing.T) {
 	// Журнал и квитанция.
 	r, _ = c.Get(base + "/journal")
 	p = body(t, r)
-	if !strings.Contains(p, "цела") || !strings.Contains(p, "notes.append") {
+	if !strings.Contains(p, "Журнал не изменён") || !strings.Contains(p, "notes.append") {
 		t.Fatal("journal")
 	}
 	hash := regexp.MustCompile(`/journal/([0-9a-f]{64})`).FindStringSubmatch(p)[1]
@@ -160,7 +175,7 @@ func TestWebUI(t *testing.T) {
 		t.Fatal("schema error not shown", p)
 	}
 	r, _ = c.PostForm(base+"/policy", url.Values{"csrf": {csrf}, "yaml": {cfg + "    rules: [{id: r, action: notes.append, effect: allow}]\n"}, "comment": {"allow notes"}})
-	if !strings.Contains(body(t, r), "Сохранена версия 2") {
+	if !strings.Contains(body(t, r), "Сохранено как версия 2") {
 		t.Fatal("save")
 	}
 	r, _ = c.PostForm(base+"/policy/simulate", url.Values{"csrf": {csrf}, "agent": {"bot"}, "action": {"notes.append"}, "arg.text": {"x"}})
@@ -283,12 +298,12 @@ func TestAccountsAndQuestions(t *testing.T) {
     use: [p]
 `
 	r, _ = c.PostForm(base+"/policy", url.Values{"csrf": {csrf}, "yaml": {acc}, "comment": {"account"}})
-	if p := body(t, r); !strings.Contains(p, "Сохранена версия 2") {
+	if p := body(t, r); !strings.Contains(p, "Сохранено как версия 2") {
 		t.Fatal("save", p)
 	}
 	r, _ = c.Get(base + "/vault")
 	p := body(t, r)
-	for _, want := range []string{"Учётки для входа на сайты", "<code>@site</code>", "https://login.example", "секрет <code>@site.password</code>", "нет <code>@site.password</code>", `name="alias" value="@site.password"`, "Задать", "профиль <code>p</code>"} {
+	for _, want := range []string{"Учётки для входа на сайты", "<code>@site</code>", "https://login.example", "пароль <code>@site.password</code>", "нет @site.password", `name="alias" value="@site.password"`, "Задать", "логин «me»"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("vault page: no %q", want)
 		}
@@ -308,7 +323,7 @@ func TestAccountsAndQuestions(t *testing.T) {
 		t.Fatal("approvals page", p)
 	}
 	r, _ = c.PostForm(base+"/questions/"+qs[0].ID, url.Values{"csrf": {csrf}, "value": {"778899"}, "decision": {"answer"}})
-	if p := body(t, r); !strings.Contains(p, "Код передан") || strings.Contains(p, "778899") {
+	if p := body(t, r); !strings.Contains(p, "Код введён") || strings.Contains(p, "778899") {
 		t.Fatal("answer", p)
 	}
 	if v := <-got; v != "778899" {
@@ -347,20 +362,20 @@ func TestLiveApprovals(t *testing.T) {
 		t.Fatal(err)
 	}
 	p = live(a.ID)
-	if strings.Contains(p, `data-approval`) || !strings.Contains(p, "разрешено в Telegram") {
+	if strings.Contains(p, `data-approval`) || !strings.Contains(p, "разрешено через Telegram") {
 		t.Fatal("decided approval stays live", p)
 	}
 	// Нажатие на устаревшей странице — понятное сообщение, а не сырая ошибка.
 	r, _ = c.PostForm(base+"/approvals/"+a.ID, url.Values{"decision": {"reject"}, "csrf": {csrf}})
 	p = body(t, r)
-	if strings.Contains(p, "already decided") || !strings.Contains(p, "Запрос уже решён") || !strings.Contains(p, "разрешено в Telegram") {
+	if strings.Contains(p, "already decided") || !strings.Contains(p, "Уже решено") || !strings.Contains(p, "разрешено через Telegram") {
 		t.Fatal("race with another channel", p)
 	}
 	// Повторная отправка той же формы.
 	b := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "notes.append", Args: map[string]any{"text": "two"}})
 	c.PostForm(base+"/approvals/"+b.ID, url.Values{"decision": {"reject"}, "csrf": {csrf}})
 	r, _ = c.PostForm(base+"/approvals/"+b.ID, url.Values{"decision": {"reject"}, "csrf": {csrf}})
-	if p := body(t, r); strings.Contains(p, "already decided") || !strings.Contains(p, "отклонено в Web UI") {
+	if p := body(t, r); strings.Contains(p, "already decided") || !strings.Contains(p, "отклонено через Web UI") {
 		t.Fatal("double submit", p)
 	}
 	// Истёк срок ожидания.

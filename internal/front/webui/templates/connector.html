@@ -1,60 +1,77 @@
 {{template "head" .}}
 {{$d := .Data}}{{$m := $d.Manifest}}
-<div class="row between"><h2>{{$d.Name}} <span class="muted">{{$m.Version}}</span></h2><a href="{{.Base}}/connectors">← Коннекторы</a></div>
-<p>{{$m.Description}}</p>
-{{with $d.Calls}}<p class="help" style="margin-top:-.4rem">Работает через: {{range .}}<details class="chip"><summary>{{.Name}}</summary><div>
-<b><code>{{.Name}}</code></b>{{with .Description}} — {{.}}{{end}}
-{{with .Sites}}<details open><summary>Только на сайтах ({{len .}})</summary><ul style="margin:.2rem 0">{{range .}}<li><code>{{.}}</code></li>{{end}}</ul></details>{{else}}<p class="muted" style="margin:.3rem 0 0">Сайты не ограничены коннектором.</p>{{end}}
-<p class="muted" style="margin:.3rem 0 0">{{with .UsedBy}}Нужно действиям: {{join . ", "}}.{{else}}Нужно всем действиям.{{end}} Разрешение действия покрывает его подвызовы.</p></div></details>{{end}}</p>{{end}}
+<div class="row between"><h2>{{$d.Title}} <code class="muted" style="font-size:.9rem">{{$d.Name}}</code></h2><a href="{{.Base}}/connectors">← {{T "Access"}}</a></div>
+<p>{{$d.Desc}}</p>
+{{if $d.WholeHome}}<p class="warn">{{T "Files are open for the whole home folder. Put only the folders agents need below (hidden folders and keys stay closed anyway)."}}</p>{{end}}
 
-<div class="card"><h3>Настройки</h3>
-{{if $d.Fields}}
-<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/settings" autocomplete="off"><input type="hidden" name="csrf" value="{{.CSRF}}">
-{{with $d.Providers}}<label>Почтовый сервис</label><select name="provider"><option value="">другой — укажу серверы сам</option>{{range .}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select>
-<div class="help">Серверы IMAP/SMTP подставятся сами. {{range .}}<br><b>{{.Title}}:</b> {{.Help}}{{end}}</div>{{end}}
-{{range $d.Fields}}
-<label>{{.Label}}{{if ne .Label .Key}} <span class="muted"><code>{{.Key}}</code></span>{{end}}</label>
-{{if eq .Kind "list"}}<textarea name="{{.Key}}" rows="3" placeholder="{{.Placeholder}}">{{.Value}}</textarea>
-{{else if eq .Kind "secret"}}<input type="password" name="{{.Key}}" size="40" placeholder="{{if .HasSecret}}сохранён ({{.Alias}}) — введите, чтобы заменить{{else}}значение{{end}}">
-{{else if eq .Kind "number"}}<input name="{{.Key}}" value="{{.Value}}" placeholder="{{.Placeholder}}" size="8" inputmode="numeric">
-{{else}}<input name="{{.Key}}" value="{{.Value}}" placeholder="{{.Placeholder}}" size="40">{{end}}
-{{if .Help}}<div class="help">{{.Help}}</div>{{end}}
-{{end}}
-<p><button class="primary">Сохранить</button></p></form>
-{{else}}<p class="muted">У коннектора нет настроек.</p>{{end}}
+<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/settings" autocomplete="off" data-dirty-warn><input type="hidden" name="csrf" value="{{.CSRF}}">
+{{if or $d.Fields $d.Providers}}<div class="card"><h3>{{T "Settings"}}</h3>
+{{with $d.Providers}}<label for="f-provider">{{T "Mail service"}}</label><select id="f-provider" name="provider"><option value="">{{T "another — I will enter the servers myself"}}</option>{{range .}}<option value="{{.ID}}">{{T .Title}}</option>{{end}}</select>
+<div class="help">{{T "The IMAP/SMTP servers are filled in."}} {{range .}}<br><b>{{T .Title}}:</b> {{T .Help}}{{end}}</div>{{end}}
+{{range $d.Fields}}{{template "setting_field" (dict "F" . "V" $)}}{{end}}
+</div>{{end}}
+
+<div class="card"><h3>{{T "Who may use it"}}</h3><input type="hidden" name="grants" value="1">
+{{range $d.Grants}}{{if .Agents}}<label class="inline"><input type="checkbox" name="profiles" value="{{.Profile}}" {{if .Checked}}checked{{end}}> {{join .Agents ", "}}</label>{{end}}{{end}}
+{{range $d.Grants}}{{if not .Agents}}<label class="inline muted"><input type="checkbox" name="profiles" value="{{.Profile}}" {{if .Checked}}checked{{end}}> {{T "permissions %s (no agents)" .Profile}}</label>{{end}}{{end}}
+{{if not $d.Grants}}<p class="muted">{{T "No agents yet."}} <a href="{{.Base}}/setup">{{T "Connect an AI assistant"}}</a></p>{{end}}
 </div>
 
-<div class="card"><h3>Кому доступен</h3>
-<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/profiles"><input type="hidden" name="csrf" value="{{.CSRF}}">
-{{range $p := $d.Profiles}}{{$prof := index $d.Config.Profiles $p}}<label class="inline"><input type="checkbox" name="profiles" value="{{$p}}" {{if has $prof.Connectors $d.Name}}checked{{end}}> {{$p}}</label>{{else}}<p class="muted">Профилей нет.</p>{{end}}
-<p><button>Сохранить</button> <span class="help">Агенты профиля видят действия коннектора; что разрешено — в «Правилах».</span></p></form></div>
+{{if $d.AdvFields}}<details class="adv card"><summary>{{T "Advanced settings"}}</summary><p class="help">{{T "They work with the defaults; change them only if something does not work or you know why."}}</p>
+{{range $d.AdvFields}}{{template "setting_field" (dict "F" . "V" $)}}{{end}}</details>{{end}}
+<p><button class="primary">{{T "Save"}}</button></p>
+</form>
 
-<div class="card" id="actions"><h3>Действия</h3>
-{{if gt (len $d.Access) 1}}<div class="tabs"><span class="muted" style="padding:.4rem 0">Решения в профиле:</span>{{range $d.Access}}<a href="{{$.Base}}/connectors/{{$d.Name}}?profile={{.}}#actions" class="{{if eq . $d.Profile}}on{{end}}">{{.}}</a>{{end}}</div>{{end}}
-<table><tr><th>Действие</th><th>Класс</th><th>Решение{{if eq (len $d.Access) 1}} <span class="muted">(профиль {{$d.Profile}})</span>{{end}}</th><th>Описание</th></tr>
-{{range $d.Actions}}<tr class="has-more"><td><code>{{.Full}}</code></td><td><span class="badge">{{classRu .Class}}</span></td>
-<td>{{if eq .Decision "mixed"}}<span class="muted">правила с условием</span><div class="help">{{range .RuleIDs}}<a href="{{$.Base}}/policy?profile={{$d.Profile}}#rule-{{.}}">{{.}}</a> {{end}}</div>
-{{else if not $d.Profile}}<span class="{{.Default}}">{{effectRu .Default}}</span><div class="help">без правил; нет профилей с доступом</div>
+{{if $d.Profile}}<div class="card" id="actions"><div class="row between"><h3>{{T "What it may do"}}</h3>
+{{if gt (len $d.Access) 1}}<nav class="tabs" style="margin:0;border:0" aria-label="{{T "Agents"}}">{{range $d.Access}}<a href="{{$.Base}}/connectors/{{$d.Name}}?profile={{.}}#actions" class="{{if eq . $d.Profile}}on{{end}}">{{.}}</a>{{end}}</nav>{{end}}</div>
+<p class="help">{{if $d.ProfileAgents}}{{T "For %s." (join $d.ProfileAgents ", ")}}{{else}}{{T "Permissions %s have no agents." $d.Profile}}{{end}}</p>
+{{range $d.Groups}}{{$g := .}}<form method="post" action="{{$.Base}}/access/group" class="grp"><input type="hidden" name="csrf" value="{{$.CSRF}}">
+<input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="connector" value="{{.Connector}}"><input type="hidden" name="class" value="{{.Class}}"><input type="hidden" name="back" value="/connectors/{{$d.Name}}?profile={{$d.Profile}}#actions">
+<span>{{T .Title}}{{if eq .Effect "mixed"}} <span class="muted">— {{T "different decisions, see below"}}</span>{{end}}</span>
+<span class="seg" role="group" aria-label="{{T .Title}}">{{range (list "allow" "ask" "deny")}}<button name="effect" value="{{.}}" class="{{if eq . $g.Effect}}on{{end}}" aria-pressed="{{if eq . $g.Effect}}true{{else}}false{{end}}">{{effect .}}</button>{{end}}</span></form>{{end}}
+<p class="help">{{T "Finer rules (by folder, site, recipient) —"}} <a href="{{.Base}}/policy?profile={{$d.Profile}}">{{T "Access → Rules"}}</a>.</p>
+
+<details class="adv"><summary>{{T "Every action separately"}}</summary>
+{{with $d.Calls}}<p class="help">{{T "Works through:"}} {{range .}}<details class="chip"><summary>{{.Name}}</summary><div>
+<b><code>{{.Name}}</code></b>{{with .Description}} — {{.}}{{end}}
+{{with .Sites}}<details open><summary>{{T "Only on sites (%d)" (len .)}}</summary><ul style="margin:.2rem 0">{{range .}}<li><code>{{.}}</code></li>{{end}}</ul></details>{{else}}<p class="muted" style="margin:.3rem 0 0">{{T "The connector does not limit the sites."}}</p>{{end}}
+<p class="muted" style="margin:.3rem 0 0">{{with .UsedBy}}{{T "Needed by: %s." (join . ", ")}}{{else}}{{T "Needed by every action."}}{{end}} {{T "Allowing an action covers its sub-calls."}}</p></div></details>{{end}}</p>{{end}}
+<table><tr><th>{{T "Action"}}</th><th>{{T "Kind"}}</th><th>{{T "Decision"}}</th><th>{{T "Description"}}</th></tr>
+{{range $d.Actions}}<tr class="has-more"><td>{{.Title}}<div class="help"><code>{{.Full}}</code></div></td><td><span class="badge">{{class .Class}}</span></td>
+<td>{{if eq .Decision "mixed"}}<span class="muted">{{T "rules with conditions"}}</span><div class="help">{{range .RuleIDs}}<a href="{{$.Base}}/policy?profile={{$d.Profile}}#rule-{{.}}">{{.}}</a> {{end}}</div>
 {{else}}<form method="post" action="{{$.Base}}/connectors/{{$d.Name}}/decision"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="{{.Name}}"><input type="hidden" name="profile" value="{{$d.Profile}}">
-<select name="effect" data-autosubmit aria-label="Решение для {{.Full}}">
-<option value="" {{if eq .Decision ""}}selected{{end}}>без правил: {{effectRu .Default}}</option>
-<option value="allow" {{if eq .Decision "allow"}}selected{{end}}>разрешать</option>
-<option value="ask" {{if eq .Decision "ask"}}selected{{end}}>спрашивать</option>
-<option value="deny" {{if eq .Decision "deny"}}selected{{end}}>запрещать</option></select><noscript><button class="small">Сохранить</button></noscript></form>{{end}}</td>
-<td>{{.Description}}</td></tr>
-<tr class="more"><td colspan="4"><details><summary>Подробнее</summary>
-{{with .Calls}}<p style="margin:.3rem 0 .1rem"><b>Подвызовы</b> — разрешаются вместе с действием:</p><ul style="margin:0">{{range .}}<li><code>{{.Name}}</code>{{with .Reason}} — {{.}}{{end}}{{with .Sites}} <span class="muted">(сайты: {{join . ", "}})</span>{{end}}</li>{{end}}</ul>{{end}}
-{{with .Args}}<p style="margin:.3rem 0 .1rem"><b>Параметры</b></p><ul style="margin:0">{{range .}}<li><code>{{.Name}}</code>{{with .Description}} — {{.}}{{end}}</li>{{end}}</ul>{{end}}
-{{with .Example}}<p style="margin:.3rem 0 .1rem"><b>Пример</b> <code>{{.}}</code></p>{{end}}
-{{if .Untrusted}}<p class="help" style="margin:.3rem 0">Результат — недоверенный контент (со страницы или из письма): правила видят, откуда взяты данные.</p>{{end}}
-{{if and (not .Calls) (not .Args) (not .Example)}}<p class="muted" style="margin:.3rem 0">Без параметров и подвызовов.</p>{{end}}
+<select name="effect" data-autosubmit aria-label="{{T "Decision for %s" .Full}}">
+<option value="" {{if eq .Decision ""}}selected{{end}}>{{T "no rule: %s" (effect .Default)}}</option>
+<option value="allow" {{if eq .Decision "allow"}}selected{{end}}>{{effect "allow"}}</option>
+<option value="ask" {{if eq .Decision "ask"}}selected{{end}}>{{effect "ask"}}</option>
+<option value="deny" {{if eq .Decision "deny"}}selected{{end}}>{{effect "deny"}}</option></select><noscript><button class="small">{{T "Save"}}</button></noscript></form>{{end}}</td>
+<td>{{.Desc}}</td></tr>
+<tr class="more"><td colspan="4"><details><summary>{{T "More"}}</summary>
+{{with .Calls}}<p style="margin:.3rem 0 .1rem"><b>{{T "Sub-calls"}}</b> — {{T "allowed together with the action:"}}</p><ul style="margin:0">{{range .}}<li><code>{{.Name}}</code>{{with .Reason}} — {{.}}{{end}}{{with .Sites}} <span class="muted">({{T "sites:"}} {{join . ", "}})</span>{{end}}</li>{{end}}</ul>{{end}}
+{{with .Args}}<p style="margin:.3rem 0 .1rem"><b>{{T "Parameters"}}</b></p><ul style="margin:0">{{range .}}<li><code>{{.Name}}</code>{{with .Description}} — {{.}}{{end}}</li>{{end}}</ul>{{end}}
+{{with .Example}}<p style="margin:.3rem 0 .1rem"><b>{{T "Example"}}</b> <code>{{.}}</code></p>{{end}}
+{{if .Untrusted}}<p class="help" style="margin:.3rem 0">{{T "The result is untrusted content (from a page or an email): rules see where the data came from."}}</p>{{end}}
+{{if and (not .Calls) (not .Args) (not .Example)}}<p class="muted" style="margin:.3rem 0">{{T "No parameters and no sub-calls."}}</p>{{end}}
 </details></td></tr>{{end}}
 </table>
-<p class="help">Решение — правило без условия в профиле{{with $d.Profile}} <code>{{.}}</code>{{end}}; «без правил» — по классу: чтение разрешено, остальное спрашивается. Правила с условиями — в <a href="{{.Base}}/policy{{with $d.Profile}}?profile={{.}}{{end}}">«Правилах»</a>.</p></div>
+<p class="help">{{T "A decision here is a rule without a condition; “no rule” — by kind: reading is allowed, everything else asks you."}}</p>
+</details></div>{{end}}
 
-{{if not $d.Builtin}}<div class="card"><details><summary>О коннекторе: возможности и установка</summary>
-<ul>{{range $d.Info.Capabilities}}<li>{{capRu .}} <span class="muted"><code>{{.}}</code></span></li>{{else}}<li class="muted">нет</li>{{end}}</ul>
-<p class="help">Издатель {{or $d.Info.Publisher "—"}} · доверие {{$d.Info.Trust}} · источник {{$d.Info.Source}} · установлен {{ts $d.Info.InstalledAt}}</p></details>
-<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/remove" data-confirm="Удалить коннектор {{$d.Name}}? Правила с его действиями тоже будут удалены (откат — в версиях политики)." style="margin-top:.6rem"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger small">Удалить коннектор</button></form>
-</div>{{end}}
+<details class="adv card"><summary>{{T "About the connector"}}</summary>
+{{if not $d.Builtin}}<ul>{{range $d.Info.Capabilities}}<li>{{capRu .}} <span class="muted"><code>{{.}}</code></span></li>{{else}}<li class="muted">{{T "nothing"}}</li>{{end}}</ul>
+<p class="help">{{T "Publisher %s · trust %s · source %s · installed %s" (or $d.Info.Publisher "—") $d.Info.Trust $d.Info.Source (ts $d.Info.InstalledAt)}}</p>
+<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/remove" data-confirm="{{T "Remove %s? Rules with its actions are removed too (you can roll back in the policy versions)." $d.Title}}" style="margin-top:.6rem"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger small">{{T "Remove the connector"}}</button></form>
+{{else}}<p class="help">{{T "Built into gate4.ai; version %s." $m.Version}}</p>{{end}}
+</details>
 {{template "foot"}}
+
+{{define "setting_field"}}{{$f := .F}}{{with $f}}
+<label for="f-{{.Key}}">{{T .Label}}{{if ne .Label .Key}} <span class="muted"><code>{{.Key}}</code></span>{{end}}</label>
+{{if eq .Kind "list"}}<textarea id="f-{{.Key}}" name="{{.Key}}" rows="3" placeholder="{{.Placeholder}}">{{.Value}}</textarea>
+{{else if eq .Kind "secret"}}<input id="f-{{.Key}}" type="password" name="{{.Key}}" size="40" placeholder="{{if .HasSecret}}{{T "saved (%s) — type to replace" .Alias}}{{else}}{{T "value"}}{{end}}">
+{{else if eq .Kind "number"}}<input id="f-{{.Key}}" name="{{.Key}}" value="{{.Value}}" placeholder="{{.Placeholder}}" size="8" inputmode="numeric">
+{{else if eq .Kind "bool"}}<label class="inline"><input id="f-{{.Key}}" type="checkbox" name="{{.Key}}" value="1" {{if eq .Value "true"}}checked{{end}}> {{T "on"}}</label>
+{{else if eq .Kind "choice"}}<select id="f-{{.Key}}" name="{{.Key}}"><option value="">{{T "default"}}</option>{{$v := .Value}}{{range .Choices}}<option {{if eq . $v}}selected{{end}}>{{.}}</option>{{end}}</select>
+{{else}}<input id="f-{{.Key}}" name="{{.Key}}" value="{{.Value}}" placeholder="{{.Placeholder}}" size="40">{{end}}
+{{if .Help}}<div class="help">{{T .Help}}</div>{{end}}
+{{end}}{{end}}

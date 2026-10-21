@@ -14,7 +14,7 @@ func TestInstallDevChange(t *testing.T) {
 	if err := CheckChange(Change{Op: OpInstallDev, Folder: "/home/a/lk"}); err != nil {
 		t.Fatal(err)
 	}
-	if d := (Change{Op: OpInstallDev, Folder: "/home/a/lk", Connector: "lk"}).Describe(); d != "Собрать и поставить свою сборку из /home/a/lk (коннектор lk) и дать к ней доступ" {
+	if d := (Change{Op: OpInstallDev, Folder: "/home/a/lk", Connector: "lk"}).Describe(); d != "Build and install an own build from /home/a/lk (connector lk) and give access to it" {
 		t.Fatal(d)
 	}
 }

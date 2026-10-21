@@ -51,13 +51,8 @@ var funcs = template.FuncMap{
 		b, _ := json.MarshalIndent(v, "", "  ")
 		return string(b)
 	},
-	"join":     strings.Join,
-	"ago":      ago,
-	"effectRu": func(e string) string { return or(effectRu[e], e) },
-	"classRu":  func(c string) string { return or(classRu[c], c) },
-	"viaRu":    func(v string) string { return or(viaRu[v], v) },
-	"describe": func(w string) string { s, _ := DescribeWhen(w); return s },
-	"isCode":   func(w string) bool { _, ok := DescribeWhen(w); return !ok },
+	"join":   strings.Join,
+	"isCode": func(w string) bool { _, ok := DescribeWhen(w); return !ok },
 	"has": func(list []string, s string) bool {
 		for _, x := range list {
 			if x == s {
@@ -66,11 +61,8 @@ var funcs = template.FuncMap{
 		}
 		return false
 	},
-	"capRu":     humanCapability,
-	"errView":   errView,
 	"accAnchor": AccountAnchor,
 	"secAnchor": SecretAnchor,
-	"title":     func(nav string) string { return or(titles[nav], nav) },
 	"inc":       func(i int) int { return i + 1 },
 	"list":      func(s ...string) []string { return s },
 	"dict": func(kv ...any) map[string]any {
@@ -82,14 +74,30 @@ var funcs = template.FuncMap{
 	},
 	"lines": func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
 	"first": func(s string) string { return strings.SplitN(s, "\n", 2)[0] },
+	"langs": func() any { return Langs },
 }
 
-var tpl = template.Must(template.New("").Funcs(funcs).ParseFS(tplFS, "templates/*.html"))
+// tpls — шаблоны на каждом языке: функции перевода привязаны к языку.
+var tpls = func() map[string]*template.Template {
+	out := map[string]*template.Template{}
+	for _, l := range []string{langEN, langRU} {
+		out[l] = template.Must(template.New("").Funcs(funcs).Funcs(langFuncs(l)).ParseFS(tplFS, "templates/*.html"))
+	}
+	return out
+}()
 
-var titles = map[string]string{"overview": "Обзор", "approvals": "Подтверждения", "telegram": "Telegram", "agents": "Агенты", "agent": "Агент",
-	"agent_new": "Новый агент", "connectors": "Коннекторы", "connector": "Коннектор", "policy": "Правила", "rule": "Правило", "templates": "Шаблоны",
-	"policy_yaml": "YAML", "journal": "Журнал", "receipt": "Квитанция", "vault": "Секреты", "settings": "Настройки", "relay": "Relay",
-	"remote_only": "Только на компьютере"}
+// tplIn — шаблоны на языке l.
+func tplIn(l string) *template.Template {
+	if t, ok := tpls[l]; ok {
+		return t
+	}
+	return tpls[langEN]
+}
+
+var titles = map[string]string{"overview": "Home", "approvals": "Approvals", "telegram": "Telegram", "agents": "Agents", "agent": "Agent",
+	"agent_new": "New agent", "setup": "Getting started", "connectors": "Access", "connector": "Connector", "policy": "Rules", "rule": "Rule", "templates": "Ready-made rules",
+	"policy_yaml": "YAML", "journal": "Journal", "receipt": "Journal entry", "vault": "Passwords and accounts", "settings": "Settings", "relay": "Internet access",
+	"remote_only": "Only on this computer"}
 
 func or(a, b string) string {
 	if a != "" {
@@ -98,23 +106,44 @@ func or(a, b string) string {
 	return b
 }
 
-// ago — «3 мин назад».
-func ago(t time.Time) string {
+// agoIn — «3 min ago» на языке l (t — time.Time; нулевое — «never»).
+func agoIn(l string, v any) string {
+	t, _ := v.(time.Time)
 	if t.IsZero() {
-		return "никогда"
+		return tr(l, "never")
 	}
 	d := time.Since(t)
 	switch {
 	case d < time.Minute:
-		return "только что"
+		return tr(l, "just now")
 	case d < time.Hour:
-		return fmt.Sprintf("%d мин назад", int(d.Minutes()))
+		return M("%d min ago", int(d.Minutes())).In(l)
 	case d < 24*time.Hour:
-		return fmt.Sprintf("%d ч назад", int(d.Hours()))
+		return M("%d h ago", int(d.Hours())).In(l)
 	case d < 30*24*time.Hour:
-		return fmt.Sprintf("%d дн назад", int(d.Hours()/24))
+		return M("%d d ago", int(d.Hours()/24)).In(l)
 	}
 	return t.Local().Format("2006-01-02")
+}
+
+// ago — по-английски (сообщения, которые переводятся целиком).
+func ago(t time.Time) string { return agoIn(langEN, t) }
+
+// leftIn — сколько осталось до t: «28 min left».
+func leftIn(l string, v any) string {
+	t, _ := v.(time.Time)
+	d := time.Until(t)
+	switch {
+	case t.IsZero():
+		return ""
+	case d <= 0:
+		return tr(l, "time is up")
+	case d < time.Hour:
+		return M("%d min left", int(d.Minutes())+1).In(l)
+	case d < 48*time.Hour:
+		return M("%d h left", int(d.Hours())).In(l)
+	}
+	return M("%d d left", int(d.Hours()/24)).In(l)
 }
 
 // UI — Web UI.
@@ -135,12 +164,21 @@ type UI struct {
 	Autostart Autostart
 	// Confirm — подтверждение входа на другом устройстве (nil — Telegram-бот из Channels).
 	Confirm LoginConfirmer
+	// DefaultLang — язык, если браузер не выбрал (переключатель, Accept-Language); "" — английский.
+	DefaultLang string
 
 	mu       sync.Mutex
 	logins   map[string]login // одноразовые токены входа
 	sessions map[string]session
 	attempts map[string]*attempt // попытки входа при включённой защите
 	limits   [2]limiter          // защита от перебора пароля: локально, удалённо
+	notes    map[string]note     // сообщение после действия: сессия → одно последнее
+}
+
+// note — сообщение после действия (flash или ошибка) до следующей страницы сессии.
+type note struct {
+	flash, err any // Msg, Word, error или английская строка
+	detail     string
 }
 
 type login struct {
@@ -174,7 +212,7 @@ func (m mount) cookie() string {
 // New создаёт Web UI.
 func New(d *daemon.Daemon) *UI {
 	return &UI{D: d, Now: time.Now, logins: map[string]login{}, sessions: map[string]session{}, attempts: map[string]*attempt{},
-		Clients: agentsetup.Default(), Autostart: systemAutostart{}}
+		notes: map[string]note{}, Clients: agentsetup.Default(), Autostart: systemAutostart{}}
 }
 
 func random() string {
@@ -325,6 +363,7 @@ func (u *UI) handler(m mount) http.Handler {
 	mux.HandleFunc("POST "+b+"/login", u.loginPost(m))
 	mux.Handle("GET "+b+"/static/", http.StripPrefix(b, http.FileServerFS(staticFS)))
 	mux.HandleFunc("GET "+b+"/sw.js", serviceWorker)
+	mux.HandleFunc("GET "+b+"/lang", u.setLang(m))
 
 	// Удалённо: обзор, подтверждения, журнал (и подписка на push).
 	get("/{$}", u.overview(m))
@@ -366,8 +405,24 @@ func (u *UI) handler(m mount) http.Handler {
 	localPage("/vault", u.vaultPage)
 	localPage("/settings", u.settingsPage)
 	localPage("/settings/relay", u.relayPage)
+	localPage("/settings/notifications", u.notificationsPage)
+	localPage("/settings/login", u.loginSettingsPage)
+	localPage("/settings/internet", u.internetPage)
+	localPage("/settings/advanced", u.advancedPage)
 	localPage("/approvals/telegram", u.telegramPage)
+	localPage("/setup", u.setupPage)
+	localPage("/setup/access", u.setupAccessPage)
+	localPage("/setup/check", u.setupCheck)
+	if !m.remote {
+		mux.HandleFunc("GET "+b+"/setup/feed", u.setupFeedPart(m))
+		mux.HandleFunc("GET "+b+"/setup/skip", u.setupSkip(m))
+	}
 
+	change("/setup", u.setupSave)
+	change("/setup/code", u.setupCode)
+	change("/access/group", u.setGroup)
+	change("/vault/account", u.addAccount)
+	change("/settings/self", u.saveSelfConfig)
 	change("/agents", u.createAgent)
 	change("/agents/{name}/token", u.token)
 	change("/agents/{name}/connect", u.connect)
@@ -494,18 +549,38 @@ func (u *UI) login(m mount) http.HandlerFunc {
 			u.loginStep(w, r, m, id, "")
 			return
 		}
-		u.loginPage(w, m)
+		u.loginPage(w, r, m)
 	}
 }
 
 type view struct {
 	Base             string // "" или "/ui"
 	Remote           bool
+	Lang             string // язык страницы (en, ru)
+	Path             string // адрес страницы (переключатель языка возвращает сюда)
 	Title, Nav, CSRF string
 	Flash, Error     string
+	Detail           string // подробности сообщения (пути, исходный текст ошибки)
 	Data             map[string]any
 	// Счётчик в меню.
 	Pending int
+}
+
+// section — пункт главного меню, к которому относится страница.
+func (v view) Section() string {
+	switch v.Nav {
+	case "overview", "approvals", "telegram", "setup":
+		return "home"
+	case "agents", "agent", "agent_new":
+		return "agents"
+	case "connectors", "connector", "policy", "rule", "templates", "policy_yaml":
+		return "access"
+	case "journal", "receipt":
+		return "journal"
+	case "settings", "relay", "vault":
+		return "settings"
+	}
+	return ""
 }
 
 func (u *UI) counts(v *view) {
@@ -514,33 +589,95 @@ func (u *UI) counts(v *view) {
 	}
 }
 
+// sid — сессия запроса ("" — нет).
+func (u *UI) sid(m mount, r *http.Request) string {
+	id, _, ok := u.session(m, r)
+	if !ok {
+		return ""
+	}
+	return id
+}
+
+// popNote — сообщение после действия для этой сессии (показывается один раз).
+func (u *UI) popNote(sid string) (note, bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	n, ok := u.notes[sid]
+	delete(u.notes, sid)
+	return n, ok
+}
+
+func (u *UI) putNote(sid string, n note) {
+	if sid == "" || (n.flash == nil && n.err == nil) {
+		return
+	}
+	u.mu.Lock()
+	u.notes[sid] = n
+	u.mu.Unlock()
+}
+
+// render — страница name на языке запроса.
+func (u *UI) render(w http.ResponseWriter, r *http.Request, name string, v view, status int) {
+	v.Lang = u.lang(r)
+	v.Path = r.URL.RequestURI()
+	if r.Method != http.MethodGet {
+		v.Path = v.Base + "/"
+	}
+	u.counts(&v)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if status != 0 {
+		w.WriteHeader(status)
+	}
+	if err := tplIn(v.Lang).ExecuteTemplate(w, name+".html", v); err != nil {
+		http.Error(w, err.Error(), 500)
+	}
+}
+
+// fill — сообщения страницы: из сессии (после действия), иначе из адреса
+// (?flash=, ?error= — старые ссылки).
+func (u *UI) fill(v *view, r *http.Request, sid string) {
+	l := u.lang(r)
+	if n, ok := u.popNote(sid); ok {
+		v.Flash, v.Detail = say(l, n.flash), n.detail
+		if n.err != nil {
+			v.Error = say(l, n.err)
+		}
+	}
+	if v.Flash == "" {
+		v.Flash = tr(l, r.URL.Query().Get("flash"))
+	}
+	if e := r.URL.Query().Get("error"); e != "" && v.Error == "" {
+		v.Error = tr(l, e)
+	}
+}
+
 func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, s, ok := u.session(m, r)
+		sid, s, ok := u.session(m, r)
 		if !ok {
-			u.loginPage(w, m)
+			u.loginPage(w, r, m)
 			return
 		}
 		name, data, err := f(r)
-		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: data, Flash: r.URL.Query().Get("flash")}
+		if red, ok := data["redirect"].(string); ok && name == "" {
+			http.Redirect(w, r, m.base+red, http.StatusSeeOther)
+			return
+		}
+		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: data}
+		u.fill(&v, r, sid)
 		if err != nil {
-			v.Error = err.Error()
+			v.Error = say(u.lang(r), err)
 		}
-		if e := r.URL.Query().Get("error"); e != "" && v.Error == "" {
-			v.Error = e
-		}
-		u.counts(&v)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := tpl.ExecuteTemplate(w, name+".html", v); err != nil {
-			http.Error(w, err.Error(), 500)
-		}
+		u.render(w, r, name, v, 0)
 	}
 }
 
 // post — действие формы: сессия, CSRF-токен, Origin; результат — редирект или страница.
+// Сообщение редиректа (flash, error) запоминается в сессии и показывается на
+// следующей странице — в адресе его нет.
 func (u *UI) post(m mount, f func(w http.ResponseWriter, r *http.Request) map[string]any) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, s, ok := u.session(m, r)
+		sid, s, ok := u.session(m, r)
 		if !ok {
 			http.Error(w, "login required", 401)
 			return
@@ -562,26 +699,39 @@ func (u *UI) post(m mount, f func(w http.ResponseWriter, r *http.Request) map[st
 		if res == nil { // ответ уже записан (JSON для app.js)
 			return
 		}
+		detail, _ := res["detail"].(string)
 		if red, ok := res["redirect"].(string); ok {
+			u.putNote(sid, note{flash: res["flash"], err: res["error"], detail: detail})
 			http.Redirect(w, r, m.base+red, http.StatusSeeOther)
 			return
 		}
 		name, _ := res["page"].(string)
-		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: res}
-		u.counts(&v)
-		if e, ok := res["error"].(string); ok {
-			v.Error = e
+		l := u.lang(r)
+		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: res, Detail: detail}
+		if e, ok := res["error"]; ok && e != nil {
+			v.Error = say(l, e)
 		}
-		if fl, ok := res["flash"].(string); ok {
-			v.Flash = fl
+		if fl, ok := res["flash"]; ok && fl != nil {
+			v.Flash = say(l, fl)
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if st, ok := res["status"].(int); ok {
-			w.WriteHeader(st)
+		st, _ := res["status"].(int)
+		u.render(w, r, name, v, st)
+	}
+}
+
+// setLang — переключатель языка: cookie на год и возврат на ту же страницу.
+func (u *UI) setLang(m mount) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		l := r.URL.Query().Get("l")
+		if supported(l) {
+			http.SetCookie(w, &http.Cookie{Name: langCookie, Value: l, Path: m.base + "/", MaxAge: 365 * 24 * 3600, SameSite: http.SameSiteLaxMode, Secure: m.remote})
 		}
-		if err := tpl.ExecuteTemplate(w, name+".html", v); err != nil {
-			http.Error(w, err.Error(), 500)
+		back := r.URL.Query().Get("back")
+		// Только путь этого же Web UI: открытый редирект на чужой сайт не нужен.
+		if !strings.HasPrefix(back, m.base+"/") || strings.HasPrefix(back, "//") || strings.Contains(back, "\\") {
+			back = m.base + "/"
 		}
+		http.Redirect(w, r, back, http.StatusSeeOther)
 	}
 }
 

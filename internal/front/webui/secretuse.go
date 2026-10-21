@@ -44,14 +44,14 @@ func secretUses(cfg *config.Config, ms []manifest.Manifest) map[string][]SecretU
 		out[a] = append(out[a], u)
 	}
 	if t := cfg.Approvals.Telegram; t != nil && t.Token != "" {
-		u := SecretUse{Name: "Telegram-бот", Post: " (подтверждения)", Link: "/approvals/telegram"}
+		u := SecretUse{Name: "Telegram bot", Post: " (approvals)", Link: "/approvals/telegram"}
 		if !cfg.ChannelOn("telegram") {
-			u.Post = " (подтверждения, канал выключен)"
+			u.Post = " (approvals, the channel is off)"
 		}
 		add(t.Token, u)
 	}
 	if r := cfg.Relay; r.Token != "" {
-		add(r.Token, SecretUse{Name: "relay", Post: " (подключение устройства)", Link: "/settings#relay"})
+		add(r.Token, SecretUse{Name: "relay", Post: " (device connection)", Link: "/settings/internet"})
 	}
 	for _, s := range cfg.Egress.Secrets {
 		if s.Secret != "" {
@@ -60,11 +60,11 @@ func secretUses(cfg *config.Config, ms []manifest.Manifest) map[string][]SecretU
 	}
 	for _, alias := range sortedAccounts(cfg) {
 		for _, sec := range cfg.Credentials[alias].Secrets() {
-			add(sec, SecretUse{Pre: "учётка ", Name: alias, Post: " (вход на " + strings.Join(cfg.Credentials[alias].Bind, ", ") + ")", Link: "#" + AccountAnchor(alias)})
+			add(sec, SecretUse{Pre: "account ", Name: alias, Post: " (sign-in)", Link: "#" + AccountAnchor(alias)})
 		}
 	}
 	if k := cfg.Browser.ModelKey; k != "" { // раздел browser до v0.6, переносится в connectors.browser
-		add(k, SecretUse{Pre: "браузер: ", Name: "ключ модели"})
+		add(k, SecretUse{Pre: "browser: ", Name: "model key"})
 	}
 	installed := map[string]manifest.Manifest{}
 	for _, m := range ms {
@@ -82,10 +82,10 @@ func secretUses(cfg *config.Config, ms []manifest.Manifest) map[string][]SecretU
 	sort.Strings(names)
 	for _, name := range names {
 		settings := cfg.Connectors[name]
-		u := SecretUse{Pre: "коннектор ", Name: name, Link: "/connectors/" + name}
+		u := SecretUse{Pre: "connector ", Name: name, Link: "/connectors/" + name}
 		m, ok := installed[name]
 		if !ok {
-			u = SecretUse{Pre: "коннектор ", Name: name, Post: " (не установлен)"}
+			u = SecretUse{Pre: "connector ", Name: name, Post: " (not installed)"}
 		}
 		// Возможности манифеста с подставленными настройками экземпляра.
 		var tmpls []string
@@ -182,7 +182,7 @@ func accountsView(cfg *config.Config, set map[string]bool) []AccountView {
 		if f := cr.Form; f != nil {
 			v.Submit = f.Submit.Selector
 			if f.Submit.Press != "" {
-				v.Submit = "клавиша " + f.Submit.Press
+				v.Submit = "key " + f.Submit.Press
 			}
 			if f.Success != nil {
 				v.Success = f.Success.URLPrefix

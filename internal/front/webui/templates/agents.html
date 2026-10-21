@@ -1,19 +1,18 @@
 {{template "head" .}}
-<div class="row between"><h2>Агенты</h2><a class="btn primary" href="{{.Base}}/agents/new">+ Добавить агента</a></div>
-<p class="muted">Агент — программа (Claude Code, Cursor, Claude.ai…), которая обращается к gate4.ai со своим токеном. Что ему можно — задаёт его профиль в «Правилах».</p>
+<div class="row between"><h2>{{T "Agents"}}</h2><a class="btn primary" href="{{.Base}}/setup">+ {{T "Connect an AI assistant"}}</a></div>
+<p class="muted">{{T "An agent is a program (Claude Code, Cursor, Claude.ai…) that reaches gate4.ai with its own token. What it may do is set on its page."}}</p>
 {{range .Data.Rows}}
 <div class="card">
-<div class="row between"><div><a href="{{$.Base}}/agents/{{.Name}}"><b style="font-size:1.1rem">{{.Name}}</b></a> <span class="muted">профиль <a href="{{$.Base}}/policy?profile={{.Agent.Profile}}">{{.Agent.Profile}}</a></span>
+<div class="row between"><div><a href="{{$.Base}}/agents/{{.Name}}"><b style="font-size:1.1rem">{{.Name}}</b></a>{{if .Clients}} <span class="muted">· {{join .Clients ", "}}</span>{{end}}
 {{if .Agent.Description}}<div class="muted">{{.Agent.Description}}</div>{{end}}</div>
-<a class="btn" href="{{$.Base}}/agents/{{.Name}}">Подключение и токены</a></div>
+<a class="btn" href="{{$.Base}}/agents/{{.Name}}">{{T "Open"}}</a></div>
 <div class="status" style="margin:.6rem 0 0">
-<span>Последнее обращение: {{if .Seen.TS.IsZero}}<b class="warn">ещё не обращался</b>{{else}}<b>{{ago .Seen.TS}}</b> <span class="muted">через {{viaRu .Seen.Via}}</span>{{end}}</span>
-<span>Активных токенов: {{.Active}}</span>
-{{if .Clients}}<span>Подключён: {{join .Clients ", "}}</span>{{end}}
-<span>Коннекторы: {{if .Profile.Connectors}}{{join .Profile.Connectors ", "}}{{else}}<span class="warn">нет — агент ничего не видит</span>{{end}}</span>
+<span>{{T "Last request:"}} {{if .Seen.TS.IsZero}}<b class="warn">{{T "not yet"}}</b>{{else}}<b>{{ago .Seen.TS}}</b> <span class="muted">{{T "via %s" (via .Seen.Via)}}</span>{{end}}</span>
+<span>{{T "Access:"}} {{range $i, $c := .Conns}}{{if $i}}, {{end}}{{$c.Title}}{{else}}<span class="warn">{{T "nothing — the agent sees no tools"}}</span>{{end}}</span>
+<span class="muted">{{T "%d actions today" .Today}}</span>
 </div></div>
 {{else}}
-<div class="card"><p>Агентов пока нет. Добавьте первого: выберите программу, которой хотите дать доступ, — gate4.ai подключит её сам или покажет, что вставить в её настройки.</p>
-<a class="btn primary" href="{{.Base}}/agents/new">Добавить агента</a></div>
+<div class="card"><p>{{T "No agents yet. Choose the program you want to give access to — gate4.ai connects it itself or shows what to paste into its settings."}}</p>
+<a class="btn primary" href="{{.Base}}/setup">{{T "Connect an AI assistant"}}</a></div>
 {{end}}
 {{template "foot"}}

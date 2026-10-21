@@ -26,10 +26,14 @@ const (
 
 // Manifest — описание коннектора.
 type Manifest struct {
-	Connector   string `json:"connector" yaml:"connector"`
+	Connector string `json:"connector" yaml:"connector"`
+	// Title — имя коннектора для человека по-английски ("Files"); пусто — Connector.
+	Title       string `json:"title,omitempty" yaml:"title,omitempty"`
 	Description string `json:"description" yaml:"description"`
-	Version     string `json:"version" yaml:"version"`
-	Runtime     string `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+	// I18n — переводы title и description по коду языка ("ru").
+	I18n    map[string]Text `json:"i18n,omitempty" yaml:"i18n,omitempty"`
+	Version string          `json:"version" yaml:"version"`
+	Runtime string          `json:"runtime,omitempty" yaml:"runtime,omitempty"`
 	// Contract — мажор контракта действий из Services: несовместимое изменение
 	// их схем — только с его повышением (contract.Diff).
 	Contract int `json:"contract,omitempty" yaml:"contract,omitempty"`
@@ -84,16 +88,20 @@ func (m *Manifest) Slot(name string) (CredentialSlot, bool) {
 
 // Action — действие коннектора.
 type Action struct {
-	Name         string   `json:"name" yaml:"name"`
-	Description  string   `json:"description" yaml:"description"`
-	Class        string   `json:"class" yaml:"class"`                                     // read | write | external | money
-	InputSchema  Schema   `json:"input_schema" yaml:"input_schema"`                       // аргументы (как inputSchema MCP)
-	OutputSchema *Schema  `json:"output_schema,omitempty" yaml:"output_schema,omitempty"` // структурированный результат (как outputSchema MCP)
-	Verify       string   `json:"verify,omitempty" yaml:"verify,omitempty"`               // метод проверки результата, "" — нет; для money обязателен
-	Evidence     string   `json:"evidence,omitempty" yaml:"evidence,omitempty"`           // формат доказательства: eml, text, png, json
-	Untrusted    bool     `json:"untrusted,omitempty" yaml:"untrusted,omitempty"`         // результат содержит недоверенный контент
-	Sensitive    []string `json:"sensitive,omitempty" yaml:"sensitive,omitempty"`         // аргументы, которые маскируются в журнале
-	Example      string   `json:"example,omitempty" yaml:"example,omitempty"`             // пример вызова CLI
+	Name string `json:"name" yaml:"name"`
+	// Title — короткое название действия по-английски ("Read a file"); пусто — Name.
+	Title       string `json:"title,omitempty" yaml:"title,omitempty"`
+	Description string `json:"description" yaml:"description"`
+	// I18n — переводы title и description по коду языка ("ru").
+	I18n         map[string]Text `json:"i18n,omitempty" yaml:"i18n,omitempty"`
+	Class        string          `json:"class" yaml:"class"`                                     // read | write | external | money
+	InputSchema  Schema          `json:"input_schema" yaml:"input_schema"`                       // аргументы (как inputSchema MCP)
+	OutputSchema *Schema         `json:"output_schema,omitempty" yaml:"output_schema,omitempty"` // структурированный результат (как outputSchema MCP)
+	Verify       string          `json:"verify,omitempty" yaml:"verify,omitempty"`               // метод проверки результата, "" — нет; для money обязателен
+	Evidence     string          `json:"evidence,omitempty" yaml:"evidence,omitempty"`           // формат доказательства: eml, text, png, json
+	Untrusted    bool            `json:"untrusted,omitempty" yaml:"untrusted,omitempty"`         // результат содержит недоверенный контент
+	Sensitive    []string        `json:"sensitive,omitempty" yaml:"sensitive,omitempty"`         // аргументы, которые маскируются в журнале
+	Example      string          `json:"example,omitempty" yaml:"example,omitempty"`             // пример вызова CLI
 	// ServiceOnly — действие только для других коннекторов (service_call):
 	// агенту не показывается. Должно быть в Services.
 	ServiceOnly bool `json:"service_only,omitempty" yaml:"service_only,omitempty"`
@@ -106,6 +114,61 @@ type Action struct {
 	// описании, подтверждении и согласии рядом с подвызовом. Например, чтение,
 	// которому нужны клики (browser.act — «раскрыть список записей»).
 	CallReasons map[string]string `json:"call_reasons,omitempty" yaml:"call_reasons,omitempty"`
+}
+
+// Text — перевод названия и описания на один язык.
+type Text struct {
+	Title       string `json:"title,omitempty" yaml:"title,omitempty"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+var langRe = regexp.MustCompile(`^[a-z]{2}$`)
+
+func validateI18n(where string, i map[string]Text) error {
+	for lang := range i {
+		if !langRe.MatchString(lang) {
+			return fmt.Errorf("manifest %s: i18n: bad language %q (two lowercase letters, e.g. ru)", where, lang)
+		}
+	}
+	return nil
+}
+
+// TitleIn — название коннектора на языке lang: перевод, иначе Title, иначе имя.
+func (m Manifest) TitleIn(lang string) string {
+	if t := m.I18n[lang].Title; t != "" {
+		return t
+	}
+	if m.Title != "" {
+		return m.Title
+	}
+	return m.Connector
+}
+
+// DescriptionIn — описание коннектора на языке lang (иначе исходное).
+func (m Manifest) DescriptionIn(lang string) string {
+	if d := m.I18n[lang].Description; d != "" {
+		return d
+	}
+	return m.Description
+}
+
+// TitleIn — название действия на языке lang: перевод, иначе Title, иначе имя.
+func (a Action) TitleIn(lang string) string {
+	if t := a.I18n[lang].Title; t != "" {
+		return t
+	}
+	if a.Title != "" {
+		return a.Title
+	}
+	return a.Name
+}
+
+// DescriptionIn — описание действия на языке lang (иначе исходное).
+func (a Action) DescriptionIn(lang string) string {
+	if d := a.I18n[lang].Description; d != "" {
+		return d
+	}
+	return a.Description
 }
 
 // CallsText — подвызовы с причинами: "browser.open, browser.act (раскрыть список)".
@@ -252,6 +315,9 @@ func (m *Manifest) Validate() error {
 			}
 		}
 	}
+	if err := validateI18n(m.Connector, m.I18n); err != nil {
+		return err
+	}
 	if m.Limits.MemoryMB < 0 || m.Limits.TimeoutS < 0 || m.Limits.VerifyDeadlineS < 0 {
 		return fmt.Errorf("manifest %s: negative limits", m.Connector)
 	}
@@ -261,6 +327,9 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("manifest %s: bad or duplicate action %q", m.Connector, a.Name)
 		}
 		seen[a.Name] = true
+		if err := validateI18n(m.Connector+"."+a.Name, a.I18n); err != nil {
+			return err
+		}
 		switch a.Class {
 		case "read", "write", "external", "money":
 		default:

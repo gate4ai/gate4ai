@@ -134,6 +134,10 @@ var commands = []string{"help", "version", "tools", "status", "skill", "mcp", "d
 // Run — точка входа CLI.
 func Run(ctx context.Context, e *Env, args []string) int {
 	e.cmdline = args
+	// `gate4ai --json <команда> …` — то же, что --json после команды.
+	if len(args) > 1 && (args[0] == "--json" || args[0] == "-json") {
+		e.ForceJSON, args = true, args[1:]
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		if len(args) > 1 && isCommand(args[1]) {
 			return e.commandHelp(args[1])
@@ -402,6 +406,7 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 		e.problem(p)
 		return ExitUsage
 	}
+	args, pre := hoistCallOpts(args)
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		fmt.Fprintf(e.Stdout, "gate4ai %s <action>\n\n", conn)
 		for _, t := range mine {
@@ -427,7 +432,7 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 		e.problem(p)
 		return ExitUsage
 	}
-	vals, opts, err := parseArgs(*tool, args[1:])
+	vals, opts, err := parseArgs(*tool, append(append([]string{}, args[1:]...), pre...))
 	if err != nil {
 		e.printJSON(map[string]any{"status": "error", "code": "invalid_arguments", "message": err.Error()})
 		return ExitUsage
@@ -435,6 +440,9 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 	if opts.help {
 		e.actionHelp(*tool)
 		return ExitOK
+	}
+	if opts.json {
+		e.ForceJSON = true
 	}
 	body := map[string]any{"action": tool.Name, "args": vals, "wait": opts.wait, "agent": opts.as}
 	var res map[string]any
@@ -476,7 +484,7 @@ func (e *Env) actionHelp(t skill.Tool) {
 		}
 		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s\n", p.Name, flagType(p.Schema), req, p.Schema.Description)
 	}
-	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
+	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
 }
 
 // flagType — тип флага для --help.
@@ -510,10 +518,34 @@ func scalar(name, typ, v string) (any, error) {
 	return v, nil
 }
 
+// hoistCallOpts снимает опции вызова (--json, --wait v, --as v), стоящие перед
+// именем действия: `gate4ai files --json list …`; они разбираются вместе с
+// аргументами действия.
+func hoistCallOpts(args []string) (rest, opts []string) {
+	for len(args) > 0 {
+		a := args[0]
+		name, _, hasVal := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		switch {
+		case !strings.HasPrefix(a, "--"):
+			return args, opts
+		case name == "json" && !hasVal:
+			opts, args = append(opts, a), args[1:]
+		case (name == "wait" || name == "as") && hasVal:
+			opts, args = append(opts, a), args[1:]
+		case (name == "wait" || name == "as") && len(args) > 1:
+			opts, args = append(opts, args[0], args[1]), args[2:]
+		default:
+			return args, opts
+		}
+	}
+	return args, opts
+}
+
 type callOpts struct {
 	wait string
 	as   string
 	help bool
+	json bool // --json без значения: вывод JSON
 }
 
 // parseArgs разбирает --name value / --name=value по схеме действия.
@@ -545,10 +577,17 @@ func parseArgs(t skill.Tool, args []string) (map[string]any, callOpts, error) {
 			i++
 			return args[i], nil
 		}
-		switch name {
-		case "wait", "as":
+		// --wait, --as и --json — опции вызова, если у действия нет
+		// аргумента с таким именем.
+		_, isArg := types[name]
+		switch {
+		case isArg:
+		case name == "wait" || name == "as":
 			v, err := next()
 			if err != nil {
+				if name == "wait" {
+					return nil, o, errors.New("--wait needs a duration, e.g. --wait 10m")
+				}
 				return nil, o, err
 			}
 			if name == "wait" {
@@ -557,7 +596,11 @@ func parseArgs(t skill.Tool, args []string) (map[string]any, callOpts, error) {
 				o.as = v
 			}
 			continue
-		case "json":
+		case name == "json" && !hasVal && (i+1 >= len(args) || strings.HasPrefix(args[i+1], "-")):
+			// --json без значения — вывод JSON (вывод действия и так JSON).
+			o.json = true
+			continue
+		case name == "json":
 			v, err := next()
 			if err != nil {
 				return nil, o, err

@@ -224,7 +224,7 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 	}
 	c := d.Config.Current()
 	if !c.Profiles["default"].HasConnector("files") || !c.Profiles["default"].HasConnector("browser") ||
-		!slices.Equal(c.Connectors["files"]["roots"].([]any), []any{"~"}) || len(c.Connectors["browser"]) != 0 {
+		!slices.Equal(c.Connectors["files"]["roots"].([]any), []any{"~/Documents"}) || len(c.Connectors["browser"]) != 0 {
 		t.Fatal(c.Profiles["default"], c.Connectors)
 	}
 	for conn, acts := range defaultActions {
@@ -243,8 +243,8 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 			if dec.Effect != config.EffectAsk || dec.Default || !slices.Equal(dec.RuleIDs, []string{conn + "-" + a.Name + "-ask"}) {
 				t.Fatal(action, dec)
 			}
-			args := map[string]map[string]any{"read": {"path": "~/a"}, "list": {"path": "~"}, "append": {"path": "~/a", "text": "x"},
-				"write": {"path": "~/a", "content": "x"}}[a.Name]
+			args := map[string]map[string]any{"read": {"path": "~/Documents/a"}, "list": {"path": "~/Documents"}, "append": {"path": "~/Documents/a", "text": "x"},
+				"write": {"path": "~/Documents/a", "content": "x"}}[a.Name]
 			if conn != "files" {
 				args = nil
 			}

@@ -191,7 +191,7 @@ func TestRemoteLinkThroughRelay(t *testing.T) {
 	ui := strings.TrimSuffix(strings.TrimSpace(res.out), "/login?t="+strings.SplitN(strings.TrimSpace(res.out), "t=", 2)[1])
 	link := func() string {
 		t.Helper()
-		_, p := get(t, owner, ui+"/settings?link=1")
+		_, p := get(t, owner, ui+"/settings/internet?link=1")
 		m := remoteLinkRe.FindStringSubmatch(p)
 		if m == nil {
 			t.Fatal("no remote link on the settings page:", p)
@@ -204,7 +204,7 @@ func TestRemoteLinkThroughRelay(t *testing.T) {
 		t.Fatal("link:", l)
 	}
 	phone := r.browser(t)
-	if code, p := get(t, phone, l); code != 200 || !strings.Contains(p, "Удалённый вход") {
+	if code, p := get(t, phone, l); code != 200 || !strings.Contains(p, "Remote access") {
 		t.Fatalf("link did not open the device UI: %d %s", code, p)
 	}
 	if code, _ := get(t, r.browser(t), l); code != 401 {

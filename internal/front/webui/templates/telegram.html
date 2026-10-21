@@ -1,40 +1,42 @@
 {{template "head" .}}
 {{$d := .Data}}
-<h2>Подтверждения в Telegram</h2>
-<p>Личный бот: gate4.ai присылает запрос с кнопками «Разрешить / Отклонить», бот принимает нажатия только от вас. Подключённый бот присылает запросы подтверждения действий агентов и, если включить в конце, подтверждает вход в Web UI.</p>
+<div class="layout">{{template "settings_nav" (dict "V" . "On" "notifications")}}<div>
+<h2>{{T "Approvals in Telegram"}}</h2>
+<p>{{T "Your own bot: gate4.ai sends a request with Allow / Deny buttons, and the bot accepts presses only from you. The bot sends agent approval requests and, if you turn it on at the end, confirms signing in to the Web UI."}}</p>
 
-<div class="card"><h3>1. Создайте бота</h3>
-<ol><li>Откройте в Telegram <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>.</li>
-<li>Отправьте <code>/newbot</code>, задайте имя и логин бота (заканчивается на <code>bot</code>).</li>
-<li>BotFather пришлёт токен вида <code>123456789:AA…</code> — скопируйте его.</li></ol>
+<div class="card"><h3>1. {{T "Create a bot"}}</h3>
+<ol><li>{{TH "Open <a href=\"https://t.me/BotFather\" target=\"_blank\" rel=\"noopener\">@BotFather</a> in Telegram."}}</li>
+<li>{{TH "Send <code>/newbot</code>, choose a name and a username (it ends with <code>bot</code>)."}}</li>
+<li>{{TH "BotFather sends a token like <code>123456789:AA…</code> — copy it."}}</li></ol>
 <form method="post" action="{{.Base}}/channels/telegram" class="row" autocomplete="off"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="token"><input type="hidden" name="for" value="{{$d.For}}">
-<input name="token" type="password" placeholder="токен бота" size="50" required><button class="primary">Проверить и сохранить</button></form>
-{{if $d.HasToken}}<p class="ok">Токен сохранён в хранилище секретов (<code>@telegram.bot</code>){{if $d.Bot}}, бот <b>@{{$d.Bot}}</b>{{end}}.</p>{{end}}
+<label class="inline" for="tg-tok">{{T "Bot token"}}</label><input id="tg-tok" name="token" type="password" size="50" required><button class="primary">{{T "Check and save"}}</button></form>
+{{if $d.HasToken}}<p class="ok">{{T "The token is saved in gate4.ai passwords (@telegram.bot)."}}{{if $d.Bot}} {{T "Bot @%s." $d.Bot}}{{end}}</p>{{end}}
 </div>
 
-<div class="card"><h3>2. Найдите себя</h3>
+<div class="card"><h3>2. {{T "Find yourself"}}</h3>
 {{if $d.HasToken}}
-<p>Откройте своего бота{{if $d.Bot}} (<a href="https://t.me/{{$d.Bot}}" target="_blank" rel="noopener">t.me/{{$d.Bot}}</a>){{end}} и отправьте ему <code>/start</code>. Затем нажмите:</p>
-<form method="post" action="{{.Base}}/channels/telegram"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="find"><input type="hidden" name="for" value="{{$d.For}}"><button>Найти, кто написал боту</button></form>
+<p>{{T "Open your bot"}}{{if $d.Bot}} (<a href="https://t.me/{{$d.Bot}}" target="_blank" rel="noopener">t.me/{{$d.Bot}}</a>){{end}} {{TH "and send it <code>/start</code>. Then press:"}}</p>
+<form method="post" action="{{.Base}}/channels/telegram"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="find"><input type="hidden" name="for" value="{{$d.For}}"><button>{{T "Find who wrote to the bot"}}</button></form>
 {{if $d.Searched}}{{if $d.Users}}
-<table style="margin-top:.6rem"><tr><th>Кто</th><th>ID</th><th>Сообщение</th><th></th></tr>
+<table style="margin-top:.6rem"><tr><th>{{T "Who"}}</th><th>ID</th><th>{{T "Message"}}</th><th></th></tr>
 {{range $d.Users}}<tr><td>{{.Name}}{{if .Username}} <span class="muted">@{{.Username}}</span>{{end}}</td><td><code>{{.ID}}</code></td><td class="muted">{{.Text}}</td>
 <td><form method="post" action="{{$.Base}}/channels/telegram"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="step" value="owner"><input type="hidden" name="owner_id" value="{{.ID}}"><input type="hidden" name="for" value="{{$d.For}}">
-{{if $d.Public}}<label class="inline"><input type="checkbox" name="webhook" value="1"> вебхук</label>{{end}}<button class="primary small">Это я — включить</button></form></td></tr>{{end}}</table>
-{{else}}<p class="warn">Сообщений боту пока нет. Отправьте боту <code>/start</code> и нажмите кнопку ещё раз.</p>{{end}}{{end}}
-<details><summary>Знаю свой Telegram ID</summary>
+{{if $d.Public}}<label class="inline"><input type="checkbox" name="webhook" value="1"> {{T "webhook"}}</label>{{end}}<button class="primary small">{{T "This is me — turn on"}}</button></form></td></tr>{{end}}</table>
+{{else}}<p class="warn">{{TH "No messages to the bot yet. Send the bot <code>/start</code> and press the button again."}}</p>{{end}}{{end}}
+<details><summary>{{T "I know my Telegram ID"}}</summary>
 <form method="post" action="{{.Base}}/channels/telegram" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="owner"><input type="hidden" name="for" value="{{$d.For}}">
-<input name="owner_id" placeholder="123456789" required><button>Включить</button></form><p class="help">Свой ID подскажет, например, бот @userinfobot.</p></details>
-{{else}}<p class="muted">Сначала сохраните токен бота.</p>{{end}}
+<label class="inline" for="tg-id">ID</label><input id="tg-id" name="owner_id" placeholder="123456789" required><button>{{T "Turn on"}}</button></form><p class="help">{{T "The bot @userinfobot, for example, tells you your ID."}}</p></details>
+{{else}}<p class="muted">{{T "Save the bot token first."}}</p>{{end}}
 </div>
 
-<div class="card" id="done"><h3>3. Готово</h3>
-{{with $d.Telegram}}<p>Владелец: <code>{{.OwnerID}}</code>, токен <code>{{.Token}}</code>, режим: {{if .Webhook}}вебхук на публичном адресе{{else}}опрос Telegram (исходящие запросы, без открытых портов){{end}}. Канал подтверждений {{if $d.On}}<b class="ok">включён</b>{{else}}<b>выключен</b>{{end}}.</p>
-<h3>Вход в Web UI</h3>
-{{if $d.LoginTelegram}}<p><b class="ok">Вход в Web UI подтверждается в Telegram.</b> <a href="{{$.Base}}/settings#login">Защита входа →</a></p>
-{{else if $d.LoginReady}}<p>Этот же бот может подтверждать вход в Web UI: на странице входа появится код, а в боте — кнопка «Разрешить вход». Агент на этом компьютере такой вход не пройдёт.</p>
-{{template "login_telegram_button" (dict "V" $ "On" true "Password" $d.LoginPassword "Primary" true "Label" "Включить подтверждение входа в Web UI через Telegram" "From" "telegram" "Back" "#done")}}
-{{else}}<p class="muted">Бот подключается — обновите страницу через несколько секунд, чтобы включить подтверждение входа в Web UI.</p>{{end}}
-{{else}}<p class="muted">После шага 2 придёт пробное сообщение{{if eq $d.For "login"}}, а здесь появится кнопка включения подтверждения входа в Web UI{{end}}.</p>{{end}}
-<p>{{if eq $d.For "login"}}<a href="{{.Base}}/settings#login">← Настройки: защита входа</a>{{else}}<a href="{{.Base}}/approvals#channels">← Каналы уведомлений</a>{{end}}</p></div>
+<div class="card" id="done"><h3>3. {{T "Done"}}</h3>
+{{with $d.Telegram}}<p>{{T "Owner: %d, token %s." .OwnerID .Token}} {{if .Webhook}}{{T "Mode: a webhook at the public address."}}{{else}}{{T "Mode: polling Telegram (outgoing requests, no open ports)."}}{{end}} {{if $d.On}}<b class="ok">{{T "The approval channel is on."}}</b>{{else}}<b>{{T "The approval channel is off."}}</b>{{end}}</p>
+<h3>{{T "Signing in to the Web UI"}}</h3>
+{{if $d.LoginTelegram}}<p><b class="ok">{{T "Signing in to the Web UI is confirmed in Telegram."}}</b> <a href="{{$.Base}}/settings/login">{{T "Signing in →"}}</a></p>
+{{else if $d.LoginReady}}<p>{{T "The same bot can confirm signing in to the Web UI: the sign-in page shows a code, the bot shows an “Allow sign-in” button. An agent on this computer cannot pass such a sign-in."}}</p>
+{{template "login_telegram_button" (dict "V" $ "On" true "Password" $d.LoginPassword "Primary" true "Label" "Turn on sign-in confirmation in Telegram" "From" "telegram" "Back" "#done")}}
+{{else}}<p class="muted">{{T "The bot is connecting — reload the page in a few seconds to turn on sign-in confirmation."}}</p>{{end}}
+{{else}}<p class="muted">{{T "After step 2 a test message arrives."}}</p>{{end}}
+<p>{{if eq $d.For "login"}}<a href="{{.Base}}/settings/login">← {{T "Signing in"}}</a>{{else if eq $d.For "setup"}}<a href="{{.Base}}/">← {{T "Home"}}</a>{{else}}<a href="{{.Base}}/settings/notifications">← {{T "Notifications"}}</a>{{end}}</p></div>
+</div></div>
 {{template "foot"}}

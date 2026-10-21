@@ -245,7 +245,7 @@ func (c *Config) ApplyChange(profile string, ch Change) error {
 func (ch Change) Describe() string {
 	d := ch.describe()
 	if ch.Profile != "" && ch.Op != OpAddListItems && ch.Op != OpRemoveListItems && ch.Op != OpConnectorSetting {
-		d += " (профиль " + ch.Profile + ")"
+		d += " (profile " + ch.Profile + ")"
 	}
 	return d
 }
@@ -253,39 +253,39 @@ func (ch Change) Describe() string {
 func (ch Change) describe() string {
 	switch ch.Op {
 	case OpAddRule:
-		eff := map[string]string{EffectAllow: "разрешать", EffectAsk: "спрашивать", EffectDeny: "запрещать"}[ch.Effect]
-		s := fmt.Sprintf("Правило: %s %s", eff, ch.Action)
+		eff := map[string]string{EffectAllow: "allow", EffectAsk: "ask", EffectDeny: "deny"}[ch.Effect]
+		s := fmt.Sprintf("Rule: %s %s", eff, ch.Action)
 		if ch.When != "" {
-			s += ", если " + ch.When
+			s += ", if " + ch.When
 		}
 		if ch.RuleReason != "" {
-			s += " — «" + ch.RuleReason + "»"
+			s += " — “" + ch.RuleReason + "”"
 		}
 		return s
 	case OpRemoveRule:
-		return "Удалить правило " + ch.RuleID
+		return "Remove rule " + ch.RuleID
 	case OpAddListItems:
-		return fmt.Sprintf("Добавить в список %s: %s", ch.List, strings.Join(ch.Items, ", "))
+		return fmt.Sprintf("Add to list %s: %s", ch.List, strings.Join(ch.Items, ", "))
 	case OpRemoveListItems:
-		return fmt.Sprintf("Убрать из списка %s: %s", ch.List, strings.Join(ch.Items, ", "))
+		return fmt.Sprintf("Remove from list %s: %s", ch.List, strings.Join(ch.Items, ", "))
 	case OpAddConnector:
-		return "Дать доступ к коннектору " + ch.Connector
+		return "Give access to connector " + ch.Connector
 	case OpInstallConnector:
-		return "Установить коннектор " + ch.Connector + " из магазина и дать к нему доступ"
+		return "Install connector " + ch.Connector + " from the store and give access to it"
 	case OpInstallDev:
-		s := "Собрать и поставить свою сборку из " + ch.Folder
+		s := "Build and install an own build from " + ch.Folder
 		if ch.Connector != "" {
-			s += " (коннектор " + ch.Connector + ")"
+			s += " (connector " + ch.Connector + ")"
 		}
-		return s + " и дать к ней доступ"
+		return s + " and give access to it"
 	case OpConnectorSetting:
-		return "Настройки коннектора " + ch.Connector + ": " + ch.SettingsJSON
+		return "Settings of connector " + ch.Connector + ": " + ch.SettingsJSON
 	case OpAddSettingItems:
-		return fmt.Sprintf("Добавить в настройку %s.%s: %s", ch.Connector, ch.Key, strings.Join(ch.Items, ", "))
+		return fmt.Sprintf("Add to setting %s.%s: %s", ch.Connector, ch.Key, strings.Join(ch.Items, ", "))
 	case OpRemoveSettingItems:
-		return fmt.Sprintf("Убрать из настройки %s.%s: %s", ch.Connector, ch.Key, strings.Join(ch.Items, ", "))
+		return fmt.Sprintf("Remove from setting %s.%s: %s", ch.Connector, ch.Key, strings.Join(ch.Items, ", "))
 	case OpAddCredential:
-		return "Учётка " + ch.Account + " (значения секретов — в хранилище, их задаёте вы): " + ch.CredentialJSON
+		return "Account " + ch.Account + " (secret values stay in the vault, you set them): " + ch.CredentialJSON
 	}
 	return ch.Op
 }

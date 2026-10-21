@@ -23,16 +23,18 @@ import (
 
 // emptyConfig — первая версия конфигурации, если не передан --config: агентов
 // нет, официальный магазин коннекторов подключён, встроенный коннектор files
-// виден в профиле default с правилом ask на каждое действие. Каждый
+// (корень ~/Documents; скрытое и ключи закрыты им самим) виден в профиле
+// default с правилом ask на каждое действие. Каждый
 // установленный из магазина коннектор daemon добавляет туда же с ask.
-const emptyConfig = `# gate4ai: no agents yet. Files are built in (every action asks you first);
+const emptyConfig = `# gate4ai: no agents yet. Files are built in, limited to ~/Documents (every action
+# asks you first; hidden files and keys are always closed);
 # the browser connector is installed from the store and added to profile default
 # the same way. Add agents and your rules (see the README), then: gate4ai policy set config.yaml
 store:
   registry: https://raw.githubusercontent.com/gate4ai/registry/main/index.json
   registry_keys: ["ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="]
 connectors:
-  files: { roots: ["~"] }
+  files: { roots: ["~/Documents"] }
 profiles:
   default:
     connectors: [files]
