@@ -160,7 +160,7 @@ func TestDaemonSockets(t *testing.T) {
 	// write → ask по умолчанию; подтверждение владельцем.
 	var res map[string]any
 	agent.do(t, "POST", "/v1/call", map[string]any{"action": "notes.append", "args": map[string]any{"text": "hello"}}, &res)
-	if res["status"] != "pending" || res["code"] != "pending_approval" {
+	if res["status"] != "pending" || errOf(res)["code"] != "pending_approval" {
 		t.Fatal(res)
 	}
 	id := res["id"].(string)
@@ -179,12 +179,12 @@ func TestDaemonSockets(t *testing.T) {
 	}
 	// deny по правилу.
 	agent.do(t, "POST", "/v1/call", map[string]any{"action": "notes.append", "args": map[string]any{"text": "my password"}}, &res)
-	if res["code"] != "denied_by_policy" || !strings.Contains(res["message"].(string), "no secrets in notes") {
+	if errOf(res)["code"] != "denied_by_policy" || !strings.Contains(errOf(res)["message"].(string), "no secrets in notes") {
 		t.Fatal(res)
 	}
 	// Действие вне профиля не видно.
 	agent.do(t, "POST", "/v1/call", map[string]any{"action": "bank.pay", "args": map[string]any{}}, &res)
-	if res["code"] != "unknown_action" {
+	if errOf(res)["code"] != "unknown_action" {
 		t.Fatal(res)
 	}
 	// Владелец видит журнал и проверяет цепочку.
@@ -214,7 +214,7 @@ func TestDaemonSockets(t *testing.T) {
 		t.Fatal(code)
 	}
 	agent.do(t, "POST", "/v1/call", map[string]any{"action": "notes.read"}, &res)
-	if res["code"] != "denied_by_policy" {
+	if errOf(res)["code"] != "denied_by_policy" {
 		t.Fatal("new policy not applied", res)
 	}
 	owner.do(t, "POST", "/v1/policy/rollback", map[string]int{"version": 1}, nil)
@@ -228,3 +228,6 @@ func TestDaemonSockets(t *testing.T) {
 		t.Fatal("revoked token works", code)
 	}
 }
+
+// errOf — error {code, message, hint} из конверта ответа.
+func errOf(m map[string]any) map[string]any { e, _ := m["error"].(map[string]any); return e }

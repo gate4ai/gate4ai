@@ -98,7 +98,7 @@ func TestUIWithoutDaemon(t *testing.T) {
 		t.Fatalf("code %d started %d", code, started)
 	}
 	m := jsonOf(t, out.String())
-	if m["code"] != "unavailable" || !strings.Contains(m["hint"].(string), "gate4ai daemon start") || strings.Contains(m["message"].(string), "dial unix") {
+	if errOf(m)["code"] != "unavailable" || !strings.Contains(errOf(m)["hint"].(string), "gate4ai daemon start") || strings.Contains(errOf(m)["message"].(string), "dial unix") {
 		t.Fatal(out)
 	}
 	// --no-start в терминале: тоже без запуска, и человеку — подсказка в stderr.
@@ -253,7 +253,7 @@ func TestHumanOutput(t *testing.T) {
 		t.Fatalf("%d %q %q", code, out, errs)
 	}
 	code, out, _ = runAs(false, "", "agents", "token", "nobody")
-	if code != ExitUsage || jsonOf(t, out)["code"] != "not_found" {
+	if code != ExitUsage || errOf(jsonOf(t, out))["code"] != "not_found" {
 		t.Fatal(out)
 	}
 }

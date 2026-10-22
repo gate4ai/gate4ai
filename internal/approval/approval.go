@@ -137,6 +137,11 @@ func (d *Desktop) Asked(id, text string) {
 	_ = d.show("gate4.ai: нужен код", text+"\nВведите в Web UI («Подтверждения») или: gate4ai approvals answer "+id)
 }
 
+// HandedOff — агент передал страницу браузера человеку (browser.handoff).
+func (d *Desktop) HandedOff(text string) {
+	_ = d.show("gate4.ai: агент ждёт вас в Chrome", text)
+}
+
 // Denied — агенту отказано политикой; пользователь узнаёт об этом.
 func (d *Desktop) Denied(agent, action, reason string) {
 	_ = d.show("gate4.ai: действие запрещено", fmt.Sprintf("%s: %s — %s", agent, action, reason))

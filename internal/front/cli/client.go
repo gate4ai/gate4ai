@@ -34,7 +34,11 @@ const (
 	ExitVerification = 4
 	ExitUsage        = 5
 	ExitUnavailable  = 6
+	ExitAuth         = 7 // кто вызывает: токен агента неверен, команда только для владельца, владелец не назвал агента (--as)
 )
+
+// authCodes — ошибки «кто вызывает» (ExitAuth), а не аргументов.
+var authCodes = map[string]bool{"unauthorized": true, "owner_only": true, "agent_required": true}
 
 // Client — HTTP к daemon: поверх сокета или по HTTPS к публичному адресу устройства.
 type Client struct {

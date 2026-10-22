@@ -151,7 +151,8 @@ Owner commands (local socket):
 
 Output: JSON. At a terminal (stdout is a terminal) lists and status are tables and errors are text;
   --json or GATE4AI_OUTPUT=json gives JSON there too, GATE4AI_OUTPUT=table gives tables anywhere.
-Exit codes: 0 ok, 1 error, 2 denied by policy, 3 pending approval, 4 verification failed, 5 usage, 6 daemon unavailable.
+Exit codes: 0 ok, 1 error, 2 denied by policy, 3 pending approval, 4 verification failed, 5 invalid arguments or unknown action, 6 daemon unavailable, 7 caller not allowed (invalid agent token, owner-only command, owner call without --as).
+Output: JSON {"status": "ok" | "denied" | "pending" | "error" | "verification_failed", "result": …, "error": {"code", "message", "hint"}}.
 `
 
 // commands — встроенные команды (остальное первое слово — имя коннектора).
@@ -447,9 +448,9 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 		e.problem(p)
 		return ExitUsage
 	}
-	vals, opts, err := parseArgs(*tool, append(append([]string{}, args[1:]...), pre...))
+	vals, opts, err := parseArgs(*tool, append(append([]string{}, args[1:]...), pre...), e.Stdin)
 	if err != nil {
-		e.printJSON(map[string]any{"status": "error", "code": "invalid_arguments", "message": err.Error()})
+		e.problem(Problem{Code: "invalid_arguments", Message: err.Error(), Hint: "see gate4ai " + conn + " " + tool.Action + " --help"})
 		return ExitUsage
 	}
 	if opts.help {
@@ -465,7 +466,8 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 
 // ExitForResult — код выхода по результату pipeline.
 func ExitForResult(res map[string]any) int {
-	code, _ := res["code"].(string)
+	e, _ := res["error"].(map[string]any)
+	code, _ := e["code"].(string)
 	switch res["status"] {
 	case "ok":
 		return ExitOK
@@ -492,9 +494,33 @@ func (e *Env) actionHelp(t skill.Tool) {
 		if t.Schema.IsRequired(p.Name) {
 			req = " (required)"
 		}
-		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s\n", p.Name, flagType(p.Schema), req, p.Schema.Description)
+		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, limits(p.Schema))
 	}
-	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
+	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n"+
+		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
+}
+
+// limits — допустимые значения аргумента для --help: варианты, длина, диапазон.
+func limits(s *manifest.Schema) string {
+	var out []string
+	if s.Type == manifest.TArray && s.Items != nil && len(s.Items.Enum) > 0 {
+		out = append(out, "of: "+strings.Join(s.Items.Enum, ", "))
+	}
+	if len(s.Enum) > 0 {
+		out = append(out, "one of: "+strings.Join(s.Enum, ", "))
+	}
+	if s.MaxLength != nil {
+		out = append(out, fmt.Sprintf("up to %d characters", *s.MaxLength))
+	}
+	if s.Minimum != nil && s.Maximum != nil {
+		out = append(out, fmt.Sprintf("%g..%g", *s.Minimum, *s.Maximum))
+	} else if s.Maximum != nil {
+		out = append(out, fmt.Sprintf("up to %g", *s.Maximum))
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return " [" + strings.Join(out, "; ") + "]"
 }
 
 // flagType — тип флага для --help.
@@ -558,8 +584,33 @@ type callOpts struct {
 	json bool // --json без значения: вывод JSON
 }
 
-// parseArgs разбирает --name value / --name=value по схеме действия.
-func parseArgs(t skill.Tool, args []string) (map[string]any, callOpts, error) {
+// MaxArgFile — предел файла аргумента (--<name>_file).
+const MaxArgFile = 16 << 20
+
+// readArgFile — содержимое файла аргумента; "-" — stdin.
+func readArgFile(path string, stdin io.Reader) ([]byte, error) {
+	var r io.Reader = stdin
+	if path != "-" {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		r = f
+	}
+	if r == nil {
+		return nil, errors.New("no stdin")
+	}
+	b, err := io.ReadAll(io.LimitReader(r, MaxArgFile+1))
+	if err == nil && len(b) > MaxArgFile {
+		err = fmt.Errorf("the file is larger than %d bytes", MaxArgFile)
+	}
+	return b, err
+}
+
+// parseArgs разбирает --name value / --name=value по схеме действия; строковый
+// аргумент можно взять из файла: --<name>_file путь (- — stdin).
+func parseArgs(t skill.Tool, args []string, stdin io.Reader) (map[string]any, callOpts, error) {
 	var o callOpts
 	vals := map[string]any{}
 	types := map[string]*manifest.Schema{}
@@ -623,6 +674,19 @@ func parseArgs(t skill.Tool, args []string) (map[string]any, callOpts, error) {
 			continue
 		}
 		sch, ok := types[name]
+		if base, isFile := strings.CutSuffix(name, "_file"); !ok && isFile && types[base] != nil && types[base].Type == manifest.TString {
+			// --value_file article.md: длинный текст — из файла (- — stdin), а не в аргументе.
+			path, err := next()
+			if err != nil {
+				return nil, o, err
+			}
+			b, err := readArgFile(path, stdin)
+			if err != nil {
+				return nil, o, fmt.Errorf("--%s: %v", name, err)
+			}
+			vals[base] = string(b)
+			continue
+		}
 		if !ok {
 			return nil, o, fmt.Errorf("unknown argument --%s for %s (see --help)", name, t.Name)
 		}

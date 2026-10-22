@@ -231,7 +231,7 @@ func TestRunsAndEgress(t *testing.T) {
 	resp, _ = agentC.Do(req)
 	var res map[string]any
 	json.NewDecoder(resp.Body).Decode(&res)
-	if res["code"] != "unknown_action" {
+	if errOf(res)["code"] != "unknown_action" {
 		t.Fatal("agent called internal connector", res)
 	}
 
@@ -385,3 +385,6 @@ func TestSRTDeniesDataHome(t *testing.T) {
 		t.Fatal("daemon home from the run is not denied:", deny)
 	}
 }
+
+// errOf — error {code, message, hint} из конверта ответа.
+func errOf(m map[string]any) map[string]any { e, _ := m["error"].(map[string]any); return e }

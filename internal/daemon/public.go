@@ -42,7 +42,7 @@ func (b backend) Call(ctx context.Context, action string, args map[string]any) (
 		id, _ := args["id"].(string)
 		a, err := b.d.State.GetApproval(id)
 		if err != nil || a.Agent != b.p.Agent {
-			return map[string]any{"status": "error", "code": "not_found", "message": "unknown id"}, nil
+			return map[string]any{"status": "error", "error": map[string]any{"code": "not_found", "message": "unknown id"}}, nil
 		}
 		wait, _ := args["wait"].(string)
 		d, _ := config.ParseDuration(wait)

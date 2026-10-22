@@ -79,6 +79,8 @@ type Daemon struct {
 	stopOnce  sync.Once
 	notifiers *MultiNotifier
 	questions questions
+	handoffMu sync.Mutex
+	handoffs  map[string]HandoffNote // browser.handoff, которые ждут человека
 	servers   []*http.Server
 	extra     []func(*http.ServeMux) // доп. маршруты владельца (MCP HTTP, Web UI)
 	oauth     *oauth.Server
@@ -182,6 +184,7 @@ func New(opt Options) (*Daemon, error) {
 	d.Pipeline.AlwaysAsk = map[string]func(map[string]any) string{SelfConnector: d.alwaysAskSelf}
 	d.Pipeline.Vault = d.Vault
 	d.Pipeline.Ask = d.ask
+	d.Pipeline.Handoff = d.handoff
 	if opt.Now != nil {
 		d.Pipeline.Now = opt.Now
 		d.State.Now = opt.Now

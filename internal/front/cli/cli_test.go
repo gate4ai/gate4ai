@@ -149,18 +149,18 @@ func TestCLIFlow(t *testing.T) {
 	}
 	// Проверка не прошла → код 4.
 	code, out = h.run(t, tok, "email", "send", "--to=landlord@example.com", "--subject", "lost mail")
-	if code != ExitVerification || jsonOf(t, out)["code"] != "verification_failed" {
+	if code != ExitVerification || errOf(jsonOf(t, out))["code"] != "verification_failed" {
 		t.Fatal(code, out)
 	}
 	// Отказ → код 2 и честная причина.
 	code, out = h.run(t, dtok, "email", "send", "--to", "landlord@example.com", "--subject", "x")
-	if code != ExitDenied || !strings.Contains(jsonOf(t, out)["message"].(string), "denied_by_policy: drafts only") {
+	if code != ExitDenied || !strings.Contains(errOf(jsonOf(t, out))["message"].(string), "denied_by_policy: drafts only") {
 		t.Fatal(code, out)
 	}
 	// Подтверждение → код 3, затем approve владельцем и status.
 	code, out = h.run(t, tok, "email", "send", "--to", "a@b.example,c@d.example", "--subject", "hi")
 	res := jsonOf(t, out)
-	if code != ExitPending || res["code"] != "pending_approval" {
+	if code != ExitPending || errOf(res)["code"] != "pending_approval" {
 		t.Fatal(code, out)
 	}
 	id := res["id"].(string)
@@ -257,25 +257,25 @@ func TestDaemonUnavailable(t *testing.T) {
 func TestCallOptsAnywhere(t *testing.T) {
 	tool := skill.Tool{Name: "files.list", Connector: "files", Action: "list",
 		Schema: manifest.MustSchema(`{ type: object, properties: { path: { type: string }, as: { type: string } } }`)}
-	vals, o, err := parseArgs(tool, []string{"--path", "/x", "--json", "--wait", "1m"})
+	vals, o, err := parseArgs(tool, []string{"--path", "/x", "--json", "--wait", "1m"}, nil)
 	if err != nil || vals["path"] != "/x" || !o.json || o.wait != "1m" {
 		t.Fatal(vals, o, err)
 	}
-	vals, o, err = parseArgs(tool, []string{"--json", "--path", "/x"})
+	vals, o, err = parseArgs(tool, []string{"--json", "--path", "/x"}, nil)
 	if err != nil || vals["path"] != "/x" || !o.json {
 		t.Fatal(vals, o, err)
 	}
 	// --json со значением — по-прежнему все аргументы объектом.
-	vals, o, err = parseArgs(tool, []string{"--json", `{"path":"/y"}`})
+	vals, o, err = parseArgs(tool, []string{"--json", `{"path":"/y"}`}, nil)
 	if err != nil || vals["path"] != "/y" || o.json {
 		t.Fatal(vals, o, err)
 	}
 	// Аргумент действия с именем опции остаётся аргументом.
-	vals, o, err = parseArgs(tool, []string{"--as", "pdf"})
+	vals, o, err = parseArgs(tool, []string{"--as", "pdf"}, nil)
 	if err != nil || vals["as"] != "pdf" || o.as != "" {
 		t.Fatal(vals, o, err)
 	}
-	if _, _, err := parseArgs(tool, []string{"--wait"}); err == nil || !strings.Contains(err.Error(), "10m") {
+	if _, _, err := parseArgs(tool, []string{"--wait"}, nil); err == nil || !strings.Contains(err.Error(), "10m") {
 		t.Fatal(err)
 	}
 	rest, pre := hoistCallOpts([]string{"--json", "--wait", "5m", "--as=bot", "list", "--path", "/x"})
@@ -297,3 +297,6 @@ func TestCallOptsAnywhere(t *testing.T) {
 		}
 	}
 }
+
+// errOf — error {code, message, hint} из конверта ответа.
+func errOf(m map[string]any) map[string]any { e, _ := m["error"].(map[string]any); return e }

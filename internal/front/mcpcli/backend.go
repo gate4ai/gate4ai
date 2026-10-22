@@ -33,7 +33,7 @@ func (b ClientBackend) Call(ctx context.Context, action string, args map[string]
 		err = b.C.Do(ctx, "POST", "/v1/call", map[string]any{"action": action, "args": args}, &res)
 	}
 	if ae, ok := err.(*cli.APIError); ok {
-		return map[string]any{"status": "error", "code": ae.Code, "message": ae.Message}, nil
+		return map[string]any{"status": "error", "error": map[string]any{"code": ae.Code, "message": ae.Message}}, nil
 	}
 	return res, err
 }

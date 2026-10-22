@@ -174,7 +174,7 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (an
 		res, err = s.Backend.Call(ctx, action, args)
 	}
 	if err != nil {
-		return toolResult(map[string]any{"status": "error", "code": "unavailable", "message": err.Error()}, true), nil
+		return toolResult(map[string]any{"status": "error", "error": map[string]any{"code": "unavailable", "message": err.Error()}}, true), nil
 	}
 	st, _ := res["status"].(string)
 	return toolResult(res, st != "ok" && st != "pending"), nil
@@ -184,9 +184,10 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (an
 // (статус, квитанция, проверка, метки), результат коннектора — в поле result.
 func envelopeSchema(result map[string]any) map[string]any {
 	str := map[string]any{"type": "string"}
-	return map[string]any{"type": "object", "required": []string{"status", "action"}, "properties": map[string]any{
-		"status": str, "code": str, "action": str, "id": str, "receipt": str, "result": result,
-		"verified": map[string]any{"type": "boolean"}, "verification": str, "reason": str, "message": str,
+	return map[string]any{"type": "object", "required": []string{"status"}, "properties": map[string]any{
+		"status": str, "action": str, "id": str, "receipt": str, "result": result,
+		"error":    map[string]any{"type": "object", "properties": map[string]any{"code": str, "message": str, "hint": str}, "required": []string{"code", "message"}},
+		"verified": map[string]any{"type": "boolean"}, "verification": str, "reason": str,
 		"rule_ids":   map[string]any{"type": "array", "items": str},
 		"provenance": map[string]any{"type": "object"},
 	}}
@@ -202,8 +203,10 @@ func toolResult(res map[string]any, isErr bool) map[string]any {
 	delete(env, "content")
 	b, _ := json.MarshalIndent(env, "", "  ")
 	text := string(b)
-	if msg, _ := res["message"].(string); msg != "" && isErr {
-		text = msg + "\n\n" + text
+	if e, _ := res["error"].(map[string]any); isErr {
+		if msg, _ := e["message"].(string); msg != "" {
+			text = msg + "\n\n" + text
+		}
 	}
 	content := []any{map[string]any{"type": "text", "text": text}}
 	_, untrusted := res["provenance"]

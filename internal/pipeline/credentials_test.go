@@ -39,6 +39,7 @@ func (b *fakeBrowser) Manifest() manifest.Manifest {
 		{Name: "login", Class: "write", InputSchema: obj,
 			OutputSchema: ptr(manifest.MustSchema(`{ type: object, properties: { url: { type: string }, status: { type: string }, origin: { type: string } }, required: [status] }`))},
 		{Name: "fill_secret", Class: "write", InputSchema: obj},
+		{Name: "handoff", Class: "read", InputSchema: manifest.MustSchema(`{ type: object, properties: { session: { type: string }, message: { type: string } } }`)},
 	}}
 	if b.runtime == manifest.RuntimeNative {
 		m.Platforms = []string{"linux/amd64"}
@@ -61,6 +62,11 @@ func (b *fakeBrowser) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecRes
 			return abi.ExecResult{}, abi.Errorf("form_mismatch", "#password: not found")
 		}
 		return abi.ExecResult{Structured: map[string]any{"url": "https://lk.example/", "status": "logged_in", "origin": "https://login.example"}, ResultRef: "logged_in"}, nil
+	case "handoff":
+		if r.Args["session"] == "s-closed" {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeNotFound, "browser session s-closed is closed or unknown")
+		}
+		return abi.ExecResult{Structured: map[string]any{"url": "https://lk.example/", "status": "done"}}, nil
 	case "fill_secret":
 		if r.Args["selector"] == "#elsewhere" {
 			return abi.ExecResult{}, abi.Errorf("wrong_origin", "the page is not at the sign-in site")
@@ -460,5 +466,36 @@ func TestHumanPromptFromAgentIgnored(t *testing.T) {
 	p.askHuman(context.Background(), accessor{agent: "dev", connector: "bank_login"}, "@bank", cr, "sms", map[string]any{"prompt": long})
 	if q := got[1].Text; strings.ContainsAny(q, "\n\x1b") || len([]rune(q)) > maxPromptLen+1 || !strings.HasPrefix(q, "Code from SMS") {
 		t.Fatalf("%q", q)
+	}
+}
+
+// browser.handoff: человек получает уведомление, только когда браузер проверил
+// сеанс; слова агента — одной строкой; запись снимается после ожидания.
+func TestHandoffNotifiesAfterPrecheck(t *testing.T) {
+	e := newCredEnv(t, manifest.RuntimeNative)
+	var got []Handoff
+	active := 0
+	e.p.Handoff = func(h Handoff) func() {
+		got = append(got, h)
+		active++
+		return func() { active-- }
+	}
+	ctx := context.Background()
+	res := e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.handoff", Args: map[string]any{"session": "s-closed", "message": "Войдите"}})
+	if res.Status != StatusError || len(got) != 0 {
+		t.Fatal("a closed session: nobody is notified", res, got)
+	}
+	res = e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.handoff", Args: map[string]any{"session": "s-1", "message": "Войдите\nв Хабр"}})
+	if res.Status != StatusOK || len(got) != 1 || got[0].Agent != "dev" || got[0].Message != "Войдите в Хабр" || active != 0 {
+		t.Fatal(res, got, active)
+	}
+	reqs := 0
+	for _, r := range e.br.reqs {
+		if r.Action == "handoff" {
+			reqs++
+		}
+	}
+	if reqs != 3 { // проверка закрытого сеанса, проверка и ожидание
+		t.Fatal(reqs)
 	}
 }

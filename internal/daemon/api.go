@@ -141,9 +141,9 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	_ = enc.Encode(v)
 }
 
-// WriteError — ошибка API: {"error": {"code", "message"}}.
+// WriteError — ошибка API в едином конверте: {"status": "error", "error": {"code", "message"}}.
 func WriteError(w http.ResponseWriter, status int, code, msg string) {
-	WriteJSON(w, status, map[string]APIError{"error": {Code: code, Message: msg}})
+	WriteJSON(w, status, map[string]any{"status": "error", "error": APIError{Code: code, Message: msg}})
 }
 
 func readJSON(r *http.Request, v any) error {
