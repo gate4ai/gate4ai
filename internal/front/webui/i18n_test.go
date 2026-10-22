@@ -63,6 +63,11 @@ func i18nKeys(t *testing.T) []string {
 			add(strconv.Quote(v))
 		}
 	}
+	for _, g := range groupWarns {
+		for _, v := range g {
+			add(strconv.Quote(v))
+		}
+	}
 	for _, g := range groupTitles {
 		for _, v := range g {
 			add(strconv.Quote(v))

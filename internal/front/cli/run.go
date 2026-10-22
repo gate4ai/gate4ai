@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
+	"github.com/gate4ai/gate4ai/internal/front/skill"
 	"github.com/gate4ai/gate4ai/internal/sandbox"
 )
 
@@ -177,7 +179,7 @@ func (e *Env) run(ctx context.Context, args []string) int {
 }
 
 func (e *Env) doctor(ctx context.Context) int {
-	checks := sandbox.Doctor(sandbox.RealDoctorEnv(func() error {
+	env := sandbox.RealDoctorEnv(func() error {
 		if _, err := e.health(ctx); err != nil {
 			p := Explain(err, false)
 			if p.Detail != "" {
@@ -186,7 +188,14 @@ func (e *Env) doctor(ctx context.Context) int {
 			return errors.New(p.Message)
 		}
 		return nil
-	}))
+	})
+	clients := agentsetup.Default()
+	env.ClaudeSettings, env.SkillPath = clients.ClaudeSettingsPath(), clients.SkillPath()
+	env.Skill = func() (string, error) {
+		tools, err := e.Tools(ctx, "")
+		return skill.Generate(tools), err
+	}
+	checks := sandbox.Doctor(env)
 	e.printJSON(checks)
 	for _, c := range checks {
 		if c.Status == "fail" {

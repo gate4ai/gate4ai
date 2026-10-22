@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -247,12 +248,70 @@ func (e Env) Connect(id, bin, token, skillMD string) (Result, error) {
 		return res, err
 	}
 	if c.Skill && skillMD != "" {
-		sp := filepath.Join(e.skillDir(), "SKILL.md")
+		sp := e.SkillPath()
 		if err := writePrivate(sp, []byte(skillMD)); err == nil {
 			res.Notes = append(res.Notes, "skill: "+sp)
 		}
 	}
+	if id == "claude-code" {
+		// Команды gate4ai из Bash — с токеном агента (не правами владельца), и
+		// решает политика gate4ai: Claude Code их не переспрашивает.
+		sp := e.ClaudeSettingsPath()
+		if _, err := rewrite(sp, func(old []byte) ([]byte, error) { return claudeSettings(old, token) }); err != nil {
+			res.Notes = append(res.Notes, "settings: "+sp+": "+err.Error())
+		} else {
+			res.Notes = append(res.Notes, "settings: "+sp+" (GATE4AI_TOKEN for Bash, permission "+BashRule+")")
+		}
+	}
 	return res, nil
+}
+
+// BashRule — правило Claude Code: команды gate4ai без вопроса Claude Code
+// (их проверяет политика gate4ai, второй вопрос о том же не нужен).
+const BashRule = "Bash(gate4ai *)"
+
+// ClaudeSettingsPath — пользовательские настройки Claude Code.
+func (e Env) ClaudeSettingsPath() string {
+	if d := e.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
+		return filepath.Join(d, "settings.json")
+	}
+	return filepath.Join(e.Home, ".claude", "settings.json")
+}
+
+// claudeSettings — настройки Claude Code с токеном агента в env (его получают
+// и команды Bash) и правилом BashRule в permissions.allow; token "" — убрать
+// и то и другое.
+func claudeSettings(old []byte, token string) ([]byte, error) {
+	m := map[string]any{}
+	if len(bytes.TrimSpace(old)) > 0 {
+		if err := decodeJSON(old, &m); err != nil {
+			return nil, fmt.Errorf("not valid JSON (%v): add GATE4AI_TOKEN to env and %q to permissions.allow by hand", err, BashRule)
+		}
+	}
+	env, _ := m["env"].(map[string]any)
+	perms, _ := m["permissions"].(map[string]any)
+	if token == "" {
+		delete(env, "GATE4AI_TOKEN")
+		if perms != nil {
+			allow, _ := perms["allow"].([]any)
+			perms["allow"] = slices.DeleteFunc(allow, func(x any) bool { return x == BashRule })
+		}
+		return marshal(m), nil
+	}
+	if env == nil {
+		env = map[string]any{}
+		m["env"] = env
+	}
+	env["GATE4AI_TOKEN"] = token
+	if perms == nil {
+		perms = map[string]any{}
+		m["permissions"] = perms
+	}
+	allow, _ := perms["allow"].([]any)
+	if !slices.Contains(allow, any(BashRule)) {
+		perms["allow"] = append(allow, BashRule)
+	}
+	return marshal(m), nil
 }
 
 // Disconnect убирает сервер gate4ai из конфигурации клиента.
@@ -285,6 +344,11 @@ func (e Env) Disconnect(id string) (Result, error) {
 	}
 	if c.Skill {
 		_ = os.RemoveAll(e.skillDir())
+	}
+	if id == "claude-code" {
+		if sp := e.ClaudeSettingsPath(); fileExists(sp) {
+			_, _ = rewrite(sp, func(old []byte) ([]byte, error) { return claudeSettings(old, "") })
+		}
 	}
 	return res, nil
 }
@@ -321,6 +385,11 @@ func rewrite(p string, f func(old []byte) ([]byte, error)) (string, error) {
 		return bak, writePrivate(p, out)
 	}
 }
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// SkillPath — SKILL.md gate4ai для Claude Code.
+func (e Env) SkillPath() string { return filepath.Join(e.skillDir(), "SKILL.md") }
 
 // skillDir — каталог skill gate4ai для Claude Code.
 func (e Env) skillDir() string {

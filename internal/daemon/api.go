@@ -580,7 +580,7 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 		agent := p.Agent
 		if p.IsOwner() {
 			if req.Agent == "" {
-				WriteError(w, 400, "agent_required", "owner calls must name the agent whose profile applies (--as <agent>)")
+				WriteError(w, 400, "agent_required", "this call has the owner's rights, not an agent's: an agent calls with its own token (the owner gives it: gate4ai agents token <agent> → GATE4AI_TOKEN); the owner names the agent whose profile applies: --as <agent>")
 				return
 			}
 			agent = req.Agent

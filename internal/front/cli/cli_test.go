@@ -128,6 +128,26 @@ func TestCLIFlow(t *testing.T) {
 	if code, out := h.run(t, tok, "vault", "set", "@site.password"); code == 0 || !strings.Contains(out, "env -u GATE4AI_TOKEN gate4ai vault set @site.password") {
 		t.Fatal("owner_only hint:", code, out)
 	}
+	if code, out := h.run(t, tok, "vault", "set", "@site.password"); code != ExitAuth {
+		t.Fatal("owner_only: exit 7", code, out)
+	}
+	// Владелец без --as: agent_required — код 7 и подсказка про токен агента.
+	if code, out := h.run(t, "", "mail", "send", "--to", "landlord@example.com", "--subject", "x"); code != ExitAuth ||
+		errOf(jsonOf(t, out))["code"] != "agent_required" || !strings.Contains(errOf(jsonOf(t, out))["hint"].(string), "gate4ai agents token") {
+		t.Fatal("agent_required:", code, out)
+	}
+	// Строковый аргумент из файла (--<name>_file) и из stdin (-).
+	f := filepath.Join(t.TempDir(), "subject.txt")
+	os.WriteFile(f, []byte("from file"), 0o600)
+	if code, out := h.run(t, tok, "mail", "send", "--to", "landlord@example.com", "--subject_file", f); code != ExitOK || !strings.Contains(out, `"subject": "from file"`) {
+		t.Fatal("--subject_file:", code, out)
+	}
+	if code, out := h.run(t, tok, "mail", "send", "--to", "landlord@example.com", "--subject_file", "-"); code != ExitOK || !strings.Contains(out, `"subject": "s3cret-value"`) {
+		t.Fatal("--subject_file -:", code, out)
+	}
+	if code, out := h.run(t, tok, "mail", "send", "--to", "landlord@example.com", "--subject_file", "/nonexistent"); code != ExitUsage || errOf(jsonOf(t, out))["code"] != "invalid_arguments" {
+		t.Fatal("missing file:", code, out)
+	}
 	// Каталог и skill.
 	code, out = h.run(t, tok, "tools", "--json")
 	if code != 0 || !strings.Contains(out, `"email.send"`) {
@@ -194,7 +214,7 @@ func TestCLIFlow(t *testing.T) {
 	}
 	// Журнал, show, export, verify.
 	code, out = h.run(t, "", "log")
-	if code != 0 || strings.Count(out, "\n") != 4 {
+	if code != 0 || strings.Count(out, "\n") != 6 {
 		t.Fatal(out)
 	}
 	hash := strings.Fields(out)[0]

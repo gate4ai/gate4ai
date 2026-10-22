@@ -109,6 +109,8 @@ var ru = map[string]string{
 	// Подтверждения
 	"Unanswered requests are denied after %s.": "Запросы без ответа отклоняются через %s.", "Get these requests on your phone →": "Получать эти запросы на телефоне →",
 	"Notifications →": "Уведомления →", "A code is needed": "Нужен код",
+	"“Allow” lets the agent widen its own rights — sites, rules, connectors — without asking you. Keep “Ask” unless you trust every change it makes.": "«Разрешать» позволит агенту расширять свои права — сайты, правила, коннекторы — не спрашивая вас. Оставьте «Спрашивать», если не доверяете каждой его правке.",
+	"%s: %s. %s": "%s: %s. %s",
 	"An agent is waiting for you in Chrome":                 "Агент ждёт вас в Chrome",
 	"<b>%s</b> handed the browser over to you %s and asks:": "<b>%s</b> передал вам браузер %s и просит:",
 	"Do it yourself in the gate4ai Chrome window: the agent continues when the page changes. Never give passwords to the agent in chat.": "Сделайте это сами в окне Chrome gate4ai: агент продолжит, когда страница сменится. Никогда не сообщайте агенту пароли в чате.",

@@ -154,6 +154,51 @@ func TestDoctor(t *testing.T) {
 	}
 }
 
+// TestDoctorAgentAccess — агент без своего токена (права владельца), настройки
+// Claude Code (токен, правило Bash) и устаревший SKILL.md.
+func TestDoctorAgentAccess(t *testing.T) {
+	files := map[string]string{}
+	base := DoctorEnv{Home: "/home/u", GOOS: "linux", LookPath: func(string) (string, error) { return "/usr/bin/claude", nil },
+		Readable: func(string) bool { return false }, Writable: func(string) bool { return false },
+		ReadFile: func(p string) ([]byte, error) {
+			if v, ok := files[p]; ok {
+				return []byte(v), nil
+			}
+			return nil, os.ErrNotExist
+		},
+		ClaudeSettings: "/home/u/.claude/settings.json", SkillPath: "/home/u/.claude/skills/gate4ai/SKILL.md",
+		Skill: func() (string, error) { return "new skill", nil }}
+	check := func(e DoctorEnv) map[string]Check {
+		got := map[string]Check{}
+		for _, c := range Doctor(e) {
+			got[c.ID] = c
+		}
+		return got
+	}
+	agent := base
+	agent.Environ = []string{"CLAUDECODE=1"}
+	files["/home/u/.claude/skills/gate4ai/SKILL.md"] = "old skill"
+	got := check(agent)
+	for _, id := range []string{"agent-token", "claude-code-token", "claude-code-permission", "skill"} {
+		if got[id].Status != "warn" || got[id].Fix == "" {
+			t.Errorf("%s: %+v", id, got[id])
+		}
+	}
+	if !strings.Contains(got["agent-token"].Detail, "approve its own requests") || !strings.Contains(got["claude-code-permission"].Fix, BashRule) {
+		t.Fatal(got)
+	}
+	agent.Environ = []string{"CLAUDECODE=1", "GATE4AI_TOKEN=g4a_x"}
+	files["/home/u/.claude/settings.json"] = `{"env": {"GATE4AI_TOKEN": "g4a_x"}, "permissions": {"allow": ["Bash(gate4ai *)"]}}`
+	files["/home/u/.claude/skills/gate4ai/SKILL.md"] = "new skill"
+	for id, c := range check(agent) {
+		if strings.HasPrefix(id, "claude-code") || id == "agent-token" || id == "skill" {
+			if c.Status != "ok" {
+				t.Errorf("%s: %+v", id, c)
+			}
+		}
+	}
+}
+
 type noop struct{}
 
 func (noop) Manifest() manifest.Manifest {

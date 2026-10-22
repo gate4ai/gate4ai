@@ -494,33 +494,17 @@ func (e *Env) actionHelp(t skill.Tool) {
 		if t.Schema.IsRequired(p.Name) {
 			req = " (required)"
 		}
-		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, limits(p.Schema))
+		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, bracket(skill.Limits(p.Schema)))
 	}
 	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n"+
 		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
 }
 
-// limits — допустимые значения аргумента для --help: варианты, длина, диапазон.
-func limits(s *manifest.Schema) string {
-	var out []string
-	if s.Type == manifest.TArray && s.Items != nil && len(s.Items.Enum) > 0 {
-		out = append(out, "of: "+strings.Join(s.Items.Enum, ", "))
-	}
-	if len(s.Enum) > 0 {
-		out = append(out, "one of: "+strings.Join(s.Enum, ", "))
-	}
-	if s.MaxLength != nil {
-		out = append(out, fmt.Sprintf("up to %d characters", *s.MaxLength))
-	}
-	if s.Minimum != nil && s.Maximum != nil {
-		out = append(out, fmt.Sprintf("%g..%g", *s.Minimum, *s.Maximum))
-	} else if s.Maximum != nil {
-		out = append(out, fmt.Sprintf("up to %g", *s.Maximum))
-	}
-	if len(out) == 0 {
+func bracket(s string) string {
+	if s == "" {
 		return ""
 	}
-	return " [" + strings.Join(out, "; ") + "]"
+	return " [" + s + "]"
 }
 
 // flagType — тип флага для --help.

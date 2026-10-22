@@ -164,6 +164,19 @@ func TestDaemonSockets(t *testing.T) {
 		t.Fatal(res)
 	}
 	id := res["id"].(string)
+	// Агент со своим токеном не одобряет свой же запрос — ни на сокете агентов, ни на сокете владельца.
+	for _, c := range []client{agent, agentOnOwnerSock} {
+		var e map[string]any
+		if code := c.do(t, "POST", "/v1/approvals/"+id+"/decide", map[string]any{"approve": true}, &e); code != 403 || e["status"] != "error" || errOf(e)["code"] != "owner_only" {
+			t.Fatal("agent approved its own request:", code, e)
+		}
+	}
+	// Владелец без --as: agent_required с понятным сообщением.
+	var ar map[string]any
+	if code := owner.do(t, "POST", "/v1/call", map[string]any{"action": "notes.append", "args": map[string]any{"text": "x"}}, &ar); code != 400 ||
+		errOf(ar)["code"] != "agent_required" || !strings.Contains(errOf(ar)["message"].(string), "gate4ai agents token") {
+		t.Fatal(code, ar)
+	}
 	var pend []map[string]any
 	owner.do(t, "GET", "/v1/approvals?status=pending", nil, &pend)
 	if len(pend) != 1 || !strings.Contains(pend[0]["preview"].(string), "hello") {

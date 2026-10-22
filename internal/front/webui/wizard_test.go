@@ -222,6 +222,12 @@ func TestAccessGroup(t *testing.T) {
 	}
 	if p := post("/access/group", url.Values{"profile": {"p"}, "connector": {"docs"}, "class": {"read"}, "effect": {"maybe"}}); !strings.Contains(p, "Неизвестное решение") {
 		t.Fatal("bad effect", p)
+	}	// Самонастройка: «Разрешать» для изменений gate4ai — с предупреждением.
+	if p := post("/access/group", url.Values{"profile": {"p"}, "connector": {"gate4ai"}, "class": {"write"}, "effect": {"allow"}, "back": {"/agents/bot"}}); !strings.Contains(p, "расширять свои права") {
+		t.Fatal("change_policy allow warning", p)
+	}
+	if p := get("/connectors/gate4ai?profile=p"); !strings.Contains(p, "расширять свои права") {
+		t.Fatal("change_policy warning", p)
 	}
 }
 
