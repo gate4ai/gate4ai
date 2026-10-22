@@ -62,8 +62,11 @@ type callSession struct {
 type agentSession struct {
 	callSession
 	id        string
+	agent     string // агент-владелец (ExecRequest.Agent): чужой агент сеанс не видит
 	steps     []map[string]any
 	truncated bool
+	closed    bool               // страница освобождена (под mu)
+	cancel    context.CancelFunc // отмена идущего действия (под Browser.mu)
 }
 
 // New — коннектор с воркером по умолчанию.
@@ -217,12 +220,14 @@ func (b *Browser) agent(ctx context.Context, r abi.ExecRequest) (abi.ExecResult,
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
+	page.URL = cleanURL(page.URL) // адрес после редиректов: в нём бывают токены
 	switch r.Action {
 	case "read":
 		p, err := s.Observe(ctx, 0)
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
+		p.URL = cleanURL(p.URL)
 		res := map[string]any{"url": p.URL, "title": p.Title}
 		if p.Truncated {
 			res["truncated"] = true
@@ -421,7 +426,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		return abi.ExecResult{Structured: map[string]any{"data": data}, Source: "web:" + cs.url}, nil
+		return abi.ExecResult{Structured: map[string]any{"data": data}, Source: "web:" + cleanURL(cs.url)}, nil
 	case "page_screenshot":
 		png, err := cs.s.ScreenshotElement(ctx, str(r.Args, "selector"))
 		if err != nil {
@@ -443,7 +448,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			return abi.ExecResult{}, err
 		}
 		cs.url = res.URL
-		return abi.ExecResult{Structured: map[string]any{"url": res.URL, "status": res.Status, "origin": res.Origin}, ResultRef: res.Status}, nil
+		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(res.URL), "status": res.Status, "origin": res.Origin}, ResultRef: res.Status}, nil
 	case "fill_secret":
 		bind, f, err := secretField(r)
 		if err != nil {
@@ -458,7 +463,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			return abi.ExecResult{}, err
 		}
 		cs.url = res.URL
-		return abi.ExecResult{Structured: map[string]any{"url": res.URL, "origin": res.Origin}, ResultRef: res.Origin}, nil
+		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(res.URL), "origin": res.Origin}, ResultRef: res.Origin}, nil
 	}
 	return abi.ExecResult{}, fmt.Errorf("unknown action %s", r.Action)
 }
@@ -476,7 +481,7 @@ func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 		}
 	}
 	if all, _ := r.Args["all"].(bool); r.Action == "close" && all {
-		return b.closeAll(), nil
+		return b.closeAll(r.Agent), nil
 	}
 	var as *agentSession
 	if id == "" {
@@ -490,18 +495,30 @@ func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 	} else {
 		b.mu.Lock()
 		as = b.agents[id]
+		if as != nil && as.agent != r.Agent {
+			as = nil // сеанс другого агента: как неизвестный
+		}
 		if as != nil {
 			as.timer.Reset(AgentIdle)
 		}
 		b.mu.Unlock()
 		if as == nil {
-			return abi.ExecResult{}, abi.Errorf(abi.CodeNotFound, "browser session %s is closed or unknown; start a new one with browser.open", id)
+			return abi.ExecResult{}, closedErr(id)
 		}
 	}
 	as.mu.Lock()
 	defer as.mu.Unlock()
+	if as.closed {
+		// close --all или простой закрыли сеанс, пока действие ждало страницу.
+		return abi.ExecResult{}, closedErr(as.id)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	b.mu.Lock()
+	as.cancel = cancel
+	b.mu.Unlock()
 	if r.Action == "close" {
-		b.closeAgent(as.id)
+		b.closeAgent(as)
 		res := map[string]any{"session": as.id, "steps": as.steps}
 		if as.truncated {
 			res["truncated"] = true
@@ -512,7 +529,7 @@ func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 	as.record(r, res, err)
 	if err != nil {
 		if id == "" {
-			b.closeAgent(as.id) // сеанс не начался
+			b.closeAgent(as) // сеанс не начался
 		}
 		return abi.ExecResult{}, err
 	}
@@ -535,12 +552,12 @@ func (b *Browser) newAgentSession(ctx context.Context, r abi.ExecRequest) (*agen
 	}
 	var raw [8]byte
 	_, _ = rand.Read(raw[:])
-	as := &agentSession{callSession: callSession{s: s, sites: sites}, id: "s-" + hex.EncodeToString(raw[:])}
+	as := &agentSession{callSession: callSession{s: s, sites: sites}, id: "s-" + hex.EncodeToString(raw[:]), agent: r.Agent}
 	id := as.id
 	as.timer = time.AfterFunc(AgentIdle, func() {
 		as.mu.Lock()
 		defer as.mu.Unlock()
-		b.closeAgent(id)
+		b.closeAgent(as)
 	})
 	b.mu.Lock()
 	if b.agents == nil {
@@ -551,31 +568,48 @@ func (b *Browser) newAgentSession(ctx context.Context, r abi.ExecRequest) (*agen
 	return as, nil
 }
 
-// closeAll закрывает все сеансы агентов (потерянный id, зависший сеанс): не
-// ждёт их действий — они кончатся сами по сроку вызова.
-func (b *Browser) closeAll() abi.ExecResult {
-	b.mu.Lock()
-	ids := make([]string, 0, len(b.agents))
-	for id := range b.agents {
-		ids = append(ids, id)
-	}
-	b.mu.Unlock()
-	for _, id := range ids {
-		b.closeAgent(id)
-	}
-	return abi.ExecResult{Structured: map[string]any{"closed": len(ids)}}
+// closedErr — сеанса нет: закрыт, неизвестен или принадлежит другому агенту
+// (ответ один и тот же — чужие id не подтверждаются).
+func closedErr(id string) error {
+	return abi.Errorf(abi.CodeNotFound, "browser session %s is closed or unknown; start a new one with browser.open", id)
 }
 
-// closeAgent освобождает страницу сеанса агента (close, простой, неудачный
-// open); вызывающий держит as.mu.
-func (b *Browser) closeAgent(id string) {
+// closeAll закрывает сеансы агента agent (потерянный id, зависший сеанс):
+// идущее действие сеанса отменяется, страница освобождается после его
+// завершения — следующий сеанс не получит её посреди чужого действия.
+func (b *Browser) closeAll(agent string) abi.ExecResult {
 	b.mu.Lock()
-	as, ok := b.agents[id]
-	delete(b.agents, id)
+	var mine []*agentSession
+	for _, as := range b.agents {
+		if as.agent != agent {
+			continue
+		}
+		mine = append(mine, as)
+		if as.cancel != nil {
+			as.cancel()
+		}
+	}
 	b.mu.Unlock()
-	if !ok {
+	for _, as := range mine {
+		as.mu.Lock()
+		b.closeAgent(as)
+		as.mu.Unlock()
+	}
+	return abi.ExecResult{Structured: map[string]any{"closed": len(mine)}}
+}
+
+// closeAgent освобождает страницу сеанса агента (close, close --all, простой,
+// неудачный open); вызывающий держит as.mu — действий сеанса в этот момент нет.
+func (b *Browser) closeAgent(as *agentSession) {
+	b.mu.Lock()
+	if b.agents[as.id] == as {
+		delete(b.agents, as.id)
+	}
+	b.mu.Unlock()
+	if as.closed {
 		return
 	}
+	as.closed = true
 	as.timer.Stop()
 	as.s.Release()
 }
@@ -629,12 +663,21 @@ func account(r abi.ExecRequest) (*abi.Account, error) {
 	return acc, nil
 }
 
-// fieldOf — поле формы учётки со значением: константа или секрет из Revealed;
-// sel — селектор вызывающего (коннектор входа), иначе селектор из учётки.
+// fieldOf — поле формы учётки со значением: константа или секрет из Revealed.
+// Правило поля задаёт владелец: sel вызывающего заменяет селектор учётки,
+// только если вызывающий — коннектор входа этой учётки (via); если владелец
+// селектор не задал — вызывающий выбирает поле, но только input[type=password].
 func fieldOf(r abi.ExecRequest, f abi.AccountField, sel string) (worker.LoginField, error) {
 	lf := worker.LoginField{Selector: f.Selector, Value: f.Value, AnyType: f.Type == "text"}
-	if sel != "" {
-		lf.Selector = sel
+	if sel != "" && sel != f.Selector {
+		switch {
+		case viaCaller(r):
+			lf.Selector = sel
+		case f.Selector == "":
+			lf.Selector, lf.AnyType = sel, false
+		default:
+			return lf, abi.Errorf(abi.CodeBadRequest, "field %s of account %s: the owner set its selector (%s); omit selector", f.Name, r.Login.Alias, f.Selector)
+		}
 	}
 	if f.Secret != "" {
 		v, ok := r.Revealed[f.Secret]
@@ -649,6 +692,22 @@ func fieldOf(r abi.ExecRequest, f abi.AccountField, sel string) (worker.LoginFie
 	return lf, nil
 }
 
+// codeField — поле кода, который вводит человек (без value и secret).
+func codeField(f abi.AccountField) bool { return f.Value == "" && f.Secret == "" }
+
+// viaCaller — действие вызвал коннектор входа учётки r.Login (её via):
+// напрямую (Caller) или в сеансе агента (служебный аргумент viaArg).
+func viaCaller(r abi.ExecRequest) bool {
+	if r.Login == nil || r.Login.Via == "" {
+		return false
+	}
+	conn := str(r.Args, viaArg)
+	if r.Caller != nil {
+		conn = r.Caller.Connector
+	}
+	return conn != "" && strings.HasPrefix(r.Login.Via, conn+".") // via — "<коннектор>.<действие>"
+}
+
 // loginForm — простой вход по форме учётки.
 func loginForm(r abi.ExecRequest) (worker.LoginForm, error) {
 	acc, err := account(r)
@@ -661,6 +720,9 @@ func loginForm(r abi.ExecRequest) (worker.LoginForm, error) {
 		form.SubmitSelector, form.SubmitPress = acc.Submit.Selector, acc.Submit.Press
 	}
 	for _, f := range acc.Fields {
+		if codeField(f) {
+			continue // код вводит человек через fill_secret source: human
+		}
 		lf, err := fieldOf(r, f, "")
 		if err != nil {
 			return form, err
@@ -687,11 +749,28 @@ func secretField(r abi.ExecRequest) ([]string, worker.LoginField, error) {
 		if v == "" {
 			return nil, worker.LoginField{}, abi.Errorf(abi.CodeSecretDenied, "no answer from the user")
 		}
-		if sel == "" {
-			return nil, worker.LoginField{}, abi.Errorf(abi.CodeBadRequest, "fill_secret with source human needs selector")
+		// Поле для ответа человека задаёт владелец (поле кода учётки по имени)
+		// или коннектор входа учётки (via); иначе — только input[type=password]:
+		// агент не выбирает, в какое текстовое поле уйдёт код.
+		if viaCaller(r) {
+			if sel == "" {
+				return nil, worker.LoginField{}, abi.Errorf(abi.CodeBadRequest, "fill_secret with source human needs selector")
+			}
+			return acc.Bind, worker.LoginField{Selector: sel, Value: v, Secret: true, AnyType: true}, nil
 		}
-		// Код, который ввёл человек, — в любое текстовое поле (поле кода — не password).
-		return acc.Bind, worker.LoginField{Selector: sel, Value: v, Secret: true, AnyType: true}, nil
+		for _, f := range acc.Fields {
+			if name == "" || f.Name != name || !codeField(f) || f.Selector == "" {
+				continue
+			}
+			if sel != "" && sel != f.Selector {
+				return nil, worker.LoginField{}, abi.Errorf(abi.CodeBadRequest, "code field %s of account %s: the owner set its selector (%s); omit selector", name, acc.Alias, f.Selector)
+			}
+			return acc.Bind, worker.LoginField{Selector: f.Selector, Value: v, Secret: true, AnyType: true}, nil
+		}
+		if sel == "" {
+			return nil, worker.LoginField{}, abi.Errorf(abi.CodeBadRequest, "fill_secret with source human: set field (a code field of account %s) or selector of a password field", acc.Alias)
+		}
+		return acc.Bind, worker.LoginField{Selector: sel, Value: v, Secret: true}, nil
 	}
 	for _, f := range acc.Fields {
 		if name == "" || !(f.Name == name || f.Secret == name || f.Secret == "@"+name || f.Secret == acc.Alias+"."+name) {

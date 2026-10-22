@@ -59,13 +59,13 @@ func TestNetworkAndSecrets(t *testing.T) {
 			t.Errorf("%v allowed: %v", x, err)
 		}
 	}
-	if err := c.Secret("@api", "api.example.com"); err != nil {
+	if err := c.Secret("@api", "https", "api.example.com", 443); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Secret("@api", "evil.com"); !isDenied(err) {
+	if err := c.Secret("@api", "https", "evil.com", 443); !isDenied(err) {
 		t.Fatal("secret for unbound host")
 	}
-	if err := c.Secret("@other", "api.example.com"); !isDenied(err) {
+	if err := c.Secret("@other", "https", "api.example.com", 443); !isDenied(err) {
 		t.Fatal("undeclared secret")
 	}
 	if _, err := c.Service("browser", "open"); !isDenied(err) {
@@ -76,6 +76,44 @@ func TestNetworkAndSecrets(t *testing.T) {
 	}
 	if _, err := c.Path("/tmp/x"); !isDenied(err) {
 		t.Fatal("files not declared")
+	}
+}
+
+// Алиас объявлен несколько раз (пароль IMAP и для SMTP): подходит любая
+// привязка; wildcard в привязке секрета не действует; привязка-origin
+// проверяет схему и порт.
+func TestSecretBinds(t *testing.T) {
+	c := checker(t, `capabilities:
+  secrets:
+    - { alias: "@mail.pw", bind: [imap.example.com] }
+    - { alias: "@mail.pw", bind: [smtp.example.com] }
+    - { alias: "@wild", bind: ["*.example.com"] }
+    - { alias: "@origin", bind: ["https://api.example.com:8443", "imaps://imap.example.com"] }
+`, nil, "")
+	for _, h := range []string{"imap.example.com", "smtp.example.com"} {
+		if err := c.Secret("@mail.pw", "tls", h, 465); err != nil {
+			t.Errorf("%s: %v", h, err)
+		}
+	}
+	if err := c.Secret("@mail.pw", "tls", "evil.example.com", 465); !isDenied(err) {
+		t.Fatal("unbound host")
+	}
+	if err := c.Secret("@wild", "https", "a.example.com", 443); !isDenied(err) {
+		t.Fatal("wildcard bind matched")
+	}
+	if err := c.Secret("@origin", "https", "api.example.com", 8443); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Secret("@origin", "tls", "imap.example.com", 993); err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []struct {
+		s, h string
+		p    int
+	}{{"https", "api.example.com", 443}, {"http", "api.example.com", 8443}, {"tls", "api.example.com", 8443}, {"tls", "imap.example.com", 143}, {"https", "imap.example.com", 993}} {
+		if err := c.Secret("@origin", x.s, x.h, x.p); !isDenied(err) {
+			t.Errorf("%v allowed", x)
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
@@ -207,6 +208,7 @@ func (p *Pipeline) prepareBrowser(ctx context.Context, agent string, act manifes
 	cfg := p.cfg()
 	who := p.accessorOf(ctx, agent)
 	req.Accounts = p.accountsFor(cfg, who)
+	req.Agent = agent // сеансы браузера привязаны к агенту
 	if act.Name != ActionLogin && act.Name != ActionFillSecret {
 		return nil, nil
 	}
@@ -295,9 +297,12 @@ func (p *Pipeline) askHuman(ctx context.Context, who accessor, alias string, cr 
 	if p.Ask == nil {
 		return "", abi.Errorf(abi.CodeNotSupported, "no channel to ask the user")
 	}
+	// Вопрос — владельца (prompts учётки) или коннектора входа; текст от
+	// агента не показывается: агент мог бы выманить у человека пароль под видом
+	// кода. Кто спрашивает и для какого сайта, показывает канал по Question.
 	text := cr.Prompts[field]
-	if text == "" {
-		text, _ = args["prompt"].(string)
+	if text == "" && who.connector != "" {
+		text = promptText(args["prompt"])
 	}
 	if text == "" {
 		text = "a one-time code"
@@ -309,6 +314,20 @@ func (p *Pipeline) askHuman(ctx context.Context, who accessor, alias string, cr 
 		return "", denied("no answer from the user: %v", err)
 	}
 	return v, nil
+}
+
+// maxPromptLen — предел текста вопроса от коннектора.
+const maxPromptLen = 200
+
+// promptText — вопрос коннектора одной строкой без управляющих символов, не
+// длиннее maxPromptLen (не может нарисовать в уведомлении чужой текст).
+func promptText(v any) string {
+	s, _ := v.(string)
+	s = strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }), " ")
+	if r := []rune(s); len(r) > maxPromptLen {
+		s = string(r[:maxPromptLen]) + "…"
+	}
+	return s
 }
 
 // loginVia — browser.login учётки со сложным входом: daemon вызывает действие
@@ -333,7 +352,7 @@ func (p *Pipeline) loginVia(ctx context.Context, agent string, info callInfo, pr
 	}
 	dec := p.Engine().Decide(policy.Request{Agent: agent, Action: full, Class: act.Class, Args: args, Now: p.Now(), Nested: true}, p.State.Counters())
 	if dec.Effect == config.EffectDeny {
-		res := p.deny(agent, act, full, args, dec, nil)
+		res := p.denyAt(agent, act, full, args, dec, nil, info.ID)
 		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "%s denied by policy: %s", full, res.Reason)
 	}
 	// Коннектор входа работает через browser: в цепочке вызовов его нет.

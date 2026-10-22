@@ -18,14 +18,14 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: sigstore/cosign-installer@v3
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           version: "~> v2"
           args: release --clean
@@ -39,11 +39,11 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
       - run: |
           set -euo pipefail
           mkdir out
@@ -68,8 +68,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: pack
@@ -111,7 +111,7 @@ jobs:
       group: deploy-relay
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Download
         if: vars.DEPLOY_HOST != ''
         run: |
@@ -129,9 +129,14 @@ jobs:
           install -d -m 700 ~/.ssh
           printf '%s\n' "$KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          ssh_opts="-i $HOME/.ssh/id_deploy -o StrictHostKeyChecking=yes -o BatchMode=yes"
-          scp $ssh_opts dist/gate4ai-relay "root@$HOST:/tmp/gate4ai-relay.new"
-          ssh $ssh_opts "root@$HOST" 'sh -s' < relay/deploy/remote-install.sh
+          ssh_opts=(-i "$HOME/.ssh/id_deploy" -o StrictHostKeyChecking=yes -o BatchMode=yes)
+          # Каталог для загрузки — mktemp -d на сервере (0700, root), а не предсказуемый путь
+          # в /tmp: другой локальный пользователь не подложит туда файл или симлинк.
+          dir=$(ssh "${ssh_opts[@]}" "root@$HOST" 'mktemp -d')
+          case $dir in /tmp/* | /var/tmp/*) ;; *) echo "mktemp -d on $HOST gave '$dir'" >&2; exit 1 ;; esac
+          scp "${ssh_opts[@]}" dist/gate4ai-relay "root@$HOST:$dir/gate4ai-relay.new"
+          # shellcheck disable=SC2029 # $dir раскрывается здесь: это путь на сервере
+          ssh "${ssh_opts[@]}" "root@$HOST" "sh -s -- '$dir/gate4ai-relay.new'" < relay/deploy/remote-install.sh
       - name: Public check
         if: vars.DEPLOY_HOST != ''
         run: curl -fsS --max-time 10 https://relay.gate4.ai/api/health

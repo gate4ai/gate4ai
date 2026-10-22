@@ -122,7 +122,7 @@ func (x *Executor) SecretOnPage(ctx context.Context) bool {
 	if err := x.Engine.Eval(ctx, "window.__gate4aiSecret === "+itoaStr(x.secret), &same); err != nil || same {
 		return true
 	}
-	x.secret = ""
+	x.secret, x.secretSel = "", nil // новый документ: введённого секрета на нём нет
 	return false
 }
 
@@ -248,7 +248,9 @@ func (x *Executor) FillSecret(ctx context.Context, bind []string, f LoginField) 
 	if err := x.checkFields(ctx, []LoginField{f}); err != nil {
 		return LoginResult{}, err
 	}
-	if f.Secret {
+	// Документ уже помечен (второе поле секрета): повторная метка не встанет
+	// (свойство не изменить) и включила бы режим до перехода через Open.
+	if f.Secret && !x.SecretOnPage(ctx) {
 		if err := x.mark(ctx); err != nil {
 			return LoginResult{}, err
 		}
@@ -292,7 +294,9 @@ func (x *Executor) Login(ctx context.Context, form LoginForm) (LoginResult, erro
 		return LoginResult{}, err
 	}
 	for _, f := range form.Fields {
-		if f.Secret && x.secret == "" && !x.sticky {
+		// Метка прежнего документа (неверный пароль — новая страница входа) не
+		// в счёт: SecretOnPage сверяет её с текущим документом.
+		if f.Secret && !x.SecretOnPage(ctx) {
 			if err := x.mark(ctx); err != nil {
 				return LoginResult{}, err
 			}

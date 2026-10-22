@@ -8,6 +8,7 @@ package approval
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -42,6 +43,9 @@ func Summary(a *state.Approval) string {
 			}
 		}
 	}
+	// Одноразовые коды и токены в адресах (?code=, #access_token=) не уходят
+	// в Telegram и журнал уведомлений ОС.
+	key = pipeline.MaskURLText(key)
 	if amt, ok := a.Args["amount"].(float64); ok && amt != 0 {
 		key = strings.TrimSpace(fmt.Sprintf("%s %.2f", key, amt))
 	}
@@ -52,11 +56,18 @@ func Summary(a *state.Approval) string {
 	return s + " " + audit.Short(a.PreviewHash)
 }
 
-// Runner запускает команду (подменяется в тестах).
-type Runner func(name string, args ...string) error
+// Runner запускает команду с дополнительными переменными окружения env
+// ("K=V"; подменяется в тестах).
+type Runner func(env []string, name string, args ...string) error
 
 // ExecRunner — реальный запуск.
-func ExecRunner(name string, args ...string) error { return exec.Command(name, args...).Run() }
+func ExecRunner(env []string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	return cmd.Run()
+}
 
 // Desktop — уведомления на компьютере (notify-send / osascript / PowerShell).
 // Подтверждение — в трее, Web UI или CLI; сам тост не принимает решений.
@@ -70,20 +81,34 @@ type Desktop struct {
 // NewDesktop — канал уведомлений для текущей ОС.
 func NewDesktop() *Desktop { return &Desktop{Run: ExecRunner, GOOS: runtime.GOOS} }
 
+// Скрипты уведомлений — константы: заголовок и текст (в них аргументы агента)
+// никогда не входят в текст скрипта, а передаются данными — переменными
+// окружения (PowerShell) или аргументами (osascript, notify-send). Кавычки,
+// в том числе «умные» ’ ‘ ‛ ‚, которые PowerShell тоже считает кавычками,
+// ничего не закрывают.
+const (
+	psToast = `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;` +
+		`$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);` +
+		`$x = $t.GetElementsByTagName('text'); $x.Item(0).AppendChild($t.CreateTextNode($env:G4A_TITLE)) > $null; $x.Item(1).AppendChild($t.CreateTextNode($env:G4A_BODY)) > $null;` +
+		`[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('gate4.ai').Show([Windows.UI.Notifications.ToastNotification]::new($t))`
+	osaRun  = `on run argv`
+	osaShow = `display notification (item 2 of argv) with title (item 1 of argv)`
+	osaEnd  = `end run`
+)
+
 func (d *Desktop) show(title, body string) error {
+	// NUL в аргументе или переменной окружения не даёт запустить процесс:
+	// агент не должен так гасить уведомление.
+	title, body = strings.ReplaceAll(title, "\x00", ""), strings.ReplaceAll(body, "\x00", "")
 	var err error
 	switch d.GOOS {
 	case "darwin":
-		script := fmt.Sprintf("display notification %q with title %q", body, title)
-		err = d.Run("osascript", "-e", script)
+		err = d.Run(nil, "osascript", "-e", osaRun, "-e", osaShow, "-e", osaEnd, title, body)
 	case "windows":
-		ps := `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;` +
-			`$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);` +
-			`$x = $t.GetElementsByTagName('text'); $x.Item(0).AppendChild($t.CreateTextNode($env:G4A_TITLE)) > $null; $x.Item(1).AppendChild($t.CreateTextNode($env:G4A_BODY)) > $null;` +
-			`[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('gate4.ai').Show([Windows.UI.Notifications.ToastNotification]::new($t))`
-		err = d.Run("powershell", "-NoProfile", "-Command", "$env:G4A_TITLE='"+psQuote(title)+"'; $env:G4A_BODY='"+psQuote(body)+"'; "+ps)
+		err = d.Run([]string{"G4A_TITLE=" + oneLine(title), "G4A_BODY=" + body}, "powershell", "-NoProfile", "-NonInteractive", "-Command", psToast)
 	default:
-		err = d.Run("notify-send", "--app-name=gate4.ai", "--urgency=critical", title, body)
+		// "--": текст, начинающийся с "-", не становится флагом.
+		err = d.Run(nil, "notify-send", "--app-name=gate4.ai", "--urgency=critical", "--", title, body)
 	}
 	if d.Result != nil {
 		d.Result(err)
@@ -91,12 +116,13 @@ func (d *Desktop) show(title, body string) error {
 	return err
 }
 
+// oneLine — заголовок в одну строку.
+func oneLine(s string) string { return strings.NewReplacer("\r", " ", "\n", " ").Replace(s) }
+
 // Test показывает пробное уведомление.
 func (d *Desktop) Test() error {
 	return d.show("gate4.ai: проверка уведомлений", "Так будут приходить запросы подтверждения.")
 }
-
-func psQuote(s string) string { return strings.ReplaceAll(s, "'", "''") }
 
 // Notify — новый запрос подтверждения.
 func (d *Desktop) Notify(a *state.Approval) {

@@ -5,6 +5,8 @@ package relay
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -35,19 +38,36 @@ type Server struct {
 	// TCP-адрес бэкенда. Трафик пробрасывается без расшифровки, TLS (и ACME
 	// TLS-ALPN-01) завершает бэкенд.
 	Routes map[string]string
+	// proxyRoutes — маршруты, бэкенду которых relay первым отправляет заголовок
+	// PROXY protocol v2 с настоящим адресом клиента (--route host=addr,proxy).
+	proxyRoutes map[string]bool
 
 	// Metrics — метрики Prometheus (страница — Metrics.Handler).
 	Metrics *Metrics
 
+	// Пределы (0 — без предела). Меняются до Serve.
+	MaxConns      int           // одновременных TCP-соединений всего
+	MaxConnsPerIP int           // одновременных TCP-соединений с одного адреса (IPv6 — /64)
+	MaxWaiters    int           // соединений, ждущих туннель одного офлайн-устройства
+	PipeIdle      time.Duration // passthrough без данных в обе стороны дольше — закрывается
+	// RegPerIPDay и RegPerDay — регистраций устройств в сутки с одного адреса и всего.
+	RegPerIPDay, RegPerDay int
+
 	mu       sync.Mutex
 	sessions map[string]*yamux.Session
 	waiters  map[string][]chan struct{}
+
+	limOnce             sync.Once
+	conns               *connLimiter
+	regIP, regAll, wits *rateLimiter
 }
 
 // NewServer создаёт relay.
 func NewServer(domain string, tlsCfg *tls.Config, st *Store) *Server {
 	s := &Server{Domain: strings.ToLower(domain), TLS: tlsCfg, Store: st, Log: slog.Default(), HoldFor: 30 * time.Second,
-		AllowReg: true, Routes: map[string]string{}, sessions: map[string]*yamux.Session{}, waiters: map[string][]chan struct{}{}}
+		AllowReg: true, Routes: map[string]string{}, proxyRoutes: map[string]bool{},
+		MaxConns: 20000, MaxConnsPerIP: 256, MaxWaiters: 32, PipeIdle: 10 * time.Minute, RegPerIPDay: 5, RegPerDay: 500,
+		sessions: map[string]*yamux.Session{}, waiters: map[string][]chan struct{}{}}
 	s.Metrics = newMetrics(s)
 	return s
 }
@@ -56,9 +76,11 @@ func NewServer(domain string, tlsCfg *tls.Config, st *Store) *Server {
 func (s *Server) DeviceHost(id string) string { return id + "." + s.Domain }
 
 // AddRoute пробрасывает соединения с SNI host на TCP-адрес addr. Имена relay
-// и его устройств занять нельзя.
+// и его устройств занять нельзя. addr с суффиксом ",proxy" — бэкенд получает
+// заголовок PROXY protocol v2 (настоящий адрес клиента вместо 127.0.0.1).
 func (s *Server) AddRoute(host, addr string) error {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	addr, proxy := strings.CutSuffix(addr, ",proxy")
 	if host == "" || addr == "" {
 		return errors.New("route: need host=addr")
 	}
@@ -69,12 +91,39 @@ func (s *Server) AddRoute(host, addr string) error {
 		return fmt.Errorf("route %s: %w", host, err)
 	}
 	s.Routes[host] = addr
+	if proxy {
+		if s.proxyRoutes == nil {
+			s.proxyRoutes = map[string]bool{}
+		}
+		s.proxyRoutes[host] = true
+	}
 	return nil
 }
 
+// limits создаёт лимитеры по значениям полей (один раз, при первом использовании).
+func (s *Server) limits() {
+	s.limOnce.Do(func() {
+		s.conns = &connLimiter{max: s.MaxConns, maxIP: s.MaxConnsPerIP}
+		if s.RegPerIPDay > 0 {
+			s.regIP = newRateLimiter(24*time.Hour/time.Duration(s.RegPerIPDay), s.RegPerIPDay)
+		}
+		if s.RegPerDay > 0 {
+			s.regAll = newRateLimiter(24*time.Hour/time.Duration(s.RegPerDay), s.RegPerDay)
+		}
+		// Чекпоинты: журнал шлёт их раз в 100 записей или раз в сутки; запас — 60
+		// сразу (повтор неотправленных), дальше один в 10 с.
+		s.wits = newRateLimiter(10*time.Second, 60)
+	})
+}
+
 // Serve принимает TCP-соединения (порт 443).
+// Соединения сверх MaxConns / MaxConnsPerIP сбрасываются сразу.
 func (s *Server) Serve(l net.Listener) error {
-	api := &http.Server{Handler: s.apiHandler(), ReadHeaderTimeout: 10 * time.Second, ConnState: s.apiConnState}
+	s.limits()
+	// IdleTimeout: keep-alive соединение API не висит вечно; чтение тела и
+	// ответ ограничивает apiDeadlines (кроме /tunnel — у него keepalive yamux).
+	api := &http.Server{Handler: s.apiHandler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
+		ConnState: s.apiConnState}
 	apiConns := newChanListener(l.Addr())
 	go api.Serve(tls.NewListener(apiConns, s.TLS))
 	defer api.Close()
@@ -83,7 +132,13 @@ func (s *Server) Serve(l net.Listener) error {
 		if err != nil {
 			return err
 		}
-		go s.handle(c, apiConns)
+		release, ok := s.conns.acquire(ipKey(c.RemoteAddr()))
+		if !ok {
+			s.Metrics.rejected.WithLabelValues("conn_limit").Inc()
+			c.Close()
+			continue
+		}
+		go s.handle(&releaseConn{Conn: c, release: release}, apiConns)
 	}
 }
 
@@ -102,7 +157,7 @@ func (s *Server) handle(c net.Conn, api *chanListener) {
 		return
 	}
 	if addr, ok := s.Routes[sni]; ok {
-		s.forward(c, prefix, sni, addr)
+		s.forward(c, prefix, sni, addr, s.proxyRoutes[sni])
 		return
 	}
 	id, ok := strings.CutSuffix(sni, "."+s.Domain)
@@ -143,19 +198,22 @@ func (s *Server) handle(c net.Conn, api *chanListener) {
 }
 
 // pipe пробрасывает c ↔ up (сначала prefix в up) и учитывает байты; closeUp
-// вызывается, когда клиент закончил писать.
+// вызывается, когда клиент закончил писать. Соединение без данных в обе
+// стороны дольше PipeIdle закрывается.
 func (s *Server) pipe(span trace.Span, kind string, c net.Conn, up io.ReadWriteCloser, prefix []byte, closeUp func()) {
 	m := s.Metrics
 	m.active.WithLabelValues(kind).Inc()
 	defer m.active.WithLabelValues(kind).Dec()
+	var act atomic.Int64
+	act.Store(time.Now().UnixNano())
 	in := make(chan int64, 1)
 	go func() {
 		_, _ = up.Write(prefix)
-		n, _ := io.Copy(up, c)
+		n, _ := idleCopy(up, c, &act, s.PipeIdle)
 		closeUp()
 		in <- int64(len(prefix)) + n
 	}()
-	out, _ := io.Copy(c, up)
+	out, _ := idleCopy(c, up, &act, s.PipeIdle)
 	c.Close()
 	up.Close()
 	nin := <-in
@@ -164,8 +222,68 @@ func (s *Server) pipe(span trace.Span, kind string, c net.Conn, up io.ReadWriteC
 	span.SetAttributes(attribute.Int64("relay.bytes_in", nin), attribute.Int64("relay.bytes_out", out))
 }
 
-// forward пробрасывает соединение на бэкенд маршрута, не расшифровывая его.
-func (s *Server) forward(c net.Conn, prefix []byte, host, addr string) {
+// idleCopy копирует src → dst. Чтение ждёт данных не дольше idle с последней
+// активности в любую из сторон (act — время в UnixNano): односторонний поток
+// (ответ сервера идёт, клиент молчит) не обрывается.
+func idleCopy(dst io.Writer, src io.Reader, act *atomic.Int64, idle time.Duration) (int64, error) {
+	ds, _ := src.(interface{ SetReadDeadline(time.Time) error })
+	if idle <= 0 || ds == nil {
+		return io.Copy(dst, src)
+	}
+	defer ds.SetReadDeadline(time.Time{})
+	buf := make([]byte, 32<<10)
+	var n int64
+	for {
+		_ = ds.SetReadDeadline(time.Unix(0, act.Load()).Add(idle))
+		k, err := src.Read(buf)
+		if k > 0 {
+			act.Store(time.Now().UnixNano())
+			w, werr := dst.Write(buf[:k])
+			n += int64(w)
+			if werr != nil {
+				return n, werr
+			}
+		}
+		if err != nil {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() && time.Since(time.Unix(0, act.Load())) < idle {
+				continue // другая сторона была активна — ждём дальше
+			}
+			if errors.Is(err, io.EOF) {
+				return n, nil
+			}
+			return n, err
+		}
+	}
+}
+
+// proxyHeader — заголовок PROXY protocol v2 (команда PROXY, TCP) с адресами
+// соединения c; для не-TCP адресов — команда LOCAL.
+func proxyHeader(c net.Conn) []byte {
+	h := []byte("\r\n\r\n\x00\r\nQUIT\n")
+	src, ok1 := c.RemoteAddr().(*net.TCPAddr)
+	dst, ok2 := c.LocalAddr().(*net.TCPAddr)
+	if !ok1 || !ok2 {
+		return append(h, 0x20, 0x00, 0, 0)
+	}
+	var body []byte
+	fam := byte(0x11) // TCP over IPv4
+	if s4, d4 := src.IP.To4(), dst.IP.To4(); s4 != nil && d4 != nil {
+		body = append(append(body, s4...), d4...)
+	} else {
+		fam = 0x21 // TCP over IPv6
+		body = append(append(body, src.IP.To16()...), dst.IP.To16()...)
+	}
+	body = binary.BigEndian.AppendUint16(body, uint16(src.Port))
+	body = binary.BigEndian.AppendUint16(body, uint16(dst.Port))
+	h = append(h, 0x21, fam)
+	h = binary.BigEndian.AppendUint16(h, uint16(len(body)))
+	return append(h, body...)
+}
+
+// forward пробрасывает соединение на бэкенд маршрута, не расшифровывая его;
+// proxy — сначала заголовок PROXY protocol v2.
+func (s *Server) forward(c net.Conn, prefix []byte, host, addr string, proxy bool) {
 	m := s.Metrics
 	m.conns.WithLabelValues("route").Inc()
 	_, span := tracer.Start(context.Background(), "relay.passthrough route", trace.WithSpanKind(trace.SpanKindServer),
@@ -179,6 +297,9 @@ func (s *Server) forward(c net.Conn, prefix []byte, host, addr string) {
 		s.Log.Warn("route backend unreachable", "host", host, "backend", addr, "err", err)
 		c.Close()
 		return
+	}
+	if proxy {
+		prefix = append(proxyHeader(c), prefix...)
 	}
 	s.pipe(span, "route", c, b, prefix, func() {
 		if tc, ok := b.(*net.TCPConn); ok {
@@ -194,6 +315,8 @@ func (s *Server) SetHoldFor(d time.Duration) {
 	s.mu.Unlock()
 }
 
+// waitSession ждёт туннель устройства до HoldFor; nil — офлайн или уже ждут
+// MaxWaiters соединений.
 func (s *Server) waitSession(id string) *yamux.Session {
 	s.mu.Lock()
 	deadline := time.Now().Add(s.HoldFor)
@@ -214,14 +337,44 @@ func (s *Server) waitSession(id string) *yamux.Session {
 			s.mu.Unlock()
 			return nil
 		}
+		if s.MaxWaiters > 0 && len(s.waiters[id]) >= s.MaxWaiters {
+			s.mu.Unlock()
+			return nil
+		}
 		ch := make(chan struct{})
 		s.waiters[id] = append(s.waiters[id], ch)
 		s.mu.Unlock()
 		select {
 		case <-ch:
 		case <-time.After(wait):
+			s.dropWaiter(id, ch)
 		}
 	}
+}
+
+// dropWaiter убирает канал ожидания, не дождавшийся туннеля.
+func (s *Server) dropWaiter(id string, ch chan struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l := s.waiters[id]
+	for i, c := range l {
+		if c == ch {
+			l = append(l[:i:i], l[i+1:]...)
+			break
+		}
+	}
+	if len(l) == 0 {
+		delete(s.waiters, id)
+	} else {
+		s.waiters[id] = l
+	}
+}
+
+// waiting — сколько соединений ждут туннель устройства (тесты).
+func (s *Server) waiting(id string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.waiters[id])
 }
 
 // apiConnState считает открытые соединения API; туннели после Hijack
@@ -280,9 +433,20 @@ func (s *Server) apiHandler() http.Handler {
 			http.Error(w, "registration closed", 403)
 			return
 		}
+		// Регистрация открыта, но не бесплатна для атакующего: лимит на адрес
+		// (IPv6 — /64) и общий в сутки, общий предел устройств в store.
+		s.limits()
+		if !s.regIP.Allow(ipKey(remoteAddr(r))) || !s.regAll.Allow("") {
+			http.Error(w, "too many registrations, try later", 429)
+			return
+		}
 		id, tok, err := s.Store.Register()
+		if errors.Is(err, ErrFull) {
+			http.Error(w, "registration closed: device limit reached", 503)
+			return
+		}
 		if err != nil {
-			http.Error(w, err.Error(), 500)
+			s.internalError(w, "register", err)
 			return
 		}
 		writeJSON(w, map[string]string{"device_id": id, "token": tok, "host": s.DeviceHost(id)})
@@ -331,23 +495,77 @@ func (s *Server) apiHandler() http.Handler {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
+		s.limits()
+		if !s.wits.Allow(id) {
+			http.Error(w, "too many checkpoints, try later", 429)
+			return
+		}
 		var cp WitnessedCheckpoint
-		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&cp); err != nil || len(cp.Head) != 64 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&cp); err != nil || !validCheckpoint(cp) {
 			http.Error(w, "bad checkpoint", 400)
 			return
 		}
+		cp.Head, cp.Sig = strings.ToLower(cp.Head), strings.ToLower(cp.Sig)
 		cp.ReceivedAt = time.Now().UTC()
-		if err := s.Store.AddCheckpoint(id, cp); err != nil {
+		switch err := s.Store.AddCheckpoint(id, cp); {
+		case errors.Is(err, ErrRewind):
 			http.Error(w, err.Error(), 409)
+			return
+		case err != nil:
+			s.internalError(w, "witness", err)
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
+	// Чекпоинты видит только само устройство: id публичен (CT-логи), а seq и
+	// времена выдают, сколько и когда пользователь действует через шлюз.
 	mux.HandleFunc("GET /api/witness/{id}", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, s.Store.Checkpoints(r.PathValue("id")))
+		id, tok := deviceAuth(r)
+		if id != r.PathValue("id") || !s.Store.Auth(id, tok) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		writeJSON(w, s.Store.Checkpoints(id))
 	})
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]bool{"ok": true}) })
-	return traceAPI(s.Metrics.instrument(mux))
+	return apiDeadlines(traceAPI(s.Metrics.instrument(mux)))
+}
+
+// apiDeadlines — дедлайны чтения тела и ответа у запросов API: медленный
+// клиент не держит соединение и горутину. /tunnel после Hijack живёт долго,
+// там свои keepalive yamux.
+func apiDeadlines(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tunnel" {
+			rc := http.NewResponseController(w)
+			_ = rc.SetReadDeadline(time.Now().Add(15 * time.Second))
+			_ = rc.SetWriteDeadline(time.Now().Add(30 * time.Second))
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// remoteAddr — адрес клиента запроса API (r.RemoteAddr — host:port соединения).
+func remoteAddr(r *http.Request) net.Addr {
+	if a, err := net.ResolveTCPAddr("tcp", r.RemoteAddr); err == nil {
+		return a
+	}
+	return nil
+}
+
+// internalError — 500 с общим текстом; подробности (пути, ошибки диска) — в лог.
+func (s *Server) internalError(w http.ResponseWriter, op string, err error) {
+	s.Log.Error("relay api", "op", op, "err", err)
+	http.Error(w, "internal error", 500)
+}
+
+// validCheckpoint — формат чекпоинта по протоколу: seq ≥ 1, head — 32 байта
+// hex, sig — подпись Ed25519 (64 байта hex). Саму подпись relay не проверяет:
+// открытого ключа журнала устройства у него нет.
+func validCheckpoint(cp WitnessedCheckpoint) bool {
+	h, err1 := hex.DecodeString(cp.Head)
+	sig, err2 := hex.DecodeString(cp.Sig)
+	return cp.Seq >= 1 && err1 == nil && len(h) == 32 && err2 == nil && len(sig) == 64
 }
 
 func (s *Server) txt(w http.ResponseWriter, r *http.Request, set bool) {
@@ -361,7 +579,7 @@ func (s *Server) txt(w http.ResponseWriter, r *http.Request, set bool) {
 		Value string `json:"value"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
-		http.Error(w, err.Error(), 400)
+		http.Error(w, "bad request", 400)
 		return
 	}
 	want := "_acme-challenge." + s.DeviceHost(id)
@@ -375,8 +593,15 @@ func (s *Server) txt(w http.ResponseWriter, r *http.Request, set bool) {
 	} else {
 		err = s.Store.DelTXT(want, req.Value)
 	}
-	if err != nil {
-		http.Error(w, err.Error(), 500)
+	switch {
+	case errors.Is(err, ErrBadTXT):
+		http.Error(w, "bad TXT value: ACME key authorization digest (base64url, up to 255 bytes) expected", 400)
+		return
+	case errors.Is(err, ErrOrderLimit):
+		http.Error(w, "too many certificate orders for this device today, try tomorrow", 429)
+		return
+	case err != nil:
+		s.internalError(w, "acme txt", err)
 		return
 	}
 	writeJSON(w, map[string]bool{"ok": true})

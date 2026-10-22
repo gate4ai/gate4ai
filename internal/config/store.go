@@ -38,7 +38,18 @@ type Store struct {
 	n    int
 	subs []func(*Config)
 	now  func() time.Time
+
+	// editMu — Edit целиком (чтение, правка, запись): параллельные правки не
+	// теряют друг друга.
+	editMu sync.Mutex
+	// notifyMu — подписчики вызываются по одному и по возрастанию версий:
+	// applied — последняя версия, отданная подписчикам.
+	notifyMu sync.Mutex
+	applied  int
 }
+
+// ErrConflict — версия изменилась с тех пор, как её прочитали (PutIf).
+var ErrConflict = errors.New("the policy was changed meanwhile: reload it and apply your edit again")
 
 // ErrNoVersion — версия не найдена.
 var ErrNoVersion = errors.New("config version not found")
@@ -109,13 +120,16 @@ func (s *Store) Validate(raw []byte) (*Config, error) { return Parse(raw, s.extr
 
 // Put сохраняет новую версию. Только владелец.
 func (s *Store) Put(p auth.Principal, raw []byte, comment string) (Version, error) {
+	return s.PutIf(p, raw, comment, 0)
+}
+
+// PutIf — Put, если текущая версия всё ещё base (base 0 — без проверки):
+// иначе ErrConflict, и правка, сделанная по старой версии, не затирает новую.
+func (s *Store) PutIf(p auth.Principal, raw []byte, comment string, base int) (Version, error) {
 	if err := p.RequireOwner(); err != nil {
 		return Version{}, err
 	}
-	s.mu.RLock()
-	parent := s.n
-	s.mu.RUnlock()
-	return s.put("owner:"+p.Via, comment, raw, parent)
+	return s.put("owner:"+p.Via, comment, raw, base)
 }
 
 // Rollback делает версию n текущей, записывая её копию новой версией. Только владелец.
@@ -129,10 +143,7 @@ func (s *Store) Rollback(p auth.Principal, n int) (Version, error) {
 	} else if err != nil {
 		return Version{}, err
 	}
-	s.mu.RLock()
-	parent := s.n
-	s.mu.RUnlock()
-	return s.put("owner:"+p.Via, fmt.Sprintf("rollback to %d", n), raw, parent)
+	return s.put("owner:"+p.Via, fmt.Sprintf("rollback to %d", n), raw, 0)
 }
 
 // Get возвращает YAML версии n.
@@ -169,12 +180,18 @@ func (s *Store) Versions() ([]Version, error) {
 	return out, nil
 }
 
-func (s *Store) put(author, comment string, raw []byte, parent int) (Version, error) {
+// put — новая версия поверх текущей; base != 0 — только если текущая — base.
+func (s *Store) put(author, comment string, raw []byte, base int) (Version, error) {
 	c, err := Parse(raw, s.extra...)
 	if err != nil {
 		return Version{}, err
 	}
 	s.mu.Lock()
+	if base != 0 && base != s.n {
+		s.mu.Unlock()
+		return Version{}, ErrConflict
+	}
+	parent := s.n
 	n := s.n + 1
 	v := Version{N: n, At: s.now().UTC(), Author: author, Comment: comment, Parent: parent}
 	meta, _ := json.MarshalIndent(v, "", "  ")
@@ -191,13 +208,33 @@ func (s *Store) put(author, comment string, raw []byte, parent int) (Version, er
 		return Version{}, err
 	}
 	s.cur, s.raw, s.n = c, append([]byte(nil), raw...), n
-	subs := append([]func(*Config){}, s.subs...)
 	s.mu.Unlock()
+	s.notify(false)
+	return v, nil
+}
+
+// notify отдаёт подписчикам текущую версию: по одному и не назад — если два
+// put закончились в обратном порядке, старая версия подписчикам не попадёт.
+// force — отдать текущую и без смены версии (сменился каталог коннекторов).
+func (s *Store) notify(force bool) {
+	s.notifyMu.Lock()
+	defer s.notifyMu.Unlock()
+	s.mu.RLock()
+	c, n := s.cur, s.n
+	subs := append([]func(*Config){}, s.subs...)
+	s.mu.RUnlock()
+	if !force && n <= s.applied {
+		return
+	}
+	s.applied = n
 	for _, f := range subs {
 		f(c)
 	}
-	return v, nil
 }
+
+// Reapply вызывает подписчиков с текущей версией (после установки или
+// удаления коннектора), упорядоченно с обычными сменами версий.
+func (s *Store) Reapply() { s.notify(true) }
 
 func writeAtomic(path string, b []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
@@ -214,9 +251,29 @@ func writeAtomic(path string, b []byte) error {
 		os.Remove(tmp.Name())
 		return err
 	}
+	// Данные — на диск до переименования: после сбоя питания current не
+	// укажет на пустую или усечённую версию.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmp.Name())
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	syncDir(filepath.Dir(path))
+	return nil
+}
+
+// syncDir — запись каталога (переименование) на диск; на Windows каталог так
+// не открыть — там ошибка не важна.
+func syncDir(dir string) {
+	if f, err := os.Open(dir); err == nil {
+		_ = f.Sync()
+		f.Close()
+	}
 }

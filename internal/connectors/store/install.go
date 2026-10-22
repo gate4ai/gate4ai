@@ -105,6 +105,11 @@ func (o Options) RefreshIndex(ctx context.Context) (*registry.Index, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Откат: индекс старше закэшированного (до отзыва версии) или просроченный
+	// не принимается и кэш не заменяет.
+	if err := ix.CheckNewer(o.cachedIndex(), time.Now()); err != nil {
+		return nil, err
+	}
 	_ = os.MkdirAll(o.Dir, 0o700)
 	_ = os.WriteFile(filepath.Join(o.Dir, "registry-index.json"), raw, 0o600)
 	_ = os.WriteFile(filepath.Join(o.Dir, "registry-index.json.sig"), []byte(sig), 0o600)
@@ -154,6 +159,12 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 	if slices.Contains(o.Builtin, m.Connector) {
 		return nil, fmt.Errorf("connector %s is part of gate4ai and is not installed from the store", m.Connector)
 	}
+	if registry.Reserved(m.Connector) {
+		return nil, fmt.Errorf("connector name %s is reserved by gate4ai", m.Connector)
+	}
+	if err := m.Limits.CheckInstall(); err != nil {
+		return nil, fmt.Errorf("connector %s: %w", m.Connector, err)
+	}
 	p.Connector, p.Version, p.Capabilities = m.Connector, m.Version, m.Summary()
 	if p.Capabilities == nil {
 		p.Capabilities = []string{}
@@ -169,7 +180,10 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 	p.NeedsConsent = true
 	if info, err := o.Info(m.Connector); err == nil {
 		p.Installed = info.Version
-		p.NeedsConsent = !slices.Equal(info.Capabilities, p.Capabilities)
+		p.NeedsConsent = !slices.Equal(o.consented(info), nonNil(p.Capabilities))
+	}
+	if owner, ok := o.dataOwner(m.Connector); ok && owner != p.owner() {
+		p.Warnings = append(p.Warnings, fmt.Sprintf("connector %s from another publisher was installed under this name: its stored data will be erased", m.Connector))
 	}
 	if m.Runtime == manifest.RuntimeNative {
 		if p.Trust != registry.TrustVerified && p.Trust != TrustLocal {
@@ -209,12 +223,17 @@ func (o Options) prepareFile(ctx context.Context, source string, dev bool) (*Pla
 	if o.indexKeysOK() {
 		ix = o.cachedIndex()
 	}
-	switch {
-	case signedBy(o.TrustedKeys):
+	var why error
+	trusted := signedBy(o.TrustedKeys)
+	if trusted {
 		p.Trust = registry.TrustPublisher
-	case ix != nil && trustOf(ix, pkg, signedBy, p):
-	case dev:
-	default:
+	} else if ix != nil {
+		trusted, why = trustOf(ix, pkg, signedBy, p)
+	}
+	if !trusted && !dev {
+		if why != nil {
+			return nil, fmt.Errorf("%w; use --dev to install it as your own build (trust local)", why)
+		}
 		return nil, errors.New("package is not signed by a trusted key (store.trusted_keys or registry publishers); use --dev to install a package you built yourself")
 	}
 	if ix != nil {
@@ -272,18 +291,35 @@ func (o Options) prepareDir(ctx context.Context, dir string, dev bool) (*Plan, e
 	return &Plan{Source: SourceDir + dir, pkg: pkg, Trust: TrustLocal}, nil
 }
 
-// trustOf — доверие к пакету по ключам издателя из индекса.
-func trustOf(ix *registry.Index, pkg *Package, signedBy func([]string) bool, p *Plan) bool {
-	e, ok := ix.Connectors[pkg.Manifest.Connector]
+// trustOf — доверие к пакету из файла по ключам издателя из индекса. Уровень
+// издателя пакет получает, только если его версия есть в индексе и совпадает
+// с прошедшей ревью записью (дайджест и возможности — как в CheckRelease);
+// иначе ошибка с причиной (подпись издателя без записи — не ревью registry).
+func trustOf(ix *registry.Index, pkg *Package, signedBy func([]string) bool, p *Plan) (bool, error) {
+	m := pkg.Manifest
+	e, ok := ix.Connectors[m.Connector]
 	if !ok {
-		return false
+		return false, nil
 	}
 	pub := ix.Publishers[e.Publisher]
 	if !signedBy(pub.Keys) {
-		return false
+		return false, nil
 	}
-	p.Trust, p.Publisher, p.Repo = pub.Trust, e.Publisher, e.Repo
-	return true
+	for _, rel := range e.Versions {
+		if rel.Version != m.Version {
+			continue
+		}
+		if rel.Native() || pkg.Native() {
+			// Дайджест платформы — в списке платформ на сервере registry.
+			return false, fmt.Errorf("native connector %s %s from a file cannot be matched with the registry entry: install it from the registry", m.Connector, m.Version)
+		}
+		if pkg.Sig.Digest != rel.Digest || !capsMatch(m, rel.Capabilities) {
+			return false, fmt.Errorf("connector %s %s does not match its reviewed entry in the registry (digest or capabilities)", m.Connector, m.Version)
+		}
+		p.Trust, p.Publisher, p.Repo = pub.Trust, e.Publisher, e.Repo
+		return true, nil
+	}
+	return false, fmt.Errorf("connector %s %s is signed by publisher %s but is not in the registry index (not reviewed)", m.Connector, m.Version, e.Publisher)
 }
 
 func (o Options) prepareRegistry(ctx context.Context, source string) (*Plan, error) {
@@ -318,6 +354,78 @@ func (p *Plan) ConsentOK(consent []string) bool {
 	return !p.NeedsConsent || slices.Equal(nonNil(consent), nonNil(p.Capabilities))
 }
 
+// consented — согласие из install.json в форме текущего Summary: согласие,
+// записанное прежней версией (LegacySummary установленного манифеста),
+// приводится к Summary того же манифеста — на его runtime, классы и лимиты
+// владелец фактически согласился, ставя пакет.
+func (o Options) consented(info Info) []string {
+	c := nonNil(info.Capabilities)
+	b, err := os.ReadFile(filepath.Join(o.Dir, info.Connector, ManifestFile))
+	if err != nil {
+		return c
+	}
+	m, err := manifest.Parse(b)
+	if err != nil || slices.Equal(c, nonNil(m.Summary())) || !slices.Equal(c, nonNil(m.LegacySummary())) {
+		return c
+	}
+	return nonNil(m.Summary())
+}
+
+// DataDir — каталог KV коннекторов в каталоге установленных (<Dir>/data/<имя>).
+const DataDir = "data"
+
+// ownerFile — чьи данные лежат в <Dir>/data/<имя> (издатель коннектора).
+const ownerFile = "owner"
+
+// owner — кому принадлежат данные коннектора плана (ownerID).
+func (p *Plan) owner() string { return ownerID(p.Publisher, p.Trust, p.pkg.Sig.PublicKey) }
+
+// ownerID — владелец данных коннектора: издатель из registry, своя сборка
+// владельца или ключ доверенного издателя (store.trusted_keys).
+func ownerID(publisher, trust, key string) string {
+	switch {
+	case publisher != "":
+		return "publisher:" + publisher
+	case trust == TrustLocal:
+		return "local"
+	}
+	return "key:" + key
+}
+
+// dataOwner — владелец данных KV коннектора: из метки в каталоге данных,
+// иначе по установленному коннектору; false — неизвестен (данных нет или они
+// без метки от прежних версий и владельца не определить — тогда они остаются).
+func (o Options) dataOwner(name string) (string, bool) {
+	dir := filepath.Join(o.Dir, DataDir, name)
+	if b, err := os.ReadFile(filepath.Join(dir, ownerFile)); err == nil {
+		return strings.TrimSpace(string(b)), true
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return "", false
+	}
+	info, err := o.Info(name)
+	if err != nil || info.Publisher == "" && info.Trust != TrustLocal {
+		return "", false
+	}
+	return ownerID(info.Publisher, info.Trust, ""), true
+}
+
+// claimData — данные KV коннектора принадлежат издателю плана: данные другого
+// издателя под тем же именем стираются (новый коннектор не читает чужие
+// токены и состояние), метка владельца обновляется.
+func (o Options) claimData(p *Plan) error {
+	dir := filepath.Join(o.Dir, DataDir, p.Connector)
+	if owner, ok := o.dataOwner(p.Connector); ok && owner != p.owner() {
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, ownerFile), []byte(p.owner()+"\n"), 0o600)
+}
+
 // Install устанавливает пакет плана. consent — возможности, на которые
 // согласился владелец; они должны совпасть с планом, если согласие нужно.
 func (o Options) Install(p *Plan, consent []string) (Info, error) {
@@ -325,6 +433,9 @@ func (o Options) Install(p *Plan, consent []string) (Info, error) {
 		return Info{}, ErrConsent
 	}
 	name := p.Connector
+	if !nameOK(name) {
+		return Info{}, fmt.Errorf("connector name %q is reserved or invalid", name)
+	}
 	tmp, err := os.MkdirTemp(o.Dir, ".install-"+name+"-")
 	if err != nil {
 		if err := os.MkdirAll(o.Dir, 0o700); err != nil {
@@ -365,6 +476,9 @@ func (o Options) Install(p *Plan, consent []string) (Info, error) {
 		return Info{}, err
 	}
 	_ = os.RemoveAll(old)
+	if err := o.claimData(p); err != nil {
+		o.log().Warn("connector data not claimed", "connector", name, "err", err)
+	}
 	return info, nil
 }
 
@@ -378,7 +492,8 @@ func (o Options) Info(name string) (Info, error) {
 	return info, json.Unmarshal(b, &info)
 }
 
-// Remove удаляет установленный коннектор (данные KV остаются в data/).
+// Remove удаляет установленный коннектор. Данные KV остаются в data/ с меткой
+// издателя: их получит только коннектор того же издателя (claimData).
 func (o Options) Remove(name string) error {
 	if !nameOK(name) {
 		return fmt.Errorf("bad connector name %q", name)
@@ -391,7 +506,7 @@ func (o Options) Remove(name string) error {
 }
 
 func nameOK(n string) bool {
-	if n == "" || n == "data" {
+	if n == "" || registry.Reserved(n) {
 		return false
 	}
 	for _, r := range n {
@@ -400,4 +515,11 @@ func nameOK(n string) bool {
 		}
 	}
 	return true
+}
+
+func (o Options) log() *slog.Logger {
+	if o.Log != nil {
+		return o.Log
+	}
+	return slog.Default()
 }

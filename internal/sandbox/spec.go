@@ -10,10 +10,17 @@ package sandbox
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/gate4ai/gate4ai/internal/platform/paths"
 )
 
 // Modes.
@@ -73,6 +80,15 @@ type Run struct {
 	AllowDomains []string `json:"allow_domains"`
 	AskDomains   []string `json:"ask_domains"`
 	SkillMD      string   `json:"skill_md"`
+	// Home — каталог данных daemon (vault, ключи, журнал): закрыт для чтения в
+	// песочнице; "" — Options.DataHome или расположение по умолчанию.
+	Home string `json:"home,omitempty"`
+	// SecretEnv — одноразовые заглушки egress-секретов запуска: переменная
+	// окружения → заглушка (настоящее значение подставляет Egress Proxy).
+	SecretEnv map[string]string `json:"secret_env,omitempty"`
+	// KeepAliveS — как часто (секунды) запускающий продлевает запуск
+	// (POST /v1/runs/{id}/keepalive); без продления запуск гаснет.
+	KeepAliveS int `json:"keepalive_s,omitempty"`
 }
 
 // Options — параметры CLI.
@@ -84,7 +100,9 @@ type Options struct {
 	Engine    string // docker | podman
 	GateBin   string // путь к бинарнику gate4ai на хосте
 	Home      string
-	TmpDir    string // каталог для файлов запуска (настройки srt, CA)
+	TmpDir    string // каталог для файлов запуска (настройки srt, CA, сокет прокси контейнера)
+	// DataHome — каталог данных daemon, если известен CLI ("" — paths.Home()).
+	DataHome string
 }
 
 // Spec — что запускать.
@@ -92,12 +110,16 @@ type Spec struct {
 	Argv  []string          `json:"argv"`
 	Env   []string          `json:"env"`
 	Files map[string]string `json:"files"` // путь → содержимое (создать перед запуском)
+	// Bridge — пересылка с сокета на прокси, которую запускающий держит на
+	// время работы агента (StartBridge); только для контейнера.
+	Bridge *Bridge `json:"bridge,omitempty"`
 }
 
 // SensitivePaths — что закрыто для чтения в песочнице.
 func SensitivePaths(home, goos string) []string {
 	p := []string{"~/.ssh", "~/.gnupg", "~/.aws", "~/.config/gcloud", "~/.kube", "~/.docker", "~/.netrc",
-		"~/.local/share/keyrings", "~/.mozilla", "~/.thunderbird"}
+		"~/.local/share/keyrings", "~/.mozilla", "~/.thunderbird",
+		"~/.config/gh", "~/.git-credentials", "~/.npmrc", "~/.pypirc"}
 	switch goos {
 	case "darwin":
 		p = append(p, "~/Library/Keychains", "~/Library/Application Support/Google/Chrome", "~/Library/Application Support/Firefox",
@@ -110,9 +132,50 @@ func SensitivePaths(home, goos string) []string {
 	return p
 }
 
+// dataDirs — каталоги данных daemon: из запуска, из параметров CLI и по
+// умолчанию (GATE4AI_HOME, XDG_STATE_HOME учитывает paths.Home).
+func dataDirs(r Run, o Options) []string {
+	var out []string
+	for _, d := range []string{r.Home, o.DataHome, paths.Home()} {
+		if d == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(d); err == nil {
+			d = abs
+		}
+		if !slices.Contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// DataDenyPaths — что закрыть для чтения из каталогов данных daemon dirs:
+// каталог целиком, а если в нём сокет запуска (GATE4AI_HOME/run) — все его
+// элементы, кроме ведущего к сокету (иначе песочница закроет и сокет).
+func DataDenyPaths(dirs []string, socket string) []string {
+	var out []string
+	for _, d := range dirs {
+		rel, err := filepath.Rel(d, socket)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+			out = append(out, d)
+			continue
+		}
+		keep := strings.Split(rel, string(filepath.Separator))[0]
+		ents, _ := os.ReadDir(d)
+		for _, e := range ents {
+			if e.Name() != keep {
+				out = append(out, filepath.Join(d, e.Name()))
+			}
+		}
+	}
+	return out
+}
+
 // SRTSettings — настройки sandbox-runtime из профиля агента: запись только в
-// рабочую папку, закрыто чтение секретов и профилей браузеров/почты, из
-// unix-сокетов — только сокет gate4ai, сеть — только Egress Proxy gate4ai.
+// рабочую папку, закрыто чтение секретов, профилей браузеров/почты и данных
+// gate4ai (где бы они ни лежали), из unix-сокетов — только сокет gate4ai,
+// сеть — только Egress Proxy gate4ai.
 func SRTSettings(r Run, o Options) map[string]any {
 	return map[string]any{
 		"network": map[string]any{
@@ -124,11 +187,21 @@ func SRTSettings(r Run, o Options) map[string]any {
 			"httpProxyPort":     r.ProxyPort,
 		},
 		"filesystem": map[string]any{
-			"denyRead":   SensitivePaths(o.Home, runtime.GOOS),
+			"denyRead":   append(SensitivePaths(o.Home, runtime.GOOS), DataDenyPaths(dataDirs(r, o), r.Socket)...),
 			"allowWrite": []string{o.Workspace},
 			"denyWrite":  []string{},
 		},
 	}
+}
+
+// secretEnv — одноразовые заглушки egress-секретов запуска (VAR=заглушка).
+func secretEnv(r Run) []string {
+	out := make([]string, 0, len(r.SecretEnv))
+	for k, v := range r.SecretEnv {
+		out = append(out, k+"="+v)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func proxyEnv(proxy, caPath string) []string {
@@ -175,7 +248,7 @@ func Build(r Run, o Options) (Spec, error) {
 			files[filepath.Join(o.Workspace, ".mcp.json")] = MCPConfig(o.GateBin)
 		}
 		spec.Argv = append([]string{"srt", "--settings", settings, "--"}, cmd...)
-		spec.Env = append([]string{"GATE4AI_TOKEN=" + r.Token, "GATE4AI_AGENT_SOCKET=" + r.Socket, "GATE4AI_RUN_ID=" + r.ID}, proxyEnv(r.ProxyURL, caHost)...)
+		spec.Env = append(append([]string{"GATE4AI_TOKEN=" + r.Token, "GATE4AI_AGENT_SOCKET=" + r.Socket, "GATE4AI_RUN_ID=" + r.ID}, proxyEnv(r.ProxyURL, caHost)...), secretEnv(r)...)
 	case ModeContainer:
 		engine := o.Engine
 		if engine == "" {
@@ -187,33 +260,56 @@ func Build(r Run, o Options) (Spec, error) {
 				return Spec{}, fmt.Errorf("--image is required for agent %q", r.Agent)
 			}
 		}
-		if t.ClaudeMCP {
-			files[filepath.Join(o.Workspace, ".mcp.json")] = MCPConfig("/usr/local/bin/gate4ai")
+		if runtimeGOOS != "linux" {
+			// Внутри контейнера работает бинарник gate4ai хоста (MCP, пересылка
+			// прокси), а сокеты монтируются напрямую: только Linux.
+			return Spec{}, fmt.Errorf("--container needs a Linux host for now; on %s use the default sandbox or --microvm", runtimeGOOS)
 		}
-		proxy := strings.Replace(r.ProxyURL, r.ProxyHost, "host.docker.internal", 1)
+		if t.ClaudeMCP {
+			files[filepath.Join(o.Workspace, ".mcp.json")] = MCPConfig(containerGateBin)
+		}
+		// Сеть: --network none (только loopback), прокси — через сокет
+		// (bridge.go); адрес прокси внутри — loopback контейнера.
+		pu, err := url.Parse(r.ProxyURL)
+		if err != nil {
+			return Spec{}, fmt.Errorf("proxy url: %w", err)
+		}
+		pu.Host = fmt.Sprintf("127.0.0.1:%d", ShimPort)
+		proxySock := filepath.Join(o.TmpDir, "egress.sock")
+		spec.Bridge = &Bridge{Socket: proxySock, Target: net.JoinHostPort(r.ProxyHost, strconv.Itoa(r.ProxyPort))}
+		// Токен и пароль прокси — в файле окружения (каталог запуска 0700), а
+		// не в argv docker, который виден в ps.
+		envFile := filepath.Join(o.TmpDir, "container.env")
+		env := append(append([]string{"GATE4AI_TOKEN=" + r.Token, "GATE4AI_AGENT_SOCKET=/run/gate4ai.sock", "GATE4AI_RUN_ID=" + r.ID}, proxyEnv(pu.String(), "/etc/gate4ai/ca.pem")...), secretEnv(r)...)
+		files[envFile] = strings.Join(env, "\n") + "\n"
 		argv := []string{engine, "run", "--rm", "-it", "--name", "gate4ai-" + r.ID,
+			"--network", "none",
 			"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-			"--add-host", "host.docker.internal:host-gateway",
 			"-v", o.Workspace + ":/workspace", "-w", "/workspace",
 			"-v", r.Socket + ":/run/gate4ai.sock",
-			"-v", o.GateBin + ":/usr/local/bin/gate4ai:ro",
-			"-v", caHost + ":/etc/gate4ai/ca.pem:ro"}
-		env := append([]string{"GATE4AI_TOKEN=" + r.Token, "GATE4AI_AGENT_SOCKET=/run/gate4ai.sock", "GATE4AI_RUN_ID=" + r.ID}, proxyEnv(proxy, "/etc/gate4ai/ca.pem")...)
-		for _, e := range env {
-			argv = append(argv, "-e", e)
-		}
-		spec.Argv = append(append(argv, image), cmd...)
+			"-v", proxySock + ":" + containerProxySock,
+			"-v", o.GateBin + ":" + containerGateBin + ":ro",
+			"-v", caHost + ":/etc/gate4ai/ca.pem:ro",
+			"--env-file", envFile,
+			"--entrypoint", containerGateBin,
+			image, ShimCommand, "--listen", fmt.Sprintf("127.0.0.1:%d", ShimPort), "--socket", containerProxySock, "--"}
+		spec.Argv = append(argv, cmd...)
 		spec.Env = []string{"GATE4AI_TOKEN=" + r.Token} // для маскирования в --dry-run
 	case ModeMicroVM:
 		if !known || t.SandboxAgent == "" {
 			return Spec{}, fmt.Errorf("Docker Sandboxes support only: claude-code, codex")
 		}
 		proxy := strings.Replace(r.ProxyURL, r.ProxyHost, "host.docker.internal", 1)
-		argv := []string{"docker", "sandbox", "run", "--workspace", o.Workspace,
-			"-e", "GATE4AI_TOKEN=" + r.Token, "-e", "GATE4AI_RUN_ID=" + r.ID,
-			"-e", "HTTPS_PROXY=" + proxy, "-e", "HTTP_PROXY=" + proxy}
+		// Значения — в окружении процесса docker (spec.Env), в argv — только
+		// имена (`-e VAR`): токен запуска и пароль прокси не видны в ps.
+		env := append([]string{"GATE4AI_TOKEN=" + r.Token, "GATE4AI_RUN_ID=" + r.ID, "HTTPS_PROXY=" + proxy, "HTTP_PROXY=" + proxy}, secretEnv(r)...)
+		argv := []string{"docker", "sandbox", "run", "--workspace", o.Workspace}
+		for _, kv := range env {
+			k, _, _ := strings.Cut(kv, "=")
+			argv = append(argv, "-e", k)
+		}
 		spec.Argv = append(argv, t.SandboxAgent)
-		spec.Env = []string{"GATE4AI_TOKEN=" + r.Token}
+		spec.Env = env
 	default:
 		return Spec{}, fmt.Errorf("unknown mode %q", o.Mode)
 	}

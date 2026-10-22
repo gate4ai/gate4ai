@@ -21,6 +21,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
+	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 	"github.com/gate4ai/gate4ai/internal/state"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -195,7 +196,10 @@ func TestDesktopCommands(t *testing.T) {
 		Args: map[string]any{"payee": "@uk-dom", "amount": 5000.0}}
 	for goos, bin := range map[string]string{"linux": "notify-send", "darwin": "osascript", "windows": "powershell"} {
 		var got []string
-		d := &Desktop{GOOS: goos, Run: func(name string, args ...string) error { got = append([]string{name}, args...); return nil }}
+		d := &Desktop{GOOS: goos, Run: func(env []string, name string, args ...string) error {
+			got = append(append([]string{name}, args...), env...)
+			return nil
+		}}
 		d.Notify(a)
 		if got[0] != bin || !strings.Contains(strings.Join(got, " "), "@uk-dom 5000.00 #a3f9c21e") {
 			t.Errorf("%s: %v", goos, got)
@@ -204,6 +208,82 @@ func TestDesktopCommands(t *testing.T) {
 		if !strings.Contains(strings.Join(got, " "), "recipient not in allowlist") {
 			t.Errorf("%s denied: %v", goos, got)
 		}
+	}
+}
+
+// Аргументы агента в уведомлении — данные, а не код: скрипт PowerShell и
+// AppleScript — константы, заголовок и текст идут переменными окружения или
+// аргументами, какие бы кавычки ни были в аргументах (в том числе «умные»,
+// которые PowerShell тоже считает одинарными).
+func TestDesktopNotificationIsNotCode(t *testing.T) {
+	evil := "C:/x\u2019; Start-Process calc; \u2018 \u201b \u201a ' \\ \" $(calc) `calc` & calc\n-x"
+	a := &state.Approval{ID: "a_1", Agent: "bot", Action: "files.write", PreviewHash: "a3f9c21e00",
+		Args: map[string]any{"path": evil + "\x00"}, Decision: policy.Decision{Reason: "why " + evil}}
+	type call struct {
+		env  []string
+		name string
+		args []string
+	}
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		var calls []call
+		d := &Desktop{GOOS: goos, Run: func(env []string, name string, args ...string) error {
+			calls = append(calls, call{env, name, args})
+			return nil
+		}}
+		d.Notify(a)
+		d.Asked("a_2", "code? "+evil)
+		d.Denied("bot", "files.write", evil)
+		if len(calls) != 3 {
+			t.Fatal(goos, calls)
+		}
+		for _, c := range calls {
+			switch goos {
+			case "windows":
+				// Скрипт — ровно константа; данные — только в G4A_TITLE/G4A_BODY.
+				if c.name != "powershell" || c.args[len(c.args)-1] != psToast {
+					t.Fatalf("windows script is not constant: %q", c.args)
+				}
+				for _, x := range c.args {
+					if strings.Contains(x, "calc") {
+						t.Fatalf("agent data in powershell command line: %q", x)
+					}
+				}
+				if len(c.env) != 2 || !strings.HasPrefix(c.env[0], "G4A_TITLE=") || !strings.HasPrefix(c.env[1], "G4A_BODY=") ||
+					!strings.Contains(c.env[1], "Start-Process calc") {
+					t.Fatalf("windows env: %q", c.env)
+				}
+			case "darwin":
+				if c.name != "osascript" || len(c.args) != 8 || c.args[1] != osaRun || c.args[3] != osaShow || c.args[5] != osaEnd {
+					t.Fatalf("darwin: %q", c.args)
+				}
+				for _, x := range c.args[:6] {
+					if strings.Contains(x, "calc") {
+						t.Fatalf("agent data in AppleScript: %q", x)
+					}
+				}
+				if !strings.Contains(c.args[7], "calc") {
+					t.Fatalf("darwin body: %q", c.args)
+				}
+			default:
+				if c.name != "notify-send" || c.args[2] != "--" || len(c.args) != 5 {
+					t.Fatalf("linux: %q", c.args)
+				}
+			}
+			for _, x := range append(append([]string{}, c.args...), c.env...) {
+				if strings.Contains(x, "\x00") {
+					t.Fatalf("%s: NUL passed to the process: %q", goos, x)
+				}
+			}
+		}
+	}
+}
+
+// Одноразовые токены в адресе не уходят в уведомления (L4).
+func TestSummaryMasksURLTokens(t *testing.T) {
+	a := &state.Approval{ID: "a_1", Agent: "bot", Action: "browser.open", PreviewHash: "a3f9c21e00",
+		Args: map[string]any{"url": "https://example.com/cb?code=SECRET123&x=1"}}
+	if s := Summary(a); strings.Contains(s, "SECRET123") || !strings.Contains(s, "example.com/cb") {
+		t.Fatal(s)
 	}
 }
 
@@ -227,9 +307,10 @@ func TestAttachFromConfig(t *testing.T) {
 	var desk []string
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	Attach(ctx, d, &Desktop{GOOS: "linux", Run: func(n string, a ...string) error { desk = append(desk, n); return nil }}, srv.URL)
+	ch := Attach(ctx, d, &Desktop{GOOS: "linux", Run: func(env []string, n string, a ...string) error { desk = append(desk, n); return nil }}, srv.URL)
 	d.Config.Put(ownerP, raw, "reload")
 	d.Pipeline.Execute(ctx, pipeline.Call{Agent: "a", Action: "email.send", Args: map[string]any{"to": "x@y.example"}})
+	ch.Flush()
 	fake.mu.Lock()
 	n := len(fake.sent)
 	fake.mu.Unlock()
@@ -252,6 +333,10 @@ func TestTelegramLoginConfirmation(t *testing.T) {
 	}
 	kb := fake.sent[0]["reply_markup"].(map[string]any)["inline_keyboard"].([]any)[0].([]any)
 	yes := kb[0].(map[string]any)["callback_data"].(string)
+	// Идентификатор попытки (значение cookie) в Telegram не уходит (E.12).
+	if strings.Contains(yes, "abc") || strings.Contains(kb[1].(map[string]any)["callback_data"].(string), "abc") {
+		t.Fatal("login attempt id leaked to Telegram:", yes)
+	}
 	// Чужой не подтверждает вход.
 	tg.Handle(context.Background(), cbUpdate(1, 7, yes))
 	if len(got) != 0 || fake.answers[0] != "Нет доступа" {
@@ -267,7 +352,12 @@ func TestTelegramLoginConfirmation(t *testing.T) {
 		t.Fatal("second press accepted", fake.answers)
 	}
 	_ = tg.ConfirmLogin("def", "x", func(ok bool) { got <- ok })
-	tg.Handle(context.Background(), cbUpdate(4, owner, "lr:def"))
+	tg.Handle(context.Background(), cbUpdate(4, owner, "la:def")) // id попытки как ключ не принимается
+	if len(got) != 0 {
+		t.Fatal("cookie value accepted as callback key")
+	}
+	kb = fake.sent[1]["reply_markup"].(map[string]any)["inline_keyboard"].([]any)[0].([]any)
+	tg.Handle(context.Background(), cbUpdate(5, owner, kb[1].(map[string]any)["callback_data"].(string)))
 	if ok := <-got; ok {
 		t.Fatal("rejection confirmed login")
 	}

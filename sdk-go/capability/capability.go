@@ -8,8 +8,10 @@ package capability
 import (
 	"errors"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
@@ -55,20 +57,63 @@ func (c *Checker) Network(scheme, host string, port int) error {
 	return denied("network %s://%s:%d is not declared in capabilities.network", scheme, host, port)
 }
 
-// Secret — алиас можно подставить для адреса host.
-func (c *Checker) Secret(alias, host string) error {
+// Secret — алиас можно подставить для соединения scheme://host:port (scheme —
+// https/http для http_request, tls/tcp для tls_dial). Привязка (bind) — точный
+// хост ("api.example.com", без wildcard: поддомены — только явным списком) или
+// точный origin ("https://api.example.com:8443", "imaps://imap.example.com:993").
+// Для привязки-хоста схему и порт ограничивает Network (без TLS — только
+// loopback). Алиас может быть объявлен несколько раз с разными привязками
+// (пароль IMAP для SMTP): подходит любая.
+func (c *Checker) Secret(alias, scheme, host string, port int) error {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	declared := false
 	for _, s := range c.R.Secrets {
 		if s.Alias != alias {
 			continue
 		}
+		declared = true
 		for _, b := range s.Bind {
-			if domain.HostMatches(host, b) {
+			if bindMatches(b, scheme, host, port) {
 				return nil
 			}
 		}
+	}
+	if declared {
 		return denied("secret %s is not bound to %s", alias, host)
 	}
 	return denied("secret %s is not declared in capabilities.secrets", alias)
+}
+
+var defaultPorts = map[string]int{"https": 443, "http": 80, "imaps": 993, "smtps": 465}
+
+func bindMatches(b, scheme, host string, port int) bool {
+	b = strings.TrimSpace(b)
+	if !strings.Contains(b, "://") {
+		if strings.Contains(b, "*") {
+			return false
+		}
+		return host != "" && strings.ToLower(strings.TrimSuffix(b, ".")) == host
+	}
+	u, err := url.Parse(b)
+	if err != nil || u.User != nil || (u.Path != "" && u.Path != "/") {
+		return false
+	}
+	bs := strings.ToLower(u.Scheme)
+	bp := defaultPorts[bs]
+	if p := u.Port(); p != "" {
+		bp, _ = strconv.Atoi(p)
+	}
+	web := bs == "https" || bs == "http"
+	switch {
+	case scheme == "https" || scheme == "http":
+		if bs != scheme {
+			return false
+		}
+	case !web && scheme == manifest.SchemeTLS:
+	default:
+		return false
+	}
+	return strings.TrimSuffix(strings.ToLower(u.Hostname()), ".") == host && bp != 0 && bp == port
 }
 
 // Service — действие action поставщика target объявлено в capabilities.services.
@@ -131,27 +176,44 @@ func within(p, root string) bool {
 // Path проверяет путь по capabilities.files и возвращает настоящий путь
 // (после ~, .. и симлинков). Выход за пределы разрешённого — capability_denied.
 func (c *Checker) Path(p string) (string, error) {
+	l, err := c.Locate(p)
+	return l.Real, err
+}
+
+// Location — разрешённый путь: Real — настоящий путь; Root — каталог, внутри
+// которого его можно открывать (os.Root), Rel — путь относительно Root;
+// Exact — разрешён только сам файл (правило без /**): последний компонент не
+// должен оказаться симлинком.
+type Location struct {
+	Real, Root, Rel string
+	Exact           bool
+}
+
+// Locate — Path с каталогом-корнем для открытия без выхода за пределы
+// разрешённого (защита от подмены компонента пути симлинком после проверки).
+func (c *Checker) Locate(p string) (Location, error) {
 	if len(c.R.Files) == 0 {
-		return "", denied("files are not declared in capabilities.files")
+		return Location{}, denied("files are not declared in capabilities.files")
 	}
 	if !strings.HasPrefix(p, "~") && !filepath.IsAbs(filepath.FromSlash(p)) {
-		return "", denied("use an absolute path or ~/… (%s)", p)
+		return Location{}, denied("use an absolute path or ~/… (%s)", p)
 	}
 	real, err := realPath(c.expand(p))
 	if err != nil {
-		return "", abi.Errorf(abi.CodeIO, "%v", err)
+		return Location{}, abi.Errorf(abi.CodeIO, "%v", err)
 	}
 	for _, f := range c.R.Files {
 		if root, ok := strings.CutSuffix(f, "/**"); ok {
 			rr, err := realPath(c.expand(root))
 			if err == nil && (real == rr || within(real, rr)) {
-				return real, nil
+				rel, _ := filepath.Rel(rr, real)
+				return Location{Real: real, Root: rr, Rel: rel}, nil
 			}
 			continue
 		}
 		if rr, err := realPath(c.expand(f)); err == nil && rr == real {
-			return real, nil
+			return Location{Real: real, Root: filepath.Dir(real), Rel: filepath.Base(real), Exact: true}, nil
 		}
 	}
-	return "", denied("path %s is outside capabilities.files (%s)", p, strings.Join(c.R.Files, ", "))
+	return Location{}, denied("path %s is outside capabilities.files (%s)", p, strings.Join(c.R.Files, ", "))
 }

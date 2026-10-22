@@ -43,6 +43,9 @@ type Services struct {
 	// Dial и RootCAs — сеть (подменяются в тестах).
 	Dial    func(ctx context.Context, network, addr string) (net.Conn, error)
 	RootCAs *x509.CertPool
+	// Mask — маскирование секретов Vault в диагностике коннекторов (stderr
+	// нативных процессов) перед записью в лог daemon; nil — без маскирования.
+	Mask func(string) string
 }
 
 // Router проводит вызов service_call коннектора caller через политики хоста.
@@ -66,6 +69,14 @@ type Engine struct {
 	cache wazero.CompilationCache
 }
 
+// MaskString — текст без значений секретов (Services.Mask).
+func (e *Engine) MaskString(s string) string {
+	if e.svc.Mask == nil {
+		return s
+	}
+	return e.svc.Mask(s)
+}
+
 // NewEngine — cacheDir "" — кэш компиляции только в памяти.
 func NewEngine(cacheDir string, svc Services) (*Engine, error) {
 	if svc.Log == nil {
@@ -85,6 +96,12 @@ func NewEngine(cacheDir string, svc Services) (*Engine, error) {
 // Close освобождает кэш.
 func (e *Engine) Close() error { return e.cache.Close(context.Background()) }
 
+// MaxConcurrentCalls — одновременных экземпляров одного коннектора: каждый
+// вызов — новый экземпляр с памятью до limits.memory_mb, так что память
+// коннектора ограничена MaxConcurrentCalls × memory_mb; остальные вызовы ждут
+// (в пределах своего срока).
+const MaxConcurrentCalls = 8
+
 // Connector — загруженный WASM-коннектор (connectors.Client).
 type Connector struct {
 	e        *Engine
@@ -92,6 +109,7 @@ type Connector struct {
 	limits   manifest.Limits
 	rt       wazero.Runtime
 	compiled wazero.CompiledModule
+	slots    chan struct{} // семафор одновременных вызовов
 	mu       sync.Mutex
 	closed   bool
 }
@@ -113,11 +131,17 @@ func (e *Engine) Load(ctx context.Context, wasmBytes []byte, pkg manifest.Manife
 		return nil, fmt.Errorf("connector %s: runtime %q is not wasm", pkg.Connector, pkg.Runtime)
 	}
 	lim := pkg.Limits.WithDefaults()
+	// Validate не пропускает memory_mb > MaxMemoryMB; предел страниц wazero
+	// (65536) проверяется и здесь: больше — паника в WithMemoryLimitPages.
+	pages := uint64(lim.MemoryMB) * 16 // страница — 64 КиБ
+	if lim.MemoryMB <= 0 || pages > 65536 {
+		return nil, fmt.Errorf("connector %s: limits.memory_mb %d is out of range", pkg.Connector, lim.MemoryMB)
+	}
 	cfg := wazero.NewRuntimeConfig().WithCompilationCache(e.cache).
-		WithMemoryLimitPages(uint32(lim.MemoryMB) * 16). // страница — 64 КиБ
+		WithMemoryLimitPages(uint32(pages)).
 		WithCloseOnContextDone(true)
 	rt := wazero.NewRuntimeWithConfig(ctx, cfg)
-	c := &Connector{e: e, man: pkg, limits: lim, rt: rt}
+	c := &Connector{e: e, man: pkg, limits: lim, rt: rt, slots: make(chan struct{}, MaxConcurrentCalls)}
 	if err := c.init(ctx, wasmBytes); err != nil {
 		rt.Close(ctx)
 		return nil, fmt.Errorf("connector %s: %w", pkg.Connector, err)
@@ -150,6 +174,10 @@ func (c *Connector) init(ctx context.Context, wasmBytes []byte) error {
 			return fmt.Errorf("module does not export %s", exp)
 		}
 	}
+	// Без линейной памяти хосту некуда писать запрос и неоткуда читать ответ.
+	if len(c.compiled.ExportedMemories()) == 0 {
+		return errors.New("module does not export its linear memory")
+	}
 	var got manifest.Manifest
 	if err := c.invoke(ctx, abi.ExportManifest, nil, nil, &got); err != nil {
 		return fmt.Errorf("manifest: %w", err)
@@ -162,7 +190,7 @@ func (c *Connector) init(ctx context.Context, wasmBytes []byte) error {
 
 func hostCall(ctx context.Context, m api.Module, fnPtr, fnLen, reqPtr, reqLen uint32) int32 {
 	cl, _ := ctx.Value(callKey{}).(*call)
-	if cl == nil {
+	if cl == nil || m.Memory() == nil {
 		return 0
 	}
 	fn, ok1 := m.Memory().Read(fnPtr, fnLen)
@@ -180,7 +208,7 @@ func hostCall(ctx context.Context, m api.Module, fnPtr, fnLen, reqPtr, reqLen ui
 
 func hostResult(ctx context.Context, m api.Module, dst uint32) {
 	cl, _ := ctx.Value(callKey{}).(*call)
-	if cl == nil {
+	if cl == nil || m.Memory() == nil {
 		return
 	}
 	m.Memory().Write(dst, cl.pending)
@@ -208,8 +236,14 @@ func (l *limitedBuffer) String() string {
 	return l.b.String()
 }
 
-// invoke — новый экземпляр модуля, один экспорт, ответ в out.
-func (c *Connector) invoke(ctx context.Context, export string, d *hostfuncs.Dispatcher, in []byte, out any) error {
+// invoke — новый экземпляр модуля, один экспорт, ответ в out. Паника в хосте
+// (ошибка wazero, неожиданный модуль) — ошибка вызова, а не падение daemon.
+func (c *Connector) invoke(ctx context.Context, export string, d *hostfuncs.Dispatcher, in []byte, out any) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = abi.Errorf(abi.CodeConnector, "connector %s crashed the host call: %v", c.man.Connector, r)
+		}
+	}()
 	c.mu.Lock()
 	closed := c.closed
 	c.mu.Unlock()
@@ -218,6 +252,12 @@ func (c *Connector) invoke(ctx context.Context, export string, d *hostfuncs.Disp
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(c.limits.TimeoutS)*time.Second)
 	defer cancel()
+	select {
+	case c.slots <- struct{}{}:
+		defer func() { <-c.slots }()
+	case <-ctx.Done():
+		return c.trap(ctx, ctx.Err(), &limitedBuffer{})
+	}
 	ctx = context.WithValue(ctx, callKey{}, &call{d: d})
 	stderr := &limitedBuffer{}
 	cfg := wazero.NewModuleConfig().WithName("").WithStartFunctions("_initialize").
@@ -228,6 +268,9 @@ func (c *Connector) invoke(ctx context.Context, export string, d *hostfuncs.Disp
 		return c.trap(ctx, err, stderr)
 	}
 	defer mod.Close(context.Background())
+	if mod.Memory() == nil {
+		return errors.New("module has no linear memory")
+	}
 	args := []uint64{}
 	if export != abi.ExportManifest {
 		res, err := mod.ExportedFunction(abi.ExportAlloc).Call(ctx, uint64(len(in)))
@@ -352,6 +395,14 @@ func (e *Engine) LoadLazy(wasmBytes []byte, pkg manifest.Manifest) *Lazy {
 	l := &Lazy{man: pkg, done: make(chan struct{})}
 	go func() {
 		defer close(l.done)
+		// Паника при компиляции (ошибка wazero на неожиданном модуле) не должна
+		// ронять daemon: коннектор просто не загружается.
+		defer func() {
+			if r := recover(); r != nil {
+				l.c, l.err = nil, fmt.Errorf("connector %s: load: %v", pkg.Connector, r)
+				e.svc.Log.Error("connector not loaded", "connector", pkg.Connector, "err", l.err)
+			}
+		}()
 		l.c, l.err = e.Load(context.Background(), wasmBytes, pkg)
 		if l.err != nil {
 			e.svc.Log.Error("connector not loaded", "connector", pkg.Connector, "err", l.err)

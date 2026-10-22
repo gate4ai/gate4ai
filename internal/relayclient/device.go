@@ -152,8 +152,19 @@ func (d *Device) once(ctx context.Context) error {
 	}
 	d.online.Store(true)
 	d.Log.Info("relay tunnel up", "host", d.ID)
-	srv := &http.Server{Handler: d.Handler, ReadHeaderTimeout: 15 * time.Second}
-	go func() { <-ctx.Done(); sess.Close() }()
+	// Без IdleTimeout keep-alive соединение агента (yamux-поток и горутина)
+	// живёт, пока клиент молчит, — вечно. ReadTimeout/WriteTimeout не ставим:
+	// ответы бывают долгими (ожидание @status до 2 мин, потоки MCP).
+	srv := &http.Server{Handler: d.Handler, ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 2 * time.Minute}
+	// Сессия закрывается и по отмене ctx, и сама (обрыв туннеля): горутина не
+	// переживает переподключение.
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-sess.CloseChan():
+		}
+		sess.Close()
+	}()
 	err = srv.Serve(tls.NewListener(sess, d.ServerTLS))
 	sess.Close()
 	return err
@@ -208,6 +219,38 @@ func (d *Device) Witness(cp audit.Checkpoint) error {
 	return d.post(ctx, "POST", "/api/witness", witnessCheckpoint{Seq: cp.Seq, Head: cp.Head, TS: cp.TS, Sig: cp.Sig})
 }
 
+// LastWitnessed — последний чекпоинт, принятый relay (audit.WitnessReader):
+// по нему журнал замечает обрезку хвоста вместе с его чекпоинтами.
+func (d *Device) LastWitnessed() (audit.Checkpoint, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", strings.TrimSuffix(d.RelayURL, "/")+"/api/witness/"+d.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+d.Token)
+	req.Header.Set("X-Gate4ai-Device", d.ID)
+	resp, err := d.httpClient().Do(req)
+	if err != nil {
+		return audit.Checkpoint{}, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return audit.Checkpoint{}, false, fmt.Errorf("relay /api/witness: %s", resp.Status)
+	}
+	var cps []witnessCheckpoint
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&cps); err != nil {
+		return audit.Checkpoint{}, false, err
+	}
+	var last witnessCheckpoint
+	for _, c := range cps {
+		if c.Seq > last.Seq {
+			last = c
+		}
+	}
+	if last.Seq == 0 {
+		return audit.Checkpoint{}, false, nil
+	}
+	return audit.Checkpoint{Seq: last.Seq, Head: last.Head, TS: last.TS, Sig: last.Sig}, true, nil
+}
+
 // witnessCheckpoint — тело POST /api/witness (протокол relay, docs/protocol.md
 // в репозитории relay).
 type witnessCheckpoint struct {
@@ -254,12 +297,43 @@ type ACMEConfig struct {
 	Email      string
 	Provider   certmagic.DNSProvider
 	Resolvers  []string
+
+	// issuer — эмитент вместо ACME (тесты); renewCheck — как часто проверять
+	// продление (0 — по умолчанию certmagic).
+	issuer     certmagic.Issuer
+	renewCheck time.Duration
 }
 
-// ACMETLS выпускает/обновляет сертификат и возвращает TLS-конфигурацию устройства.
+// ACMETLS выпускает сертификат и возвращает TLS-конфигурацию устройства;
+// сертификат продлевается в фоне до отмены ctx. Кэш certmagic — свой: у
+// глобального (certmagic.NewDefault) фоновое продление идёт с конфигурацией
+// по умолчанию — чужое хранилище, без DNS-01, — и сертификат истекал бы у
+// daemon, работающего дольше срока сертификата.
 func ACMETLS(ctx context.Context, c ACMEConfig) (*tls.Config, error) {
-	cfg := certmagic.NewDefault()
-	cfg.Storage = &certmagic.FileStorage{Path: c.StorageDir}
+	cfg, cache := acmeConfig(c)
+	if err := cfg.ManageSync(ctx, []string{c.Host}); err != nil {
+		cache.Stop()
+		return nil, err
+	}
+	go func() { <-ctx.Done(); cache.Stop() }()
+	t := cfg.TLSConfig()
+	t.NextProtos = []string{"http/1.1"}
+	return t, nil
+}
+
+// acmeConfig — конфигурация certmagic со своим кэшем: продление (фоновое и при
+// загрузке) получает эту же конфигурацию — наше хранилище и эмитент с DNS-01.
+func acmeConfig(c ACMEConfig) (*certmagic.Config, *certmagic.Cache) {
+	var cfg *certmagic.Config
+	cache := certmagic.NewCache(certmagic.CacheOptions{
+		GetConfigForCert:   func(certmagic.Certificate) (*certmagic.Config, error) { return cfg, nil },
+		RenewCheckInterval: c.renewCheck,
+	})
+	cfg = certmagic.New(cache, certmagic.Config{Storage: &certmagic.FileStorage{Path: c.StorageDir}})
+	if c.issuer != nil {
+		cfg.Issuers = []certmagic.Issuer{c.issuer}
+		return cfg, cache
+	}
 	ca := c.CA
 	if ca == "" {
 		ca = certmagic.LetsEncryptProductionCA
@@ -268,12 +342,7 @@ func ACMETLS(ctx context.Context, c ACMEConfig) (*tls.Config, error) {
 		DisableHTTPChallenge: true, DisableTLSALPNChallenge: true,
 		DNS01Solver: &certmagic.DNS01Solver{DNSManager: certmagic.DNSManager{DNSProvider: c.Provider, Resolvers: c.Resolvers}}})
 	cfg.Issuers = []certmagic.Issuer{quietIssuer{issuer}}
-	if err := cfg.ManageSync(ctx, []string{c.Host}); err != nil {
-		return nil, err
-	}
-	t := cfg.TLSConfig()
-	t.NextProtos = []string{"http/1.1"}
-	return t, nil
+	return cfg, cache
 }
 
 // quietIssuer — ACME-эмитент без вопросов в stdin: ManageSync интерактивен, и без

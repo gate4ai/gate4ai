@@ -4,6 +4,7 @@ package paths
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -36,6 +37,18 @@ func TestFindOwnerSocket(t *testing.T) {
 	}
 	t.Setenv("GATE4AI_SOCKET", "/x/explicit.sock")
 	if got := FindOwnerSocket(); got != "/x/explicit.sock" {
+		t.Fatal(got)
+	}
+}
+
+// Имя pipe — по SID, а не по короткому имени (PC\alex и CORP\alex различаются).
+func TestPipeNameUsesSID(t *testing.T) {
+	a := pipeName("gate4ai-", &user.User{Uid: "S-1-5-21-1-2-3-1001", Username: `PC\alex`})
+	b := pipeName("gate4ai-", &user.User{Uid: "S-1-5-21-9-8-7-1001", Username: `CORP\alex`})
+	if a != `\\.\pipe\gate4ai-S-1-5-21-1-2-3-1001` || a == b {
+		t.Fatalf("pipe names: %s, %s", a, b)
+	}
+	if got := pipeName("gate4ai-agent-", nil); got != `\\.\pipe\gate4ai-agent-user` {
 		t.Fatal(got)
 	}
 }

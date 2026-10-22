@@ -31,7 +31,7 @@ type env struct {
 	pool   *x509.CertPool
 }
 
-func start(t *testing.T) *env {
+func start(t *testing.T, opts ...func(*Server)) *env {
 	t.Helper()
 	cert, leaf, err := SelfSigned("relay.test")
 	if err != nil {
@@ -40,6 +40,9 @@ func start(t *testing.T) *env {
 	st, _ := OpenStore("")
 	s := NewServer("relay.test", &tls.Config{Certificates: []tls.Certificate{cert}, NextProtos: []string{"http/1.1"}}, st)
 	s.HoldFor = 200 * time.Millisecond
+	for _, o := range opts {
+		o(s)
+	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -152,26 +155,55 @@ func TestPassthroughAndAuth(t *testing.T) {
 	if _, _, err := e.agentGet("unknown000000000", pool); err == nil {
 		t.Fatal("unknown device answered")
 	}
-	if code := e.call(t, "POST", "/api/witness", id, "dev_wrong", map[string]any{"seq": 1, "head": strings.Repeat("a", 64)}); code != 401 {
+	if code := e.call(t, "POST", "/api/witness", id, "dev_wrong", map[string]any{"seq": 1, "head": strings.Repeat("a", 64), "sig": sig}); code != 401 {
 		t.Fatal("wrong token:", code)
 	}
 }
+
+// sig — подпись Ed25519 по формату протокола (64 байта hex); relay её не проверяет.
+var sig = strings.Repeat("cd", 64)
 
 func TestWitnessMonotonic(t *testing.T) {
 	e := start(t)
 	id, tok := e.register(t)
 	head := strings.Repeat("ab", 32)
-	if code := e.call(t, "POST", "/api/witness", id, tok, map[string]any{"seq": 10, "head": head, "ts": time.Now(), "sig": "00"}); code != 200 {
+	if code := e.call(t, "POST", "/api/witness", id, tok, map[string]any{"seq": 10, "head": head, "ts": time.Now(), "sig": sig}); code != 200 {
 		t.Fatal(code)
 	}
-	if code := e.call(t, "POST", "/api/witness", id, tok, map[string]any{"seq": 5, "head": head}); code != 409 {
+	if code := e.call(t, "POST", "/api/witness", id, tok, map[string]any{"seq": 5, "head": head, "sig": sig}); code != 409 {
 		t.Fatal("rewound log accepted:", code)
 	}
-	if code := e.call(t, "POST", "/api/witness", id, tok, map[string]any{"seq": 11, "head": "short"}); code != 400 {
-		t.Fatal("bad head accepted:", code)
+	// Тот же seq: тот же head — повтор (200), другой — переписывание (409).
+	if code := e.call(t, "POST", "/api/witness", id, tok, map[string]any{"seq": 10, "head": head, "sig": sig}); code != 200 {
+		t.Fatal("repeated checkpoint:", code)
+	}
+	if code := e.call(t, "POST", "/api/witness", id, tok, map[string]any{"seq": 10, "head": strings.Repeat("ef", 32), "sig": sig}); code != 409 {
+		t.Fatal("same seq, other head accepted:", code)
+	}
+	for _, bad := range []map[string]any{
+		{"seq": 11, "head": "short", "sig": sig},
+		{"seq": 11, "head": strings.Repeat("zz", 32), "sig": sig}, // не hex
+		{"seq": 11, "head": head, "sig": "00"},                    // не подпись Ed25519
+		{"seq": 11, "head": head},
+		{"seq": 0, "head": head, "sig": sig},
+	} {
+		if code := e.call(t, "POST", "/api/witness", id, tok, bad); code != 400 {
+			t.Fatal("bad checkpoint accepted:", bad, code)
+		}
 	}
 	if cps := e.srv.Store.Checkpoints(id); len(cps) != 1 || cps[0].Seq != 10 {
 		t.Fatal(cps)
+	}
+	// Чтение — только самим устройством.
+	if code := e.call(t, "GET", "/api/witness/"+id, "", "", nil); code != 401 {
+		t.Fatal("checkpoints readable without the device token:", code)
+	}
+	id2, tok2 := e.register(t)
+	if code := e.call(t, "GET", "/api/witness/"+id, id2, tok2, nil); code != 401 {
+		t.Fatal("another device read checkpoints:", code)
+	}
+	if code := e.call(t, "GET", "/api/witness/"+id, id, tok, nil); code != 200 {
+		t.Fatal(code)
 	}
 }
 

@@ -64,7 +64,7 @@ func List(dir string) ([]Installed, error) {
 	for _, e := range ents {
 		// Точки в имени коннектора нет: ".install-<имя>-*" и "<имя>.old" — каталоги
 		// идущей установки (Install), их видно, пока ставится коннектор по умолчанию.
-		if !e.IsDir() || e.Name() == "data" || strings.Contains(e.Name(), ".") {
+		if !e.IsDir() || registry.Reserved(e.Name()) || strings.Contains(e.Name(), ".") {
 			continue
 		}
 		d := filepath.Join(dir, e.Name())
@@ -195,7 +195,7 @@ func (o Options) check(it Installed, ix *registry.Index) ([]byte, error) {
 	if digest != it.Info.Digest {
 		return nil, errors.New("files changed after installation (digest mismatch)")
 	}
-	if !equalStrings(it.Manifest.Summary(), nonNil(it.Info.Capabilities)) {
+	if !capsMatch(it.Manifest, it.Info.Capabilities) {
 		return nil, errors.New("capabilities differ from what the owner consented to")
 	}
 	if ix != nil {
@@ -204,18 +204,6 @@ func (o Options) check(it Installed, ix *registry.Index) ([]byte, error) {
 		}
 	}
 	return bin, nil
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // readOnlyClient — коннектор сообщества: доступны только действия класса read.

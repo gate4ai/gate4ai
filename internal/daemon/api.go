@@ -209,8 +209,17 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		_, n := d.Config.CurrentRaw()
 		// version и args — для `gate4ai daemon status` (старый бинарник после
 		// обновления) и `gate4ai daemon restart` (запуск с теми же флагами).
-		writeJSON(w, 200, map[string]any{"ok": true, "config_version": n, "connectors": len(d.Registry.Manifests()), "pid": os.Getpid(),
-			"version": version.Version, "args": daemonArgs()})
+		// argv и предупреждения — только на сокете владельца: health отвечает
+		// без аутентификации, а на сокете агентов собеседник — агент.
+		res := map[string]any{"ok": true, "config_version": n, "connectors": len(d.Registry.Manifests()), "pid": os.Getpid(),
+			"version": version.Version}
+		if owner {
+			res["args"] = daemonArgs()
+			if w := d.PolicyWarning(); w != "" {
+				res["policy_warning"] = w
+			}
+		}
+		writeJSON(w, 200, res)
 	})
 	// Остановка по просьбе владельца (`gate4ai daemon stop`): Serve завершается штатно.
 	mux.HandleFunc("POST /v1/shutdown", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -332,12 +341,19 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		var req struct {
 			YAML    string `json:"yaml"`
 			Comment string `json:"comment"`
+			Base    int    `json:"base,omitempty"` // версия, от которой сделана правка (0 — без проверки)
 		}
 		if err := readJSON(r, &req); err != nil {
 			writeErr(w, 400, "bad_request", err.Error())
 			return
 		}
-		v, err := d.Config.Put(p, []byte(req.YAML), req.Comment)
+		// base — версия, которую клиент правил: если с тех пор политику
+		// изменили (одобренный change_policy, Web UI), правка не затирает их.
+		v, err := d.Config.PutIf(p, []byte(req.YAML), req.Comment, req.Base)
+		if errors.Is(err, config.ErrConflict) {
+			writeErr(w, 409, "conflict", err.Error())
+			return
+		}
 		if err != nil {
 			writeErr(w, 400, "invalid_policy", err.Error())
 			return
@@ -444,6 +460,14 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		ch := req.Channel
 		if ch == "" {
 			ch = "cli"
+		}
+		if req.Approve && ch == "tray" {
+			// Самонастройку трей одним нажатием не одобряет: правки видны
+			// целиком только в Web UI (code review E.5).
+			if a, err := d.State.GetApproval(r.PathValue("id")); err == nil && strings.HasPrefix(a.Action, SelfConnector+".") {
+				writeErr(w, 403, "web_only", "approve changes of gate4ai in the Web UI (gate4ai ui): all the changes are shown there")
+				return
+			}
 		}
 		res, err := d.Pipeline.Decide(r.Context(), r.PathValue("id"), req.Approve, ch, "owner")
 		if err != nil {
@@ -572,6 +596,9 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 			writeErr(w, 400, "bad_request", err.Error())
 			return
 		}
+		if p.Via == "https" && wait > maxPublicWait {
+			wait = maxPublicWait
+		}
 		args, _ := numbersToFloat(map[string]any(req.Args)).(map[string]any)
 		res := d.Pipeline.Execute(r.Context(), pipeline.Call{Agent: agent, Action: req.Action, Args: args, Wait: wait})
 		writeJSON(w, 200, res)
@@ -584,6 +611,9 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 			return
 		}
 		wait, _ := config.ParseDuration(r.URL.Query().Get("wait"))
+		if p.Via == "https" && wait > maxPublicWait {
+			wait = maxPublicWait // публичный адрес: соединение не держится дольше
+		}
 		if wait > 0 {
 			writeJSON(w, 200, d.Pipeline.WaitFor(r.Context(), id, wait))
 			return
@@ -593,11 +623,16 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 	}))
 }
 
-// daemonArgs — флаги, с которыми запущен daemon (после «gate4ai daemon»).
+// maxPublicWait — сколько публичный адрес ждёт решения в одном запросе (как
+// @status встроенного MCP); WriteTimeout публичного сервера — больше.
+const maxPublicWait = 2 * time.Minute
+
+// daemonArgs — флаги, с которыми запущен daemon (после «gate4ai daemon»), без
+// разовых: --reset-ui-login не повторяется при restart.
 func daemonArgs() []string {
 	for i, a := range os.Args {
 		if a == "daemon" {
-			return append([]string{}, os.Args[i+1:]...)
+			return filterOneShot(os.Args[i+1:])
 		}
 	}
 	return []string{}
@@ -611,4 +646,18 @@ func orEmpty(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// filterOneShot убирает из флагов daemon разовые: --reset-ui-login (снятие
+// защиты входа) не должно повторяться при каждом restart.
+func filterOneShot(args []string) []string {
+	out := []string{}
+	for _, a := range args {
+		name, _, _ := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		if strings.HasPrefix(a, "-") && name == "reset-ui-login" {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }

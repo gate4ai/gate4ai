@@ -95,8 +95,11 @@ func (probe) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 		time.Sleep(1200 * time.Millisecond)
 		return abi.ExecResult{Structured: map[string]any{"slept_ms": time.Since(start).Milliseconds()}}, nil
 	case "hog":
+		// Сразу больше limits.memory_mb одним куском: выход за предел памяти
+		// не зависит от скорости машины (по 8 МиБ под -race мог раньше
+		// наступить срок вызова).
 		for {
-			sink = append(sink, make([]byte, 8<<20))
+			sink = append(sink, make([]byte, 256<<20))
 		}
 	case "crash":
 		var m map[string]int

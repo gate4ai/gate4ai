@@ -46,6 +46,13 @@ func (h *Host) FSRead(path string, max int64) (FSReadResponse, error) {
 	return out, err
 }
 
+// FSReadAt — fs_read с позиции offset (отрицательное — столько байт с конца файла).
+func (h *Host) FSReadAt(path string, offset, max int64) (FSReadResponse, error) {
+	var out FSReadResponse
+	err := h.call(FnFSRead, FSRequest{Path: path, Max: max, Offset: offset}, &out)
+	return out, err
+}
+
 // FSWrite — fs_write (атомарно: временный файл и переименование).
 func (h *Host) FSWrite(path string, data []byte) (FSWriteResponse, error) {
 	var out FSWriteResponse

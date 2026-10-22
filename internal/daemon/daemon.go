@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gate4ai/gate4ai/internal/audit"
@@ -86,6 +87,17 @@ type Daemon struct {
 	public     []publicRoute
 	publicURLs []func() string
 	publicMux  http.Handler
+
+	// strict — новые версии конфигурации проверяются по каталогу строго; до
+	// конца открытия хранилища сохранённая версия проверяется мягко (legacy —
+	// её ошибки, которые терпятся и в новых версиях, пока владелец их не уберёт).
+	strict     atomic.Bool
+	legacyErrs map[string]bool
+	// policyWarn — политика скомпилирована без проверки имён аргументов:
+	// правила ссылаются на действия незагруженных коннекторов.
+	policyWarn string
+	// ticker — горутина периодических задач Serve (Close ждёт её).
+	ticker sync.WaitGroup
 }
 
 // New собирает daemon.
@@ -134,15 +146,13 @@ func New(opt Options) (*Daemon, error) {
 		d.Registry.Add(sc)
 	}
 	// Каталог меняется при установке и удалении коннекторов — проверка по текущему.
-	validator := func(c *config.Config) config.Errors {
-		return policy.Validator(policy.Catalog(d.Registry.Catalog()))(c)
-	}
 	_, err = os.Stat(filepath.Join(opt.Home, "config", "current"))
 	fresh := errors.Is(err, os.ErrNotExist)
-	d.Config, err = config.OpenStore(filepath.Join(opt.Home, "config"), opt.InitialConfig, validator)
+	d.Config, err = config.OpenStore(filepath.Join(opt.Home, "config"), opt.InitialConfig, d.validate)
 	if err != nil {
 		return nil, err
 	}
+	d.strict.Store(true)
 	if fresh {
 		if err := d.savePendingDefaults(opt.DefaultConnectors); err != nil {
 			return nil, err
@@ -150,7 +160,7 @@ func New(opt Options) (*Daemon, error) {
 	}
 	d.dropRevoked()
 	d.AddRoutes(d.connectorRoutes)
-	eng, err := policy.New(d.Config.Current(), policy.Catalog(d.Registry.Catalog()))
+	eng, _, err := d.compilePolicy(d.Config.Current())
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +180,7 @@ func New(opt Options) (*Daemon, error) {
 	d.Pipeline.Describe = map[string]func(string, map[string]any) (string, error){SelfConnector: d.describeSelf}
 	d.Pipeline.EndCall = d.endCall
 	d.Pipeline.ConnectorLog = d.devLog
-	d.Pipeline.AlwaysAsk = map[string]func(map[string]any) string{SelfConnector: alwaysAskSelf}
+	d.Pipeline.AlwaysAsk = map[string]func(map[string]any) string{SelfConnector: d.alwaysAskSelf}
 	d.Pipeline.Vault = d.Vault
 	d.Pipeline.Ask = d.ask
 	if opt.Now != nil {
@@ -178,7 +188,7 @@ func New(opt Options) (*Daemon, error) {
 		d.State.Now = opt.Now
 	}
 	d.Config.Subscribe(func(c *config.Config) {
-		e, err := policy.New(c, policy.Catalog(d.Registry.Catalog()))
+		e, _, err := d.compilePolicy(c)
 		if err != nil {
 			d.Log.Error("policy compile after config change", "err", err)
 			return
@@ -186,9 +196,91 @@ func New(opt Options) (*Daemon, error) {
 		d.Pipeline.SetEngine(e)
 		d.Log.Info("policy updated")
 	})
+	// Действия, прерванные прошлой остановкой: итоговые квитанции и итоги запросов.
+	if n, err := d.Pipeline.Recover(); err != nil {
+		d.Log.Error("recover interrupted actions", "err", err)
+	} else if n > 0 {
+		d.Log.Warn("interrupted actions closed", "count", n)
+	}
 	d.migrateBrowserSection()
 	d.updateWasmBrowser()
 	return d, nil
+}
+
+// errKey — ошибка проверки без номера строки (он меняется между версиями).
+func errKey(e config.FieldError) string { return e.Path + "\x00" + e.Msg }
+
+// validate — проверка CEL по каталогу загруженных коннекторов. Сохранённая
+// версия на старте проверяется мягко: если правила ссылаются на аргументы
+// действий коннектора, которого нет в каталоге (удалён, отозван, повреждён),
+// daemon всё равно стартует — иначе владельцу нечем исправить политику.
+// Такие ошибки запоминаются и терпятся в новых версиях; новые — нет.
+func (d *Daemon) validate(c *config.Config) config.Errors {
+	errs := policy.Validator(policy.Catalog(d.Registry.Catalog()))(c)
+	if len(errs) == 0 {
+		return nil
+	}
+	if !d.strict.Load() {
+		if policy.Validator(nil)(c) != nil {
+			return errs // ошибка не в именах аргументов
+		}
+		d.mu.Lock()
+		d.legacyErrs = map[string]bool{}
+		for _, e := range errs {
+			d.legacyErrs[errKey(e)] = true
+		}
+		d.mu.Unlock()
+		d.Log.Warn("saved policy references actions of connectors that are not loaded; their conditions are not checked against the catalog until you fix the policy", "errors", errs.Error())
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out config.Errors
+	for _, e := range errs {
+		if !d.legacyErrs[errKey(e)] {
+			out = append(out, e)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// compilePolicy — движок политики по каталогу. Если имена аргументов в
+// условиях не сходятся с каталогом (коннектор удалён или не загрузился),
+// политика компилируется без каталога: такие условия для неизвестного
+// действия не вычисляются, а остальное работает. warn — что не сошлось
+// (видно владельцу в daemon status).
+func (d *Daemon) compilePolicy(c *config.Config) (*policy.Engine, string, error) {
+	e, err := policy.New(c, policy.Catalog(d.Registry.Catalog()))
+	warn := ""
+	if err != nil {
+		var err2 error
+		if e, err2 = policy.New(c, nil); err2 != nil {
+			return nil, "", err
+		}
+		warn = err.Error()
+		d.Log.Warn("policy compiled without the connector catalog", "err", err)
+	}
+	d.mu.Lock()
+	d.policyWarn = warn
+	d.mu.Unlock()
+	return e, warn, nil
+}
+
+// PolicyWarning — почему политика скомпилирована без каталога ("" — всё сошлось).
+func (d *Daemon) PolicyWarning() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.policyWarn
+}
+
+// TrackServer — HTTP-сервер (Web UI), который Shutdown останавливает вместе с API.
+func (d *Daemon) TrackServer(srv *http.Server) {
+	d.mu.Lock()
+	d.servers = append(d.servers, srv)
+	d.mu.Unlock()
 }
 
 // AddNotifier подключает канал подтверждений/уведомлений.
@@ -226,7 +318,13 @@ func (d *Daemon) Serve(ctx context.Context, ownerSock, agentSock string) error {
 	errc := make(chan error, 2)
 	d.ServeListener(ol, true, errc)
 	d.ServeListener(al, false, errc)
+	// Тикер живёт до конца Serve (в том числе при остановке по просьбе
+	// владельца): после него Close закрывает базы.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	d.ticker.Add(1)
 	go func() {
+		defer d.ticker.Done()
 		t := time.NewTicker(10 * time.Second)
 		defer t.Stop()
 		for {
@@ -245,7 +343,9 @@ func (d *Daemon) Serve(ctx context.Context, ownerSock, agentSock string) error {
 		d.Log.Info("stop requested by the owner")
 	case err = <-errc:
 	}
+	cancel()
 	d.Shutdown()
+	d.ticker.Wait()
 	return err
 }
 
@@ -284,7 +384,10 @@ func (d *Daemon) Shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for _, s := range srvs {
-		_ = s.Shutdown(ctx)
+		if err := s.Shutdown(ctx); err != nil {
+			// Не дождались (status --wait, долгий вызов): закрыть соединения.
+			_ = s.Close()
+		}
 	}
 	d.Pipeline.Wait()
 }
@@ -292,6 +395,7 @@ func (d *Daemon) Shutdown() {
 // Close освобождает ресурсы.
 func (d *Daemon) Close() {
 	d.Shutdown()
+	d.ticker.Wait()
 	d.Registry.Close()
 	if d.Wasm != nil {
 		_ = d.Wasm.Close()
@@ -315,7 +419,7 @@ func (d *Daemon) startWasm(opt Options) error {
 	e, err := wasm.NewEngine(filepath.Join(opt.Home, "cache", "wasm"), wasm.Services{
 		Secrets: vaultSecrets{d.Vault},
 		KV:      func(name string) hostfuncs.KV { return kv(name) },
-		Router:  d, Log: d.Log, Home: home, Dial: opt.WasmDial, RootCAs: opt.WasmRootCAs})
+		Router:  d, Log: d.Log, Home: home, Dial: opt.WasmDial, RootCAs: opt.WasmRootCAs, Mask: d.Vault.MaskString})
 	if err != nil {
 		return err
 	}

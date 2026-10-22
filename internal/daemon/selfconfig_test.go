@@ -136,7 +136,7 @@ func TestInstallDevConnectorByAgent(t *testing.T) {
 		t.Fatal("installed and given to the agent's profile")
 	}
 	// Нативный код из папки агент поставить не может.
-	if _, err := devManifest("/nonexistent"); err == nil {
+	if _, _, err := devManifest("/nonexistent"); err == nil {
 		t.Fatal("no manifest")
 	}
 }

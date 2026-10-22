@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package mcp — MCP-сервер gate4.ai: каталог инструментов по профилю агента,
-// вызовы через Action Pipeline. Инструментов изменения политик нет вообще.
+// вызовы через Action Pipeline. Политику агент меняет только инструментом
+// gate4ai_change_policy (виден всем агентам): это обычное действие под
+// политикой — по умолчанию с подтверждением владельца.
 // Транспорты: stdio (`gate4ai mcp`) и Streamable HTTP (через relay).
 package mcp
 

@@ -1,0 +1,39 @@
+# Репозитории проекта
+
+Проект gate4ai — несколько репозиториев на github.com/gate4ai. Локально они лежат рядом в общем каталоге проекта, который сам не git-репозиторий (так pitwall создаёт набор worktree задачи сразу по всем клонам). Код продукта — один репозиторий `gate4ai/gate4ai` и один Go-модуль `github.com/gate4ai/gate4ai`.
+
+## Репозитории
+
+| Локальный каталог | Репозиторий | Видимость | Лицензия | Что |
+|---|---|---|---|---|
+| `gate4ai/` | `gate4ai/gate4ai` | публичный | AGPL-3.0-only, `sdk-go/` — Apache-2.0 | ядро и трей, `sdk-go/`, `relay/`, `connectors/`, `e2e/` (каталоги — ниже) |
+| `registry/` | `gate4ai/registry` | публичный | CC0 1.0 (индекс); у коннекторов — свои, поле `license` | индекс магазина `index.json` и его подпись; версия gate4ai для CI — `.github/gate4ai-version` |
+| `www/` | `gate4ai/www` | приватный | — (не публикуется) | сайт gate4.ai и установщики `install.sh`/`install.ps1`; CI собирает образ `ghcr.io/gate4ai/www:<sha>` и выкладывает его на сервер relay |
+| `dev/` | `gate4ai/dev` | приватный | — (не публикуется) | скрипты процессов pitwall: `deploy.sh`, стенд, тесты набора |
+| `.github/` | `gate4ai/.github` | публичный | — | профиль организации, CONTRIBUTING, SECURITY.md |
+| `.secrets/keys/` | — | вне git | — | ключ издателя и ключ registry |
+
+Внешний вклад — с CLA и DCO (`Signed-off-by` в каждом коммите). SPDX-заголовок в каждом файле `gate4ai/` проверяет `scripts/spdx.sh`.
+
+## Каталоги монорепозитория `gate4ai/`
+
+| Каталог | Лицензия | Может импортировать |
+|---|---|---|
+| `cmd/`, `internal/` (ядро: daemon, CLI, трей) | AGPL-3.0-only | ядро, `sdk-go`; `relay` — только в тестах |
+| `sdk-go/` (манифест, ABI, PDK, формат индекса registry) | Apache-2.0 (свой `LICENSE`) | только `sdk-go` |
+| `relay/` (сервер relay) | AGPL-3.0-only | `relay`, `sdk-go` |
+| `connectors/<имя>/` (официальные коннекторы: `mail`, `browser`; `auth/` — auth-модули) | AGPL-3.0-only | свой каталог, `sdk-go`, ядро; другой коннектор — никогда |
+| `e2e/` (сквозные тесты) | AGPL-3.0-only | что угодно; `e2e` не импортирует никто |
+
+Направление зависимостей проверяет `scripts/deps-check.sh` (в CI — `scripts/ci.sh`); какой компонент спецификации в каком пакете — [architecture.md](architecture.md).
+
+## Зависимости между репозиториями
+
+- `www` требует модуль `github.com/gate4ai/gate4ai` выпущенной версии (`require … vX.Y.Z`; берёт `sdk-go/registry` для проверки подписи индекса). Обновляет её `dev/scripts/deploy.sh gate4ai-bump`. Локально `dev/scripts/test-set.sh` собирает сайт с соседним `gate4ai/` через временный `go.work`.
+- `registry` ссылается на релизы `gate4ai/gate4ai`: пакеты коннекторов (`.g4c`, `.platforms.json`) лежат в релизе тега, а CI registry ставит gate4ai версии из `.github/gate4ai-version`. Записи официальных коннекторов добавляет `dev/scripts/deploy.sh registry` после каждого релиза ([publishing.md](publishing.md)).
+- Сторонние коннекторы требуют `github.com/gate4ai/gate4ai` и импортируют только `sdk-go/...`.
+- `dev` работает со всеми клонами сразу и ничего не импортирует.
+
+## Архив: прежние отдельные репозитории
+
+До 2026-10-21 `sdk-go`, `relay`, `gate4ai-mail`, `gate4ai-browser`, `gate4ai-files` и `e2e` были отдельными репозиториями. Их код перенесён в `gate4ai/` без истории, на GitHub они удалены; обратной совместимости с их путями модулей и релизами нет. Если в каталоге проекта остались их клоны (`relay/`, `sdk-go/`, `e2e/`, `connectors/mail/`, `connectors/browser/` в корне), это архив: в README каждого есть пометка, деплоя и релизов в их workflow нет, а `dev/scripts` их не тестирует и не включает в `go.work` (список репозиториев — `project_repos` в `dev/scripts/workset.sh`). Правки — только в `gate4ai/`; сами клоны можно удалить.

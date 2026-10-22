@@ -2,7 +2,7 @@
 {{$d := .Data}}
 <div class="row between"><h2>Конфигурация YAML <span class="muted">версия {{$d.Version}}</span></h2><a href="{{.Base}}/policy">← Правила</a></div>
 <p class="muted">Вся конфигурация одним файлом — для технических пользователей. Изменения в разделах Web UI сохраняют модель, но не комментарии YAML.</p>
-<form method="post" action="{{.Base}}/policy" class="card"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<form method="post" action="{{.Base}}/policy" class="card"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="base" value="{{$d.Base}}">
 <textarea class="code" name="yaml" rows="30" spellcheck="false">{{$d.YAML}}</textarea>
 <div class="row" style="margin-top:.5rem"><input name="comment" placeholder="комментарий к версии" size="40"><button class="primary">Сохранить новую версию</button></div></form>
 <h3>Версии</h3>

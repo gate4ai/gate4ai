@@ -16,6 +16,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/gate4ai/sdk-go/capability"
+	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs/mask"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 	"github.com/gate4ai/gate4ai/sdk-go/netauth"
 )
@@ -64,6 +66,9 @@ const (
 	MaxEvidence     = 32 << 20
 	MaxConns        = 8
 	maxConnReadWait = 200
+	// MaxConnBuffer — предел непрочитанных модулем данных соединения: дальше
+	// фоновое чтение ждёт, пока модуль заберёт данные.
+	MaxConnBuffer = 8 << 20
 )
 
 // Dispatcher — функции хоста для одного вызова коннектора.
@@ -84,6 +89,7 @@ type Dispatcher struct {
 	mu       sync.Mutex
 	conns    map[int]*conn
 	next     int
+	dialing  int // соединения, для которых занят слот MaxConns, но dial ещё идёт
 	used     []string
 	evidence []abi.EvidenceItem
 	evSize   int
@@ -110,10 +116,10 @@ func (d *Dispatcher) Evidence() []abi.EvidenceItem {
 	return append([]abi.EvidenceItem(nil), d.evidence...)
 }
 
-// secret — значение секрета для адреса host (проверка привязки); значение
-// запоминается для маскирования.
-func (d *Dispatcher) secret(alias, host string) (string, error) {
-	if err := d.Check.Secret(alias, host); err != nil {
+// secret — значение секрета для соединения scheme://host:port (проверка
+// привязки); значение запоминается для маскирования.
+func (d *Dispatcher) secret(alias, scheme, host string, port int) (string, error) {
+	if err := d.Check.Secret(alias, scheme, host, port); err != nil {
 		return "", err
 	}
 	if d.Secrets == nil {
@@ -131,28 +137,30 @@ func (d *Dispatcher) secret(alias, host string) (string, error) {
 	return v, nil
 }
 
-// Mask вырезает значения секретов, подставленных в этом вызове.
-func (d *Dispatcher) Mask(s string) string {
+// masks — набор маскирования по секретам, подставленным в этом вызове
+// (значения и производные формы, один проход).
+func (d *Dispatcher) masks() *mask.Set {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	for _, v := range d.used {
-		if len(v) >= 4 {
-			s = strings.ReplaceAll(s, v, "[secret]")
-		}
-	}
-	return s
+	return mask.New(d.used...)
 }
 
-func (d *Dispatcher) maskBytes(b []byte) []byte {
+// Mask вырезает значения секретов, подставленных в этом вызове.
+func (d *Dispatcher) Mask(s string) string { return d.masks().String(s, "[secret]") }
+
+func (d *Dispatcher) maskBytes(b []byte) []byte { return d.masks().Bytes(b, "[secret]") }
+
+func (d *Dispatcher) secretsUsed() bool {
 	d.mu.Lock()
-	used := d.used
-	d.mu.Unlock()
-	for _, v := range used {
-		if len(v) >= 4 {
-			b = bytes.ReplaceAll(b, []byte(v), []byte("[secret]"))
-		}
-	}
-	return b
+	defer d.mu.Unlock()
+	return len(d.used) > 0
+}
+
+// textual — доказательство с текстом (маскируется); изображения — нет.
+func textual(mime string) bool {
+	m := strings.ToLower(mime)
+	return m == "" || strings.HasPrefix(m, "text/") || strings.Contains(m, "json") || strings.Contains(m, "xml") ||
+		strings.Contains(m, "javascript") || strings.Contains(m, "x-www-form-urlencoded")
 }
 
 // Call — вызов функции хоста (abi.Transport).
@@ -224,7 +232,7 @@ func (d *Dispatcher) call(fn string, req []byte) (any, error) {
 		delete(d.conns, r.Conn)
 		d.mu.Unlock()
 		if c != nil {
-			c.c.Close()
+			c.close()
 		}
 		return struct{}{}, nil
 	case abi.FnFSRead, abi.FnFSWrite, abi.FnFSAppend, abi.FnFSList, abi.FnFSStat:
@@ -243,6 +251,9 @@ func (d *Dispatcher) call(fn string, req []byte) (any, error) {
 		var r abi.EvidenceItem
 		if err := decode(req, &r); err != nil {
 			return nil, err
+		}
+		if textual(r.MIME) {
+			r.Data = d.maskBytes(r.Data)
 		}
 		d.mu.Lock()
 		defer d.mu.Unlock()
@@ -271,25 +282,52 @@ func (d *Dispatcher) call(fn string, req []byte) (any, error) {
 	return nil, abi.Errorf(abi.CodeNotSupported, "unknown host function %q", fn)
 }
 
-var placeholderRe = regexp.MustCompile(`\{\{secret:(@[a-zA-Z0-9_.\-]+)\}\}`)
+var (
+	placeholderRe = regexp.MustCompile(`\{\{secret:(@[a-zA-Z0-9_.\-]+)\}\}`)
+	// secretValueRe — значение заголовка с секретом: весь заголовок —
+	// плейсхолдер, перед ним может стоять схема ("Bearer ", "Token ").
+	secretValueRe = regexp.MustCompile(`^((?:[A-Za-z][A-Za-z0-9._~+/=-]{0,31} )?)\{\{secret:(@[a-zA-Z0-9_.\-]+)\}\}$`)
+	// secretHeaderRe — заголовки, куда можно подставить секрет: заголовки
+	// аутентификации, а не произвольные (их сервер может отразить в ответе).
+	secretHeaderRe = regexp.MustCompile(`(?i)^(authorization|cookie)$|key|token|auth|secret|signature|session|password|credential`)
+)
 
-func (d *Dispatcher) substitute(s, host string) (string, error) {
-	var ferr error
-	out := placeholderRe.ReplaceAllStringFunc(s, func(m string) string {
-		alias := placeholderRe.FindStringSubmatch(m)[1]
-		v, err := d.secret(alias, host)
-		if err != nil && ferr == nil {
-			ferr = err
+// substituteHeader подставляет секрет в заголовок name: только в заголовок
+// аутентификации и только целиком (схема + плейсхолдер).
+func (d *Dispatcher) substituteHeader(name, v, scheme, host string, port int) (string, error) {
+	if !strings.Contains(v, "{{secret:") {
+		return v, nil
+	}
+	// Сначала — право на секрет для этого адреса (capability_denied), затем —
+	// место подстановки.
+	for _, m := range placeholderRe.FindAllStringSubmatch(v, -1) {
+		if err := d.Check.Secret(m[1], scheme, host, port); err != nil {
+			return "", err
 		}
-		return v
-	})
-	return out, ferr
+	}
+	m := secretValueRe.FindStringSubmatch(v)
+	if m == nil || !secretHeaderRe.MatchString(name) {
+		return "", abi.Errorf(abi.CodeBadRequest, "a secret may only be the whole value of an authentication header (Authorization: Bearer {{secret:@alias}}), not in %s", name)
+	}
+	val, err := d.secret(m[2], scheme, host, port)
+	if err != nil {
+		return "", err
+	}
+	return m[1] + val, nil
 }
+
+// noSecretHeaders — заголовки запроса, которые коннектор не задаёт: сжатие
+// ответа (маскирование не видит значение в сжатом теле) и частичные ответы
+// (часть значения). Сжатие согласует и снимает сам хост.
+var noSecretHeaders = []string{"Accept-Encoding", "Te", "Range", "If-Range"}
 
 func (d *Dispatcher) http(r abi.HTTPRequest) (abi.HTTPResponse, error) {
 	var out abi.HTTPResponse
 	if strings.Contains(r.URL, "{{secret:") {
-		return out, abi.Errorf(abi.CodeBadRequest, "secrets are not allowed in the URL (use a header or the body)")
+		return out, abi.Errorf(abi.CodeBadRequest, "secrets are not allowed in the URL (use an authentication header)")
+	}
+	if bytes.Contains(r.Body, []byte("{{secret:")) {
+		return out, abi.Errorf(abi.CodeBadRequest, "secrets are not allowed in the body (use an authentication header)")
 	}
 	u, err := url.Parse(r.URL)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Hostname() == "" {
@@ -310,25 +348,24 @@ func (d *Dispatcher) http(r abi.HTTPRequest) (abi.HTTPResponse, error) {
 	if method == "" {
 		method = "GET"
 	}
-	body, err := d.substitute(string(r.Body), host)
-	if err != nil {
-		return out, err
-	}
 	timeout := d.timeout()
 	if r.TimeoutMS > 0 && time.Duration(r.TimeoutMS)*time.Millisecond < timeout {
 		timeout = time.Duration(r.TimeoutMS) * time.Millisecond
 	}
 	ctx, cancel := context.WithTimeout(d.ctx(), timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(r.Body))
 	if err != nil {
 		return out, abi.Errorf(abi.CodeBadRequest, "%v", err)
 	}
 	for k, v := range r.Headers {
-		if v, err = d.substitute(v, host); err != nil {
+		if v, err = d.substituteHeader(k, v, u.Scheme, host, port); err != nil {
 			return out, err
 		}
 		req.Header.Set(k, v)
+	}
+	for _, h := range noSecretHeaders {
+		req.Header.Del(h)
 	}
 	tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: d.RootCAs, MinVersion: tls.VersionTLS12}, DialContext: d.Dial, Proxy: nil}
 	defer tr.CloseIdleConnections()
@@ -339,6 +376,11 @@ func (d *Dispatcher) http(r abi.HTTPRequest) (abi.HTTPResponse, error) {
 		return out, abi.Errorf(abi.CodeIO, "%s %s: %v", method, host, err)
 	}
 	defer resp.Body.Close()
+	// Тело, которое хост не распаковал (сервер сжал без запроса), маскирование
+	// не видит: если в вызове подставлялись секреты — отказ.
+	if ce := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding"))); ce != "" && ce != "identity" && !resp.Uncompressed && d.secretsUsed() {
+		return out, abi.Errorf(abi.CodeIO, "%s %s: unsupported Content-Encoding %q in a call that uses secrets", method, host, ce)
+	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, MaxHTTPBody+1))
 	if err != nil {
 		return out, abi.Errorf(abi.CodeIO, "read body: %v", err)
@@ -355,16 +397,42 @@ func (d *Dispatcher) http(r abi.HTTPRequest) (abi.HTTPResponse, error) {
 
 // conn — соединение коннектора с фоновым чтением.
 type conn struct {
-	c     net.Conn
-	mu    sync.Mutex
-	buf   []byte
-	eof   bool
-	ready chan struct{}
+	c      net.Conn
+	mu     sync.Mutex
+	buf    []byte
+	eof    bool
+	closed bool
+	ready  chan struct{}
+	space  *sync.Cond // буфер освободился или соединение закрыто
+}
+
+func newConn(nc net.Conn, greeting []byte) *conn {
+	c := &conn{c: nc, buf: append([]byte(nil), greeting...), ready: make(chan struct{}, 1)}
+	c.space = sync.NewCond(&c.mu)
+	return c
+}
+
+func (c *conn) close() {
+	c.mu.Lock()
+	c.closed = true
+	c.space.Broadcast()
+	c.mu.Unlock()
+	c.c.Close()
 }
 
 func (c *conn) pump() {
 	b := make([]byte, 32<<10)
 	for {
+		// Модуль не забирает данные — дальше не читаем (предел памяти).
+		c.mu.Lock()
+		for len(c.buf) >= MaxConnBuffer && !c.closed {
+			c.space.Wait()
+		}
+		closed := c.closed
+		c.mu.Unlock()
+		if closed {
+			return
+		}
 		n, err := c.c.Read(b)
 		c.mu.Lock()
 		c.buf = append(c.buf, b[:n]...)
@@ -403,6 +471,9 @@ func (c *conn) read(max, waitMS int) abi.ConnReadResponse {
 	n := min(max, len(c.buf))
 	out := abi.ConnReadResponse{Data: append([]byte(nil), c.buf[:n]...)}
 	c.buf = c.buf[n:]
+	if n > 0 {
+		c.space.Broadcast()
+	}
 	out.EOF = c.eof && len(c.buf) == 0
 	return out
 }
@@ -434,25 +505,32 @@ func (d *Dispatcher) dial(r abi.DialRequest) (abi.DialResponse, error) {
 	cfg := netauth.Config{DialRequest: r, Dial: d.Dial, RootCAs: d.RootCAs, Timeout: d.timeout()}
 	cfg.Port = port
 	if r.Auth != nil {
-		v, err := d.secret(r.Auth.Secret, host)
+		v, err := d.secret(r.Auth.Secret, scheme, host, port)
 		if err != nil {
 			return out, err
 		}
 		cfg.Password = v
 	}
+	// Слот занимается до dial (параллельные conn_open не превысят MaxConns) и
+	// освобождается при ошибке или после вставки в conns.
 	d.mu.Lock()
-	if len(d.conns) >= MaxConns {
+	if len(d.conns)+d.dialing >= MaxConns {
 		d.mu.Unlock()
 		return out, abi.Errorf(abi.CodeLimit, "too many open connections")
 	}
+	d.dialing++
 	d.mu.Unlock()
 	nc, err := netauth.Dial(d.ctx(), cfg)
 	if err != nil {
+		d.mu.Lock()
+		d.dialing--
+		d.mu.Unlock()
 		return out, err
 	}
-	c := &conn{c: nc, buf: append([]byte(nil), nc.Greeting...), ready: make(chan struct{}, 1)}
+	c := newConn(nc, nc.Greeting)
 	go c.pump()
 	d.mu.Lock()
+	d.dialing--
 	if d.conns == nil {
 		d.conns = map[int]*conn{}
 	}
@@ -463,8 +541,57 @@ func (d *Dispatcher) dial(r abi.DialRequest) (abi.DialResponse, error) {
 	return out, nil
 }
 
-func size(p string) int64 {
-	fi, err := os.Stat(p)
+// errSwapped — компонент пути подменён между проверкой и открытием.
+var errSwapped = errors.New("path changed during the operation (symlink swap?)")
+
+// openRoot открывает разрешённый каталог как os.Root (дальше файлы
+// открываются относительно дескриптора, симлинки — только внутри корня) и
+// проверяет, что дескриптор — тот самый каталог: путь по-прежнему без
+// симлинков и указывает на тот же каталог (подмена между проверкой и
+// открытием — ошибка).
+func openRoot(dir string) (*os.Root, error) {
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	st, err := r.Stat(".")
+	if err == nil {
+		var li os.FileInfo
+		var real string
+		real, err = filepath.EvalSymlinks(dir)
+		if err == nil {
+			li, err = os.Lstat(dir)
+		}
+		if err == nil && (real != dir || !os.SameFile(st, li)) {
+			err = errSwapped
+		}
+	}
+	if err != nil {
+		r.Close()
+		return nil, err
+	}
+	return r, nil
+}
+
+// sameEntry — открытый файл f — это запись rel корня, а не симлинк на другой
+// файл (для правил без /**: разрешён только сам файл).
+func sameEntry(r *os.Root, rel string, f *os.File) error {
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	li, err := r.Lstat(rel)
+	if err != nil {
+		return err
+	}
+	if li.Mode()&os.ModeSymlink != 0 || !os.SameFile(fi, li) {
+		return errSwapped
+	}
+	return nil
+}
+
+func rootSize(r *os.Root, rel string) int64 {
+	fi, err := r.Stat(rel)
 	if err != nil {
 		return -1
 	}
@@ -472,19 +599,48 @@ func size(p string) int64 {
 }
 
 func (d *Dispatcher) fs(fn string, r abi.FSRequest) (any, error) {
-	real, err := d.Check.Path(r.Path)
+	loc, err := d.Check.Locate(r.Path)
 	if err != nil {
 		return nil, err
 	}
+	return d.fsAt(fn, r, loc)
+}
+
+// fsAt — операция над уже проверенным путём: открытие идёт относительно
+// корня, так что подмена компонента пути после проверки не выводит за него.
+func (d *Dispatcher) fsAt(fn string, r abi.FSRequest, loc capability.Location) (any, error) {
+	real := loc.Real
 	ioErr := func(err error) error {
 		if os.IsNotExist(err) {
 			return abi.Errorf(abi.CodeNotFound, "%s: no such file or directory", r.Path)
 		}
 		return abi.Errorf(abi.CodeIO, "%v", err)
 	}
+	root, err := openRoot(loc.Root)
+	if err != nil {
+		if os.IsNotExist(err) && fn == abi.FnFSStat {
+			return abi.FSStatResponse{Size: -1, RealPath: real}, nil
+		}
+		return nil, ioErr(err)
+	}
+	defer root.Close()
+	rel := loc.Rel
+	open := func(flag int, perm os.FileMode) (*os.File, error) {
+		f, err := root.OpenFile(rel, flag, perm)
+		if err != nil {
+			return nil, err
+		}
+		if loc.Exact {
+			if err := sameEntry(root, rel, f); err != nil {
+				f.Close()
+				return nil, err
+			}
+		}
+		return f, nil
+	}
 	switch fn {
 	case abi.FnFSStat:
-		fi, err := os.Stat(real)
+		fi, err := root.Stat(rel)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return abi.FSStatResponse{Size: -1, RealPath: real}, nil
@@ -500,18 +656,30 @@ func (d *Dispatcher) fs(fn string, r abi.FSRequest) (any, error) {
 		if max > MaxFSRead {
 			max = MaxFSRead
 		}
-		fi, err := os.Stat(real)
+		f, err := open(os.O_RDONLY, 0)
+		if err != nil {
+			return nil, ioErr(err)
+		}
+		defer f.Close()
+		fi, err := f.Stat()
 		if err != nil {
 			return nil, ioErr(err)
 		}
 		if fi.IsDir() {
 			return nil, abi.Errorf(abi.CodeBadRequest, "%s is a directory", r.Path)
 		}
-		f, err := os.Open(real)
-		if err != nil {
-			return nil, ioErr(err)
+		if r.Offset != 0 { // с позиции; отрицательное — столько байт с конца
+			off := r.Offset
+			if off < 0 {
+				off = fi.Size() + off
+			}
+			if off < 0 {
+				off = 0
+			}
+			if _, err := f.Seek(min(off, fi.Size()), io.SeekStart); err != nil {
+				return nil, ioErr(err)
+			}
 		}
-		defer f.Close()
 		b, err := io.ReadAll(io.LimitReader(f, max+1))
 		if err != nil {
 			return nil, ioErr(err)
@@ -523,7 +691,12 @@ func (d *Dispatcher) fs(fn string, r abi.FSRequest) (any, error) {
 		out.Data = b
 		return out, nil
 	case abi.FnFSList:
-		ents, err := os.ReadDir(real)
+		f, err := open(os.O_RDONLY, 0)
+		if err != nil {
+			return nil, ioErr(err)
+		}
+		defer f.Close()
+		ents, err := f.ReadDir(-1)
 		if err != nil {
 			return nil, ioErr(err)
 		}
@@ -538,8 +711,8 @@ func (d *Dispatcher) fs(fn string, r abi.FSRequest) (any, error) {
 		sort.Slice(out.Entries, func(i, j int) bool { return out.Entries[i].Name < out.Entries[j].Name })
 		return out, nil
 	case abi.FnFSAppend:
-		before := size(real)
-		f, err := os.OpenFile(real, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+		before := rootSize(root, rel)
+		f, err := open(os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
 		if err != nil {
 			return nil, ioErr(err)
 		}
@@ -547,13 +720,20 @@ func (d *Dispatcher) fs(fn string, r abi.FSRequest) (any, error) {
 			f.Close()
 			return nil, ioErr(err)
 		}
+		after := int64(-1)
+		if fi, err := f.Stat(); err == nil {
+			after = fi.Size()
+		}
 		if err := f.Close(); err != nil {
 			return nil, ioErr(err)
 		}
-		return abi.FSWriteResponse{SizeBefore: before, SizeAfter: size(real), RealPath: real}, nil
+		return abi.FSWriteResponse{SizeBefore: before, SizeAfter: after, RealPath: real}, nil
 	case abi.FnFSWrite:
-		before := size(real)
-		tmp, err := os.CreateTemp(filepath.Dir(real), ".gate4ai-*")
+		before := rootSize(root, rel)
+		// Временный файл в том же каталоге корня, затем rename внутри корня:
+		// запись не уходит за его пределы, даже если путь подменят.
+		tmpRel := filepath.Join(filepath.Dir(rel), ".gate4ai-"+strconv.FormatInt(time.Now().UnixNano(), 36))
+		tmp, err := root.OpenFile(tmpRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if err != nil {
 			return nil, ioErr(err)
 		}
@@ -563,14 +743,13 @@ func (d *Dispatcher) fs(fn string, r abi.FSRequest) (any, error) {
 			werr = cerr
 		}
 		if werr == nil {
-			_ = os.Chmod(tmp.Name(), 0o644)
-			werr = os.Rename(tmp.Name(), real)
+			werr = root.Rename(tmpRel, rel)
 		}
 		if werr != nil {
-			os.Remove(tmp.Name())
+			_ = root.Remove(tmpRel)
 			return nil, ioErr(werr)
 		}
-		return abi.FSWriteResponse{SizeBefore: before, SizeAfter: size(real), RealPath: real}, nil
+		return abi.FSWriteResponse{SizeBefore: before, SizeAfter: rootSize(root, rel), RealPath: real}, nil
 	}
 	return nil, abi.Errorf(abi.CodeNotSupported, "%s", fn)
 }
@@ -627,6 +806,6 @@ func (d *Dispatcher) Close() {
 	d.conns = nil
 	d.mu.Unlock()
 	for _, c := range conns {
-		c.c.Close()
+		c.close()
 	}
 }

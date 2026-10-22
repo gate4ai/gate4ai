@@ -23,6 +23,20 @@ type Pending struct {
 	Hash    string `json:"hash"`
 	Summary string `json:"summary"`
 	Reason  string `json:"reason"`
+	// WebOnly — daemon просит решать запрос только в Web UI (там виден полный
+	// текст правок); трей проверяет и сам, см. Pending.NeedsWebUI.
+	WebOnly bool `json:"web_only,omitempty"`
+}
+
+// SelfConfigPrefix — действия самонастройки gate4ai (change_policy и др.);
+// то же правило, что approval.WebOnly (трей не тянет пакет approval).
+const SelfConfigPrefix = "gate4ai."
+
+// NeedsWebUI — запрос нельзя решать одним нажатием в трее: изменение политики
+// или установка своей сборки показываются полностью только в Web UI, а в меню
+// трея видны лишь заголовок и причина (код-ревью E.5).
+func (p Pending) NeedsWebUI() bool {
+	return p.WebOnly || strings.HasPrefix(p.Action, SelfConfigPrefix)
 }
 
 // State — ответ GET /v1/tray/state.

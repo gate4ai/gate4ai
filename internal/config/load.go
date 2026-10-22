@@ -204,8 +204,11 @@ func (c *Config) Validate() Errors {
 	}
 	for i, s := range c.Egress.Secrets {
 		p := fmt.Sprintf("egress.secrets[%d]", i)
-		if s.Domain == "" || s.Header == "" || s.Placeholder == "" {
-			add(p, "domain, header and placeholder are required")
+		if s.Domain == "" || s.Header == "" || (s.Placeholder == "" && s.Env == "") {
+			add(p, "domain, header and env (or placeholder) are required")
+		}
+		if s.Env != "" && !envNameRe.MatchString(s.Env) {
+			add(p+".env", "must be an environment variable name like ANTHROPIC_API_KEY")
 		}
 		if !strings.HasPrefix(s.Secret, "@") {
 			add(p+".secret", "secret must be a vault alias like @anthropic.key")
@@ -299,3 +302,6 @@ func IsSchemaError(err error) bool {
 	var es Errors
 	return errors.As(err, &es)
 }
+
+// envNameRe — имя переменной окружения для заглушки egress-секрета.
+var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)

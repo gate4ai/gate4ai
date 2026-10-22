@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -114,7 +115,12 @@ func daemonMain(args []string, tty bool) error {
 	if err != nil {
 		return err
 	}
-	defer d.Close()
+	// Порядок остановки: сначала отмена ctx (relay, Telegram, установка по
+	// умолчанию, тикер), потом серверы и базы — не наоборот.
+	defer func() {
+		cancel()
+		d.Close()
+	}()
 	if err := setup(ctx, d, log); err != nil {
 		return err
 	}
@@ -138,21 +144,75 @@ func banner(ctx context.Context, sock string) {
 	}
 }
 
+// keystoreMarker — файл в home с выбранным хранилищем ключей (keychain | file).
+const keystoreMarker = "keystore"
+
+// newKeyring и probeKeyring — системная связка ключей (подменяются в тестах).
+var (
+	newKeyring   = func() keys.Store { return keys.NewKeyring() }
+	probeKeyring = keys.Probe
+)
+
+// openKeys открывает хранилище ключей. auto молча выбирает файл только на
+// новой установке: если в home уже есть базы, зашифрованные ключами из
+// keychain, файл дал бы новые ключи (старые записи не читаются, Vault пуст).
+// Тогда — ошибка с подсказкой, а выбор запоминается в home.
 func openKeys(kind, home string, log *slog.Logger) (keys.Store, error) {
-	file := keys.NewFile(filepath.Join(home, "keys.json"))
+	path := filepath.Join(home, "keys.json")
+	useFile := func() keys.Store {
+		log.Warn("using file key store: secrets are protected only by file permissions", "path", path)
+		return keys.NewFile(path)
+	}
+	marker, _ := os.ReadFile(filepath.Join(home, keystoreMarker))
+	prev := strings.TrimSpace(string(marker))
+	remember := func(k string) {
+		if prev == "" {
+			_ = os.MkdirAll(home, 0o700)
+			_ = os.WriteFile(filepath.Join(home, keystoreMarker), []byte(k+"\n"), 0o600)
+		}
+	}
 	switch kind {
 	case "keychain":
-		return keys.NewKeyring(), nil
+		remember("keychain")
+		return newKeyring(), nil
 	case "file":
-		log.Warn("using file key store: secrets are protected only by file permissions", "path", filepath.Join(home, "keys.json"))
-		return file, nil
+		remember("file")
+		return useFile(), nil
 	case "auto":
-		k := keys.NewKeyring()
-		if err := keys.Probe(k); err != nil {
-			log.Warn("system keychain unavailable, falling back to file key store", "err", err)
-			return file, nil
-		}
+	default:
+		return nil, fmt.Errorf("unknown keystore %q", kind)
+	}
+	if prev == "file" {
+		return useFile(), nil
+	}
+	k := newKeyring()
+	err := probeKeyring(k)
+	if err == nil {
+		remember("keychain")
 		return k, nil
 	}
-	return nil, fmt.Errorf("unknown keystore %q", kind)
+	// keychain недоступен (D-Bus ещё не поднят, связка заблокирована).
+	if prev == "keychain" || (!exists(path) && hasData(home)) {
+		return nil, fmt.Errorf("system keychain unavailable (%v); this installation keeps its keys there, so a file key store "+
+			"would start with new keys (old records unreadable, the vault empty). Unlock the keychain and start again, "+
+			"or choose explicitly: --keystore file", err)
+	}
+	log.Warn("system keychain unavailable, using the file key store", "err", err)
+	remember("file")
+	return useFile(), nil
+}
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// hasData — в home уже есть базы daemon (State Store, журнал, конфигурация).
+func hasData(home string) bool {
+	for _, n := range []string{"state.db", "journal.db", filepath.Join("config", "current")} {
+		if exists(filepath.Join(home, n)) {
+			return true
+		}
+	}
+	return false
 }

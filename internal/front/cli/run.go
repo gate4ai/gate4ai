@@ -7,11 +7,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/sandbox"
 )
@@ -87,6 +89,24 @@ func (e *Env) run(ctx context.Context, args []string) int {
 		return e.fail(err)
 	}
 	defer c.Do(context.Background(), "DELETE", "/v1/runs/"+run.ID, nil, nil)
+	// Запуск живёт, пока его продлевают: если этот процесс убьют, токен
+	// запуска и пароль прокси истекут сами.
+	if run.KeepAliveS > 0 {
+		kctx, stopKeep := context.WithCancel(ctx)
+		defer stopKeep()
+		go func() {
+			t := time.NewTicker(time.Duration(run.KeepAliveS) * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-kctx.Done():
+					return
+				case <-t.C:
+					_ = c.Do(kctx, "POST", "/v1/runs/"+run.ID+"/keepalive", nil, nil)
+				}
+			}
+		}()
+	}
 	tmp, err := os.MkdirTemp("", "gate4ai-run-")
 	if err != nil {
 		return e.fail(err)
@@ -100,7 +120,19 @@ func (e *Env) run(ctx context.Context, args []string) int {
 		return e.fail(err)
 	}
 	if *dry {
-		mask := func(s string) string { return strings.ReplaceAll(s, run.Token, "***") }
+		// Токен запуска и пароль прокси — не в вывод.
+		secrets := []string{run.Token}
+		if pu, err := url.Parse(run.ProxyURL); err == nil && pu.User != nil {
+			if pw, ok := pu.User.Password(); ok && pw != "" {
+				secrets = append(secrets, pw)
+			}
+		}
+		mask := func(s string) string {
+			for _, x := range secrets {
+				s = strings.ReplaceAll(s, x, "***")
+			}
+			return s
+		}
 		var argv, env []string
 		for _, a := range spec.Argv {
 			argv = append(argv, mask(a))
@@ -128,6 +160,13 @@ func (e *Env) run(ctx context.Context, args []string) int {
 		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			return e.fail(err)
 		}
+	}
+	if spec.Bridge != nil { // контейнер без сети: прокси — через сокет на время работы агента
+		stop, err := sandbox.StartBridge(ctx, *spec.Bridge)
+		if err != nil {
+			return e.fail(err)
+		}
+		defer stop()
 	}
 	fmt.Fprintf(e.Stderr, "gate4ai: run %s — agent %s in %s mode, workspace %s\n", run.ID, agent, mode, wsAbs)
 	code, err := Exec(ctx, e, spec.Argv, cleanEnv(os.Environ(), spec.Env))

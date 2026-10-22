@@ -250,6 +250,9 @@ func TestTrayContract(t *testing.T) {
 	if p.ID != res.ID || p.Agent != "bot" || p.Action != "notes.append" || !strings.HasPrefix(p.Hash, "#") || p.Summary == "" || p.Reason == "" {
 		t.Fatalf("%+v", p)
 	}
+	if p.WebOnly || p.NeedsWebUI() {
+		t.Fatal("an ordinary action is decided in the tray")
+	}
 	if f := tr.Fresh(st); len(f) != 1 || len(tr.Fresh(st)) != 0 {
 		t.Fatal("each request must be notified once")
 	}

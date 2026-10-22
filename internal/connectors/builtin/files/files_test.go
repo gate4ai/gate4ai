@@ -131,3 +131,25 @@ func TestManifest(t *testing.T) {
 		t.Fatal("files connector must have only file capabilities", m.Capabilities)
 	}
 }
+
+// Дописывание в файл больше предела fs_read (16 МиБ) подтверждается по хвосту,
+// а не даёт ложное not_confirmed (B.L3).
+func TestAppendToLargeFileVerified(t *testing.T) {
+	h, c, home := setup(t)
+	big := filepath.Join(home, "Documents", "obsidian", "big.log")
+	if err := os.WriteFile(big, make([]byte, 17<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := map[string]any{"path": "~/Documents/obsidian/big.log", "text": "tail line"}
+	res, err := h.Execute(c, "append", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, err := h.Verify(c, "append", args, res); err != nil || v.Status != abi.Verified {
+		t.Fatal(v, err)
+	}
+	args["text"] = "other line"
+	if v, _ := h.Verify(c, "append", args, res); v.Status != abi.NotConfirmed {
+		t.Fatal("wrong tail confirmed:", v)
+	}
+}

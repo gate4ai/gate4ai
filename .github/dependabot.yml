@@ -1,0 +1,8 @@
+# Сторонние actions закреплены по полному SHA (тег — в комментарии): Dependabot
+# предлагает обновления pull request'ом, и новый SHA проходит ревью.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

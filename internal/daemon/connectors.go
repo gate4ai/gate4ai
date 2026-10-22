@@ -93,13 +93,14 @@ func (d *Daemon) reloadConnector(name string, removed bool) error {
 			d.Log.Warn("connector not added to profile "+DefaultProfile, "connector", name, "err", err)
 		}
 	}
-	e, err := policy.New(d.Config.Current(), policy.Catalog(d.Registry.Catalog()))
-	if err != nil {
-		// Политика ссылается на действия удалённого коннектора: действует прежняя
-		// политика, ошибка видна владельцу.
-		return err
+	// Политика — из текущей версии по новому каталогу, тем же путём, что и
+	// смены версий (по порядку с ними). Если она ссылается на аргументы
+	// действий удалённого коннектора, она компилируется без каталога, а
+	// предупреждение видно владельцу.
+	d.Config.Reapply()
+	if w := d.PolicyWarning(); w != "" {
+		return errors.New(w)
 	}
-	d.Pipeline.SetEngine(e)
 	return nil
 }
 
@@ -146,7 +147,10 @@ func (d *Daemon) PrepareConnectorDev(ctx context.Context, source string, dev boo
 }
 
 // RemoveConnector удаляет коннектор; warning — политика ещё ссылается на него.
+// Под installMu: не пересекается с установкой того же коннектора.
 func (d *Daemon) RemoveConnector(name string) (warning string, err error) {
+	d.installMu.Lock()
+	defer d.installMu.Unlock()
 	d.stopNative(name)
 	if err := d.StoreOptions().Remove(name); err != nil {
 		return "", err
@@ -279,13 +283,16 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			writeErr(w, 400, "bad_request", "name is required")
 			return
 		}
-		if err := d.StoreOptions().Remove(req.Name); err != nil {
+		// Тот же путь, что у Web UI: нативный процесс останавливается (на
+		// Windows иначе exe занят), установка того же коннектора ждёт.
+		warn, err := d.RemoveConnector(req.Name)
+		if err != nil {
 			writeErr(w, 400, "store", err.Error())
 			return
 		}
 		res := map[string]any{"status": "removed", "connector": req.Name}
-		if err := d.reloadConnector(req.Name, true); err != nil {
-			res["warning"] = "policy still references this connector: " + err.Error()
+		if warn != "" {
+			res["warning"] = warn
 		}
 		writeJSON(w, 200, res)
 	}))

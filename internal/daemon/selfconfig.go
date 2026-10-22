@@ -5,10 +5,12 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -23,7 +25,10 @@ import (
 // его действия меняют политику самого gate4ai. Это обычные действия под обычной
 // политикой (спецификация, «Безопасность самого шлюза»): change_policy — класс
 // write, по умолчанию с подтверждением владельца в любом канале; правила могут
-// его разрешить или запретить. Секреты и учётки через него не задаются.
+// его разрешить или запретить. Значения секретов через него не задаются; новая
+// учётка (add_credential, только с новыми алиасами в своём пространстве имён),
+// своя сборка и настройки, от которых зависит, куда уходят секреты, — только
+// с подтверждением человека (alwaysAskSelf).
 const SelfConnector = "gate4ai"
 
 type selfConnector struct{ d *Daemon }
@@ -45,7 +50,7 @@ const changeSchema = `{ type: object, properties: {
   folder: { type: string, description: "install_dev_connector: absolute path of the folder with manifest.yaml and Go sources" },
   key: { type: string, description: "add_setting_items / remove_setting_items: the list setting, e.g. allowed_domains" },
   account: { type: string, description: "add_credential: the account alias, e.g. @emias" },
-  credential_json: { type: string, description: "add_credential: the account as in credentials of the policy, JSON: {bind, form | via, login_page, prompts, use, connectors}; secrets only as vault aliases" } },
+  credential_json: { type: string, description: "add_credential: a NEW account as in credentials of the policy, JSON: {bind, form | via, login_page, prompts, use, connectors}; secrets only as new vault aliases of the account itself (@site.password for @site) — the owner puts the values into the vault" } },
   required: [op] }`
 
 func (selfConnector) Manifest() manifest.Manifest {
@@ -55,8 +60,8 @@ func (selfConnector) Manifest() manifest.Manifest {
 			{Name: "change_policy", Class: "write",
 				Description: "Change gate4.ai policy: rules of any profile, lists, connector settings, installing connectors. Like any write action it usually needs the owner's approval. Secrets cannot be set. Explain why in reason.",
 				InputSchema: manifest.MustSchema(`{ type: object, properties: {
-				  summary: { type: string, description: "one line: what the change does" },
-				  reason: { type: string, description: "why the user needs it" },
+				  summary: { type: string, maxLength: 200, description: "one line: what the change does" },
+				  reason: { type: string, maxLength: 1000, description: "why the user needs it" },
 				  changes: { type: array, minItems: 1, maxItems: 20, description: "JSON array of changes, each {op, …}: add_rule {action, effect, when?, rule_id?, rule_reason?, profile?}; remove_rule {rule_id, profile?}; add_list_items / remove_list_items {list, items}; add_connector / install_connector {connector, profile?}; connector_settings {connector, settings_json}; install_dev_connector {folder}; add_setting_items / remove_setting_items {connector, key, items}; add_credential {account, credential_json}. A rule decides by precedence deny > ask > allow, not by order", items: ` + changeSchema + ` } },
 				  required: [summary, changes] }`),
 				Example: `gate4ai gate4ai change_policy --summary "Let me append to notes" --changes '[{"op":"add_rule","action":"files.append","when":"glob(path, \"~/notes/**\")","effect":"allow"}]'`},
@@ -108,7 +113,8 @@ func (d *Daemon) applyChanges(c *config.Config, agent string, changes []config.C
 
 // describeSelf — проверка change_policy до решения политики и текст для
 // запроса подтверждения: правки человеческим языком и возможности
-// устанавливаемых коннекторов.
+// устанавливаемых коннекторов. Показанное человеку закрепляется в аргументах
+// запроса (pinsArg): исполняется только оно (code review K2).
 func (d *Daemon) describeSelf(agent string, args map[string]any) (string, error) {
 	if _, ok := args["changes"]; !ok {
 		return "", nil // policy_summary
@@ -117,48 +123,67 @@ func (d *Daemon) describeSelf(agent string, args map[string]any) (string, error)
 	if err != nil {
 		return "", err
 	}
-	devs := map[int]manifest.Manifest{}
-	for i := range changes {
-		if changes[i].Op != config.OpInstallDev {
-			continue
+	pins, err := d.pinChanges(args, changes)
+	if err != nil {
+		return "", err
+	}
+	for i, pin := range pins {
+		if pin.Op == config.OpInstallDev {
+			changes[i].Connector = pin.Connector
 		}
-		m, err := devManifest(changes[i].Folder)
-		if err != nil {
-			return "", err
-		}
-		devs[i] = m
-		changes[i].Connector = m.Connector
+	}
+	if err := d.checkCredentials(changes); err != nil {
+		return "", err
 	}
 	if _, _, err := d.Config.Preview(func(c *config.Config) error { return d.applyChanges(c, agent, changes, true) }); err != nil {
 		return "", fmt.Errorf("the change would not produce a valid policy: %v", err)
 	}
+	cur := d.Config.Current()
+	prof := cur.Agents[agent].Profile
+	// Сначала — правки, как их понимает gate4ai; текст агента — после них,
+	// одной строкой и с пометкой (code review E.4): им не нарисовать
+	// фальшивый блок правок.
 	var b strings.Builder
-	if s, _ := args["summary"].(string); s != "" {
-		fmt.Fprintf(&b, "%s\n", s)
-	}
-	if s, _ := args["reason"].(string); s != "" {
-		fmt.Fprintf(&b, "Why: %s\n", s)
-	}
 	b.WriteString("Changes to the gate4.ai policy:\n")
 	for i, ch := range changes {
-		fmt.Fprintf(&b, "  • %s\n", ch.Describe())
-		if m, ok := devs[i]; ok {
-			fmt.Fprintf(&b, "    %s %s, own build (not reviewed), capabilities: %s\n", m.Connector, m.Version, strings.Join(m.Summary(), "; "))
-			continue
+		fmt.Fprintf(&b, "  • %s\n", oneLine(ch.DescribeIn(cur, prof), 600))
+		for _, w := range d.settingWarnings(ch) {
+			fmt.Fprintf(&b, "    ⚠ %s\n", oneLine(w, 600))
 		}
-		if ch.Op != config.OpInstallConnector {
-			continue
-		}
-		if _, ok := d.Registry.Get(ch.Connector); ok {
-			continue
-		}
-		if ix := d.StoreOptions().CachedIndex(); ix != nil {
-			if e, rel, err := ix.Resolve(ch.Connector, ""); err == nil {
-				fmt.Fprintf(&b, "    %s %s by %s, capabilities: %s\n", ch.Connector, rel.Version, e.Publisher, strings.Join(rel.Capabilities, "; "))
+		if pin, ok := pins[i]; ok {
+			for _, l := range pin.lines() {
+				fmt.Fprintf(&b, "    %s\n", oneLine(l, 1500))
 			}
 		}
 	}
+	summary, _ := args["summary"].(string)
+	reason, _ := args["reason"].(string)
+	if summary != "" || reason != "" {
+		b.WriteString("Agent's own words (not checked by gate4.ai):\n")
+		if summary != "" {
+			fmt.Fprintf(&b, "  summary: %s\n", oneLine(summary, 200))
+		}
+		if reason != "" {
+			fmt.Fprintf(&b, "  why: %s\n", oneLine(reason, 500))
+		}
+	}
 	return b.String(), nil
+}
+
+// oneLine — текст агента или его манифеста в запросе подтверждения: одна
+// строка без управляющих символов, не длиннее n символов.
+func oneLine(s string, n int) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		s = string(r[:n]) + "…"
+	}
+	return s
 }
 
 func (s selfConnector) Execute(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
@@ -175,11 +200,26 @@ func (s selfConnector) Execute(ctx context.Context, r abi.ExecRequest) (abi.Exec
 		if err != nil {
 			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
 		}
-		// Установка коннектора: решение по действию покрывает согласие на его
-		// возможности (они перечислены в запросе подтверждения).
+		// Установка коннектора: решение по действию покрывает согласие ровно
+		// на те возможности, что были в запросе (закреплены в аргументах при
+		// его создании); другое не ставится (code review K2).
+		pins, err := readPins(r.Args)
+		if err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
+		}
+		if err := d.checkCredentials(changes); err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
+		}
 		for i, ch := range changes {
+			pin, pinned := pins[i]
+			if pinned && pin.Op != ch.Op {
+				return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "changes[%d]: the approved request does not match", i)
+			}
 			if ch.Op == config.OpInstallDev {
-				name, err := d.installDevFolder(ctx, ch.Folder)
+				if !pinned {
+					return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "changes[%d]: own build was not shown to the owner; ask again", i)
+				}
+				name, err := d.installDevFolder(ctx, ch.Folder, pin)
 				if err != nil {
 					return abi.ExecResult{}, fmt.Errorf("install %s: %w", ch.Folder, err)
 				}
@@ -192,11 +232,10 @@ func (s selfConnector) Execute(ctx context.Context, r abi.ExecRequest) (abi.Exec
 			if _, ok := d.Registry.Get(ch.Connector); ok {
 				continue
 			}
-			plan, err := d.PrepareConnector(ctx, ch.Connector)
-			if err != nil {
-				return abi.ExecResult{}, fmt.Errorf("install %s: %w", ch.Connector, err)
+			if !pinned {
+				return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "changes[%d]: connector %s was not shown to the owner; ask again", i, ch.Connector)
 			}
-			if _, _, _, err := d.InstallConnector(ctx, ch.Connector, plan.Capabilities); err != nil {
+			if err := d.installStorePinned(ctx, pin); err != nil {
 				return abi.ExecResult{}, fmt.Errorf("install %s: %w", ch.Connector, err)
 			}
 		}
@@ -258,25 +297,25 @@ func PolicySummary(cfg *config.Config, agent string) map[string]any {
 		"lists": lists, "other_profiles": others, "defaults": "no rule matched: read → allow; write / external / money → ask; deny beats ask beats allow"}
 }
 
-// devManifest — манифест своей сборки в папке: только WASM (нативный код
-// без песочницы агент поставить не может).
-func devManifest(folder string) (manifest.Manifest, error) {
+// devManifest — манифест своей сборки в папке и его байты: только WASM
+// (нативный код без песочницы агент поставить не может).
+func devManifest(folder string) (manifest.Manifest, []byte, error) {
 	dir, ok := store.SourceFolder(expandHome(folder))
 	if !ok {
-		return manifest.Manifest{}, fmt.Errorf("install_dev_connector: no %s in %s", store.ManifestFile, folder)
+		return manifest.Manifest{}, nil, fmt.Errorf("install_dev_connector: no %s in %s", store.ManifestFile, folder)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, store.ManifestFile))
 	if err != nil {
-		return manifest.Manifest{}, err
+		return manifest.Manifest{}, nil, err
 	}
 	m, err := manifest.Parse(raw)
 	if err != nil {
-		return manifest.Manifest{}, err
+		return manifest.Manifest{}, nil, err
 	}
 	if m.Runtime != manifest.RuntimeWasm {
-		return manifest.Manifest{}, fmt.Errorf("install_dev_connector: only runtime wasm (%s is %s)", m.Connector, m.Runtime)
+		return manifest.Manifest{}, nil, fmt.Errorf("install_dev_connector: only runtime wasm (%s is %s)", m.Connector, m.Runtime)
 	}
-	return m, nil
+	return m, raw, nil
 }
 
 func expandHome(p string) string {
@@ -289,38 +328,84 @@ func expandHome(p string) string {
 }
 
 // installDevFolder собирает коннектор из папки (как `gate4ai connectors
-// install <папка>`) и ставит его с согласием на объявленные возможности:
-// согласие дал владелец, подтвердив change_policy.
-func (d *Daemon) installDevFolder(ctx context.Context, folder string) (string, error) {
-	m, err := devManifest(folder)
-	if err != nil {
-		return "", err
+// install <папка>`) и ставит его с согласием на возможности из запроса:
+// исходники и манифест должны совпасть с показанными владельцу, собирается
+// только WASM, согласие — ровно на закреплённые возможности.
+func (d *Daemon) installDevFolder(ctx context.Context, folder string, pin selfPin) (string, error) {
+	dir, ok := store.SourceFolder(expandHome(folder))
+	if !ok {
+		return "", fmt.Errorf("install_dev_connector: no %s in %s", store.ManifestFile, folder)
 	}
-	dir, _ := store.SourceFolder(expandHome(folder))
+	if sum, err := sourceDigest(dir); err != nil {
+		return "", err
+	} else if sum != pin.SourceSHA256 {
+		return "", errors.New("the folder changed after the request was shown to the owner; ask again")
+	}
 	opts := d.StoreOptions()
-	plan, err := opts.Prepare(ctx, dir, true)
+	plan, err := opts.PrepareDevWasm(ctx, dir, pin.ManifestSHA256)
 	if err != nil {
 		return "", err
 	}
-	if plan.Connector != m.Connector {
-		return "", fmt.Errorf("the folder changed while installing: %s, not %s", plan.Connector, m.Connector)
-	}
-	d.installMu.Lock()
-	defer d.installMu.Unlock()
-	info, err := opts.Install(plan, plan.Capabilities)
-	if err != nil {
+	if err := pin.matches(plan); err != nil {
 		return "", err
 	}
-	if err := d.reloadConnector(info.Connector, false); err != nil {
-		d.Log.Warn("connector reloaded with a warning", "connector", info.Connector, "err", err)
+	info, err := d.installPlan(opts, plan, pin.Capabilities)
+	if err != nil {
+		return "", err
 	}
 	d.Log.Info("own build installed by an agent", "connector", info.Connector, "version", info.Version, "folder", dir)
 	return info.Connector, nil
 }
 
-// alwaysAskSelf — установка своей сборки (новый код в daemon) подтверждается
-// человеком всегда: правило allow на change_policy её не разрешает.
-func alwaysAskSelf(args map[string]any) string {
+// installStorePinned ставит из магазина ровно ту версию (и дайджест) из
+// записи индекса, что показали владельцу, с согласием на её возможности.
+func (d *Daemon) installStorePinned(ctx context.Context, pin selfPin) error {
+	opts := d.StoreOptions()
+	plan, err := opts.Prepare(ctx, pin.Connector+"@"+pin.Version, false)
+	if err != nil {
+		return err
+	}
+	if ix := opts.CachedIndex(); ix == nil {
+		return errors.New("store index is not available")
+	} else if _, rel, err := ix.Resolve(pin.Connector, pin.Version); err != nil || rel.Digest != pin.Digest {
+		return fmt.Errorf("connector %s %s changed in the store after the request was shown to the owner; ask again", pin.Connector, pin.Version)
+	}
+	if err := pin.matches(plan); err != nil {
+		return err
+	}
+	info, err := d.installPlan(opts, plan, pin.Capabilities)
+	if err != nil {
+		return err
+	}
+	d.Log.Info("connector installed by an agent's change", "connector", info.Connector, "version", info.Version, "trust", info.Trust)
+	return nil
+}
+
+// installPlan — установка проверенного плана под installMu (как
+// InstallConnectorDev, но без повторной подготовки пакета).
+func (d *Daemon) installPlan(opts store.Options, plan *store.Plan, consent []string) (store.Info, error) {
+	d.installMu.Lock()
+	defer d.installMu.Unlock()
+	if !plan.ConsentOK(consent) {
+		return store.Info{}, store.ErrConsent
+	}
+	d.stopNative(plan.Connector)
+	info, err := opts.Install(plan, consent)
+	if err != nil {
+		d.restartNative(plan.Connector)
+		return store.Info{}, err
+	}
+	if err := d.reloadConnector(info.Connector, false); err != nil {
+		d.Log.Warn("connector reloaded with a warning", "connector", info.Connector, "err", err)
+	}
+	return info, nil
+}
+
+// alwaysAskSelf — правки, которые подтверждает только человек, даже при
+// правиле allow на change_policy: своя сборка (новый код в daemon), учётка и
+// настройки, от которых зависит, куда коннектор ходит в сеть и отправляет
+// секреты (code review H4).
+func (d *Daemon) alwaysAskSelf(args map[string]any) string {
 	changes, err := changesOf(args)
 	if err != nil {
 		return ""
@@ -332,14 +417,16 @@ func alwaysAskSelf(args map[string]any) string {
 		case config.OpAddCredential:
 			return "an account decides where your secrets are entered: it always needs the owner's approval"
 		}
+		if len(d.settingWarnings(ch)) > 0 {
+			return "the change moves where a connector connects or sends secrets: it always needs the owner's approval"
+		}
 	}
 	return ""
 }
 
 // secretSetting — настройка со значением-алиасом Vault или о секрете (ключ модели, пароль).
 func secretSetting(k string, v any) bool {
-	lk := strings.ToLower(k)
-	if strings.Contains(lk, "key") || strings.Contains(lk, "password") || strings.Contains(lk, "token") || strings.Contains(lk, "secret") || k == "credentials" {
+	if config.SecretKey(k) {
 		return true
 	}
 	s, ok := v.(string)

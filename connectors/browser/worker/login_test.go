@@ -133,9 +133,15 @@ func (f *loginChrome) eval(expr string) any {
 			return true
 		}
 		return false
-	case strings.HasPrefix(expr, "((sel, text, method) =>"): // actJS
-		sel, method := args[0].(string), args[2].(string)
-		if _, ok := f.fields[sel]; !ok && sel != "body" {
+	case strings.HasPrefix(expr, "((sel, text, method, secret) =>"): // actJS
+		sel, text, method := args[0].(string), args[1].(string), args[2].(string)
+		fl, ok := f.fields[sel]
+		if !ok && sel != "body" {
+			return nil
+		}
+		// Как подпись в actJS: значение поля сравнивается с текстом, только
+		// пока секрета на странице нет (secret — false).
+		if text != "" && (fl == nil || args[3] == true || !strings.Contains(fl.value, text)) {
 			return nil
 		}
 		if method == "click" && sel == "#bind" {
@@ -143,6 +149,10 @@ func (f *loginChrome) eval(expr string) any {
 		}
 		if method == "press" || method == "fill" {
 			f.focus = sel
+		}
+		if fl != nil {
+			// Как прежний actJS: у input нет видимого текста — его value.
+			return map[string]any{"text": fl.value}
 		}
 		return map[string]any{"text": ""}
 	case strings.Contains(expr, "g4visible(root)") && strings.HasSuffix(expr, "(document.body)"): // текст страницы (visibleTextJS)
@@ -362,6 +372,24 @@ func TestStillOnLoginAndSecretOnPage(t *testing.T) {
 	}
 	if _, err := s.FillSecret(ctx, form.Bind, LoginField{Selector: "#password", Value: fakePass, Secret: true}); err != nil {
 		t.Fatal(err)
+	}
+	// Значение введённого секрета не возвращается ни в ответе act, ни через
+	// подбор по тексту (text, expect_text, wait_for_text).
+	for _, r := range []ActRequest{{Selector: "#password", Method: ActWait}, {Selector: "#password", Method: ActClick},
+		{Selector: "#password", Method: ActPress, Value: "Tab"}} {
+		res, err := s.Act(ctx, r)
+		if err != nil || res.Text != "" || strings.Contains(fmt.Sprint(res), fakePass) {
+			t.Fatal(r, res, err)
+		}
+	}
+	if _, err := s.Act(ctx, ActRequest{Selector: "#password", Method: ActWait, Text: fakePass[:4], TimeoutMS: 1}); !errors.Is(err, ErrNotFound) {
+		t.Fatal("act text matches the secret:", err)
+	}
+	if _, err := s.Act(ctx, ActRequest{Selector: "#bind", Method: ActWait, ExpectSelector: "#password", ExpectText: fakePass[:4], ExpectMS: 1}); !errors.Is(err, ErrNoEffect) {
+		t.Fatal("expect_text matches the secret:", err)
+	}
+	if err := s.WaitFor(ctx, "#password", fakePass[:4], 1); !errors.Is(err, ErrNotFound) {
+		t.Fatal("wait_for_text matches the secret:", err)
 	}
 	// Переход верхнего документа снимает режим.
 	if _, err := s.Open(ctx, signURL, lkSites); err != nil {

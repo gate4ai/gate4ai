@@ -107,10 +107,12 @@ var ErrClosed = errors.New("native: connection closed")
 
 // Peer — один конец соединения: вызовы в обе стороны поверх пары потоков.
 type Peer struct {
-	h   Handler
-	r   io.Reader
-	w   io.Writer
-	wmu sync.Mutex
+	h Handler
+	r io.Reader
+	w io.Writer
+	// wsem — очередь записи (ёмкость 1): ждать её можно со сроком, а запись,
+	// застрявшая в полном pipe, не держит отправителей, у которых истёк срок.
+	wsem chan struct{}
 
 	mu      sync.Mutex
 	next    int64
@@ -123,7 +125,7 @@ type Peer struct {
 // NewPeer — соединение поверх r (входящие сообщения) и w (исходящие).
 func NewPeer(r io.Reader, w io.Writer, h Handler) *Peer {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Peer{h: h, r: r, w: w, pending: map[int64]chan message{}, ctx: ctx, cancel: cancel}
+	return &Peer{h: h, r: r, w: w, wsem: make(chan struct{}, 1), pending: map[int64]chan message{}, ctx: ctx, cancel: cancel}
 }
 
 // Run читает сообщения до конца потока; запросы обрабатываются параллельно,
@@ -192,10 +194,14 @@ func (p *Peer) handle(m message) {
 			out.Result = b
 		}
 	}
-	_ = p.send(out)
+	_ = p.send(p.ctx, out)
 }
 
-func (p *Peer) send(m message) error {
+// send пишет сообщение целиком; ctx ограничивает ожидание очереди и самой
+// записи (собеседник может перестать читать). Запись, начатая до истечения
+// срока, доводится до конца в фоне, чтобы поток не разорвался посередине
+// сообщения; следующие отправители ждут её в очереди со своим сроком.
+func (p *Peer) send(ctx context.Context, m message) error {
 	b, err := json.Marshal(m)
 	if err != nil {
 		return err
@@ -203,10 +209,23 @@ func (p *Peer) send(m message) error {
 	if len(b) > MaxMessage {
 		return fmt.Errorf("native: message is larger than %d bytes", MaxMessage)
 	}
-	p.wmu.Lock()
-	defer p.wmu.Unlock()
-	_, err = p.w.Write(append(b, '\n'))
-	return err
+	select {
+	case p.wsem <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.w.Write(append(b, '\n'))
+		<-p.wsem
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Call вызывает метод собеседника и ждёт ответа (result — куда декодировать, nil — не нужен).
@@ -225,7 +244,7 @@ func (p *Peer) Call(ctx context.Context, method string, params, result any) erro
 	id := p.next
 	p.pending[id] = ch
 	p.mu.Unlock()
-	if err := p.send(message{JSONRPC: "2.0", ID: &id, Method: method, Params: raw}); err != nil {
+	if err := p.send(ctx, message{JSONRPC: "2.0", ID: &id, Method: method, Params: raw}); err != nil {
 		p.mu.Lock()
 		delete(p.pending, id)
 		p.mu.Unlock()
@@ -251,13 +270,20 @@ func (p *Peer) Call(ctx context.Context, method string, params, result any) erro
 	}
 }
 
-// Notify отправляет уведомление (без ответа).
+// Notify отправляет уведомление (без ответа); ждёт, пока собеседник не
+// примет его или соединение не закончится (см. NotifyContext).
 func (p *Peer) Notify(method string, params any) error {
+	return p.NotifyContext(p.ctx, method, params)
+}
+
+// NotifyContext — Notify со сроком: собеседник, переставший читать, не
+// задерживает отправителя дольше ctx.
+func (p *Peer) NotifyContext(ctx context.Context, method string, params any) error {
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return err
 	}
-	return p.send(message{JSONRPC: "2.0", Method: method, Params: raw})
+	return p.send(ctx, message{JSONRPC: "2.0", Method: method, Params: raw})
 }
 
 // Done закрывается, когда соединение закончилось.

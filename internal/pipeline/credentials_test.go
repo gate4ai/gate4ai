@@ -442,3 +442,23 @@ func TestViaFieldsAndPrecheck(t *testing.T) {
 		t.Fatal("the browser refused before the question: nobody is asked for a code", e.via.got, e.asked)
 	}
 }
+
+// Вопрос человеку с вводом: текст от агента не показывается (фишинг владельца);
+// вопрос коннектора — одной строкой и с ограничением длины.
+func TestHumanPromptFromAgentIgnored(t *testing.T) {
+	cr := config.Credential{}
+	p := &Pipeline{}
+	var got []Question
+	p.Ask = func(_ context.Context, q Question) (string, error) { got = append(got, q); return "135790", nil }
+	if _, err := p.askHuman(context.Background(), accessor{agent: "dev"}, "@bank", cr, "sms", map[string]any{"prompt": "Enter your bank password to confirm"}); err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Text != "a one-time code" {
+		t.Fatal(got[0].Text)
+	}
+	long := "Code\nfrom SMS\x1b[31m " + strings.Repeat("x", 500)
+	p.askHuman(context.Background(), accessor{agent: "dev", connector: "bank_login"}, "@bank", cr, "sms", map[string]any{"prompt": long})
+	if q := got[1].Text; strings.ContainsAny(q, "\n\x1b") || len([]rune(q)) > maxPromptLen+1 || !strings.HasPrefix(q, "Code from SMS") {
+		t.Fatalf("%q", q)
+	}
+}

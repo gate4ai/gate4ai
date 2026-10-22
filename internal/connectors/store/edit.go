@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 	"github.com/gate4ai/gate4ai/sdk-go/registry"
 )
 
@@ -29,10 +30,18 @@ func CheckRelease(b []byte, name, publisher string, rel registry.Release, pub re
 	if _, ok := registry.VerifySig(pub.Keys, pkg.Sig.Digest, pkg.Sig.Signature); !ok {
 		return nil, fmt.Errorf("package %s %s is not signed by publisher %s", name, rel.Version, publisher)
 	}
-	if !slices.Equal(pkg.Manifest.Summary(), nonNil(rel.Capabilities)) {
+	if !capsMatch(pkg.Manifest, rel.Capabilities) {
 		return nil, errors.New("package capabilities differ from the reviewed capabilities in the registry")
 	}
 	return pkg, nil
+}
+
+// capsMatch — caps (согласие владельца или возможности версии в registry)
+// совпадают с Summary манифеста — в текущей форме или в прежней
+// (LegacySummary: записи, сделанные прежними версиями gate4ai).
+func capsMatch(m manifest.Manifest, caps []string) bool {
+	c := nonNil(caps)
+	return slices.Equal(nonNil(m.Summary()), c) || slices.Equal(nonNil(m.LegacySummary()), c)
 }
 
 // VerifyPackages скачивает пакеты всех версий индекса (base — адрес или путь
@@ -80,6 +89,9 @@ func AddRelease(ix *registry.Index, publisher string, p PackInfo, url string, me
 	}
 	if p.SignedBy == "" {
 		return errors.New("the package is not signed (gate4ai connectors pack --key)")
+	}
+	if registry.Reserved(p.Connector) {
+		return fmt.Errorf("connector name %s is reserved", p.Connector)
 	}
 	if ix.Publishers == nil {
 		ix.Publishers = map[string]registry.Publisher{}

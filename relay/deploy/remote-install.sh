@@ -1,11 +1,14 @@
 #!/bin/sh
-# Runs on the relay server as root (CI: ssh root@host 'sh -s' < deploy/remote-install.sh).
-# Expects /tmp/gate4ai-relay.new uploaded beforehand. Replaces only the binary:
+# Runs on the relay server as root
+# (CI: ssh root@host "sh -s -- <dir>/gate4ai-relay.new" < deploy/remote-install.sh).
+# The argument is the binary uploaded beforehand into a root-owned directory made by
+# mktemp -d on the server (not a predictable path in /tmp). Replaces only the binary:
 # the systemd unit and /etc/gate4ai-relay/env (certificate, --route) stay as
 # configured on the server. Rolls back to the previous binary if the relay API
 # does not answer after the restart.
 set -eu
 
+NEW=${1:?usage: remote-install.sh <uploaded gate4ai-relay>}
 BIN=/usr/local/bin/gate4ai-relay
 DOMAIN=relay.gate4.ai
 
@@ -13,8 +16,9 @@ DOMAIN=relay.gate4.ai
 systemctl cat gate4ai-relay >/dev/null 2>&1 || { echo "gate4ai-relay.service is not installed" >&2; exit 1; }
 
 [ -f "$BIN" ] && cp -p "$BIN" "$BIN.prev"
-install -m 0755 /tmp/gate4ai-relay.new "$BIN.tmp"
-rm -f /tmp/gate4ai-relay.new
+install -m 0755 "$NEW" "$BIN.tmp"
+rm -f "$NEW"
+rmdir "$(dirname "$NEW")" 2>/dev/null || true
 mv -f "$BIN.tmp" "$BIN"
 systemctl restart gate4ai-relay
 
