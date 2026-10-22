@@ -194,8 +194,8 @@ func (c *Config) Validate() Errors {
 	}
 	for i, s := range c.Egress.Secrets {
 		p := fmt.Sprintf("egress.secrets[%d]", i)
-		if s.Domain == "" || s.Header == "" || (s.Placeholder == "" && s.Env == "") {
-			add(p, "domain, header and env (or placeholder) are required")
+		if s.Domain == "" || s.Header == "" || s.Env == "" {
+			add(p, "domain, header and env are required")
 		}
 		if s.Env != "" && !envNameRe.MatchString(s.Env) {
 			add(p+".env", "must be an environment variable name like ANTHROPIC_API_KEY")
@@ -203,14 +203,6 @@ func (c *Config) Validate() Errors {
 		if !strings.HasPrefix(s.Secret, "@") {
 			add(p+".secret", "secret must be a vault alias like @anthropic.key")
 		}
-	}
-	switch c.Browser.Engine {
-	case "", "stagehand", "cdp":
-	default:
-		add("browser.engine", "must be stagehand or cdp")
-	}
-	if c.Browser.ModelKey != "" && !strings.HasPrefix(c.Browser.ModelKey, "@") {
-		add("browser.model_key", "must be a vault alias like @llm.key")
 	}
 	for i, k := range append(append([]string{}, c.Store.RegistryKeys...), c.Store.TrustedKeys...) {
 		if !strings.HasPrefix(k, "ed25519:") {

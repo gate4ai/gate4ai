@@ -44,8 +44,8 @@ func (e *Env) service(ctx context.Context, args []string) int {
 	case "status":
 		res := autostart.State(home)
 		res["status"] = "ok"
-		// running здесь — daemon отвечает (как раньше); работает ли он
-		// службой автозапуска — service_running.
+		// running — daemon отвечает; работает ли он службой автозапуска —
+		// service_running.
 		if v, ok := res["running"]; ok {
 			res["service_running"] = v
 		}

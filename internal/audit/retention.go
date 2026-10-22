@@ -107,39 +107,27 @@ func (j *Journal) Purge(now time.Time, ret Retention) (PurgeReport, error) {
 			return rep, err
 		}
 	}
-	n, err := j.redact(seqs, false)
+	n, err := j.redact(seqs)
 	rep.Redacted = n
 	return rep, err
 }
 
 // redact записывает квитанцию journal.redact со списком квитанций (хэш и хэш
 // заголовка), стирает их тела и ставит чекпоинт, покрывающий запись.
-// legacy — запись для квитанций, отредактированных до появления journal.redact.
-func (j *Journal) redact(seqs []int64, legacy bool) (int, error) {
+func (j *Journal) redact(seqs []int64) (int, error) {
 	if len(seqs) == 0 {
 		return 0, nil
 	}
 	slices.Sort(seqs)
 	var recs []redactRec
 	for _, s := range seqs {
-		var e Entry
-		var err error
-		row := j.db.QueryRow(`SELECT `+entryCols+` FROM receipts WHERE seq=?`, s)
-		if legacy {
-			e, _, err = scanIndex(row)
-		} else {
-			e, err = j.scan(row)
-		}
+		e, err := j.scan(j.db.QueryRow(`SELECT `+entryCols+` FROM receipts WHERE seq=?`, s))
 		if err != nil {
 			return 0, err
 		}
 		recs = append(recs, redactRec{Seq: s, Hash: e.Hash, Header: HeaderHash(e.Receipt)})
 	}
-	args := map[string]any{"receipts": recs}
-	if legacy {
-		args["legacy"] = true
-	}
-	r := &Receipt{Agent: RedactAgent, Action: RedactAction, Class: "write", Args: args,
+	r := &Receipt{Agent: RedactAgent, Action: RedactAction, Class: "write", Args: map[string]any{"receipts": recs},
 		Decision:     Decision{Effect: "allow", RuleIDs: []string{"retention"}, Reason: "retention period expired"},
 		Execution:    Execution{Status: "ok"},
 		Verification: Verification{Status: "not_applicable"}}
@@ -147,34 +135,16 @@ func (j *Journal) redact(seqs []int64, legacy bool) (int, error) {
 		return 0, err
 	}
 	n := 0
-	if !legacy {
-		for _, s := range seqs {
-			res, err := j.db.Exec(`UPDATE receipts SET body=NULL, redacted=1 WHERE seq=? AND redacted=0`, s)
-			if err != nil {
-				return n, err
-			}
-			k, _ := res.RowsAffected()
-			n += int(k)
+	for _, s := range seqs {
+		res, err := j.db.Exec(`UPDATE receipts SET body=NULL, redacted=1 WHERE seq=? AND redacted=0`, s)
+		if err != nil {
+			return n, err
 		}
+		k, _ := res.RowsAffected()
+		n += int(k)
 	}
 	_, err := j.Checkpoint()
 	return n, err
-}
-
-// coverLegacyRedactions — квитанции, отредактированные прежней версией (до
-// journal.redact), один раз покрываются записью legacy; дальше любая
-// отредактированная квитанция без записи — подделка.
-func (j *Journal) coverLegacyRedactions() error {
-	var n int
-	if err := j.db.QueryRow(`SELECT COUNT(*) FROM receipts WHERE action=?`, RedactAction).Scan(&n); err != nil || n > 0 {
-		return err
-	}
-	seqs, err := j.seqs(`SELECT seq FROM receipts WHERE redacted=1`)
-	if err != nil {
-		return err
-	}
-	_, err = j.redact(seqs, true)
-	return err
 }
 
 // seqs — номера квитанций по запросу SELECT seq.

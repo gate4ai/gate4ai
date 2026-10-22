@@ -39,7 +39,7 @@ type Status struct {
 	URL        string `json:"url,omitempty"`   // адрес relay
 	DeviceID   string `json:"device_id,omitempty"`
 	Host       string `json:"host,omitempty"`    // <device-id>.<домен relay>
-	MCPURL     string `json:"mcp_url,omitempty"` // https://<host>: MCP по корню (и по /mcp)
+	MCPURL     string `json:"mcp_url,omitempty"` // https://<host>: MCP по корню
 }
 
 // RetryCert — первая пауза перед повторным выпуском сертификата устройства.

@@ -63,10 +63,6 @@ func Open(dbPath, evDir string, ks keys.Store, opt Options) (*Journal, error) {
 		db.Close()
 		return nil, fmt.Errorf("journal schema: %w", err)
 	}
-	if err := migrate(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("journal schema: %w", err)
-	}
 	aead, err := keys.OpenAEAD(ks, "audit.aead")
 	if err != nil {
 		return nil, err
@@ -92,10 +88,6 @@ func Open(dbPath, evDir string, ks keys.Store, opt Options) (*Journal, error) {
 	if ts.Valid {
 		j.lastCPAt = time.Unix(0, ts.Int64)
 	}
-	if err := j.coverLegacyRedactions(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("journal: %w", err)
-	}
 	return j, nil
 }
 
@@ -113,41 +105,22 @@ CREATE TABLE IF NOT EXISTS receipts(
   preview_hash TEXT NOT NULL DEFAULT '',
   evidence TEXT NOT NULL DEFAULT '[]',
   body BLOB,
-  redacted INTEGER NOT NULL DEFAULT 0
+  redacted INTEGER NOT NULL DEFAULT 0,
+  kind TEXT NOT NULL DEFAULT '',
+  intent TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS receipts_ts ON receipts(ts);
 CREATE INDEX IF NOT EXISTS receipts_agent ON receipts(agent, ts);
 CREATE INDEX IF NOT EXISTS receipts_action ON receipts(action, ts);
+CREATE INDEX IF NOT EXISTS receipts_kind ON receipts(kind);
 CREATE TABLE IF NOT EXISTS checkpoints(
   seq INTEGER PRIMARY KEY,
   head TEXT NOT NULL,
   ts INTEGER NOT NULL,
   sig TEXT NOT NULL,
-  witnessed INTEGER NOT NULL DEFAULT 0
+  witnessed INTEGER NOT NULL DEFAULT 0,
+  prev TEXT NOT NULL DEFAULT ''
 );`
-
-// migrate добавляет колонки, появившиеся после первой версии схемы:
-// receipts.kind ('intent' — квитанция-намерение), receipts.intent (ссылка
-// итоговой квитанции на намерение), checkpoints.prev (цепочка чекпоинтов).
-func migrate(db *sql.DB) error {
-	for _, c := range []struct{ table, col, def string }{
-		{"receipts", "kind", "TEXT NOT NULL DEFAULT ''"},
-		{"receipts", "intent", "TEXT NOT NULL DEFAULT ''"},
-		{"checkpoints", "prev", "TEXT NOT NULL DEFAULT ''"},
-	} {
-		var n int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, c.table, c.col).Scan(&n); err != nil {
-			return err
-		}
-		if n == 0 {
-			if _, err := db.Exec(`ALTER TABLE ` + c.table + ` ADD COLUMN ` + c.col + ` ` + c.def); err != nil {
-				return err
-			}
-		}
-	}
-	_, err := db.Exec(`CREATE INDEX IF NOT EXISTS receipts_kind ON receipts(kind)`)
-	return err
-}
 
 // kindIntent — квитанция-намерение (execution.status "started").
 const kindIntent = "intent"
@@ -314,7 +287,7 @@ func (j *Journal) query(q string, args ...any) ([]Entry, error) {
 
 type scanner interface{ Scan(...any) error }
 
-// entryCols — колонки квитанции для scan и scanIndex.
+// entryCols — колонки квитанции для scan.
 const entryCols = `seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash`
 
 // scan — квитанция с расшифрованным телом (отредактированная — только индекс).

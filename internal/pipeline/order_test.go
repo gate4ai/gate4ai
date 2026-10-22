@@ -62,7 +62,7 @@ func (e *env) sent() int {
 }
 
 // Лимит исчерпан между запросом и «Разрешить» — отказ, а не исполнение по
-// старому решению (H5).
+// старому решению.
 func TestApproveRechecksLimits(t *testing.T) {
 	e := newEnvPolicy(t, limitPolicy)
 	r := e.p.Execute(ctx, Call{Agent: "claude-ai", Action: "email.send", Args: stranger})
@@ -91,7 +91,7 @@ func TestApproveRechecksLimits(t *testing.T) {
 }
 
 // Правило deny, добавленное после запроса, и смена профиля действуют на
-// уже поставленный запрос (H5).
+// уже поставленный запрос.
 func TestApproveRechecksPolicyAndProfile(t *testing.T) {
 	e := newEnv(t)
 	r1 := e.p.Execute(ctx, Call{Agent: "claude-ai", Action: "email.send", Args: stranger})
@@ -119,7 +119,7 @@ profiles:
 	}
 }
 
-// Отзыв агента останавливает уже поставленные запросы (H5).
+// Отзыв агента останавливает уже поставленные запросы.
 func TestApproveAfterRevoke(t *testing.T) {
 	e := newEnv(t)
 	r := e.p.Execute(ctx, Call{Agent: "claude-ai", Action: "email.send", Args: stranger})
@@ -139,7 +139,7 @@ func TestApproveAfterRevoke(t *testing.T) {
 	}
 }
 
-// Параллельные вызовы не проходят дневной лимит по одному счётчику (C.M4).
+// Параллельные вызовы не проходят дневной лимит по одному счётчику.
 func TestParallelCallsRespectLimit(t *testing.T) {
 	e := newEnvPolicy(t, limitPolicy)
 	e.mail.slow = 30 * time.Millisecond
@@ -166,7 +166,7 @@ func TestParallelCallsRespectLimit(t *testing.T) {
 	}
 }
 
-// Квитанция-намерение пишется до исполнения; итог ссылается на неё (C.M1).
+// Квитанция-намерение пишется до исполнения; итог ссылается на неё.
 func TestIntentBeforeExecution(t *testing.T) {
 	e := newEnv(t)
 	r := e.p.Execute(ctx, Call{Agent: "claude-ai", Action: "email.send", Args: trusted})
@@ -185,7 +185,7 @@ func TestIntentBeforeExecution(t *testing.T) {
 }
 
 // Журнал недоступен — действие не исполняется, резерв лимита снят, данные
-// чтения не отдаются (C.M1, fail-closed).
+// чтения не отдаются (fail-closed).
 func TestJournalFailureFailsClosed(t *testing.T) {
 	e := newEnv(t)
 	e.j.Close()
@@ -202,7 +202,7 @@ func TestJournalFailureFailsClosed(t *testing.T) {
 	}
 }
 
-// Восстановление после остановки во время исполнения (C.M1).
+// Восстановление после остановки во время исполнения.
 func TestRecoverInterrupted(t *testing.T) {
 	e := newEnv(t)
 	// Намерение без итога (daemon упал во время действия).
@@ -237,7 +237,7 @@ func TestRecoverInterrupted(t *testing.T) {
 	}
 }
 
-// Ошибка State Store — отказ, а не «лимиты и метки нулевые» (C.M5).
+// Ошибка State Store — отказ, а не «лимиты и метки нулевые».
 func TestStateErrorFailsClosed(t *testing.T) {
 	e := newEnv(t)
 	e.st.Close()
@@ -247,7 +247,7 @@ func TestStateErrorFailsClosed(t *testing.T) {
 	}
 }
 
-// Просроченный запрос не одобряется (C.L1): ErrExpired, запрос — timeout.
+// Просроченный запрос не одобряется: ErrExpired, запрос — timeout.
 func TestDecideExpired(t *testing.T) {
 	e := newEnv(t)
 	r := e.p.Execute(ctx, Call{Agent: "claude-ai", Action: "email.send", Args: stranger})
@@ -276,7 +276,7 @@ func TestAlwaysAsk(t *testing.T) {
 	}
 }
 
-// DecideAsync: решение записано сразу, действие — в фоне (C.M3).
+// DecideAsync: решение записано сразу, действие — в фоне.
 func TestDecideAsync(t *testing.T) {
 	e := newEnv(t)
 	e.mail.slow = 50 * time.Millisecond
@@ -296,7 +296,7 @@ func TestDecideAsync(t *testing.T) {
 	}
 }
 
-// Ошибка условия правила видна в квитанции (C.L7).
+// Ошибка условия правила видна в квитанции.
 func TestDecisionErrorsInReceipt(t *testing.T) {
 	e := newEnvPolicy(t, limitPolicy)
 	r := e.p.Execute(ctx, Call{Agent: "claude-ai", Action: "email.read", Args: map[string]any{}})

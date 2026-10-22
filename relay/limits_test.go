@@ -54,7 +54,7 @@ func TestDNSNoAmplification(t *testing.T) {
 	if v := st.TXT(name); len(v) != DefaultMaxTXT || v[1] != strings.Repeat("e", 43) {
 		t.Fatal("TXT values not capped (newest kept):", v)
 	}
-	// Даже если значений много (старый файл состояния), ответ UDP усечён.
+	// Даже если значений много (MaxTXT больше), ответ UDP усечён.
 	st.MaxTXT = 50
 	for i := 0; i < 50; i++ {
 		_ = st.SetTXT(name, strings.Repeat(string(rune('A'+i%26)), 200+i))
@@ -198,7 +198,7 @@ func TestStoreFileFormat(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
 	// null вместо карт не роняет relay.
-	if err := os.WriteFile(path, []byte(`{"devices":null,"txt":null,"checkpoints":null}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"devices":null,"txt":null}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	st, err := OpenStore(path)
@@ -208,17 +208,18 @@ func TestStoreFileFormat(t *testing.T) {
 	if _, _, err := st.Register(); err != nil {
 		t.Fatal(err)
 	}
-	// Старый формат: чекпоинты в файле состояния переносятся в файлы свидетеля.
-	old := `{"devices":{"dev1":"` + hashTok("t") + `"},"checkpoints":{"dev1":[{"seq":1,"head":"aa"},{"seq":2,"head":"bb"}]}}`
-	_ = os.WriteFile(path, []byte(old), 0o600)
+	// Чекпоинты — в файлах свидетеля, не в файле состояния.
+	_ = os.WriteFile(path, []byte(`{"devices":{"dev1":"`+hashTok("t")+`"}}`), 0o600)
 	if st, err = OpenStore(path); err != nil {
 		t.Fatal(err)
 	}
-	if cps := st.Checkpoints("dev1"); len(cps) != 2 || cps[1].Seq != 2 {
-		t.Fatal("checkpoints not migrated:", cps)
+	for i := int64(1); i <= 2; i++ {
+		if err := st.AddCheckpoint("dev1", WitnessedCheckpoint{Seq: i, Head: "aa"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if b, _ := os.ReadFile(path); bytes.Contains(b, []byte("checkpoints")) {
-		t.Fatal("checkpoints still in the state file")
+		t.Fatal("checkpoints in the state file")
 	}
 	// Хранятся последние MaxCheckpoints; переживают перезапуск.
 	st.MaxCheckpoints = 3

@@ -20,7 +20,7 @@ Windows (PowerShell):
 irm https://gate4.ai/install.ps1 | iex
 ```
 
-Установщик определяет ОС и архитектуру, скачивает последний релиз, сверяет контрольные суммы и кладёт `gate4ai` и `gate4ai-tray` (значок в трее: статус, «Разрешить / Отклонить», открытие Web UI; изменения настроек gate4ai, которые просит агент, разрешаются только в Web UI, где видны все правки) в каталог из `PATH`. Проверка: `gate4ai --version`. С `GATE4AI_START=1` (`curl -fsSL https://gate4.ai/install.sh | GATE4AI_START=1 sh`) установщик сразу включает автозапуск daemon (шаг 1).
+Установщик определяет ОС и архитектуру, скачивает последний релиз, сверяет контрольные суммы и кладёт `gate4ai` и `gate4ai-tray` (значок в трее: статус, «Разрешить / Отклонить», открытие Web UI; изменения настроек gate4ai, которые просит агент, разрешаются только в Web UI, где видны все правки) в каталог из `PATH`. Проверка: `gate4ai --version`.
 
 Вручную — архивы со страницы [Releases](https://github.com/gate4ai/gate4ai/releases) (контрольные суммы подписаны [cosign](https://github.com/sigstore/cosign)) или из исходников: `go install github.com/gate4ai/gate4ai/cmd/gate4ai@latest` (Go 1.27+).
 

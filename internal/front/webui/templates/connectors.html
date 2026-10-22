@@ -14,7 +14,6 @@
 <form method="post" action="{{$.Base}}/connectors/install"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="source" value="{{if $d.Local}}{{$d.Src}}{{else}}{{.Connector}}{{end}}">
 {{if $d.Local}}<input type="hidden" name="local" value="1">{{if $d.Dev}}<input type="hidden" name="dev" value="1">{{end}}{{end}}
 {{range .Capabilities}}<input type="hidden" name="consent" value="{{.}}">{{end}}
-<input type="hidden" name="grants" value="1">
 {{if $d.Grants}}<fieldset style="border:0;padding:0"><legend><b>{{T "Give access to"}}</b></legend>
 {{range $d.Grants}}{{if .Agents}}<label class="inline"><input type="checkbox" name="profiles" value="{{.Profile}}" {{if .Checked}}checked{{end}}> {{join .Agents ", "}}</label>{{end}}{{end}}
 {{range $d.Grants}}{{if not .Agents}}<label class="inline muted"><input type="checkbox" name="profiles" value="{{.Profile}}"> {{T "permissions %s (no agents)" .Profile}}</label>{{end}}{{end}}

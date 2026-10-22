@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Токен ссылки входа не попадает в argv открывателя браузера (код-ревью E.11).
+// Токен ссылки входа не попадает в argv открывателя браузера.
 func TestOpenLoginURLKeepsTokenOutOfArgv(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("на Windows ссылка открывается как есть")
@@ -43,7 +43,7 @@ func TestOpenLoginURLKeepsTokenOutOfArgv(t *testing.T) {
 	}
 }
 
-// --reset-ui-login не повторяется при restart и не попадает в автозапуск (E.14).
+// --reset-ui-login не повторяется при restart и не попадает в автозапуск.
 func TestWithoutOneShot(t *testing.T) {
 	got := withoutOneShot([]string{"--home", "/h", "--reset-ui-login", "-reset-ui-login=true", "--public", ":443"})
 	if strings.Join(got, " ") != "--home /h --public :443" {
@@ -51,7 +51,7 @@ func TestWithoutOneShot(t *testing.T) {
 	}
 }
 
-// contract и fixture — встроенные команды со своей справкой (E.19).
+// contract и fixture — встроенные команды со своей справкой.
 func TestHelpContractFixture(t *testing.T) {
 	for _, c := range []string{"contract", "fixture"} {
 		if !isCommand(c) {

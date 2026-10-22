@@ -17,7 +17,7 @@ const day = 24 * time.Hour
 var testRetention = Retention{EvidenceMoney: 3 * 365 * day, EvidenceOther: 90 * day, Denied: 365 * day}
 
 // Одно содержимое у квитанций money и external: очистка 90-дневного
-// доказательства не удаляет файл, на который ссылается money-квитанция (H6).
+// доказательства не удаляет файл, на который ссылается money-квитанция.
 func TestPurgeKeepsSharedEvidence(t *testing.T) {
 	c := &clock{time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}
 	j, _ := openTest(t, keys.NewMemory(), c, nil, 100)
@@ -58,7 +58,7 @@ func TestPurgeKeepsSharedEvidence(t *testing.T) {
 }
 
 // Пометка redacted без подписанной записи journal.redact или с подменёнными
-// метаданными — подделка, её замечают VerifyChain и verify архива (C.M2).
+// метаданными — подделка, её замечают VerifyChain и verify архива.
 func TestRedactedForgeryDetected(t *testing.T) {
 	c := &clock{time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}
 	j, _ := openTest(t, keys.NewMemory(), c, nil, 100)
@@ -110,7 +110,7 @@ func TestRedactedForgeryDetected(t *testing.T) {
 }
 
 // Отклонение и таймаут человека — не отказ политики: через год не
-// редактируются (C.L9).
+// редактируются.
 func TestHumanRejectionNotRedactedAsDeny(t *testing.T) {
 	c := &clock{time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}
 	j, _ := openTest(t, keys.NewMemory(), c, nil, 100)
@@ -126,7 +126,7 @@ func TestHumanRejectionNotRedactedAsDeny(t *testing.T) {
 	}
 }
 
-// Чекпоинты связаны цепочкой: удаление чекпоинта из середины видно (C.L8);
+// Чекпоинты связаны цепочкой: удаление чекпоинта из середины видно;
 // свидетель, который знает последний чекпоинт, видит обрезку хвоста.
 func TestCheckpointChainAndTruncation(t *testing.T) {
 	c := &clock{time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
@@ -164,7 +164,7 @@ func (w *readerWitness) LastWitnessed() (Checkpoint, bool, error) {
 	return *w.last, true, nil
 }
 
-// Свидетель вызывается вне мьютекса журнала (C.L2): медленный relay не
+// Свидетель вызывается вне мьютекса журнала: медленный relay не
 // останавливает запись квитанций, а вызов журнала из свидетеля не виснет.
 func TestWitnessOutsideJournalLock(t *testing.T) {
 	c := &clock{time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
@@ -193,7 +193,7 @@ type witnessFunc func(Checkpoint) error
 func (f witnessFunc) Witness(cp Checkpoint) error { return f(cp) }
 
 // Квитанции-намерения: в выборке по умолчанию их нет, в проверке цепочки —
-// есть; намерение без итога — OpenIntents (C.M1).
+// есть; намерение без итога — OpenIntents.
 func TestIntentReceipts(t *testing.T) {
 	c := &clock{time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 	j, _ := openTest(t, keys.NewMemory(), c, nil, 100)

@@ -15,7 +15,7 @@ import (
 )
 
 // keystore auto не переключается молча на файл, если установка уже хранит
-// ключи в keychain (A.M4): иначе новые ключи, нечитаемые базы, пустой Vault.
+// ключи в keychain: иначе новые ключи, нечитаемые базы, пустой Vault.
 func TestOpenKeysAuto(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	mem := keys.NewMemory()
@@ -48,13 +48,6 @@ func TestOpenKeysAuto(t *testing.T) {
 	// Явный выбор файла работает, но маркер не меняет.
 	if s, err := openKeys("file", home, log); err != nil || !isFile(s) || marker(home) != "keychain" {
 		t.Fatal(s, err, marker(home))
-	}
-
-	// Старая установка без маркера: базы есть, keys.json нет → ошибка.
-	old := t.TempDir()
-	_ = os.WriteFile(filepath.Join(old, "state.db"), []byte("x"), 0o600)
-	if _, err := openKeys("auto", old, log); err == nil {
-		t.Fatal("existing databases without keys.json must not switch to the file")
 	}
 
 	// Свежая установка без keychain → файл, запомнен; и дальше файл, даже когда keychain вернулся.

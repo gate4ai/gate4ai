@@ -253,12 +253,9 @@ func StartBackground(ctx context.Context, bin string) error {
 }
 
 // staleDaemon — предупреждение, если daemon запущен другой версией (бинарник
-// обновили, а работает прежний процесс).
+// обновили, а процесс daemon запущен до обновления).
 func staleDaemon(h map[string]any) string {
 	v, _ := h["version"].(string)
-	if v == "" {
-		v = "older than 0.6.6"
-	}
 	if v == version.Version {
 		return ""
 	}
@@ -305,7 +302,7 @@ func (e *Env) daemonRestart(ctx context.Context) int {
 }
 
 // withoutOneShot убирает разовые флаги daemon (--reset-ui-login снимает защиту
-// входа в Web UI): restart и служба автозапуска их не повторяют (код-ревью E.14).
+// входа в Web UI): restart и служба автозапуска их не повторяют.
 func withoutOneShot(args []string) []string {
 	var out []string
 	for _, a := range args {

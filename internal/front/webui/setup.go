@@ -286,7 +286,7 @@ func (u *UI) setupAccessPage(r *http.Request) (string, map[string]any, error) {
 		switch cn {
 		case "files":
 			roots := toStrings(cfg.Connectors["files"]["roots"])
-			if len(roots) == 0 || (len(roots) == 1 && (roots[0] == "~" || roots[0] == "~/")) {
+			if len(roots) == 0 {
 				roots = []string{"~/Documents"}
 			}
 			sc.Folders = strings.Join(roots, "\n")
@@ -373,9 +373,8 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 				s := map[string]any{}
 				maps.Copy(s, c.Connectors["files"])
 				roots := toStrings(s["roots"])
-				// Начальный корень («весь домашний каталог» прежних версий или ~/Documents)
-				// заменяется выбранными папками.
-				if len(roots) == 1 && (roots[0] == "~" || roots[0] == "~/" || roots[0] == "~/Documents") {
+				// Начальный корень ~/Documents заменяется выбранными папками.
+				if len(roots) == 1 && roots[0] == "~/Documents" {
 					roots = nil
 				}
 				for _, d := range folders {

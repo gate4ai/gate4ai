@@ -304,7 +304,7 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		for _, a := range pend {
 			items = append(items, map[string]any{"id": a.ID, "agent": a.Agent, "action": a.Action, "hash": audit.Short(a.PreviewHash),
 				"summary": strings.SplitN(a.Preview, "\n", 2)[0], "reason": a.Decision.Reason, "expires": a.Expires,
-				// web_only — трей не даёт «Разрешить» одним нажатием (код-ревью E.5).
+				// web_only — трей не даёт «Разрешить» одним нажатием.
 				"web_only": approval.WebOnly(a.Action)})
 		}
 		_, n := u.D.Config.CurrentRaw()
@@ -386,7 +386,6 @@ func (u *UI) handler(m mount) http.Handler {
 		get(path, f)
 	}
 	localPage("/agents", u.agents)
-	localPage("/agents/new", u.agentNew)
 	localPage("/agents/{name}", u.agentPage)
 	localPage("/connectors", u.connectorsPage)
 	localPage("/connectors/{name}", u.connectorPage)
@@ -426,7 +425,6 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/connectors/install", u.installConnector)
 	change("/connectors/refresh", u.refreshIndex)
 	change("/connectors/{name}/settings", u.saveConnectorSettings)
-	change("/connectors/{name}/profiles", u.saveConnectorProfiles)
 	change("/connectors/{name}/remove", u.removeConnector)
 	change("/connectors/{name}/decision", u.saveActionDecision)
 	change("/policy", u.savePolicy)
@@ -621,7 +619,7 @@ func (u *UI) render(w http.ResponseWriter, r *http.Request, name string, v view,
 
 // fill — сообщения страницы: только из сессии (после действия). Из адреса
 // (?flash=, ?error=) текст не берётся: по ссылке владельцу нельзя показать
-// произвольный «системный» текст (код-ревью E.20).
+// произвольный «системный» текст.
 func (u *UI) fill(v *view, r *http.Request, sid string) {
 	l := u.lang(r)
 	if n, ok := u.popNote(sid); ok {

@@ -81,18 +81,6 @@ func (u *UI) agents(r *http.Request) (string, map[string]any, error) {
 	return "agents", map[string]any{"Rows": u.agentRows(u.lang(r))}, nil
 }
 
-// agentNew — прежний адрес мастера агента: теперь это мастер первого запуска.
-func (u *UI) agentNew(r *http.Request) (string, map[string]any, error) {
-	to := "/setup"
-	if c := r.URL.Query().Get("client"); c != "" {
-		to = "/setup/access?client=" + url.QueryEscape(c)
-		if n := r.URL.Query().Get("name"); n != "" {
-			to += "&name=" + url.QueryEscape(n)
-		}
-	}
-	return "", map[string]any{"redirect": to}, nil
-}
-
 // createAgent — агент с профилем (для форм и сценариев без мастера).
 func (u *UI) createAgent(w http.ResponseWriter, r *http.Request) map[string]any {
 	f := r.PostForm

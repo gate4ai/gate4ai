@@ -1,13 +1,13 @@
 # gate4ai sdk-go
 
-SDK коннекторов [gate4.ai](https://github.com/gate4ai/gate4ai) на Go. Это контракт между хостом и коннектором: манифест, ABI v2 и функции хоста.
+SDK коннекторов [gate4.ai](https://github.com/gate4ai/gate4ai) на Go. Это контракт между хостом и коннектором: манифест, ABI и функции хоста.
 
 SDK — каталог `sdk-go/` модуля `github.com/gate4ai/gate4ai` (одна версия с ядром): `go get github.com/gate4ai/gate4ai@latest`, импорт `github.com/gate4ai/gate4ai/sdk-go/...`. Пакеты SDK зависят только друг от друга и от `gopkg.in/yaml.v3` — это проверяет CI.
 
 | Пакет | Что это |
 |---|---|
 | `manifest` | манифест: действия, аргументы, класс эффекта, проверка результата, `runtime`, `capabilities`, `limits`; шаблоны `${setting:…}` |
-| `abi` | ABI v2: экспорты модуля, функции хоста, их запросы и ответы; `abi.Host` — типизированные функции хоста для кода коннектора |
+| `abi` | ABI: экспорты модуля, функции хоста, их запросы и ответы; `abi.Host` — типизированные функции хоста для кода коннектора |
 | `connector` | PDK: `connector.Register` и экспорты WASM-модуля (`GOOS=wasip1`) |
 | `native` | `runtime: native`: отдельный процесс под надзором хоста, JSON-RPC по stdio; `native.Serve` — тот же PDK, что у WASM |
 | `contract` | контракт для вызовов между коннекторами (`service_call`): `Diff` / `Check` — несовместимые изменения, `Gen` — типизированный Go-клиент |
@@ -103,7 +103,7 @@ gate4ai contract diff old/manifest.yaml manifest.yaml                     # CI �
 
 ## runtime: native
 
-Только для пакетов проверенного издателя (сейчас — gate4.ai): процесс работает без песочницы, с правами пользователя. Нативные пакеты сторонних издателей пока не принимаются — если вы хотите его создать, свяжитесь с нами, мы к этому благосклонны.
+Только для пакетов проверенного издателя (gate4.ai): процесс работает без песочницы, с правами пользователя; нативные пакеты сторонних издателей не принимаются.
 
 ```go
 func main() { native.Serve(manifestYAML, &Browser{}) }
@@ -111,7 +111,7 @@ func main() { native.Serve(manifestYAML, &Browser{}) }
 
 В манифесте — `runtime: native` и `platforms: [linux/amd64, darwin/arm64, …]`; `gate4ai connectors pack` собирает пакет под каждую платформу (`CGO_ENABLED=0 -trimpath`).
 
-## ABI v2
+## ABI
 
 Описание экспортов и импортов — в документации пакета [`abi`](abi/abi.go). Один экземпляр модуля обслуживает один вызов; лимиты памяти и времени — `limits` манифеста.
 
@@ -120,8 +120,6 @@ func main() { native.Serve(manifestYAML, &Browser{}) }
 - аргументы действия — `input_schema`, подмножество JSON Schema (`object`, `string`, `number`, `integer`, `boolean`, `array`, вложенные объекты; `enum`, `format: email | url | path`, `default`, `minimum`/`maximum`, `maxLength`, `minItems`/`maxItems`); у объектов лишних полей не бывает;
 - результат — `content` (блоки `text`, `image`, `resource`, `resource_link`) и/или `structured`; если в манифесте есть `output_schema`, `structured` обязателен и сверяется с ней;
 - проверка — `verified` / `not_confirmed` / `verify_after`; ошибка `verify` — «проверить не удалось».
-
-Манифест с `args` (ABI v1) не принимается — пересоберите коннектор с текущим SDK.
 
 ## Лицензия
 

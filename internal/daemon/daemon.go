@@ -89,10 +89,10 @@ type Daemon struct {
 	publicMux  http.Handler
 
 	// strict — новые версии конфигурации проверяются по каталогу строго; до
-	// конца открытия хранилища сохранённая версия проверяется мягко (legacy —
+	// конца открытия хранилища сохранённая версия проверяется мягко (startErrs —
 	// её ошибки, которые терпятся и в новых версиях, пока владелец их не уберёт).
-	strict     atomic.Bool
-	legacyErrs map[string]bool
+	strict    atomic.Bool
+	startErrs map[string]bool
 	// policyWarn — политика скомпилирована без проверки имён аргументов:
 	// правила ссылаются на действия незагруженных коннекторов.
 	policyWarn string
@@ -127,7 +127,6 @@ func New(opt Options) (*Daemon, error) {
 	}
 	// Каталог действий — из манифестов установленных пакетов (компиляция — в фоне);
 	// отзыв версий проверяется после чтения конфигурации (ключи registry — в ней).
-	d.retireBuiltinPackages()
 	for _, c := range (store.Options{Dir: d.ConnectorsDir}).LoadAll(context.Background(), d.Wasm, d.Log) {
 		d.Registry.Add(c)
 	}
@@ -202,8 +201,6 @@ func New(opt Options) (*Daemon, error) {
 	} else if n > 0 {
 		d.Log.Warn("interrupted actions closed", "count", n)
 	}
-	d.migrateBrowserSection()
-	d.updateWasmBrowser()
 	return d, nil
 }
 
@@ -225,9 +222,9 @@ func (d *Daemon) validate(c *config.Config) config.Errors {
 			return errs // ошибка не в именах аргументов
 		}
 		d.mu.Lock()
-		d.legacyErrs = map[string]bool{}
+		d.startErrs = map[string]bool{}
 		for _, e := range errs {
-			d.legacyErrs[errKey(e)] = true
+			d.startErrs[errKey(e)] = true
 		}
 		d.mu.Unlock()
 		d.Log.Warn("saved policy references actions of connectors that are not loaded; their conditions are not checked against the catalog until you fix the policy", "errors", errs.Error())
@@ -237,7 +234,7 @@ func (d *Daemon) validate(c *config.Config) config.Errors {
 	defer d.mu.Unlock()
 	var out config.Errors
 	for _, e := range errs {
-		if !d.legacyErrs[errKey(e)] {
+		if !d.startErrs[errKey(e)] {
 			out = append(out, e)
 		}
 	}

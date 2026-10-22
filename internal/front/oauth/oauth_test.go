@@ -208,7 +208,7 @@ func TestPKCEAndRedirects(t *testing.T) {
 	}
 }
 
-// M7: перебор кода подключения — после maxConnectFailures неверных вводов
+// Перебор кода подключения: после maxConnectFailures неверных вводов
 // выданные коды аннулируются; частота неверных вводов ограничена.
 func TestConnectCodeBruteForce(t *testing.T) {
 	e := newEnv(t)
@@ -240,7 +240,7 @@ func TestConnectCodeBruteForce(t *testing.T) {
 	}
 }
 
-// M7: регистрация клиентов ограничена по частоте и общему числу; старые
+// Регистрация клиентов ограничена по частоте и общему числу; старые
 // клиенты без токенов удаляются.
 func TestRegistrationLimits(t *testing.T) {
 	e := newEnv(t)
@@ -273,7 +273,7 @@ func TestRegistrationLimits(t *testing.T) {
 	}
 }
 
-// F.L7: issuer — настроенный публичный адрес; без него Host запроса
+// Issuer — настроенный публичный адрес; без него Host запроса
 // используется, только если это корректное имя.
 func TestIssuer(t *testing.T) {
 	e := newEnv(t)

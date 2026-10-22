@@ -99,7 +99,7 @@ func (b *browser) submitPassword(page, pw string) (int, string) {
 func TestLoginPassword(t *testing.T) {
 	u, _, _, base := setup(t)
 	advance := clock(u)
-	// Без защиты — как раньше: ссылка сразу даёт сессию.
+	// Без защиты ссылка сразу даёт сессию.
 	other := newBrowser(t, base)
 	other.get(u.LoginURL())
 	if !other.loggedIn() || len(u.Protection().Requires()) != 0 {

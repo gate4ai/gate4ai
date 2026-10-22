@@ -58,7 +58,7 @@ type errCounters struct {
 
 func (c errCounters) Err() error { return c.err }
 
-// Ошибка State Store — deny, а не нулевые счётчики или «меток нет» (C.M5).
+// Ошибка State Store — deny, а не нулевые счётчики или «меток нет».
 func TestStateErrorFailsClosed(t *testing.T) {
 	y := `
 agents: {a: {profile: p}}
@@ -83,7 +83,7 @@ profiles:
 }
 
 // Неверный шаблон glob: литерал — ошибка компиляции, значение из аргумента —
-// ошибка вычисления (deny срабатывает), а не молчаливое false (C.M6).
+// ошибка вычисления (deny срабатывает), а не молчаливое false.
 func TestGlobBadPattern(t *testing.T) {
 	y := "agents: {a: {profile: p}}\nprofiles: {p: {connectors: [files], rules: [{id: r, action: files.read, effect: deny, when: \"glob(path, '/x/[abc')\"}]}}\n"
 	if _, err := config.Parse([]byte(y), Validator(Catalog{"files.read": {"path"}})); err == nil || !strings.Contains(err.Error(), "bad pattern") {
@@ -104,7 +104,7 @@ profiles:
 	}
 }
 
-// Регистр на macOS/Windows и симлинки: решение по настоящему пути (C.M6).
+// Регистр на macOS/Windows и симлинки: решение по настоящему пути.
 func TestGlobRealPath(t *testing.T) {
 	dir := t.TempDir()
 	priv := filepath.Join(dir, "vault", "private")

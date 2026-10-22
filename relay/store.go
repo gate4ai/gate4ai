@@ -47,9 +47,9 @@ type Store struct {
 type storeData struct {
 	Devices map[string]string   `json:"devices"` // device id → sha256(token)
 	TXT     map[string][]string `json:"txt"`     // fqdn → значения
-	// Checkpoints — чекпоинты хранилища в памяти (path ""); в файле состояния
-	// только у старых версий relay (переносятся в каталог свидетеля).
-	Checkpoints map[string][]WitnessedCheckpoint `json:"checkpoints,omitempty"`
+	// Checkpoints — чекпоинты хранилища в памяти (path ""); у хранилища в
+	// файле они в каталоге свидетеля.
+	Checkpoints map[string][]WitnessedCheckpoint `json:"-"`
 	// Stats — счётчики для метрик; переживают перезапуск relay.
 	Stats Stats `json:"stats"`
 }
@@ -129,18 +129,6 @@ func OpenStore(path string) (*Store, error) {
 	}
 	if s.data.Checkpoints == nil {
 		s.data.Checkpoints = map[string][]WitnessedCheckpoint{}
-	}
-	if path != "" && len(s.data.Checkpoints) > 0 {
-		// Старый формат: чекпоинты — в файлы свидетеля, состояние — без них.
-		for id, l := range s.data.Checkpoints {
-			if err := s.writeWitness(id, l); err != nil {
-				return nil, err
-			}
-		}
-		clear(s.data.Checkpoints)
-		if err := s.save(); err != nil {
-			return nil, err
-		}
 	}
 	return s, nil
 }

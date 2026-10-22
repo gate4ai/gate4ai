@@ -176,7 +176,7 @@ func (r *registryEnv) publish(t *testing.T, version, host string) {
 	p, _ := Open(b)
 	e := r.index.Connectors["bank"]
 	e.Versions = append(e.Versions, registry.Release{Version: version, URL: "packages/bank-" + version + ".g4c", SHA256: SHA256(b),
-		Digest: p.Sig.Digest, Capabilities: p.Manifest.Capabilities.Summary()})
+		Digest: p.Sig.Digest, Capabilities: p.Manifest.Summary()})
 	r.index.Connectors["bank"] = e
 	r.save(t)
 }

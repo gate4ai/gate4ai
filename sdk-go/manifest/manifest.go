@@ -204,43 +204,11 @@ func (a Action) CallsAction(target, action string) bool {
 	return slices.Contains(a.Calls, target+"."+action)
 }
 
-// Summary — возможности и подвызовы действий человеческим языком: то, на что
-// владелец соглашается при установке (изменение — повторное согласие). Кроме
-// LegacySummary сюда входят среда исполнения без песочницы (native), действия
-// классов выше read и лимиты выше значений по умолчанию (ConsentExtras).
+// Summary — возможности, учётки, подвызовы действий, среда исполнения без
+// песочницы (native), действия классов выше read и лимиты выше значений по
+// умолчанию человеческим языком: то, на что владелец соглашается при установке
+// (изменение — повторное согласие).
 func (m *Manifest) Summary() []string {
-	out := append(m.LegacySummary(), m.ConsentExtras()...)
-	sort.Strings(out)
-	return out
-}
-
-// ConsentExtras — строки согласия, которых не было в прежних версиях Summary:
-// runtime native, действия классов write / external / money, лимиты выше
-// значений по умолчанию. Их смена (wasm → native, новое действие money,
-// timeout_s в час) требует согласия заново.
-func (m *Manifest) ConsentExtras() []string {
-	var out []string
-	if m.Runtime == RuntimeNative {
-		out = append(out, "runs as a separate program without a sandbox, with your user's rights")
-	}
-	byClass := map[string][]string{}
-	for _, a := range m.Actions {
-		byClass[a.Class] = append(byClass[a.Class], a.Name)
-	}
-	for _, c := range []string{"write", "external", "money"} {
-		if names := byClass[c]; len(names) > 0 {
-			sort.Strings(names)
-			out = append(out, fmt.Sprintf("class %s actions: %s", c, strings.Join(names, ", ")))
-		}
-	}
-	out = append(out, m.Limits.Summary(m.Runtime)...)
-	return out
-}
-
-// LegacySummary — Summary в форме до версии с ConsentExtras: так записаны
-// согласия в install.json и возможности версий в registry, сделанные прежними
-// версиями gate4ai (хост принимает их, см. store).
-func (m *Manifest) LegacySummary() []string {
 	out := m.Capabilities.Summary()
 	for _, c := range m.Credentials {
 		detail := "slot " + c.Slot
@@ -257,11 +225,23 @@ func (m *Manifest) LegacySummary() []string {
 		}
 		out = append(out, fmt.Sprintf("signs in on %s with your account (%s)", strings.Join(c.Bind, ", "), detail))
 	}
+	byClass := map[string][]string{}
 	for _, a := range m.Actions {
 		if len(a.Calls) > 0 {
 			out = append(out, fmt.Sprintf("action %s calls %s", a.Name, a.CallsText()))
 		}
+		byClass[a.Class] = append(byClass[a.Class], a.Name)
 	}
+	if m.Runtime == RuntimeNative {
+		out = append(out, "runs as a separate program without a sandbox, with your user's rights")
+	}
+	for _, c := range []string{"write", "external", "money"} {
+		if names := byClass[c]; len(names) > 0 {
+			sort.Strings(names)
+			out = append(out, fmt.Sprintf("class %s actions: %s", c, strings.Join(names, ", ")))
+		}
+	}
+	out = append(out, m.Limits.Summary(m.Runtime)...)
 	sort.Strings(out)
 	return out
 }

@@ -223,7 +223,7 @@ func TestMITMCompressedAndStreaming(t *testing.T) {
 	}
 }
 
-// B.M4: имя, которое резолвится в адрес этой машины или частной сети, не
+// имя, которое резолвится в адрес этой машины или частной сети, не
 // открывает туннель к локальным службам, если такой адрес не разрешён явно.
 func TestLocalAddressBlocked(t *testing.T) {
 	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "local service") }))

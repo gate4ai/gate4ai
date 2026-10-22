@@ -34,7 +34,7 @@ func TestRemoteMCPWithOAuth(t *testing.T) {
 	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 	// 1. Без токена — 401 с указанием на метаданные ресурса.
-	resp, _ := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	resp, _ := http.Post(ts.URL+"/", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
 	if resp.StatusCode != 401 || !strings.Contains(resp.Header.Get("WWW-Authenticate"), "/.well-known/oauth-protected-resource") {
 		t.Fatal(resp.StatusCode, resp.Header)
 	}
@@ -114,7 +114,7 @@ func TestRemoteMCPWithOAuth(t *testing.T) {
 	}
 	// 5. MCP с токеном: каталог агента bot (только notes), вызов.
 	mcpCall := func(token, body string) (int, map[string]any) {
-		req, _ := http.NewRequest("POST", ts.URL+"/mcp", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", ts.URL+"/", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
@@ -192,9 +192,8 @@ func TestRemoteMCPAtRoot(t *testing.T) {
 	}
 	list := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
 
-	// Без токена: 401 и метаданные ресурса; resource — адрес устройства
-	// (префикс и корня, и старого …/mcp).
-	for _, path := range []string{"/", "/mcp"} {
+	// Без токена: 401 и метаданные ресурса; resource — адрес устройства.
+	for _, path := range []string{"/"} {
 		resp, _ := call("POST", path, "", list)
 		h := resp.Header.Get("WWW-Authenticate")
 		m := regexp.MustCompile(`resource_metadata="([^"]+)"`).FindStringSubmatch(h)
@@ -213,9 +212,11 @@ func TestRemoteMCPAtRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	r1, root := call("POST", "/", tok, list)
-	r2, mcp := call("POST", "/mcp", tok, list)
-	if r1.StatusCode != 200 || root != mcp || !strings.Contains(root, "notes_read") {
-		t.Fatal(r1.StatusCode, r2.StatusCode, root, mcp)
+	if r1.StatusCode != 200 || !strings.Contains(root, "notes_read") {
+		t.Fatal(r1.StatusCode, root)
+	}
+	if r, _ := call("POST", "/mcp", tok, list); r.StatusCode != 404 {
+		t.Fatal("MCP is served at the root only", r.StatusCode)
 	}
 	if r, _ := call("POST", "/", tok, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`); r.Header.Get("Mcp-Session-Id") == "" {
 		t.Fatal("no session id at root")
@@ -229,9 +230,6 @@ func TestRemoteMCPAtRoot(t *testing.T) {
 	// GET корня: SSE-потока нет (405), в браузере — подсказка.
 	if r, _ := call("GET", "/", tok, ""); r.StatusCode != 405 {
 		t.Fatal("sse", r.StatusCode)
-	}
-	if r, _ := call("GET", "/mcp", tok, ""); r.StatusCode != 405 {
-		t.Fatal("sse /mcp", r.StatusCode)
 	}
 	if r, err := http.Get(ts.URL + "/"); err != nil || r.StatusCode != 200 {
 		t.Fatal("root page", err)

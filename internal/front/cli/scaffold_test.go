@@ -73,7 +73,7 @@ func TestStaleDaemon(t *testing.T) {
 	if w := staleDaemon(map[string]any{"version": version.Version}); w != "" {
 		t.Fatal(w)
 	}
-	for _, h := range []map[string]any{{"version": "0.0.1"}, {}} {
+	for _, h := range []map[string]any{{"version": "0.0.1"}} {
 		if w := staleDaemon(h); !strings.Contains(w, "gate4ai daemon restart") {
 			t.Fatal(h, w)
 		}

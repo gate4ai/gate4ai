@@ -22,7 +22,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/platform/version"
 )
 
-// ProtocolVersion — поддерживаемая версия MCP (последняя); старые клиенты получают свою, если она в списке.
+// ProtocolVersion — последняя поддерживаемая версия MCP; клиент с другой версией из списка supported получает свою.
 const ProtocolVersion = "2025-11-25"
 
 var supported = map[string]bool{"2025-11-25": true, "2025-06-18": true, "2025-03-26": true, "2024-11-05": true}

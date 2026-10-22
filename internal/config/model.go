@@ -40,7 +40,6 @@ type Config struct {
 	Retention   Retention             `yaml:"retention,omitempty" json:"retention"`
 	Relay       Relay                 `yaml:"relay,omitempty" json:"relay"`
 	Egress      Egress                `yaml:"egress,omitempty" json:"egress"`
-	Browser     Browser               `yaml:"browser,omitempty" json:"browser"`
 	Store       ConnectorStore        `yaml:"store,omitempty" json:"store"`
 }
 
@@ -49,18 +48,6 @@ type ConnectorStore struct {
 	Registry     string   `yaml:"registry,omitempty" json:"registry,omitempty"`           // URL или путь к index.json
 	RegistryKeys []string `yaml:"registry_keys,omitempty" json:"registry_keys,omitempty"` // ключи подписи индекса (ed25519:…)
 	TrustedKeys  []string `yaml:"trusted_keys,omitempty" json:"trusted_keys,omitempty"`   // ключи издателей вне registry
-}
-
-// Browser — настройки браузерного воркера (службы хоста для функций browser_*).
-// Разрешённые сайты задаются в настройках коннектора (connectors.browser.allowed_domains).
-type Browser struct {
-	Engine       string `yaml:"engine,omitempty" json:"engine,omitempty"`           // stagehand (по умолчанию) | cdp
-	CDPURL       string `yaml:"cdp_url,omitempty" json:"cdp_url,omitempty"`         // уже запущенный Chrome
-	ChromePath   string `yaml:"chrome_path,omitempty" json:"chrome_path,omitempty"` // путь к Chrome
-	ProfileDir   string `yaml:"profile_dir,omitempty" json:"profile_dir,omitempty"` // выделенный профиль
-	Model        string `yaml:"model,omitempty" json:"model,omitempty"`             // модель для extract
-	ModelKey     string `yaml:"model_key,omitempty" json:"model_key,omitempty"`     // алиас Vault ключа модели
-	MaxTextChars int    `yaml:"max_text_chars,omitempty" json:"max_text_chars,omitempty"`
 }
 
 // Agent — агент и его профиль прав.
@@ -145,10 +132,9 @@ type Egress struct {
 }
 
 // EgressSecret — заглушку в заголовке Header запроса к Domain заменить
-// значением алиаса Secret. С Env заглушка одноразовая: каждый запуск получает
-// свою (<Placeholder или gate4ai>-<случайная>) в переменной окружения Env, и
-// прокси принимает только заглушку этого запуска. Без Env — постоянная
-// Placeholder из конфигурации (совместимость; daemon предупреждает).
+// значением алиаса Secret. Заглушка одноразовая: каждый запуск получает свою
+// (<Placeholder или gate4ai>-<случайная>) в переменной окружения Env, и прокси
+// принимает только заглушку этого запуска; Placeholder — только её префикс.
 type EgressSecret struct {
 	Domain      string `yaml:"domain" json:"domain"`
 	Header      string `yaml:"header" json:"header"`

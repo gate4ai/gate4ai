@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package abi — ABI v2 между хостом gate4.ai и коннектором: экспорты модуля,
+// Package abi — ABI между хостом gate4.ai и коннектором: экспорты модуля,
 // функции хоста и их запросы/ответы. Всё передаётся в JSON.
 //
 // Экспорты WASM-модуля (Go: GOOS=wasip1, -buildmode=c-shared; хост вызывает
@@ -26,9 +26,6 @@ import (
 
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
-
-// Version — версия ABI.
-const Version = 2
 
 // Имена экспортов и импортов.
 const (

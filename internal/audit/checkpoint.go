@@ -18,7 +18,7 @@ type Checkpoint struct {
 	TS   time.Time `json:"ts"`
 	// Prev — хэш подписанных байтов предыдущего чекпоинта: чекпоинты связаны
 	// цепочкой, удалить или переставить один из середины незаметно нельзя.
-	// Пусто — первый чекпоинт (или записанный до появления цепочки).
+	// Пусто — только у первого чекпоинта.
 	Prev string `json:"prev,omitempty"`
 	Sig  string `json:"sig"` // Ed25519, hex
 }
@@ -259,7 +259,6 @@ func verifyChain(entries []Entry, cps []Checkpoint, pub ed25519.PublicKey) error
 		prev = e.Hash
 		hashes[r.Seq] = e.Hash
 	}
-	chained := false
 	for i, cp := range cps {
 		if !cp.VerifySig(pub) {
 			return fmt.Errorf("%w: checkpoint %d bad signature", ErrChainBroken, cp.Seq)
@@ -268,13 +267,12 @@ func verifyChain(entries []Entry, cps []Checkpoint, pub ed25519.PublicKey) error
 			return fmt.Errorf("%w: checkpoint %d head mismatch", ErrChainBroken, cp.Seq)
 		}
 		switch {
-		case cp.Prev != "":
-			if i == 0 || HashBytes(cps[i-1].SignedBytes()) != cp.Prev {
-				return fmt.Errorf("%w: checkpoint %d does not follow the previous one (checkpoint removed)", ErrChainBroken, cp.Seq)
-			}
-			chained = true
-		case chained:
+		case i == 0 && cp.Prev != "":
+			return fmt.Errorf("%w: checkpoint %d does not follow the previous one (checkpoint removed)", ErrChainBroken, cp.Seq)
+		case i > 0 && cp.Prev == "":
 			return fmt.Errorf("%w: checkpoint %d is not linked to the previous one", ErrChainBroken, cp.Seq)
+		case i > 0 && HashBytes(cps[i-1].SignedBytes()) != cp.Prev:
+			return fmt.Errorf("%w: checkpoint %d does not follow the previous one (checkpoint removed)", ErrChainBroken, cp.Seq)
 		}
 	}
 	return nil

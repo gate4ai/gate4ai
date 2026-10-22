@@ -169,7 +169,7 @@ func TestPasswordNeverReachesConnector(t *testing.T) {
 }
 
 // in_reply_to — только Message-ID: CR/LF не добавляют заголовков и не
-// начинают тело раньше (H7); письмо не уходит и не сохраняется.
+// начинают тело раньше; письмо не уходит и не сохраняется.
 func TestHeaderInjection(t *testing.T) {
 	srv, h, _ := setup(t)
 	for _, irt := range []string{
@@ -201,7 +201,7 @@ func TestHeaderInjection(t *testing.T) {
 	}
 }
 
-// Письма и темы в windows-1251 / koi8-r читаются (M5).
+// Письма и темы в windows-1251 / koi8-r читаются.
 func TestCharsets(t *testing.T) {
 	srv, h, _ := setup(t)
 	// «Счёт за газ» в windows-1251 (тема — encoded-word) и тело в koi8-r.
@@ -235,7 +235,7 @@ func TestStripTags(t *testing.T) {
 	}
 }
 
-// Папка черновиков «Draft» без SPECIAL-USE: черновик сохраняется и проверяется (L3).
+// Папка черновиков «Draft» без SPECIAL-USE: черновик сохраняется и проверяется.
 func TestDraftFolderNames(t *testing.T) {
 	srv, h, _ := setup(t)
 	if err := srv.Rename("Drafts", "Draft"); err != nil {
@@ -250,7 +250,7 @@ func TestDraftFolderNames(t *testing.T) {
 	}
 }
 
-// sent_copy: client — ошибка сохранения копии видна в ответе (L4).
+// sent_copy: client — ошибка сохранения копии видна в ответе.
 func TestClientCopyError(t *testing.T) {
 	_, h, set := setup(t)
 	set["sent_copy"], set["sent_folder"] = "client", "Nope"

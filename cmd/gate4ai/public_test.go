@@ -244,7 +244,7 @@ func TestPublicIsolation(t *testing.T) {
 	}
 	update := `{"update_id":1,"message":{"from":{"id":42},"chat":{"id":42},"text":"/help"}}`
 	routes := []route{
-		{"mcp", "POST", "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, func(c string) bool { return agentOK[c] }, 200, 401},
+		{"mcp", "POST", "/", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, func(c string) bool { return agentOK[c] }, 200, 401},
 		{"tools", "GET", "/v1/tools", "", func(c string) bool { return agentOK[c] }, 200, 401},
 		{"whoami", "GET", "/v1/whoami", "", func(c string) bool { return agentOK[c] }, 200, 401},
 		{"call", "POST", "/v1/call", `{"action":"notes.read","args":{}}`, func(c string) bool { return agentOK[c] }, 200, 401},

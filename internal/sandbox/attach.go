@@ -149,13 +149,10 @@ func (r *Runs) secrets(run, host string, port int) []egress.Injection {
 		if len(s.Agents) > 0 && !slices.Contains(s.Agents, agent) {
 			continue
 		}
-		// С env — только заглушка этого запуска; без env — постоянная из
-		// конфигурации (совместимость).
-		ph := s.Placeholder
-		if s.Env != "" {
-			if ph = phs[s.Env]; ph == "" {
-				continue
-			}
+		// Только заглушка этого запуска.
+		ph := phs[s.Env]
+		if ph == "" {
+			continue
 		}
 		if h, p, ok := egressOrigin(s.Domain); !ok || h != host || p != port {
 			continue
@@ -280,8 +277,6 @@ func (r *Runs) Start(agent string) (Run, error) {
 			continue
 		}
 		if s.Env == "" {
-			r.D.Log.Warn("egress secret without env: its placeholder is permanent and shared by runs; set env for a one-time placeholder per run",
-				"domain", s.Domain, "secret", s.Secret)
 			continue
 		}
 		prefix := s.Placeholder

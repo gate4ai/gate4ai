@@ -176,7 +176,6 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.asMetadata)
 	mux.HandleFunc("GET /.well-known/openid-configuration", s.asMetadata)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.prMetadata)
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", s.prMetadata)
 	mux.HandleFunc("POST /register", s.register)
 	mux.HandleFunc("GET /authorize", s.authorizeForm)
 	mux.HandleFunc("POST /authorize", s.authorizeSubmit)
@@ -213,8 +212,7 @@ func (s *Server) asMetadata(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) prMetadata(w http.ResponseWriter, r *http.Request) {
 	iss := s.issuer(r)
-	// Ресурс — сам адрес устройства (MCP по корню); клиенты сверяют адрес
-	// сервера с resource по префиксу, так что подходит и старый …/mcp.
+	// Ресурс — сам адрес устройства (MCP по корню).
 	writeJSON(w, 200, map[string]any{
 		"resource":                 iss,
 		"authorization_servers":    []string{iss},

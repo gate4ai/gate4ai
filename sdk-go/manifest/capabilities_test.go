@@ -4,6 +4,7 @@ package manifest
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -104,11 +105,11 @@ func TestSummaryAndSame(t *testing.T) {
 		}
 	}
 	m2, _ := Parse([]byte(mailYAML))
-	if !Same(m, m2) || !m.Capabilities.Equal(m2.Capabilities) {
+	if !Same(m, m2) || !slices.Equal(m.Capabilities.Summary(), m2.Capabilities.Summary()) {
 		t.Fatal("same manifests differ")
 	}
 	m2.Capabilities.Network = m2.Capabilities.Network[:1]
-	if Same(m, m2) || m.Capabilities.Equal(m2.Capabilities) {
+	if Same(m, m2) || slices.Equal(m.Capabilities.Summary(), m2.Capabilities.Summary()) {
 		t.Fatal("changed capabilities not detected")
 	}
 }

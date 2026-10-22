@@ -278,7 +278,7 @@ func TestDesktopNotificationIsNotCode(t *testing.T) {
 	}
 }
 
-// Одноразовые токены в адресе не уходят в уведомления (L4).
+// Одноразовые токены в адресе не уходят в уведомления.
 func TestSummaryMasksURLTokens(t *testing.T) {
 	a := &state.Approval{ID: "a_1", Agent: "bot", Action: "browser.open", PreviewHash: "a3f9c21e00",
 		Args: map[string]any{"url": "https://example.com/cb?code=SECRET123&x=1"}}

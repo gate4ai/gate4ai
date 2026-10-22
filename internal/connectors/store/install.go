@@ -176,7 +176,7 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 	p.NeedsConsent = true
 	if info, err := o.Info(m.Connector); err == nil {
 		p.Installed = info.Version
-		p.NeedsConsent = !slices.Equal(o.consented(info), nonNil(p.Capabilities))
+		p.NeedsConsent = !slices.Equal(nonNil(info.Capabilities), nonNil(p.Capabilities))
 	}
 	if owner, ok := o.dataOwner(m.Connector); ok && owner != p.owner() {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("connector %s from another publisher was installed under this name: its stored data will be erased", m.Connector))
@@ -350,23 +350,6 @@ func (p *Plan) ConsentOK(consent []string) bool {
 	return !p.NeedsConsent || slices.Equal(nonNil(consent), nonNil(p.Capabilities))
 }
 
-// consented — согласие из install.json в форме текущего Summary: согласие,
-// записанное прежней версией (LegacySummary установленного манифеста),
-// приводится к Summary того же манифеста — на его runtime, классы и лимиты
-// владелец фактически согласился, ставя пакет.
-func (o Options) consented(info Info) []string {
-	c := nonNil(info.Capabilities)
-	b, err := os.ReadFile(filepath.Join(o.Dir, info.Connector, ManifestFile))
-	if err != nil {
-		return c
-	}
-	m, err := manifest.Parse(b)
-	if err != nil || slices.Equal(c, nonNil(m.Summary())) || !slices.Equal(c, nonNil(m.LegacySummary())) {
-		return c
-	}
-	return nonNil(m.Summary())
-}
-
 // DataDir — каталог KV коннекторов в каталоге установленных (<Dir>/data/<имя>).
 const DataDir = "data"
 
@@ -388,22 +371,14 @@ func ownerID(publisher, trust, key string) string {
 	return "key:" + key
 }
 
-// dataOwner — владелец данных KV коннектора: из метки в каталоге данных,
-// иначе по установленному коннектору; false — неизвестен (данных нет или они
-// без метки от прежних версий и владельца не определить — тогда они остаются).
+// dataOwner — владелец данных KV коннектора из метки в каталоге данных;
+// false — данных (или метки) нет.
 func (o Options) dataOwner(name string) (string, bool) {
-	dir := filepath.Join(o.Dir, DataDir, name)
-	if b, err := os.ReadFile(filepath.Join(dir, ownerFile)); err == nil {
-		return strings.TrimSpace(string(b)), true
-	}
-	if _, err := os.Stat(dir); err != nil {
+	b, err := os.ReadFile(filepath.Join(o.Dir, DataDir, name, ownerFile))
+	if err != nil {
 		return "", false
 	}
-	info, err := o.Info(name)
-	if err != nil || info.Publisher == "" && info.Trust != TrustLocal {
-		return "", false
-	}
-	return ownerID(info.Publisher, info.Trust, ""), true
+	return strings.TrimSpace(string(b)), true
 }
 
 // claimData — данные KV коннектора принадлежат издателю плана: данные другого

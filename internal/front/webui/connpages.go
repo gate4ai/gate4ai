@@ -182,14 +182,6 @@ func (u *UI) installConnector(w http.ResponseWriter, r *http.Request) map[string
 		return redirectErr("/connectors", err)
 	}
 	profs := r.PostForm["profiles"]
-	if len(profs) == 0 && !r.PostForm.Has("grants") {
-		// Форма без выбора агентов (старые клиенты): как раньше — всем профилям с агентами.
-		for _, g := range grants(u.D.Config.Current()) {
-			if g.Checked {
-				profs = append(profs, g.Profile)
-			}
-		}
-	}
 	if len(profs) > 0 {
 		if err := u.edit("connector "+info.Connector+" for profiles", func(c *config.Config) error {
 			for _, p := range profs {
@@ -330,22 +322,6 @@ func (u *UI) saveConnectorSettings(w http.ResponseWriter, r *http.Request) map[s
 		return redirectErr(back, err)
 	}
 	return redirect(back, "Saved")
-}
-
-func (u *UI) saveConnectorProfiles(w http.ResponseWriter, r *http.Request) map[string]any {
-	name := r.PathValue("name")
-	on := r.PostForm["profiles"]
-	if err := u.edit("connector "+name+" profiles", func(c *config.Config) error {
-		for p := range c.Profiles {
-			if err := c.SetProfileConnector(p, name, slices.Contains(on, p)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return redirectErr("/connectors/"+url.PathEscape(name), err)
-	}
-	return redirect("/connectors/"+url.PathEscape(name), "Access saved")
 }
 
 func (u *UI) removeConnector(w http.ResponseWriter, r *http.Request) map[string]any {

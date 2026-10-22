@@ -68,7 +68,7 @@ var versionComments = []struct {
 }{
 	{regexp.MustCompile(`^initial$`), "First version"},
 	{regexp.MustCompile(`^connector (\S+): actions ask in profile (\S+)$`), "Connector %s added to %s: every action asks"},
-	{regexp.MustCompile(`^(?:web: )?(?:setup: )?add agent (\S+)$`), "Agent %s added"},
+	{regexp.MustCompile(`^web: (?:setup: )?add agent (\S+)$`), "Agent %s added"},
 	{regexp.MustCompile(`^web: remove agent (\S+)$`), "Agent %s removed"},
 	{regexp.MustCompile(`^web: rule in (\S+)$`), "Rule changed for %s"},
 	{regexp.MustCompile(`^web: remove rule (\S+)$`), "Rule %s removed"},

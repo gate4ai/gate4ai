@@ -279,7 +279,7 @@ func TestLazyLoad(t *testing.T) {
 	lb.Close()
 }
 
-// noMemoryModule — модуль с экспортами ABI, но без линейной памяти (B.H2):
+// noMemoryModule — модуль с экспортами ABI, но без линейной памяти:
 // type ()->(), четыре пустые функции, их экспорт.
 func noMemoryModule() []byte {
 	b := []byte{0, 'a', 's', 'm', 1, 0, 0, 0}

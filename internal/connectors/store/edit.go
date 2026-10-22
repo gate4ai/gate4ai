@@ -37,11 +37,9 @@ func CheckRelease(b []byte, name, publisher string, rel registry.Release, pub re
 }
 
 // capsMatch — caps (согласие владельца или возможности версии в registry)
-// совпадают с Summary манифеста — в текущей форме или в прежней
-// (LegacySummary: записи, сделанные прежними версиями gate4ai).
+// совпадают с Summary манифеста.
 func capsMatch(m manifest.Manifest, caps []string) bool {
-	c := nonNil(caps)
-	return slices.Equal(nonNil(m.Summary()), c) || slices.Equal(nonNil(m.LegacySummary()), c)
+	return slices.Equal(nonNil(m.Summary()), nonNil(caps))
 }
 
 // VerifyPackages скачивает пакеты всех версий индекса (base — адрес или путь

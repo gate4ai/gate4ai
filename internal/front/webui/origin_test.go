@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Origin сверяется точно: чужой сервер на localhost:<другой порт> не проходит (E.13).
+// Origin сверяется точно: чужой сервер на localhost:<другой порт> не проходит.
 func TestOriginExact(t *testing.T) {
 	u := &UI{Addr: "127.0.0.1:7777"}
 	for o, want := range map[string]bool{
@@ -26,7 +26,7 @@ func TestOriginExact(t *testing.T) {
 	}
 }
 
-// back из формы не уводит на чужой хост (E.20).
+// back из формы не уводит на чужой хост.
 func TestLocalPath(t *testing.T) {
 	for in, want := range map[string]string{
 		"/approvals": "/approvals", "/policy#lists": "/policy#lists", "//evil.example/x": "/", "/\\evil.example": "/",

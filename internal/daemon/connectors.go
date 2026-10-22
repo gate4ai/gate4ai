@@ -47,24 +47,6 @@ func (d *Daemon) restartNative(name string) {
 // BuiltinConnectors — коннекторы ядра: из магазина не ставятся.
 var BuiltinConnectors = []string{files.Name, SelfConnector, "egress"}
 
-// retireBuiltinPackages удаляет пакеты из магазина с именами коннекторов ядра
-// (files до v0.6 ставился из магазина): настройки и правила остаются — имена
-// действий те же.
-func (d *Daemon) retireBuiltinPackages() {
-	opts := store.Options{Dir: d.ConnectorsDir}
-	for _, name := range BuiltinConnectors {
-		info, err := opts.Info(name)
-		if err != nil {
-			continue
-		}
-		if err := opts.Remove(name); err != nil {
-			d.Log.Error("store package of a built-in connector not removed", "connector", name, "err", err)
-			continue
-		}
-		d.Log.Info("store package replaced by the built-in connector", "connector", name, "package_version", info.Version)
-	}
-}
-
 // dropRevoked выгружает отозванные версии по кэшу индекса registry.
 func (d *Daemon) dropRevoked() {
 	list, err := store.List(d.ConnectorsDir)

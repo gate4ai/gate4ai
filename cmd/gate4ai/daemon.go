@@ -155,10 +155,10 @@ var (
 	probeKeyring = keys.Probe
 )
 
-// openKeys открывает хранилище ключей. auto молча выбирает файл только на
-// новой установке: если в home уже есть базы, зашифрованные ключами из
-// keychain, файл дал бы новые ключи (старые записи не читаются, Vault пуст).
-// Тогда — ошибка с подсказкой, а выбор запоминается в home.
+// openKeys открывает хранилище ключей. Выбор запоминается в home (keystoreMarker).
+// auto молча выбирает файл только на новой установке: если установка хранит
+// ключи в keychain, файл дал бы новые ключи (записи не читаются, Vault пуст) —
+// тогда ошибка с подсказкой.
 func openKeys(kind, home string, log *slog.Logger) (keys.Store, error) {
 	path := filepath.Join(home, "keys.json")
 	useFile := func() keys.Store {
@@ -194,7 +194,7 @@ func openKeys(kind, home string, log *slog.Logger) (keys.Store, error) {
 		return k, nil
 	}
 	// keychain недоступен (D-Bus ещё не поднят, связка заблокирована).
-	if prev == "keychain" || (!exists(path) && hasData(home)) {
+	if prev == "keychain" {
 		return nil, fmt.Errorf("system keychain unavailable (%v); this installation keeps its keys there, so a file key store "+
 			"would start with new keys (old records unreadable, the vault empty). Unlock the keychain and start again, "+
 			"or choose explicitly: --keystore file", err)
@@ -202,19 +202,4 @@ func openKeys(kind, home string, log *slog.Logger) (keys.Store, error) {
 	log.Warn("system keychain unavailable, using the file key store", "err", err)
 	remember("file")
 	return useFile(), nil
-}
-
-func exists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
-// hasData — в home уже есть базы daemon (State Store, журнал, конфигурация).
-func hasData(home string) bool {
-	for _, n := range []string{"state.db", "journal.db", filepath.Join("config", "current")} {
-		if exists(filepath.Join(home, n)) {
-			return true
-		}
-	}
-	return false
 }

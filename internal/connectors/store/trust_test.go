@@ -4,7 +4,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,7 +14,7 @@ import (
 )
 
 // Коннектор с зарезервированным именем (data — KV всех коннекторов) не ставится
-// и не стирает данные (B.M1).
+// и не стирает данные.
 func TestReservedNameNotInstalled(t *testing.T) {
 	dir := t.TempDir()
 	o := Options{Dir: filepath.Join(dir, "connectors")}
@@ -44,7 +43,7 @@ func TestReservedNameNotInstalled(t *testing.T) {
 	}
 }
 
-// Коннектор другого издателя под тем же именем не наследует KV прежнего (B.L4);
+// Коннектор другого издателя под тем же именем не наследует KV прежнего;
 // обновление того же издателя данные сохраняет.
 func TestDataOfAnotherPublisherErased(t *testing.T) {
 	dir := t.TempDir()
@@ -85,7 +84,7 @@ func TestDataOfAnotherPublisherErased(t *testing.T) {
 }
 
 // Пакет из файла с подписью издателя из registry получает его доверие, только
-// если версия есть в индексе и совпадает с отревьюенной записью (B.M6).
+// если версия есть в индексе и совпадает с отревьюенной записью.
 func TestFileTrustNeedsRegistryEntry(t *testing.T) {
 	r := newRegistry(t, registry.TrustVerified)
 	r.publish(t, "1", "api.bank.example")
@@ -112,7 +111,7 @@ func TestFileTrustNeedsRegistryEntry(t *testing.T) {
 	}
 }
 
-// Индекс старше закэшированного (до отзыва) не принимается (B.M8).
+// Индекс старше закэшированного (до отзыва) не принимается.
 func TestIndexRollbackRejected(t *testing.T) {
 	r := newRegistry(t, registry.TrustVerified)
 	r.publish(t, "1", "api.bank.example")
@@ -143,10 +142,9 @@ func TestIndexRollbackRejected(t *testing.T) {
 	}
 }
 
-// В согласие входят runtime, классы действий и лимиты выше умолчаний (B.L5,
-// B.M2); согласие, записанное прежней версией (без этих строк), остаётся
-// действительным для того же пакета и не требует согласия заново.
-func TestConsentIncludesClassesAndLegacyConsent(t *testing.T) {
+// В согласие входят runtime, классы действий и лимиты выше умолчаний;
+// тот же пакет согласия заново не требует.
+func TestConsentIncludesClasses(t *testing.T) {
 	dir := t.TempDir()
 	o := Options{Dir: filepath.Join(dir, "connectors")}
 	ctx := context.Background()
@@ -157,17 +155,12 @@ func TestConsentIncludesClassesAndLegacyConsent(t *testing.T) {
 	if _, err := o.Install(p, p.Capabilities); err != nil {
 		t.Fatal(err)
 	}
-	// install.json прежней версии gate4ai: согласие без новых строк.
-	info, _ := o.Info("bank")
-	info.Capabilities = nonNil(p.pkg.Manifest.LegacySummary())
-	ib, _ := json.Marshal(info)
-	os.WriteFile(filepath.Join(o.Dir, "bank", InfoFile), ib, 0o600)
 	if err := o.Check("bank"); err != nil {
-		t.Fatal("legacy consent rejected at load:", err)
+		t.Fatal(err)
 	}
-	// То же — без согласия; новое действие класса external — согласие заново.
+	// Те же возможности — без согласия; новое действие класса external — согласие заново.
 	if p, _ := o.Prepare(ctx, write(t, dir, "bank-2.g4c", pack(t, "2", "api.bank.example", false, "")), true); p.NeedsConsent {
-		t.Fatal("unchanged package needs consent after upgrade of gate4ai")
+		t.Fatal("unchanged capabilities need consent")
 	}
 	p, _ = o.Prepare(ctx, write(t, dir, "bank-3.g4c", pack(t, "3", "api.bank.example", true, "")), true)
 	if !p.NeedsConsent || !slices.Contains(p.Capabilities, "class external actions: pay") {
@@ -187,7 +180,7 @@ func TestConsentIncludesClassesAndLegacyConsent(t *testing.T) {
 	}
 }
 
-// connectors verify показывает ключ, только если подпись им верна (B.L6).
+// connectors verify показывает ключ, только если подпись им верна.
 func TestSignedByVerifiesSignature(t *testing.T) {
 	pub, priv := keys(t)
 	p, _ := Open(pack(t, "1", "api.bank.example", false, priv))

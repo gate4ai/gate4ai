@@ -4,9 +4,8 @@ package webui
 
 // ru — русский перевод строк Web UI. Ключ — английский исходник из шаблонов и
 // кода; подстановки (%s, %d…) — в том же порядке, это проверяет
-// TestRussianCatalogComplete. Термины — по словарю отчёта UX-ревью
-// (docs/ux-review): daemon → gate4.ai, relay → доступ из интернета, profile →
-// права агента, receipt → запись журнала.
+// TestRussianCatalogComplete. Термины: daemon → gate4.ai, relay → доступ из
+// интернета, profile → права агента, receipt → запись журнала.
 var ru = map[string]string{
 	// Меню, общие слова
 	"Home": "Главная", "Agents": "Агенты", "Access": "Доступ", "Journal": "Журнал", "Settings": "Настройки",
@@ -118,8 +117,8 @@ var ru = map[string]string{
 	"Skip, I will set it up myself": "Пропустить, настрою сам", "What it may do": "Что можно",
 	"Which AI assistant will work through gate4.ai?":                        "Какой AI-ассистент будет работать через gate4.ai?",
 	"gate4.ai adds itself to the assistant's settings — no tokens to copy.": "gate4.ai сам впишет себя в настройки ассистента — копировать токены не нужно.",
-	"found on this computer":                                                "найден на этом компьютере", "Others: VS Code, Codex, Gemini CLI, a script": "Другие: VS Code, Codex, Gemini CLI, скрипт",
-	"Other assistants": "Другие ассистенты", "Next: what it may do →": "Дальше: что ему можно →",
+	"found on this computer":                                                "найден на этом компьютере",
+	"Other assistants":                                                      "Другие ассистенты", "Next: what it may do →": "Дальше: что ему можно →",
 	"Claude.ai or ChatGPT": "Claude.ai или ChatGPT", "in the browser — needs internet access to this computer": "в браузере — нужен доступ из интернета к этому компьютеру",
 	"A script or another agent": "Скрипт или другой агент", "a token and the gate4ai command": "токен и команда gate4ai",
 	"What may %s do?": "Что можно %s?", "Start small: you can allow more at any time, also right from an approval request.": "Начните с малого: расширить можно в любой момент, в том числе прямо из запроса подтверждения.",
@@ -393,8 +392,8 @@ var ru = map[string]string{
 	"Enter the login and the password":                                                         "Введите логин и пароль",
 	"Account %s for %s is saved. The browser signs in with it; agents never see the password.": "Учётка %s для %s сохранена. Браузер входит с ней сам; агенты пароль не видят.",
 	"Telegram bot": "Telegram-бот", " (approvals)": " (подтверждения)", " (approvals, the channel is off)": " (подтверждения, канал выключен)",
-	" (device connection)": " (подключение устройства)", "account ": "учётка ", " (sign-in)": " (вход)", "browser: ": "браузер: ",
-	"model key": "ключ модели", "connector ": "коннектор ", " (not installed)": " (не установлен)", "relay": "relay", "Egress Proxy: ": "Egress Proxy: ",
+	" (device connection)": " (подключение устройства)", "account ": "учётка ", " (sign-in)": " (вход)",
+	"connector ": "коннектор ", " (not installed)": " (не установлен)", "relay": "relay", "Egress Proxy: ": "Egress Proxy: ",
 
 	// Настройки
 	"Worth checking once. Everything else has sensible defaults.":                    "Стоит проверить один раз. Остальное разумно настроено по умолчанию.",
@@ -435,8 +434,8 @@ var ru = map[string]string{
 	"Signing in to the Web UI will no longer need the password.": "Вход в Web UI перестанет требовать пароль.", "Remove the password": "Снять пароль",
 	"Turn off signing in with a one-time link": "Выключить вход по одноразовой ссылке", "Turn on signing in with a one-time link": "Включить вход по одноразовой ссылке",
 	"Turn on sign-in confirmation in Telegram": "Включить подтверждение входа в Telegram", "Turn off sign-in confirmation in Telegram": "Выключить подтверждение входа в Telegram",
-	"Technical details:": "Технические детали:",
-	"MCP answers both at the root of the address and at <code>%s/mcp</code>. The Web UI for the phone is <code>%s/ui/</code>.":   "MCP отвечает и по корню адреса, и по <code>%s/mcp</code>. Web UI для телефона — <code>%s/ui/</code>.",
+
+	"MCP answers at the root of the address. The Web UI for the phone is <code>%s/ui/</code>.":                                   "MCP отвечает по корню адреса. Web UI для телефона — <code>%s/ui/</code>.",
 	"Needed only for cloud assistants (Claude.ai, ChatGPT) and for signing in from the phone. Local assistants work without it.": "Нужен только облачным ассистентам (Claude.ai, ChatGPT) и для входа с телефона. Локальные ассистенты работают и без него.",
 	"Turn on through %s": "Включить через %s",
 	"The computer gets an address like <id>.%s, no ports to open. Traffic is encrypted all the way to this computer: the relay sees only encrypted data.": "Компьютер получит адрес вида <id>.%s, открывать порты не нужно. Трафик шифруется до этого компьютера: relay видит только шифротекст.",
@@ -471,7 +470,7 @@ var ru = map[string]string{
 	"Address for cloud assistants": "Адрес для облачных ассистентов", "Paste it into Claude.ai or ChatGPT as a custom connector.": "Вставьте его в Claude.ai или ChatGPT как custom connector.",
 	"The assistant opens the gate4.ai sign-in page — enter the connection code. You get the code on the agent page: <a href=\"%s/agents\">Agents</a> → the cloud agent → “Get a connection code”.": "Ассистент откроет страницу входа gate4.ai — введите код подключения. Код выдаётся на странице агента: <a href=\"%s/agents\">Агенты</a> → облачный агент → «Получить код подключения».",
 	"The public address was set when gate4.ai started (--public). No relay is needed.":                                                                                                             "Публичный адрес задан при запуске gate4.ai (--public). Relay не нужен.",
-	"MCP answers both at the root of the address and at <code>%s/mcp</code>. To change the address, restart gate4.ai with other <code>--public</code> / <code>--public-url</code>.":                "MCP отвечает и по корню адреса, и по <code>%s/mcp</code>. Чтобы сменить адрес, перезапустите gate4.ai с другими <code>--public</code> / <code>--public-url</code>.",
+	"MCP answers at the root of the address. To change the address, restart gate4.ai with other <code>--public</code> / <code>--public-url</code>.":                                                "MCP отвечает по корню адреса. Чтобы сменить адрес, перезапустите gate4.ai с другими <code>--public</code> / <code>--public-url</code>.",
 	"Your own relay or address": "Свой relay или адрес", "Current connection": "Текущее подключение",
 	"Device address (also for cloud assistants):": "Адрес устройства (он же — для облачных ассистентов):", "Register again": "Зарегистрировать заново",
 	"Registering again creates a new device:": "Повторная регистрация создаёт новое устройство:",
@@ -554,15 +553,6 @@ var ru = map[string]string{
 	"No connection to %s: the network is unreachable. Check the internet connection.":                                     "Нет связи с %s: сеть недоступна. Проверьте подключение к интернету.",
 	"Could not set up a secure connection to %s: a certificate problem.":                                                  "Не удалось установить защищённое соединение с %s: проблема с сертификатом.",
 	"No connection to %s: the server did not answer in time. Check the internet connection and try again.":                "Нет связи с %s: сервер не ответил вовремя. Проверьте подключение к интернету и попробуйте ещё раз.",
-
-	// Самонастройка
-	"Rule: %s %s": "Правило: %s %s", "Rule: %s %s if %s": "Правило: %s %s, если %s", "Remove rule %s": "Удалить правило %s",
-	"Add to list %s: %s": "Добавить в список %s: %s", "Remove from list %s: %s": "Убрать из списка %s: %s",
-	"Give access to connector %s": "Дать доступ к коннектору %s", "Install connector %s from the store and give access to it": "Установить коннектор %s из магазина и дать к нему доступ",
-	"Build and install an own build from %s and give access to it": "Собрать и поставить свою сборку из %s и дать к ней доступ",
-	"Settings of connector %s: %s":                                 "Настройки коннектора %s: %s", "Add to setting %s.%s: %s": "Добавить в настройку %s.%s: %s",
-	"Remove from setting %s.%s: %s": "Убрать из настройки %s.%s: %s", "Account %s (secret values stay in the vault, you set them)": "Учётка %s (значения секретов — в хранилище, их задаёте вы)",
-	"(permissions %s)": "(права %s)", "%s": "%s",
 
 	// Версии политики
 	"First version": "Первая версия", "Connector %s added to %s: every action asks": "Коннектор %s добавлен в %s: каждое действие спрашивает",

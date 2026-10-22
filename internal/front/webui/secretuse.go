@@ -65,9 +65,6 @@ func secretUses(cfg *config.Config, ms []manifest.Manifest) map[string][]SecretU
 			add(sec, SecretUse{Pre: "account ", Name: alias, Post: " (sign-in)", Link: "#" + AccountAnchor(alias)})
 		}
 	}
-	if k := cfg.Browser.ModelKey; k != "" { // раздел browser до v0.6, переносится в connectors.browser
-		add(k, SecretUse{Pre: "browser: ", Name: "model key"})
-	}
 	installed := map[string]manifest.Manifest{}
 	for _, m := range ms {
 		installed[m.Connector] = m
