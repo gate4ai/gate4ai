@@ -369,8 +369,8 @@ func (s *Schema) coerce(name string, v any) (any, error) {
 
 func (s *Schema) normString(name, str string) (any, error) {
 	str = strings.TrimSpace(str)
-	if s.MaxLength != nil && len([]rune(str)) > *s.MaxLength {
-		return nil, argErr("argument %q is too long", name)
+	if n := len([]rune(str)); s.MaxLength != nil && n > *s.MaxLength {
+		return nil, argErr("argument %q is too long: %d characters, the limit is %d", name, n, *s.MaxLength)
 	}
 	if len(s.Enum) > 0 && str != "" && !slices.Contains(s.Enum, str) {
 		return nil, argErr("argument %q must be one of: %s", name, strings.Join(s.Enum, ", "))

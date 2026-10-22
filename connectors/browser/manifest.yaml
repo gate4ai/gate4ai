@@ -7,7 +7,7 @@ contract: 1
 services: [open, observe, act, page_extract, page_screenshot, login, fill_secret]
 capabilities:
   reveal: ["${setting:model_key}"]
-limits: { timeout_s: 120 }
+limits: { timeout_s: 600 } # handoff ждёт человека до 9 минут
 actions:
   - name: read
     class: read
@@ -84,14 +84,15 @@ actions:
   - name: observe
     class: read
     untrusted: true
-    description: "Address, title and text of the open page (or of one element: selector); elements: true adds the interactive elements with CSS selectors for act, outline: true — the page structure (containers with id, role, data-testid)"
+    description: "Address, title and text of the open page (or of one element: selector); elements: true adds the interactive elements with CSS selectors for act and the values of fields (not passwords), kinds narrows them (fields, buttons, links); outline: true — the page structure (containers with id, role, data-testid)"
     input_schema:
       type: object
       properties:
         session: { type: string, description: "agents: the session from browser.open" }
         max_chars: { type: integer, minimum: 0, description: "0 — the browser's limit" }
         selector: { type: string, description: "only inside this element: a dialog, a card, a list" }
-        elements: { type: boolean, description: "add visible links, buttons and fields with a unique CSS selector each (up to 300)" }
+        elements: { type: boolean, description: "add visible fields, buttons and links with a unique CSS selector each (up to 300; ads and trackers are skipped); fields show the start of their value (200 characters) and value_length" }
+        kinds: { type: array, items: { type: string, enum: [fields, buttons, links] }, description: "only these kinds of elements (implies elements), e.g. fields,buttons" }
         outline: { type: boolean, description: "add the structure: visible containers with a selector (dialogs, lists, sections), up to 300" }
         wait_for_selector: { type: string, description: "wait until a visible element matches (SPA content loads after the page)" }
         wait_for_text: { type: string, description: "wait until a visible element (of wait_for_selector, or any) contains this text" }
@@ -108,14 +109,18 @@ actions:
           items:
             type: object
             properties:
-              selector: { type: string, description: "CSS selector for act" }
+              selector: { type: string, description: "CSS selector for act (by data-testid, name, placeholder, aria-label or id when possible)" }
+              kind: { type: string, enum: [field, button, link] }
               tag: { type: string }
               type: { type: string }
               role: { type: string }
               text: { type: string, description: "visible text, label, placeholder or aria-label" }
               href: { type: string }
               disabled: { type: boolean }
-            required: [selector, tag]
+              value: { type: string, description: "fields: the start of the value (200 characters); never of a password" }
+              value_length: { type: integer, description: "fields: the length of the value in characters" }
+              checked: { type: boolean, description: "checkboxes, radio buttons, switches" }
+            required: [selector, kind, tag]
         outline:
           type: array
           items:
@@ -137,15 +142,15 @@ actions:
       required: [url, title]
   - name: act
     class: write
-    description: Click, fill, press a key or wait for an element by CSS selector and its visible text on the open page
+    description: "Act on the open page by CSS selector (and visible text): click; fill — replace the value of a field (input, textarea, rich editor), append — add to its end, paste — replace it as pasted from the clipboard (editors parse Markdown or HTML); press — a key or a combination; wait — for an element. fill / append / paste return the value that ended up in the field (length, start, end). value: up to 262144 characters (256 KB); a long text from a file: --value_file <path>"
     input_schema:
       type: object
       properties:
         session: { type: string, description: "agents: the session from browser.open" }
         selector: { type: string, description: CSS selector }
-        method: { type: string, enum: [click, fill, press, wait] }
+        method: { type: string, enum: [click, fill, append, paste, press, wait] }
         text: { type: string, description: "the first visible element whose text, label, placeholder or aria-label contains it" }
-        value: { type: string, maxLength: 4096, description: "fill: the value; press: Enter, Tab, Escape, Backspace, ArrowDown, ArrowUp" }
+        value: { type: string, maxLength: 262144, description: "fill / append / paste: the text, up to 262144 characters (CLI: --value_file <path> reads it from a file; leading and trailing spaces are trimmed); press: Enter, Tab, Escape, Backspace, Delete, Space, Home, End, PageUp, PageDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, a–z, 0–9 with modifiers Ctrl, Shift, Alt, Meta joined by + (Ctrl+A selects all, Ctrl+Z undoes, Ctrl+Enter, Shift+Tab). The system clipboard is not used: Ctrl+C / Ctrl+X / Ctrl+V are refused — paste a text with method paste" }
         timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait for the element (0 — 10 s)" }
         expect_selector: { type: string, description: "the action must make a visible element match it (a dialog, the next list), else not_found: no effect" }
         expect_text: { type: string, description: "the action must make visible text appear (in expect_selector, or anywhere)" }
@@ -157,7 +162,53 @@ actions:
       properties:
         url: { type: string, description: address after the action }
         text: { type: string, description: text of the element (up to 2000 characters) }
+        value:
+          type: object
+          description: "fill / append / paste: what ended up in the field; hidden for a password or after a secret was entered on the page"
+          properties:
+            length: { type: integer, description: characters }
+            start: { type: string, description: "the first 1000 characters" }
+            end: { type: string, description: "the last 200 characters, when longer" }
+            hidden: { type: boolean }
+          required: [length, start]
       required: [url]
+    example: gate4ai browser act --session s-… --selector textarea[name=text] --method fill --value_file article.md
+  - name: reload
+    class: read
+    description: "Reload the open page (the address is checked again, as in open)"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "the session from browser.open" }
+        wait_for_selector: { type: string, description: "wait until a visible element matches" }
+        wait_for_text: { type: string, description: "wait until a visible element (of wait_for_selector, or any) contains this text" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s)" }
+      required: [session]
+    output_schema:
+      type: object
+      properties:
+        url: { type: string }
+        title: { type: string }
+      required: [url, title]
+  - name: handoff
+    class: read
+    description: "Hand the open page over to the user and wait: the user is notified (Web UI, desktop, Telegram) with your message and does the step in the gate4ai Chrome window — signs in on a site without an account in gate4ai, solves a captcha, confirms by SMS. Ends when the address changes (default) or until_selector appears; status done or timeout. Never ask the user for passwords in chat"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "the session from browser.open" }
+        message: { type: string, maxLength: 200, description: "what the user should do, e.g. Sign in to habr.com" }
+        until_url_change: { type: boolean, description: "done when the page address changes (the default)" }
+        until_selector: { type: string, description: "done when a visible element matches (with until_url_change: both)" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 540000, description: "how long to wait (0 — 5 minutes, up to 9)" }
+      required: [session, message]
+    output_schema:
+      type: object
+      properties:
+        url: { type: string, description: address when the wait ended }
+        status: { type: string, enum: [done, timeout] }
+      required: [url, status]
+    example: gate4ai browser handoff --session s-… --message "Sign in to habr.com" --until_selector .user-menu
   - name: network
     class: read
     untrusted: true

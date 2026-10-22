@@ -17,65 +17,144 @@ import (
 // он находится однозначно, и то, что видит человек.
 type Element struct {
 	Selector string `json:"selector"`
+	Kind     string `json:"kind"` // field | button | link
 	Tag      string `json:"tag"`
 	Type     string `json:"type,omitempty"`
 	Role     string `json:"role,omitempty"`
 	Text     string `json:"text,omitempty"`
 	Href     string `json:"href,omitempty"`
 	Disabled bool   `json:"disabled,omitempty"`
+	// Value — начало значения поля (ElementValue символов), ValueLength — его
+	// длина; у пароля и на странице с введённым секретом их нет.
+	Value       string `json:"value,omitempty"`
+	ValueLength int    `json:"value_length,omitempty"`
+	Checked     bool   `json:"checked,omitempty"`
 }
 
 // MaxElements — предел списка элементов в observe.
 const MaxElements = 300
 
-// elementsJS — видимые интерактивные элементы: ссылки, кнопки, поля, элементы
-// с ролью или обработчиком клика. Селектор — #id, [name], [data-testid],
-// [aria-label] (если однозначны), иначе самый короткий однозначный путь с
-// :nth-of-type (не выше ближайшего предка с id). Значения полей не возвращаются (там могут быть данные человека).
-var elementsJS = `((max, root) => {
+// ElementValue — сколько символов значения поля показывает observe.
+const ElementValue = 200
+
+// Виды элементов observe (--kinds).
+var ElementKinds = []string{"fields", "buttons", "links"}
+
+// adHosts — рекламные и трекинговые адреса: ссылки и iframe с ними observe
+// не показывает (длинные адреса adfox на килобайт — шум для агента).
+const adHosts = `adfox|doubleclick|googlesyndication|googleadservices|adservice|adriver|criteo|taboola|outbrain|` +
+	`an\\.yandex|yabs\\.yandex|mc\\.yandex|adnxs|adsrvr|amazon-adsystem|moatads|scorecardresearch|smartadserver|` +
+	`mytarget|top-fwz1\\.mail|ad\\.mail\\.ru|[/.]ads\\.|/ads/|[?&](yclid|gclid|fbclid)=`
+
+// elementsJS — видимые интерактивные элементы: поля, кнопки и ссылки (kinds —
+// какие; пусто — все), кроме рекламных и трекинговых (ссылки и содержимое
+// рекламных блоков). Селектор — самый устойчивый из однозначных:
+// data-testid, name, placeholder, aria-label, #id (если не похож на
+// сгенерированный), title, короткий href, затем путь с :nth-of-type от
+// ближайшего предка с устойчивым атрибутом. Значения полей — начало и длина
+// (не пароль; на странице с введённым секретом — нет).
+var elementsJS = `((max, root, kinds, secret, valMax) => {
   const vt = ` + visibleTextJS + `;
   const base = root ? document.querySelector(root) : document;
   if (!base) return null;
   const q = 'a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=link], [role=tab], ' +
-    '[role=menuitem], [role=checkbox], [role=radio], [role=option], [role=switch], [onclick], [contenteditable=""], [contenteditable=true]';
+    '[role=menuitem], [role=checkbox], [role=radio], [role=option], [role=switch], [role=textbox], [onclick], [contenteditable=""], [contenteditable=true]';
   const vis = e => { const r = e.getBoundingClientRect(), st = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'; };
+  const ad = new RegExp('` + adHosts + `', 'i');
+  const adBox = /(^|[\s_-])(adfox|adv|advert|advertisement|ads|sponsor|sponsored)([\s_-]|$)/i;
+  const inAd = e => { for (let x = e; x && x !== document.body; x = x.parentElement) {
+      if (adBox.test(String(x.className && x.className.baseVal !== undefined ? x.className.baseVal : x.className || '')) || adBox.test(x.id || '')) return true; }
+    return false; };
   const one = s => { try { return document.querySelectorAll(s).length === 1; } catch (_) { return false; } };
-  const attr = (e, a) => { const v = e.getAttribute(a); if (!v) return ''; const s = '[' + a + '="' + v.replace(/["\\]/g, '\\$&') + '"]';
+  const esc = v => v.replace(/["\\]/g, '\\$&');
+  const attr = (e, a) => { const v = e.getAttribute(a); if (!v || v.length > 80) return ''; const s = '[' + a + '="' + esc(v) + '"]';
     return one(s) ? s : (one(e.localName + s) ? e.localName + s : ''); };
+  // id вида ember123, :r1:, react-select-5-input, длинные хэши — меняются между загрузками
+  const genID = id => /\d{3,}|^:|[:]|[0-9a-f]{8,}|^(ember|react|mui|radix|headlessui|rc_|id-)/i.test(id);
+  const stable = e => {
+    for (const a of ['data-testid', 'data-test', 'data-qa', 'name', 'placeholder', 'aria-label']) { const s = attr(e, a); if (s) return s; }
+    if (e.id && !genID(e.id) && one('#' + CSS.escape(e.id))) return '#' + CSS.escape(e.id);
+    for (const a of ['title', 'for']) { const s = attr(e, a); if (s) return s; }
+    if (e.localName === 'a') { const s = attr(e, 'href'); if (s) return s; }
+    return '';
+  };
   const sel = e => {
-    if (e.id && one('#' + CSS.escape(e.id))) return '#' + CSS.escape(e.id);
-    for (const a of ['name', 'data-testid', 'data-test', 'data-qa', 'aria-label']) { const s = attr(e, a); if (s) return s; }
+    const s0 = stable(e); if (s0) return s0;
     const path = [];
     for (let x = e; x && x.nodeType === 1 && x !== document.documentElement; x = x.parentElement) {
-      if (x !== e && x.id && one('#' + CSS.escape(x.id))) { path.unshift('#' + CSS.escape(x.id)); break; }
+      if (x !== e) { // от ближайшего предка с устойчивым селектором
+        const s = stable(x) || (x.id && one('#' + CSS.escape(x.id)) ? '#' + CSS.escape(x.id) : '');
+        if (s && one(s + ' > ' + path.join(' > '))) { path.unshift(s); break; } }
       let i = 1; for (let y = x.previousElementSibling; y; y = y.previousElementSibling) if (y.localName === x.localName) i++;
       path.unshift(x.localName + ':nth-of-type(' + i + ')');
       if (one(path.join(' > '))) break; // самый короткий однозначный путь
     }
+    // сгенерированный id лучше длинного пути (в пределах загрузки страницы он не меняется)
+    if (path.length > 3 && e.id && one('#' + CSS.escape(e.id))) return '#' + CSS.escape(e.id);
     return path.join(' > ');
   };
   const norm = s => (s || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-  const label = e => norm(e.getAttribute('aria-label') || vt(e) || e.placeholder || e.getAttribute('title') ||
+  const label = e => norm(e.getAttribute('aria-label') || (e.isContentEditable ? '' : vt(e)) || e.placeholder || e.getAttribute('title') ||
     (e.labels ? [...e.labels].map(l => vt(l)).join(' ') : '') || (e.type === 'submit' || e.type === 'button' ? e.value : ''));
+  const btnType = e => e.localName === 'input' && ['submit', 'button', 'reset', 'image'].includes(e.type);
+  const kindOf = e => {
+    const r = e.getAttribute('role');
+    if (e.localName === 'a' || r === 'link') return 'link';
+    if ((e.localName === 'input' && !btnType(e)) || ['select', 'textarea'].includes(e.localName) || e.isContentEditable ||
+      ['checkbox', 'radio', 'switch', 'textbox'].includes(r)) return 'field';
+    return 'button';
+  };
+  const want = kinds && kinds.length ? new Set(kinds.map(k => k.replace(/s$/, ''))) : null;
   const out = [];
   for (const e of base.querySelectorAll(q)) {
+    if (e.parentElement && e.parentElement.closest('[contenteditable=""], [contenteditable=true]')) continue; // внутри редактора
     if (!vis(e)) continue;
-    const it = {selector: sel(e), tag: e.localName};
+    const kind = kindOf(e);
+    if (want && !want.has(kind)) continue;
+    if (e.localName === 'a' && ad.test(e.href)) continue;
+    if (kind !== 'field' && inAd(e)) continue;
+    const it = {selector: sel(e), kind: kind, tag: e.localName};
     if (e.type && e.localName !== 'a') it.type = String(e.type);
     if (e.getAttribute('role')) it.role = e.getAttribute('role');
     const t = label(e); if (t) it.text = t;
-    if (e.localName === 'a') it.href = e.href;
+    if (e.localName === 'a') it.href = e.href.length > 300 ? e.href.slice(0, 300) + '…' : e.href;
     if (e.disabled || e.getAttribute('aria-disabled') === 'true') it.disabled = true;
+    if (kind === 'field') {
+      if (e.type === 'checkbox' || e.type === 'radio') { if (e.checked) it.checked = true; }
+      else if (e.getAttribute('aria-checked') === 'true') it.checked = true;
+      else if (!secret && !(e.localName === 'input' && e.type === 'password')) {
+        const v = e.localName === 'select' ? [...e.selectedOptions].map(o => o.text).join(', ') :
+          typeof e.value === 'string' ? e.value : (e.isContentEditable ? e.innerText : '');
+        const cs = [...(v || '')];
+        if (cs.length) { it.value = cs.slice(0, valMax).join(''); it.value_length = cs.length; }
+      }
+    }
     out.push(it);
     if (out.length >= max) break;
   }
   return out;
 })`
 
-// Elements — интерактивные элементы текущей страницы (до MaxElements).
-func (x *Executor) Elements(ctx context.Context, root string) ([]Element, error) {
-	return evalIn[Element](ctx, x, elementsJS, MaxElements, root)
+// Elements — интерактивные элементы текущей страницы (до MaxElements); kinds —
+// fields, buttons, links (пусто — все).
+func (x *Executor) Elements(ctx context.Context, root string, kinds []string) ([]Element, error) {
+	for _, k := range kinds {
+		if !slices.Contains(ElementKinds, k) {
+			return nil, fmt.Errorf("observe: unknown kind %q (%s)", k, strings.Join(ElementKinds, ", "))
+		}
+	}
+	if err := x.readable(ctx); err != nil {
+		return nil, err
+	}
+	var out *[]Element
+	if err := x.Engine.Eval(ctx, call(elementsJS, MaxElements, root, kinds, x.SecretOnPage(ctx), ElementValue), &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, root)
+	}
+	return *out, nil
 }
 
 // evalIn — список из js(max, root) на читаемой странице; null (элемента root

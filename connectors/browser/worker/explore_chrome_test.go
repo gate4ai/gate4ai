@@ -105,13 +105,13 @@ func TestExploreRealChrome(t *testing.T) {
 	if nodes, err := x.Outline(ctx, ""); err != nil || strings.Contains(fmt.Sprint(nodes), "7755") {
 		t.Fatalf("outline leaks hidden text: %+v %v", nodes, err)
 	}
-	if els, err := x.Elements(ctx, "#policy"); err != nil || len(els) != 1 || strings.Contains(els[0].Text, "7755") {
+	if els, err := x.Elements(ctx, "#policy", nil); err != nil || len(els) != 1 || strings.Contains(els[0].Text, "7755") {
 		t.Fatalf("elements: %+v %v", els, err)
 	}
 	if res, err := x.Act(ctx, ActRequest{Selector: "#policy button", Method: ActWait}); err != nil || strings.Contains(res.Text, "7755") {
 		t.Fatalf("act text: %+v %v", res, err)
 	}
-	els, err := x.Elements(ctx, "")
+	els, err := x.Elements(ctx, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestExploreRealChrome(t *testing.T) {
 	for _, e := range els {
 		got[e.Text] = e
 	}
-	for text, sel := range map[string]string{"Счета": "a:nth-of-type(1)", "Обновить": "div:nth-of-type(1) > button:nth-of-type(1)",
+	for text, sel := range map[string]string{"Счета": `[href="/bills"]`, "Обновить": "div:nth-of-type(1) > button:nth-of-type(1)",
 		"Лицевой счёт": "#acc", "Поиск": `[name="q"]`, "Закрыть": `[aria-label="Закрыть"]`} {
 		e, ok := got[text]
 		if !ok || e.Selector != sel {
@@ -132,7 +132,7 @@ func TestExploreRealChrome(t *testing.T) {
 	if _, ok := got["Скрытая"]; ok || len(els) != 8 {
 		t.Errorf("hidden elements are skipped: %+v", els)
 	}
-	if nav, err := x.Elements(ctx, "nav"); err != nil || len(nav) != 2 {
+	if nav, err := x.Elements(ctx, "nav", nil); err != nil || len(nav) != 2 {
 		t.Fatal("elements inside nav:", nav, err)
 	}
 	// Клик с ожиданием результата: диалог появляется через 0,7 с.
