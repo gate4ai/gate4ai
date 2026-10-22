@@ -412,9 +412,3 @@ func (c *Channels) Flush() {
 
 // wait — дождаться доставки поставленных событий (тесты).
 func (s *switchable) wait() { s.wg.Wait() }
-
-func (s *switchable) Notify(a *state.Approval) {
-	if n := s.get(); n != nil {
-		s.async(func() { n.Notify(a) })
-	}
-}

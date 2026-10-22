@@ -34,10 +34,7 @@ func (e *Env) service(ctx context.Context, args []string) int {
 	case "install":
 		return e.serviceInstall(ctx, home, args)
 	case "uninstall":
-		files, notes, err := autostart.Uninstall(home, false)
-		if err != nil {
-			return e.fail(err)
-		}
+		files, notes := autostart.Uninstall(home, false)
 		for _, n := range notes {
 			e.say(n)
 		}

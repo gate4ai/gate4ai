@@ -79,10 +79,9 @@ func ipKey(a net.Addr) string {
 		ip = v.IP
 	case *net.UDPAddr:
 		ip = v.IP
+	case nil:
+		return ""
 	default:
-		if a == nil {
-			return ""
-		}
 		h, _, err := net.SplitHostPort(a.String())
 		if err != nil {
 			return a.String()

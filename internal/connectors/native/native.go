@@ -32,9 +32,11 @@ import (
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 )
 
-// Hosts — функции хоста для одного вызова коннектора.
+// Hosts — функции хоста для одного вызова коннектора и маскирование
+// значений секретов в stderr процесса.
 type Hosts interface {
 	Dispatcher(ctx context.Context, m manifest.Manifest, lim manifest.Limits, settings map[string]any) (*hostfuncs.Dispatcher, error)
+	MaskString(s string) string
 }
 
 // Падения подряд, после которых коннектор считается неисправным.
@@ -189,12 +191,8 @@ func (p *Process) stderr(r io.Reader) {
 	sc.Buffer(make([]byte, 4096), 64<<10)
 	// Пакет получает значения (Revealed, коды от человека): отладочная строка
 	// или паника со значением не должна лечь в лог открытым текстом.
-	mask := func(s string) string { return s }
-	if m, ok := p.hosts.(interface{ MaskString(string) string }); ok {
-		mask = m.MaskString
-	}
 	for sc.Scan() {
-		p.log.Info(mask(sc.Text()), "connector", p.man.Connector, "stream", "stderr")
+		p.log.Info(p.hosts.MaskString(sc.Text()), "connector", p.man.Connector, "stream", "stderr")
 	}
 }
 

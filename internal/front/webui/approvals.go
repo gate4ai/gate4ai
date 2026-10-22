@@ -99,40 +99,30 @@ func clip(s string, n int) string {
 	return s
 }
 
-// Причины решения ядра (английский текст policy.Decide) — словами на языке страницы.
-var (
-	reDefault   = regexp.MustCompile(`^no rule matched; default for effect class "(\w+)" is (\w+)$`)
-	reRule      = regexp.MustCompile(`^rule (\S+): (\w+)$`)
-	reNoConn    = regexp.MustCompile(`^connector "([^"]+)" is not available for profile "([^"]+)"$`)
-	reDayLimit  = regexp.MustCompile(`^daily limit of (\d+) actions (\S+) reached$`)
-	reUnknownAg = regexp.MustCompile(`^unknown agent "([^"]+)"$`)
-	reOnlyDir   = regexp.MustCompile(`^Only the folder (.+)$`)
-	rePerDay    = regexp.MustCompile(`^At most (\d+) a day$`)
-)
+// reasons — причины решения ядра (английский текст policy.Decide) словами на
+// языке страницы; первая подошедшая.
+var reasons = []struct {
+	re  *regexp.Regexp
+	msg func(m []string) Msg
+}{
+	{regexp.MustCompile(`^no rule matched; default for effect class "(\w+)" is (\w+)$`), func(m []string) Msg {
+		return M("No rule for this: “%s” actions are “%s” by default.", Word(or(classWords[m[1]], m[1])), Word(or(effectWords[m[2]], m[2])))
+	}},
+	{regexp.MustCompile(`^nested call: no rule matched`), func([]string) Msg { return M("Part of an action that was already allowed.") }},
+	{regexp.MustCompile(`^rule (\S+): (\w+)$`), func(m []string) Msg { return M("Rule %s: %s.", m[1], Word(or(effectWords[m[2]], m[2]))) }},
+	{regexp.MustCompile(`^connector "([^"]+)" is not available for profile "([^"]+)"$`), func(m []string) Msg { return M("The agent has no access to %s.", m[1]) }},
+	{regexp.MustCompile(`^daily limit of (\d+) actions (\S+) reached$`), func(m []string) Msg { return M("The daily limit of %s actions is reached.", m[1]) }},
+	{regexp.MustCompile(`^unknown agent "([^"]+)"$`), func(m []string) Msg { return M("Unknown agent %s.", m[1]) }},
+	{regexp.MustCompile(`^Only the folder (.+)$`), func(m []string) Msg { return M("Only the folder %s", m[1]) }},
+	{regexp.MustCompile(`^At most (\d+) a day$`), func(m []string) Msg { return M("At most %s a day", m[1]) }},
+}
 
 // reasonText — причина решения на языке l.
 func reasonText(l, s string) string {
-	switch {
-	case reDefault.MatchString(s):
-		m := reDefault.FindStringSubmatch(s)
-		return M("No rule for this: “%s” actions are “%s” by default.", Word(or(classWords[m[1]], m[1])), Word(or(effectWords[m[2]], m[2]))).In(l)
-	case strings.HasPrefix(s, "nested call: no rule matched"):
-		return tr(l, "Part of an action that was already allowed.")
-	case reRule.MatchString(s):
-		m := reRule.FindStringSubmatch(s)
-		return M("Rule %s: %s.", m[1], Word(or(effectWords[m[2]], m[2]))).In(l)
-	case reNoConn.MatchString(s):
-		m := reNoConn.FindStringSubmatch(s)
-		return M("The agent has no access to %s.", m[1]).In(l)
-	case reDayLimit.MatchString(s):
-		m := reDayLimit.FindStringSubmatch(s)
-		return M("The daily limit of %s actions is reached.", m[1]).In(l)
-	case reUnknownAg.MatchString(s):
-		return M("Unknown agent %s.", reUnknownAg.FindStringSubmatch(s)[1]).In(l)
-	case reOnlyDir.MatchString(s):
-		return M("Only the folder %s", reOnlyDir.FindStringSubmatch(s)[1]).In(l)
-	case rePerDay.MatchString(s):
-		return M("At most %s a day", rePerDay.FindStringSubmatch(s)[1]).In(l)
+	for _, r := range reasons {
+		if m := r.re.FindStringSubmatch(s); m != nil {
+			return r.msg(m).In(l)
+		}
 	}
 	return tr(l, s)
 }

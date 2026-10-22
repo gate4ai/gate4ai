@@ -226,18 +226,12 @@ func encrypt(s state.PushSub, plaintext []byte) ([]byte, error) {
 		return nil, err
 	}
 	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return nil, err
-	}
-	prk, err := hkdf.Extract(sha256.New, ikm, salt)
+	rand.Read(salt) // crypto/rand.Read не возвращает ошибок
+	cek, err := hkdf.Key(sha256.New, ikm, salt, "Content-Encoding: aes128gcm\x00", 16)
 	if err != nil {
 		return nil, err
 	}
-	cek, err := hkdf.Expand(sha256.New, prk, "Content-Encoding: aes128gcm\x00", 16)
-	if err != nil {
-		return nil, err
-	}
-	nonce, err := hkdf.Expand(sha256.New, prk, "Content-Encoding: nonce\x00", 12)
+	nonce, err := hkdf.Key(sha256.New, ikm, salt, "Content-Encoding: nonce\x00", 12)
 	if err != nil {
 		return nil, err
 	}

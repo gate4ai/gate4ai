@@ -219,16 +219,27 @@ func addrs(as []imap.Address) []string {
 	return out
 }
 
-func (c *Mail) list(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, error) {
+// openFolder — IMAP-сессия с папкой из аргумента folder (по умолчанию INBOX),
+// выбранной только для чтения.
+func openFolder(h *abi.Host, s Settings, a map[string]any) (*imapclient.Client, string, error) {
 	cl, err := dialIMAP(h, s.IMAP)
+	if err != nil {
+		return nil, "", err
+	}
+	folder := strArg(a, "folder", "INBOX")
+	if _, err := cl.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+		logout(cl)
+		return nil, "", fmt.Errorf("folder %q: %w", folder, err)
+	}
+	return cl, folder, nil
+}
+
+func (c *Mail) list(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, error) {
+	cl, folder, err := openFolder(h, s, a)
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
 	defer logout(cl)
-	folder := strArg(a, "folder", "INBOX")
-	if _, err := cl.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
-		return abi.ExecResult{}, fmt.Errorf("folder %q: %w", folder, err)
-	}
 	crit := &imap.SearchCriteria{}
 	if b, _ := a["unseen_only"].(bool); b {
 		crit.NotFlag = []imap.Flag{imap.FlagSeen}
@@ -273,15 +284,11 @@ func (c *Mail) list(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, 
 }
 
 func (c *Mail) read(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, error) {
-	cl, err := dialIMAP(h, s.IMAP)
+	cl, folder, err := openFolder(h, s, a)
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
 	defer logout(cl)
-	folder := strArg(a, "folder", "INBOX")
-	if _, err := cl.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
-		return abi.ExecResult{}, fmt.Errorf("folder %q: %w", folder, err)
-	}
 	uid := uint32(intArg(a, "uid", 0))
 	raw, err := fetchRaw(cl, imap.UID(uid))
 	if err != nil {

@@ -367,17 +367,9 @@ func scalars(v any) []string {
 		}
 		return []string{t}
 	case []any:
-		var out []string
-		for _, x := range t {
-			out = append(out, scalars(x)...)
-		}
-		return out
+		return scalarsOf(t)
 	case []string:
-		var out []string
-		for _, x := range t {
-			out = append(out, scalars(x)...)
-		}
-		return out
+		return scalarsOf(t)
 	case float64:
 		return []string{strconv.FormatFloat(t, 'f', -1, 64)}
 	case int:
@@ -386,6 +378,14 @@ func scalars(v any) []string {
 		return []string{strconv.FormatBool(t)}
 	}
 	return []string{fmt.Sprint(v)}
+}
+
+func scalarsOf[T any](xs []T) []string {
+	var out []string
+	for _, x := range xs {
+		out = append(out, scalars(x)...)
+	}
+	return out
 }
 
 // Expand раскрывает шаблон ${setting:…} по настройкам: ноль, одно или несколько значений.
@@ -454,9 +454,9 @@ func (c Capabilities) Resolve(settings map[string]any) (Resolved, error) {
 		}
 	}
 	for _, sc := range c.Services {
-		p, _ := expandParams(sc.Params, settings).(map[string]any)
-		if sc.Params == nil {
-			p = nil
+		var p map[string]any
+		if sc.Params != nil {
+			p = expandParams(sc.Params, settings).(map[string]any)
 		}
 		r.Services = append(r.Services, ServiceRule{Target: sc.Target, Contract: sc.Contract, Actions: sc.Actions, Params: p})
 	}

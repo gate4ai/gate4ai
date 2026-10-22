@@ -147,13 +147,13 @@ func TestChainEncryptionCheckpoints(t *testing.T) {
 	j.db.QueryRow(`SELECT id, body FROM receipts WHERE seq=5`).Scan(&id, &body)
 	plain, _ := j.open(id, body)
 	tampered := bytes.Replace(plain, []byte("landlord"), []byte("attacker"), 1)
-	box, _ := j.seal(id, tampered)
+	box := j.seal(id, tampered)
 	j.db.Exec(`UPDATE receipts SET body=? WHERE seq=5`, box)
 	if err := j.VerifyChain(); err == nil || !strings.Contains(err.Error(), "seq 5 content hash mismatch") {
 		t.Fatalf("tamper not detected: %v", err)
 	}
 	// Без ключа AEAD тело не расшифровать.
-	j.key = make([]byte, 32)
+	j.aead, _ = keys.NewAEAD(make([]byte, 32))
 	if _, err := j.List(Filter{}); err == nil {
 		t.Fatal("decrypt with wrong key must fail")
 	}

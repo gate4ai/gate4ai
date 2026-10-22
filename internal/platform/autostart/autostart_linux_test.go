@@ -56,7 +56,7 @@ func TestServiceLinux(t *testing.T) {
 		t.Fatal(st)
 	}
 	enabled = "enabled"
-	files, _, _ := Uninstall(home, false)
+	files, _ := Uninstall(home, false)
 	if st := State(home); len(files) != 2 || st["installed"] != false || st["enabled"] != false || st["running"] != nil {
 		t.Fatal(files)
 	}
@@ -71,7 +71,7 @@ func TestServiceLinux(t *testing.T) {
 		t.Fatal(calls)
 	}
 	calls = nil
-	_, _, _ = Uninstall(home, true)
+	_, _ = Uninstall(home, true)
 	if j := strings.Join(calls, "\n"); strings.Contains(j, "--now") {
 		t.Fatal(calls)
 	}

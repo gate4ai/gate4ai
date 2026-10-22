@@ -194,17 +194,22 @@ func (u *UI) setAttemptCookie(w http.ResponseWriter, m mount, id string) {
 // начало входа (пароль и/или кнопка «Войти»), иначе — как получить ссылку.
 func (u *UI) loginPage(w http.ResponseWriter, r *http.Request, m mount) {
 	p := u.Protection()
-	l := u.lang(r)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(401)
-	v := view{Base: m.base, Remote: m.remote, Lang: l, Path: m.base + "/"}
+	v := view{Path: m.base + "/"}
 	if p.NoLink {
 		v.Data = map[string]any{"Start": true, "Password": p.Password != "", "Telegram": map[bool]string{true: tgNeed}[p.Telegram]}
-		_ = tplIn(l).ExecuteTemplate(w, "login_step.html", v)
+		u.login401(w, r, m, "login_step.html", v)
 		return
 	}
 	v.Data = map[string]any{"Password": p.Password != ""}
-	_ = tplIn(l).ExecuteTemplate(w, "login.html", v)
+	u.login401(w, r, m, "login.html", v)
+}
+
+// login401 — страница входа name с кодом 401: вход ещё не выполнен.
+func (u *UI) login401(w http.ResponseWriter, r *http.Request, m mount, name string, v view) {
+	v.Base, v.Remote, v.Lang = m.base, m.remote, u.lang(r)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(401)
+	_ = tplIn(v.Lang).ExecuteTemplate(w, name, v)
 }
 
 // errWrongPassword — неверный пароль Web UI.
@@ -400,9 +405,7 @@ func (u *UI) loginPost(m mount) http.HandlerFunc {
 				if a.tries++; a.tries >= maxTries {
 					delete(u.attempts, id)
 					u.mu.Unlock()
-					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					w.WriteHeader(401)
-					_ = tplIn(u.lang(r)).ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote, Lang: u.lang(r), Error: tr(u.lang(r), "Too many wrong passwords — start signing in again.")})
+					u.login401(w, r, m, "login.html", view{Error: tr(u.lang(r), "Too many wrong passwords — start signing in again.")})
 					return
 				}
 				u.mu.Unlock()
@@ -479,9 +482,7 @@ func (u *UI) loginStep(w http.ResponseWriter, r *http.Request, m mount, id, errM
 	data := map[string]any{"Code": st.code, "Password": st.password, "Telegram": st.telegram, "TelegramError": st.tgErr,
 		// Пока ждём нажатия в Telegram, страница обновляется сама (пароль уже введён).
 		"Refresh": st.telegram == tgSent}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(401)
-	_ = tplIn(u.lang(r)).ExecuteTemplate(w, "login_step.html", view{Base: m.base, Remote: m.remote, Lang: u.lang(r), Path: m.base + "/", CSRF: st.csrf, Error: tr(u.lang(r), errMsg), Data: data})
+	u.login401(w, r, m, "login_step.html", view{Path: m.base + "/", CSRF: st.csrf, Error: tr(u.lang(r), errMsg), Data: data})
 }
 
 // ---- Настройки → Защита входа ----

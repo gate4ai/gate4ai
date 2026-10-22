@@ -56,10 +56,9 @@ type runState struct {
 // RunTTL — срок токена и учётных данных прокси запуска без keepalive от
 // `gate4ai run` (если CLI убит, запуск гаснет сам); KeepAliveEvery — как часто
 // CLI продлевает запуск.
-var (
-	RunTTL         = 30 * time.Minute
-	KeepAliveEvery = 5 * time.Minute
-)
+var RunTTL = 30 * time.Minute
+
+const KeepAliveEvery = 5 * time.Minute
 
 func randHex(n int) string {
 	b := make([]byte, n)
@@ -207,17 +206,11 @@ func (r *Runs) allowLocal(agent, host string) bool {
 	return false
 }
 
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 func (r *Runs) routes(mux *http.ServeMux) {
 	owner := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, req *http.Request) {
 			if !daemon.PrincipalFrom(req.Context()).IsOwner() {
-				writeJSON(w, 403, map[string]any{"error": map[string]string{"code": "owner_only", "message": "owner only"}})
+				daemon.WriteError(w, 403, "owner_only", "owner only")
 				return
 			}
 			h(w, req)
@@ -230,21 +223,21 @@ func (r *Runs) routes(mux *http.ServeMux) {
 		_ = json.NewDecoder(req.Body).Decode(&body)
 		run, err := r.Start(body.Agent)
 		if err != nil {
-			writeJSON(w, 400, map[string]any{"error": map[string]string{"code": "run", "message": err.Error()}})
+			daemon.WriteError(w, 400, "run", err.Error())
 			return
 		}
-		writeJSON(w, 200, run)
+		daemon.WriteJSON(w, 200, run)
 	}))
 	mux.HandleFunc("POST /v1/runs/{id}/keepalive", owner(func(w http.ResponseWriter, req *http.Request) {
 		if err := r.KeepAlive(req.PathValue("id")); err != nil {
-			writeJSON(w, 404, map[string]any{"error": map[string]string{"code": "not_found", "message": err.Error()}})
+			daemon.WriteError(w, 404, "not_found", err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		daemon.WriteJSON(w, 200, map[string]bool{"ok": true})
 	}))
 	mux.HandleFunc("DELETE /v1/runs/{id}", owner(func(w http.ResponseWriter, req *http.Request) {
 		r.Stop(req.PathValue("id"))
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		daemon.WriteJSON(w, 200, map[string]bool{"ok": true})
 	}))
 	mux.HandleFunc("GET /v1/egress/log", owner(func(w http.ResponseWriter, req *http.Request) {
 		n, _ := strconv.Atoi(req.URL.Query().Get("limit"))
@@ -253,10 +246,10 @@ func (r *Runs) routes(mux *http.ServeMux) {
 		}
 		l, err := r.D.State.EgressLog(n)
 		if err != nil {
-			writeJSON(w, 500, map[string]any{"error": map[string]string{"code": "egress", "message": err.Error()}})
+			daemon.WriteError(w, 500, "egress", err.Error())
 			return
 		}
-		writeJSON(w, 200, l)
+		daemon.WriteJSON(w, 200, l)
 	}))
 }
 

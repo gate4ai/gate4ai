@@ -196,6 +196,11 @@ type loginReq struct {
 	done func(ok bool)
 }
 
+// botCtx — срок одного обращения к Bot API (отправка, правка, проверка).
+func botCtx(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, 15*time.Second)
+}
+
 // ConfirmLogin просит владельца подтвердить вход в Web UI (id — случайный
 // идентификатор попытки входа, text — где и с каким кодом). done вызывается один
 // раз — по нажатию «Разрешить вход» или «Отклонить».
@@ -203,7 +208,7 @@ type loginReq struct {
 // выдаётся сессия) в Telegram не уходит: в callback_data — отдельный случайный
 // ключ, сопоставление ключ → запрос хранится только здесь.
 func (t *Telegram) ConfirmLogin(id, text string, done func(ok bool)) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := botCtx(context.Background())
 	defer cancel()
 	key := randomSecret()[:32]
 	kb := [][]Button{{{Text: "Разрешить вход", Data: "la:" + key}, {Text: "Отклонить", Data: "lr:" + key}}}
@@ -255,7 +260,7 @@ func (t *Telegram) Notify(a *state.Approval) {
 		kb[0] = kb[0][1:]
 		text += "\n" + WebOnlyHint
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := botCtx(context.Background())
 	defer cancel()
 	id, err := t.API.SendMessage(ctx, t.OwnerID, text, kb)
 	if t.State != nil {
@@ -291,7 +296,7 @@ func (t *Telegram) Resolved(a *state.Approval) {
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := botCtx(context.Background())
 	defer cancel()
 	via := ""
 	if a.Channel != "" && a.Channel != "telegram" {
@@ -302,7 +307,7 @@ func (t *Telegram) Resolved(a *state.Approval) {
 
 // Denied — сообщение об отказе политикой.
 func (t *Telegram) Denied(agent, action, reason string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := botCtx(context.Background())
 	defer cancel()
 	_, _ = t.API.SendMessage(ctx, t.OwnerID, fmt.Sprintf("⛔ %s: %s запрещено — %s", agent, action, reason), nil)
 }
@@ -313,7 +318,7 @@ func (t *Telegram) Asked(id, text string) {
 	if t.Answer == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := botCtx(context.Background())
 	defer cancel()
 	msg, err := t.API.SendMessage(ctx, t.OwnerID, "🔑 "+text+"\n\nОтветьте одним сообщением с кодом (/cancel — отказаться). Сообщение с кодом я удалю.", nil)
 	if err != nil {
@@ -363,7 +368,7 @@ func (t *Telegram) answer(ctx context.Context, msgID int64, text string) bool {
 
 // Notice — служебное сообщение владельцу.
 func (t *Telegram) Notice(text string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := botCtx(context.Background())
 	defer cancel()
 	if _, err := t.API.SendMessage(ctx, t.OwnerID, text, nil); err != nil {
 		t.Log.Warn("telegram notice", "err", err)

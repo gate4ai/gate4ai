@@ -152,7 +152,7 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 		mux.HandleFunc("POST /v1/relay/register", func(w http.ResponseWriter, r *http.Request) {
 			p := daemon.PrincipalFrom(r.Context())
 			if !p.IsOwner() {
-				http.Error(w, `{"error":{"code":"owner_only"}}`, 403)
+				daemon.WriteError(w, http.StatusForbidden, "owner_only", "owner only")
 				return
 			}
 			var req struct {
@@ -163,13 +163,10 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			res, err := RegisterDevice(r.Context(), d, p, req.URL, req.CAFile, req.SelfSigned)
 			if err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(400)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "relay", "message": err.Error()}})
+				daemon.WriteError(w, http.StatusBadRequest, "relay", err.Error())
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(res)
+			daemon.WriteJSON(w, http.StatusOK, res)
 		})
 		mux.HandleFunc("GET /v1/relay/status", func(w http.ResponseWriter, r *http.Request) {
 			st := status()
@@ -177,8 +174,7 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 			if st.MCPURL != "" {
 				out["mcp_url"] = st.MCPURL
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(out)
+			daemon.WriteJSON(w, http.StatusOK, out)
 		})
 	})
 	apply(d.Config.Current())

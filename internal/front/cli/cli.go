@@ -87,6 +87,20 @@ func (e *Env) call(ctx context.Context, c *Client, method, path string, body any
 	return ExitOK
 }
 
+// callObject — call для ответа-объекта (иной ответ — ошибка, как от Do); код
+// выхода — exit(ответ), без exit — ExitOK.
+func (e *Env) callObject(ctx context.Context, c *Client, method, path string, body any, exit func(map[string]any) int) int {
+	var res map[string]any
+	if err := c.Do(ctx, method, path, body, &res); err != nil {
+		return e.fail(err)
+	}
+	e.printJSON(res)
+	if exit == nil {
+		return ExitOK
+	}
+	return exit(res)
+}
+
 func (e *Env) printJSON(v any) {
 	enc := json.NewEncoder(e.Stdout)
 	enc.SetIndent("", "  ")
@@ -446,12 +460,7 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 		e.ForceJSON = true
 	}
 	body := map[string]any{"action": tool.Name, "args": vals, "wait": opts.wait, "agent": opts.as}
-	var res map[string]any
-	if err := e.Client().Do(ctx, "POST", "/v1/call", body, &res); err != nil {
-		return e.fail(err)
-	}
-	e.printJSON(res)
-	return ExitForResult(res)
+	return e.callObject(ctx, e.Client(), "POST", "/v1/call", body, ExitForResult)
 }
 
 // ExitForResult — код выхода по результату pipeline.
@@ -677,12 +686,7 @@ func (e *Env) status(ctx context.Context, args []string) int {
 	if *wait != "" {
 		path += "?wait=" + *wait
 	}
-	var res map[string]any
-	if err := e.Client().Do(ctx, "GET", path, nil, &res); err != nil {
-		return e.fail(err)
-	}
-	e.printJSON(res)
-	return ExitForResult(res)
+	return e.callObject(ctx, e.Client(), "GET", path, nil, ExitForResult)
 }
 
 // firstPositional отделяет первый позиционный аргумент от флагов (в любом порядке).
@@ -817,15 +821,12 @@ func (e *Env) journal(ctx context.Context, args []string) int {
 		fmt.Fprintln(e.Stderr, "usage: gate4ai journal verify")
 		return ExitUsage
 	}
-	var res map[string]any
-	if err := e.Client().Do(ctx, "POST", "/v1/journal/verify", nil, &res); err != nil {
-		return e.fail(err)
-	}
-	e.printJSON(res)
-	if res["ok"] != true {
-		return ExitVerification
-	}
-	return ExitOK
+	return e.callObject(ctx, e.Client(), "POST", "/v1/journal/verify", nil, func(res map[string]any) int {
+		if res["ok"] != true {
+			return ExitVerification
+		}
+		return ExitOK
+	})
 }
 
 func (e *Env) agents(ctx context.Context, args []string) int {
@@ -979,12 +980,7 @@ func (e *Env) approvals(ctx context.Context, args []string) int {
 			fmt.Fprintf(e.Stderr, "usage: gate4ai approvals %s <id>\n", sub)
 			return ExitUsage
 		}
-		var res map[string]any
-		if err := c.Do(ctx, "POST", "/v1/approvals/"+args[0]+"/decide", map[string]any{"approve": sub == "approve", "channel": "cli"}, &res); err != nil {
-			return e.fail(err)
-		}
-		e.printJSON(res)
-		return ExitOK
+		return e.callObject(ctx, c, "POST", "/v1/approvals/"+args[0]+"/decide", map[string]any{"approve": sub == "approve", "channel": "cli"}, nil)
 	}
 	switch sub {
 	case "questions":

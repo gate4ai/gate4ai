@@ -181,7 +181,7 @@ func (d *Daemon) buildPublic() http.Handler {
 			agent, err := d.tokenAgent(r, "https")
 			if err != nil {
 				w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+as.ResourceMetadataURL(r)+`"`)
-				writeErr(w, http.StatusUnauthorized, "unauthorized", err.Error())
+				WriteError(w, http.StatusUnauthorized, "unauthorized", err.Error())
 				return
 			}
 			p := auth.AgentVia(agent, "https")
@@ -201,17 +201,17 @@ func (d *Daemon) buildPublic() http.Handler {
 		agent, err := d.tokenAgent(r, "mcp-http")
 		if err != nil {
 			w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+as.ResourceMetadataURL(r)+`"`)
-			writeErr(w, http.StatusUnauthorized, "invalid_token", "authorization required")
+			WriteError(w, http.StatusUnauthorized, "invalid_token", "authorization required")
 			return
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
 		if err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
+			WriteError(w, 400, "bad_request", err.Error())
 			return
 		}
 		srv := mcp.NewServer(backend{d: d, p: auth.AgentVia(agent, "mcp-http")})
 		if _, err := srv.Handle(r.Context(), "tools/list", nil); err != nil {
-			writeErr(w, 500, "catalog", err.Error())
+			WriteError(w, 500, "catalog", err.Error())
 			return
 		}
 		out, _ := srv.HandleMessage(r.Context(), body)

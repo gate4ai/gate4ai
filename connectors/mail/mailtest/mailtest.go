@@ -137,7 +137,7 @@ type session struct {
 
 func (ss *session) AuthMechanisms() []string { return []string{sasl.Plain} }
 
-func (ss *session) Auth(mech string) (sasl.Server, error) {
+func (ss *session) Auth(string) (sasl.Server, error) { // интерфейс smtp.AuthSession: механизм один
 	return sasl.NewPlainServer(func(identity, username, password string) error {
 		if username != User || password != Password {
 			return errors.New("invalid credentials")

@@ -114,8 +114,8 @@ func TestRegistrationLimits(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	if post() != 200 || post() != 200 {
-		t.Fatal("registration")
+	if a, b := post(), post(); a != 200 || b != 200 {
+		t.Fatal("registration:", a, b)
 	}
 	if c := post(); c != 429 {
 		t.Fatal("registrations per IP not limited:", c)

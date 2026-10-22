@@ -102,7 +102,7 @@ func (n *netLog) handle(m cdpMsg) {
 
 // NetRequests — fetch / XHR вкладки с телами текстовых ответов (до 4000
 // символов; тело Chrome хранит, пока страница жива).
-func (c *CDP) NetRequests(ctx context.Context) ([]Request, []int, error) {
+func (c *CDP) NetRequests(ctx context.Context) ([]Request, []int) {
 	c.net.mu.Lock()
 	entries := append([]netEntry(nil), c.net.entries...)
 	c.net.mu.Unlock()
@@ -132,7 +132,7 @@ func (c *CDP) NetRequests(ctx context.Context) ([]Request, []int, error) {
 		out = append(out, q)
 		sizes = append(sizes, size)
 	}
-	return out, sizes, nil
+	return out, sizes
 }
 
 func textMIME(m string) bool {
@@ -150,9 +150,7 @@ func (c *CDP) WaitIdle(ctx context.Context, quiet, max time.Duration) {
 		if idle {
 			return
 		}
-		select {
-		case <-time.After(50 * time.Millisecond):
-		case <-ctx.Done():
+		if wait(ctx, 50*time.Millisecond) != nil {
 			return
 		}
 	}

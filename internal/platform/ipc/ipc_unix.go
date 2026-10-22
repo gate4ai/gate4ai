@@ -61,16 +61,22 @@ func Dial(ctx context.Context, path string) (net.Conn, error) {
 	return d.DialContext(ctx, "unix", path)
 }
 
-func rawFD(c net.Conn, f func(fd uintptr)) error {
+// fdPeer — собеседник по дескриптору unix-соединения (read — getsockopt ОС).
+func fdPeer(c net.Conn, read func(fd int) (Peer, error)) (Peer, error) {
 	uc, ok := c.(*net.UnixConn)
 	if !ok {
-		return errors.New("ipc: not a unix connection")
+		return Peer{}, errors.New("ipc: not a unix connection")
 	}
 	rc, err := uc.SyscallConn()
 	if err != nil {
-		return err
+		return Peer{}, err
 	}
-	return rc.Control(f)
+	var p Peer
+	var rerr error
+	if err := rc.Control(func(fd uintptr) { p, rerr = read(int(fd)) }); err != nil {
+		return Peer{}, err
+	}
+	return p, rerr
 }
 
 // MaxPath — предел длины пути сокета (sun_path без завершающего нуля).

@@ -36,11 +36,9 @@ type Engine interface {
 	Close() error
 }
 
-// Pacing — задержка перед шагом Executor (точка для будущего «человеческого» темпа).
+// Pacing — задержка перед шагом Executor (точка для будущего «человеческого»
+// темпа); nil — без задержек.
 type Pacing func(ctx context.Context, step string) error
-
-// NoPacing — нулевые задержки (MVP).
-func NoPacing(context.Context, string) error { return nil }
 
 // ErrDomain — сайт не разрешён списком сайтов (настройки браузера или params вызывающего).
 var ErrDomain = errors.New("site is not allowed by the browser's site list")
@@ -67,6 +65,16 @@ func (x *Executor) pace(ctx context.Context, step string) error {
 		return nil
 	}
 	return x.Pacing(ctx, step)
+}
+
+// wait — пауза опроса d; раньше — ошибка, если ctx отменён.
+func wait(ctx context.Context, d time.Duration) error {
+	select {
+	case <-time.After(d):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // CheckURL — URL разрешён списком сайтов коннектора (дополнительно к политике).
@@ -97,10 +105,8 @@ func (x *Executor) settledURL(ctx context.Context) (string, error) {
 		if err := x.CheckURL(u); err == nil || time.Now().After(deadline) {
 			return u, err
 		}
-		select {
-		case <-time.After(ActPoll):
-		case <-ctx.Done():
-			return "", ctx.Err()
+		if err := wait(ctx, ActPoll); err != nil {
+			return "", err
 		}
 	}
 }
@@ -263,10 +269,8 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 			}
 			return ActResponse{}, fmt.Errorf("%w: %s", ErrNotFound, what)
 		}
-		select {
-		case <-time.After(ActPoll):
-		case <-ctx.Done():
-			return ActResponse{}, ctx.Err()
+		if err := wait(ctx, ActPoll); err != nil {
+			return ActResponse{}, err
 		}
 	}
 	switch r.Method {
@@ -353,10 +357,8 @@ func (x *Executor) expect(ctx context.Context, r ActRequest, before string) erro
 			}
 			return fmt.Errorf("%w: waited %s for %s", ErrNoEffect, timeout, strings.Join(what, " and "))
 		}
-		select {
-		case <-time.After(ActPoll):
-		case <-ctx.Done():
-			return ctx.Err()
+		if err := wait(ctx, ActPoll); err != nil {
+			return err
 		}
 	}
 }
@@ -395,10 +397,8 @@ func (x *Executor) WaitFor(ctx context.Context, sel, text string, timeoutMS int)
 		if time.Now().After(deadline) {
 			return fmt.Errorf("%w: %s %q did not appear in %s", ErrNotFound, sel, text, timeout)
 		}
-		select {
-		case <-time.After(ActPoll):
-		case <-ctx.Done():
-			return ctx.Err()
+		if err := wait(ctx, ActPoll); err != nil {
+			return err
 		}
 	}
 }

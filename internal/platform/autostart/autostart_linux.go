@@ -25,6 +25,11 @@ func desktopPath(home, name string) string {
 	return filepath.Join(configDir(home), "autostart", name+".desktop")
 }
 
+// autostartFiles — все файлы автозапуска: служба systemd, XDG daemon и трея.
+func autostartFiles(home string) []string {
+	return []string{unitPath(home), desktopPath(home, "gate4ai"), desktopPath(home, "gate4ai-tray")}
+}
+
 // systemdUser — у пользователя есть systemd --user.
 func systemdUser() bool {
 	_, err := runCmd("systemctl", "--user", "show-environment")
@@ -111,8 +116,7 @@ func Install(s Spec) (Result, error) {
 	return r, nil
 }
 
-func Uninstall(home string, keepRunning bool) ([]string, []string, error) {
-	var notes []string
+func Uninstall(home string, keepRunning bool) (removed, notes []string) {
 	unit := unitPath(home)
 	if fileExists(unit) {
 		if keepRunning {
@@ -122,20 +126,15 @@ func Uninstall(home string, keepRunning bool) ([]string, []string, error) {
 			notes = append(notes, "the daemon started by systemd was stopped")
 		}
 	}
-	files := removeFiles(unit, desktopPath(home, "gate4ai"), desktopPath(home, "gate4ai-tray"))
+	removed = removeFiles(autostartFiles(home))
 	if fileExists(filepath.Dir(unit)) {
 		_, _ = runCmd("systemctl", "--user", "daemon-reload")
 	}
-	return files, notes, nil
+	return removed, notes
 }
 
 func State(home string) map[string]any {
-	var files []string
-	for _, f := range []string{unitPath(home), desktopPath(home, "gate4ai"), desktopPath(home, "gate4ai-tray")} {
-		if fileExists(f) {
-			files = append(files, f)
-		}
-	}
+	files := existing(autostartFiles(home))
 	res := map[string]any{"installed": len(files) > 0, "files": files,
 		"enabled": fileExists(desktopPath(home, "gate4ai"))}
 	if fileExists(unitPath(home)) {

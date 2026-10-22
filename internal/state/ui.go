@@ -169,7 +169,7 @@ func (s *Store) AddPushSub(p PushSub) error {
 	p.Created = s.Now()
 	b, _ := json.Marshal(p)
 	_, err := s.db.Exec(`INSERT INTO push_subs(endpoint,sub,label,created) VALUES(?,?,?,?)
-		ON CONFLICT(endpoint) DO UPDATE SET sub=excluded.sub, label=excluded.label`, p.Endpoint, s.seal("push", b), p.Label, p.Created.UnixNano())
+		ON CONFLICT(endpoint) DO UPDATE SET sub=excluded.sub, label=excluded.label`, p.Endpoint, s.aead.Seal("push", b), p.Label, p.Created.UnixNano())
 	return err
 }
 
@@ -192,7 +192,7 @@ func (s *Store) PushSubs() ([]PushSub, error) {
 		if err := rows.Scan(&box); err != nil {
 			return nil, err
 		}
-		b, err := s.open("push", box)
+		b, err := s.aead.Open("push", box)
 		if err != nil {
 			continue
 		}

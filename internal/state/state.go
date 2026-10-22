@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/chacha20poly1305"
 	_ "modernc.org/sqlite"
 
 	"github.com/gate4ai/gate4ai/internal/policy"
@@ -26,10 +25,10 @@ import (
 
 // Store — State Store.
 type Store struct {
-	db  *sql.DB
-	key []byte
-	Now func() time.Time
-	mu  sync.Mutex
+	db   *sql.DB
+	aead *keys.AEAD
+	Now  func() time.Time
+	mu   sync.Mutex
 
 	seen map[string]time.Time // агент+канал → последняя запись agent_seen (Seen)
 }
@@ -67,31 +66,16 @@ func Open(path string, ks keys.Store) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	key, err := keys.RandomBytes(ks, "state.aead", chacha20poly1305.KeySize)
+	aead, err := keys.OpenAEAD(ks, "state.aead")
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, key: key, Now: time.Now}, nil
+	return &Store{db: db, aead: aead, Now: time.Now}, nil
 }
 
 // Close закрывает базу.
 func (s *Store) Close() error { return s.db.Close() }
-
-func (s *Store) seal(ad string, plain []byte) []byte {
-	a, _ := chacha20poly1305.NewX(s.key)
-	nonce := make([]byte, a.NonceSize())
-	_, _ = rand.Read(nonce)
-	return a.Seal(nonce, nonce, plain, []byte(ad))
-}
-
-func (s *Store) open(ad string, box []byte) ([]byte, error) {
-	a, _ := chacha20poly1305.NewX(s.key)
-	if len(box) < a.NonceSize() {
-		return nil, errors.New("state: ciphertext too short")
-	}
-	return a.Open(nil, box[:a.NonceSize()], box[a.NonceSize():], []byte(ad))
-}
 
 // ---- Счётчики ----
 

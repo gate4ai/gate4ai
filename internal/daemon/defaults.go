@@ -27,7 +27,7 @@ const defaultsFile = "default-connectors.json"
 
 // DefaultsRetry — первая пауза перед повтором установки коннекторов по
 // умолчанию (магазин недоступен); дальше вдвое больше, до DefaultsRetryMax.
-var DefaultsRetry, DefaultsRetryMax = 30 * time.Second, 30 * time.Minute
+const DefaultsRetry, DefaultsRetryMax = 30 * time.Second, 30 * time.Minute
 
 func (d *Daemon) defaultsPath() string { return filepath.Join(d.Home, defaultsFile) }
 

@@ -28,15 +28,8 @@ func Listen(path string) (net.Listener, error) {
 		return nil, err
 	}
 	return &checkedListener{Listener: l, check: func(c net.Conn) (Peer, error) {
-		h, ok := pipeHandle(c)
+		pid, ok := pipePeer(c, windows.GetNamedPipeClientProcessId, sid)
 		if !ok {
-			return Peer{}, ErrPeerRejected
-		}
-		var pid uint32
-		if err := windows.GetNamedPipeClientProcessId(h, &pid); err != nil {
-			return Peer{}, ErrPeerRejected
-		}
-		if !sameUser(h, pid, sid) {
 			return Peer{}, ErrPeerRejected
 		}
 		return Peer{PID: int(pid)}, nil
@@ -56,9 +49,7 @@ func Dial(ctx context.Context, path string) (net.Conn, error) {
 		c.Close()
 		return nil, err
 	}
-	h, ok := pipeHandle(c)
-	var pid uint32
-	if !ok || windows.GetNamedPipeServerProcessId(h, &pid) != nil || !sameUser(h, pid, sid) {
+	if _, ok := pipePeer(c, windows.GetNamedPipeServerProcessId, sid); !ok {
 		c.Close()
 		return nil, fmt.Errorf("%w: %s is not served by a process of the current user", ErrPeerRejected, path)
 	}
@@ -76,13 +67,19 @@ func currentSID() (*windows.SID, error) {
 	return u.User.Sid.Copy()
 }
 
-// pipeHandle — handle соединения go-winio.
-func pipeHandle(c net.Conn) (windows.Handle, bool) {
+// pipePeer — pid процесса на другом конце pipe (getPID — клиент или сервер),
+// если он работает от SID want.
+func pipePeer(c net.Conn, getPID func(windows.Handle, *uint32) error, want *windows.SID) (uint32, bool) {
 	f, ok := c.(interface{ Fd() uintptr })
 	if !ok {
 		return 0, false
 	}
-	return windows.Handle(f.Fd()), true
+	h := windows.Handle(f.Fd())
+	var pid uint32
+	if getPID(h, &pid) != nil || !sameUser(h, pid, want) {
+		return 0, false
+	}
+	return pid, true
 }
 
 // sameUser — процесс pid работает от SID want. Если токен процесса прочитать

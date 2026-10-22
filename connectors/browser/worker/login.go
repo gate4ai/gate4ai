@@ -338,10 +338,8 @@ func (x *Executor) Login(ctx context.Context, form LoginForm) (LoginResult, erro
 		if time.Now().After(deadline) {
 			break
 		}
-		select {
-		case <-time.After(LoginPoll):
-		case <-ctx.Done():
-			return LoginResult{}, ctx.Err()
+		if err := wait(ctx, LoginPoll); err != nil {
+			return LoginResult{}, err
 		}
 	}
 	res := LoginResult{URL: u, Origin: domain.OriginOf(start), Status: Submitted}

@@ -65,6 +65,12 @@ func (s *switchable) async(f func()) {
 	}
 }
 
+func (s *switchable) Notify(a *state.Approval) {
+	if n := s.get(); n != nil {
+		s.async(func() { n.Notify(a) })
+	}
+}
+
 func (s *switchable) Resolved(a *state.Approval) {
 	if n := s.get(); n != nil {
 		s.async(func() { n.Resolved(a) })

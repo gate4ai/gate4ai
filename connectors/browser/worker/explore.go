@@ -259,7 +259,7 @@ func (x *Executor) HookNetwork(ctx context.Context) {
 // netEngine — движок, который видит запросы вкладки сам (CDP Network): тела
 // любых ответов, странице ничего не подменяется.
 type netEngine interface {
-	NetRequests(ctx context.Context) ([]Request, []int, error)
+	NetRequests(ctx context.Context) ([]Request, []int)
 }
 
 // Network — запросы страницы к серверу; contains — фильтр по адресу; all —
@@ -284,10 +284,7 @@ func (x *Executor) Network(ctx context.Context, contains string, all bool) ([]Re
 	}
 	var raw []rawReq
 	if ne, ok := x.Engine.(netEngine); ok {
-		reqs, sizes, err := ne.NetRequests(ctx)
-		if err != nil {
-			return nil, err
-		}
+		reqs, sizes := ne.NetRequests(ctx)
 		for i, q := range reqs {
 			raw = append(raw, rawReq{Request: q, Size: sizes[i]})
 		}

@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/chacha20poly1305"
 	_ "modernc.org/sqlite"
 
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
@@ -28,7 +27,7 @@ type Witness interface {
 // Journal — журнал квитанций.
 type Journal struct {
 	db       *sql.DB
-	key      []byte
+	aead     *keys.AEAD
 	priv     ed25519.PrivateKey
 	Evidence *Evidence
 
@@ -68,7 +67,7 @@ func Open(dbPath, evDir string, ks keys.Store, opt Options) (*Journal, error) {
 		db.Close()
 		return nil, fmt.Errorf("journal schema: %w", err)
 	}
-	key, err := keys.RandomBytes(ks, "audit.aead", chacha20poly1305.KeySize)
+	aead, err := keys.OpenAEAD(ks, "audit.aead")
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +79,7 @@ func Open(dbPath, evDir string, ks keys.Store, opt Options) (*Journal, error) {
 	if err != nil {
 		return nil, err
 	}
-	j := &Journal{db: db, key: key, priv: ed25519.NewKeyFromSeed(seed), Evidence: ev,
+	j := &Journal{db: db, aead: aead, priv: ed25519.NewKeyFromSeed(seed), Evidence: ev,
 		every: opt.CheckpointEach, witness: opt.Witness, now: opt.Now}
 	if j.every <= 0 {
 		j.every = 100
@@ -173,27 +172,13 @@ func NewID() string {
 	return "r_" + hex.EncodeToString(b)
 }
 
-func (j *Journal) seal(id string, plain []byte) ([]byte, error) {
-	a, err := chacha20poly1305.NewX(j.key)
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, a.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return a.Seal(nonce, nonce, plain, []byte("gate4ai-receipt:"+id)), nil
+// seal/open — тело квитанции под AEAD, привязанное к её id.
+func (j *Journal) seal(id string, plain []byte) []byte {
+	return j.aead.Seal("gate4ai-receipt:"+id, plain)
 }
 
 func (j *Journal) open(id string, box []byte) ([]byte, error) {
-	a, err := chacha20poly1305.NewX(j.key)
-	if err != nil {
-		return nil, err
-	}
-	if len(box) < a.NonceSize() {
-		return nil, errors.New("ciphertext too short")
-	}
-	return a.Open(nil, box[:a.NonceSize()], box[a.NonceSize():], []byte("gate4ai-receipt:"+id))
+	return j.aead.Open("gate4ai-receipt:"+id, box)
 }
 
 // Append дописывает квитанцию в цепочку и возвращает её хэш. Непустой хэш —
@@ -225,11 +210,7 @@ func (j *Journal) Append(r *Receipt) (string, error) {
 		return "", err
 	}
 	hash := HashBytes(canon)
-	box, err := j.seal(r.ID, canon)
-	if err != nil {
-		j.mu.Unlock()
-		return "", err
-	}
+	box := j.seal(r.ID, canon)
 	ev, _ := json.Marshal(r.Verification.EvidenceRefs)
 	preview := ""
 	if r.Approval != nil {

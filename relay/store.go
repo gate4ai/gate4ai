@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -112,13 +113,11 @@ func OpenStore(path string) (*Store, error) {
 		MaxCheckpoints: DefaultMaxCheckpoints, MaxTXT: DefaultMaxTXT, CertOrdersPerDay: DefaultCertOrdersPerDay}
 	if path != "" {
 		b, err := os.ReadFile(path)
+		if err == nil {
+			err = json.Unmarshal(b, &s.data)
+		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, err
-		}
-		if err == nil {
-			if err := json.Unmarshal(b, &s.data); err != nil {
-				return nil, err
-			}
 		}
 	}
 	// null или отсутствие поля в файле — пустые карты, а не паника на первой записи.
@@ -138,7 +137,7 @@ func OpenStore(path string) (*Store, error) {
 				return nil, err
 			}
 		}
-		s.data.Checkpoints = map[string][]WitnessedCheckpoint{}
+		clear(s.data.Checkpoints)
 		if err := s.save(); err != nil {
 			return nil, err
 		}
@@ -306,10 +305,8 @@ func (s *Store) SetTXT(fqdn, value string) error {
 // MaxTXT значений); возвращает откат или nil, если значение уже есть.
 func (s *Store) addTXT(d *storeData, fqdn, value string) func() {
 	old, had := d.TXT[fqdn]
-	for _, v := range old {
-		if v == value {
-			return nil
-		}
+	if slices.Contains(old, value) {
+		return nil
 	}
 	l := append(append([]string{}, old...), value)
 	if n := max(s.MaxTXT, 1); len(l) > n {
@@ -340,10 +337,8 @@ func (s *Store) SetDeviceTXT(id, fqdn, value string) error {
 		if _, ok := d.Devices[id]; !ok {
 			return nil, ErrUnknownOwner
 		}
-		for _, v := range d.TXT[fqdn] {
-			if v == value {
-				return nil, nil
-			}
+		if slices.Contains(d.TXT[fqdn], value) {
+			return nil, nil
 		}
 		t := now().UTC()
 		st := &d.Stats
@@ -372,11 +367,7 @@ func (s *Store) SetDeviceTXT(id, fqdn, value string) error {
 		if st.LastCertOrder == nil {
 			st.LastCertOrder = map[string]time.Time{}
 		}
-		for dev, last := range st.LastCertOrder {
-			if t.Sub(last) >= certOrderGap {
-				delete(st.LastCertOrder, dev)
-			}
-		}
+		maps.DeleteFunc(st.LastCertOrder, func(_ string, last time.Time) bool { return t.Sub(last) >= certOrderGap })
 		st.LastCertOrder[id] = t
 		undoTXT := s.addTXT(d, fqdn, value)
 		return func() {
@@ -396,12 +387,7 @@ func (s *Store) DelTXT(fqdn, value string) error {
 		if !ok {
 			return nil, nil
 		}
-		var keep []string
-		for _, v := range old {
-			if v != value {
-				keep = append(keep, v)
-			}
-		}
+		keep := slices.DeleteFunc(slices.Clone(old), func(v string) bool { return v == value })
 		if len(keep) == len(old) {
 			return nil, nil
 		}
@@ -496,14 +482,9 @@ func (s *Store) AddCheckpoint(id string, cp WitnessedCheckpoint) error {
 	if !s.Exists(id) {
 		return ErrUnknownOwner
 	}
-	var l []WitnessedCheckpoint
-	if s.path == "" {
-		l = s.data.Checkpoints[id]
-	} else {
-		var err error
-		if l, err = s.readWitness(id); err != nil {
-			return err
-		}
+	l, err := s.checkpoints(id)
+	if err != nil {
+		return err
 	}
 	if n := len(l); n > 0 && cp.Seq <= l[n-1].Seq {
 		if cp.Seq == l[n-1].Seq && cp.Head == l[n-1].Head {
@@ -524,13 +505,19 @@ func (s *Store) AddCheckpoint(id string, cp WitnessedCheckpoint) error {
 	return nil
 }
 
-// Checkpoints — свидетельства устройства (последние MaxCheckpoints).
-func (s *Store) Checkpoints(id string) []WitnessedCheckpoint {
+// checkpoints — сохранённые чекпоинты устройства: из файла свидетеля или из
+// памяти (срез там не меняется, только заменяется целиком).
+func (s *Store) checkpoints(id string) ([]WitnessedCheckpoint, error) {
 	if s.path != "" {
-		l, _ := s.readWitness(id)
-		return append([]WitnessedCheckpoint{}, l...)
+		return s.readWitness(id)
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]WitnessedCheckpoint{}, s.data.Checkpoints[id]...)
+	return s.data.Checkpoints[id], nil
+}
+
+// Checkpoints — свидетельства устройства (последние MaxCheckpoints).
+func (s *Store) Checkpoints(id string) []WitnessedCheckpoint {
+	l, _ := s.checkpoints(id)
+	return append([]WitnessedCheckpoint{}, l...)
 }

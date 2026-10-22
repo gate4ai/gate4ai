@@ -92,7 +92,7 @@ func (Files) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	if _, err := g.stat(h, p); err != nil {
+	if err := g.stat(h, p); err != nil {
 		return abi.ExecResult{}, err
 	}
 	switch r.Action {

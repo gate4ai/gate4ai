@@ -80,11 +80,9 @@ func Launch(ctx context.Context, chrome, profileDir string, extra ...string) (cd
 				f.Close()
 			}
 		}
-		select {
-		case <-ctx.Done():
+		if err := wait(ctx, 100*time.Millisecond); err != nil {
 			_ = cmd.Process.Kill()
-			return "", nil, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+			return "", nil, err
 		}
 	}
 	_ = cmd.Process.Kill()

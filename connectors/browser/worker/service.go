@@ -87,7 +87,7 @@ func (s *Service) executor(ctx context.Context, st Settings) (*Executor, error) 
 	}
 	if reuse != "" {
 		if eng, err := s.NewEngine(ctx, st, reuse); err == nil {
-			s.exec = &Executor{Engine: eng, Pacing: NoPacing}
+			s.exec = &Executor{Engine: eng}
 			return s.exec, nil
 		}
 	}
@@ -116,7 +116,7 @@ func (s *Service) executor(ctx context.Context, st Settings) (*Executor, error) 
 	if err != nil {
 		return nil, err
 	}
-	s.exec = &Executor{Engine: eng, Pacing: NoPacing}
+	s.exec = &Executor{Engine: eng}
 	s.key, s.cdp = key, cdp
 	return s.exec, nil
 }

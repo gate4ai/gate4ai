@@ -169,10 +169,12 @@ func (p *Proxy) agent(r *http.Request) (agent, run string, ok bool) {
 	return p.Auth(u, pw)
 }
 
+// splitHostPort — хост (нижний регистр, без завершающей точки) и порт; без
+// порта — def.
 func splitHostPort(hp string, def int) (string, int) {
 	h, ps, err := net.SplitHostPort(hp)
 	if err != nil {
-		return strings.TrimSuffix(strings.ToLower(hp), "."), def
+		h, ps = hp, strconv.Itoa(def)
 	}
 	n, _ := strconv.Atoi(ps)
 	return strings.TrimSuffix(strings.ToLower(h), "."), n
@@ -217,9 +219,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Обычный HTTP идёт по сети открытым текстом: секрет сюда не подставляется
 	// никогда, а заглушка домена с подстановкой — отказ (агент ошибся схемой).
 	if ph := placeholderIn(r, p.injections(run, host, 443)); ph != "" {
-		rec.Decision, rec.Reason = "deny", "secret_denied: placeholder over plain http"
-		p.log(rec)
-		http.Error(w, "secret_denied: secrets are injected only over https (placeholder in a plain http request)", http.StatusForbidden)
+		p.deny(w, &rec, "secret_denied: placeholder over plain http",
+			"secret_denied: secrets are injected only over https (placeholder in a plain http request)")
 		return
 	}
 	r.RequestURI = ""
@@ -247,13 +248,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) allowed(w http.ResponseWriter, r *http.Request, rec *Record) bool {
 	allow, reason := p.Decide(r.Context(), rec.Agent, rec.Host, rec.Port)
 	if !allow {
-		rec.Decision, rec.Reason = "deny", reason
-		p.log(*rec)
-		http.Error(w, "denied_by_policy: egress to "+rec.Host+" is not allowed ("+reason+")", http.StatusForbidden)
+		p.deny(w, rec, reason, "denied_by_policy: egress to "+rec.Host+" is not allowed ("+reason+")")
 		return false
 	}
 	rec.Decision = "allow"
 	return true
+}
+
+// deny — отказ: запись в журнал с причиной reason и 403 с текстом msg.
+func (p *Proxy) deny(w http.ResponseWriter, rec *Record, reason, msg string) {
+	rec.Decision, rec.Reason = "deny", reason
+	p.log(*rec)
+	http.Error(w, msg, http.StatusForbidden)
 }
 
 // placeholderIn — заглушка из injs где-либо в URL или заголовках запроса.
@@ -341,21 +347,21 @@ func (p *Proxy) connect(w http.ResponseWriter, r *http.Request, agent, run strin
 		}
 		return
 	}
+	// Байты, которые клиент прислал вслед за CONNECT, уже в buf: читаются первыми.
+	if n := buf.Reader.Buffered(); n > 0 {
+		b, _ := buf.Reader.Peek(n)
+		client = prefixConn{Conn: client, r: io.MultiReader(strings.NewReader(string(b)), client)}
+	}
 	_, _ = client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	if mitm {
 		rec.MITM = true
-		p.serveMITM(client, buf, agent, run, host, port, &rec)
+		p.serveMITM(client, agent, run, host, port, &rec)
 		p.log(rec)
 		return
 	}
 	var upN, downN atomic.Int64
 	done := make(chan struct{})
 	go func() {
-		if n := buf.Reader.Buffered(); n > 0 {
-			b, _ := buf.Reader.Peek(n)
-			m, _ := up.Write(b)
-			upN.Add(int64(m))
-		}
 		_, _ = io.Copy(up, countConn{client, &upN})
 		if tc, ok := up.(*net.TCPConn); ok {
 			_ = tc.CloseWrite()
@@ -392,19 +398,14 @@ func writeStatus(w io.Writer, code int, msg string) {
 // сертификата. Host запроса должен совпадать с хостом CONNECT (иначе 421: ключ
 // не уйдёт на чужой хост за тем же фронтом). Ответ маскируется (значения и
 // производные формы) и отдаётся потоком.
-func (p *Proxy) serveMITM(client net.Conn, buf *bufio.ReadWriter, agent, run, host string, port int, rec *Record) {
+func (p *Proxy) serveMITM(client net.Conn, agent, run, host string, port int, rec *Record) {
 	defer client.Close()
 	leaf, err := p.CA.Leaf(host)
 	if err != nil {
 		rec.Reason = err.Error()
 		return
 	}
-	var inner net.Conn = client
-	if n := buf.Reader.Buffered(); n > 0 {
-		b, _ := buf.Reader.Peek(n)
-		inner = prefixConn{Conn: client, r: io.MultiReader(strings.NewReader(string(b)), client)}
-	}
-	tc := tls.Server(inner, &tls.Config{Certificates: []tls.Certificate{*leaf}, NextProtos: []string{"http/1.1"}})
+	tc := tls.Server(client, &tls.Config{Certificates: []tls.Certificate{*leaf}, NextProtos: []string{"http/1.1"}})
 	if err := tc.Handshake(); err != nil {
 		rec.Reason = "client TLS: " + err.Error()
 		return

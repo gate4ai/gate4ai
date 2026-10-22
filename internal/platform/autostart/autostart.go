@@ -72,8 +72,19 @@ func writeFile(p, body string) error {
 	return os.WriteFile(p, []byte(body), 0o644)
 }
 
+// existing — те из файлов, что есть на диске.
+func existing(files []string) []string {
+	var out []string
+	for _, f := range files {
+		if fileExists(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // removeFiles удаляет существующие файлы и возвращает удалённые.
-func removeFiles(files ...string) []string {
+func removeFiles(files []string) []string {
 	var out []string
 	for _, f := range files {
 		if os.Remove(f) == nil {

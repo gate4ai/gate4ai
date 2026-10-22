@@ -153,8 +153,8 @@ func (systemAutostart) Disable() error {
 	if err != nil {
 		return err
 	}
-	_, _, err = autostart.Uninstall(h, true)
-	return err
+	autostart.Uninstall(h, true)
+	return nil
 }
 
 // autostartState — состояние автозапуска словами: on-running (служба запускает
