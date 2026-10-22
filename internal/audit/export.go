@@ -12,7 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -91,12 +92,7 @@ func (j *Journal) Export(w io.Writer, passphrase string) error {
 	}
 	gz := gzip.NewWriter(out)
 	tw := tar.NewWriter(gz)
-	names := make([]string, 0, len(files))
-	for n := range files {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
+	for _, n := range slices.Sorted(maps.Keys(files)) {
 		if err := tw.WriteHeader(&tar.Header{Name: n, Mode: 0o600, Size: int64(len(files[n])), ModTime: m.Created}); err != nil {
 			return err
 		}

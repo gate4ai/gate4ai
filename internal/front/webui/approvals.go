@@ -6,13 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -100,40 +99,30 @@ func clip(s string, n int) string {
 	return s
 }
 
-// Причины решения ядра (английский текст policy.Decide) — словами на языке страницы.
-var (
-	reDefault   = regexp.MustCompile(`^no rule matched; default for effect class "(\w+)" is (\w+)$`)
-	reRule      = regexp.MustCompile(`^rule (\S+): (\w+)$`)
-	reNoConn    = regexp.MustCompile(`^connector "([^"]+)" is not available for profile "([^"]+)"$`)
-	reDayLimit  = regexp.MustCompile(`^daily limit of (\d+) actions (\S+) reached$`)
-	reUnknownAg = regexp.MustCompile(`^unknown agent "([^"]+)"$`)
-	reOnlyDir   = regexp.MustCompile(`^Only the folder (.+)$`)
-	rePerDay    = regexp.MustCompile(`^At most (\d+) a day$`)
-)
+// reasons — причины решения ядра (английский текст policy.Decide) словами на
+// языке страницы; первая подошедшая.
+var reasons = []struct {
+	re  *regexp.Regexp
+	msg func(m []string) Msg
+}{
+	{regexp.MustCompile(`^no rule matched; default for effect class "(\w+)" is (\w+)$`), func(m []string) Msg {
+		return M("No rule for this: “%s” actions are “%s” by default.", Word(or(classWords[m[1]], m[1])), Word(or(effectWords[m[2]], m[2])))
+	}},
+	{regexp.MustCompile(`^nested call: no rule matched`), func([]string) Msg { return M("Part of an action that was already allowed.") }},
+	{regexp.MustCompile(`^rule (\S+): (\w+)$`), func(m []string) Msg { return M("Rule %s: %s.", m[1], Word(or(effectWords[m[2]], m[2]))) }},
+	{regexp.MustCompile(`^connector "([^"]+)" is not available for profile "([^"]+)"$`), func(m []string) Msg { return M("The agent has no access to %s.", m[1]) }},
+	{regexp.MustCompile(`^daily limit of (\d+) actions (\S+) reached$`), func(m []string) Msg { return M("The daily limit of %s actions is reached.", m[1]) }},
+	{regexp.MustCompile(`^unknown agent "([^"]+)"$`), func(m []string) Msg { return M("Unknown agent %s.", m[1]) }},
+	{regexp.MustCompile(`^Only the folder (.+)$`), func(m []string) Msg { return M("Only the folder %s", m[1]) }},
+	{regexp.MustCompile(`^At most (\d+) a day$`), func(m []string) Msg { return M("At most %s a day", m[1]) }},
+}
 
 // reasonText — причина решения на языке l.
 func reasonText(l, s string) string {
-	switch {
-	case reDefault.MatchString(s):
-		m := reDefault.FindStringSubmatch(s)
-		return M("No rule for this: “%s” actions are “%s” by default.", Word(or(classWords[m[1]], m[1])), Word(or(effectWords[m[2]], m[2]))).In(l)
-	case strings.HasPrefix(s, "nested call: no rule matched"):
-		return tr(l, "Part of an action that was already allowed.")
-	case reRule.MatchString(s):
-		m := reRule.FindStringSubmatch(s)
-		return M("Rule %s: %s.", m[1], Word(or(effectWords[m[2]], m[2]))).In(l)
-	case reNoConn.MatchString(s):
-		m := reNoConn.FindStringSubmatch(s)
-		return M("The agent has no access to %s.", m[1]).In(l)
-	case reDayLimit.MatchString(s):
-		m := reDayLimit.FindStringSubmatch(s)
-		return M("The daily limit of %s actions is reached.", m[1]).In(l)
-	case reUnknownAg.MatchString(s):
-		return M("Unknown agent %s.", reUnknownAg.FindStringSubmatch(s)[1]).In(l)
-	case reOnlyDir.MatchString(s):
-		return M("Only the folder %s", reOnlyDir.FindStringSubmatch(s)[1]).In(l)
-	case rePerDay.MatchString(s):
-		return M("At most %s a day", rePerDay.FindStringSubmatch(s)[1]).In(l)
+	for _, r := range reasons {
+		if m := r.re.FindStringSubmatch(s); m != nil {
+			return r.msg(m).In(l)
+		}
 	}
 	return tr(l, s)
 }
@@ -180,22 +169,17 @@ func (u *UI) approvalView(l string, a *state.Approval) approvalView {
 	if strings.HasSuffix(a.Action, ".change_policy") {
 		// Самонастройка: текст запроса из ядра как есть — правки так, как их понял
 		// gate4ai (замена правила, закреплённые дайджесты сборок, предупреждения),
-		// а слова агента — после них с пометкой (код-ревью E.3, E.4, K2). Его
+		// а слова агента — после них с пометкой. Его
 		// хэш показан в карточке; перевод не делается, чтобы не разойтись с ним.
 		v.Preview = a.Preview
 		for k := range a.Args {
 			used[k] = true
 		}
 	}
-	keys := make([]string, 0, len(a.Args))
-	for k := range a.Args {
+	for _, k := range slices.Sorted(maps.Keys(a.Args)) {
 		if !used[k] {
-			keys = append(keys, k)
+			v.Args = append(v.Args, argKV{k, clip(argString(a.Args[k]), 300)})
 		}
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v.Args = append(v.Args, argKV{k, clip(argString(a.Args[k]), 300)})
 	}
 	if a.Decision.Default {
 		v.Why = M("There is no rule for this, so “%s” actions ask you.", Word(or(classWords[a.Class], a.Class))).In(l)
@@ -216,20 +200,18 @@ func (u *UI) approvalViews(l string, as []*state.Approval) []approvalView {
 	return out
 }
 
-func (u *UI) approvalsPage(m mount) func(r *http.Request) (string, map[string]any, error) {
-	return func(r *http.Request) (string, map[string]any, error) {
-		l := u.lang(r)
-		pend, err := u.D.State.ListApprovals(state.Pending, 50)
-		status := r.URL.Query().Get("status")
-		recent, _ := u.D.State.ListApprovals(status, 50)
-		recent = slices.DeleteFunc(recent, func(a *state.Approval) bool { return a.Status == state.Pending })
-		data := map[string]any{"Pending": u.approvalViews(l, pend), "Recent": u.approvalViews(l, recent), "Status": status, "Questions": u.D.Questions()}
-		cfg := u.D.Config.Current()
-		data["Timeout"] = timeoutWord(cfg.Approvals.Timeout.D())
-		data["TelegramSet"] = cfg.Approvals.Telegram != nil
-		data["PhoneOK"] = cfg.ChannelOn("telegram") || cfg.ChannelOn("webpush")
-		return "approvals", data, err
-	}
+func (u *UI) approvalsPage(r *http.Request) (string, map[string]any, error) {
+	l := u.lang(r)
+	pend, err := u.D.State.ListApprovals(state.Pending, 50)
+	status := r.URL.Query().Get("status")
+	recent, _ := u.D.State.ListApprovals(status, 50)
+	recent = slices.DeleteFunc(recent, func(a *state.Approval) bool { return a.Status == state.Pending })
+	data := map[string]any{"Pending": u.approvalViews(l, pend), "Recent": u.approvalViews(l, recent), "Status": status, "Questions": u.D.Questions()}
+	cfg := u.D.Config.Current()
+	data["Timeout"] = timeoutWord(cfg.Approvals.Timeout.D())
+	data["TelegramSet"] = cfg.Approvals.Telegram != nil
+	data["PhoneOK"] = cfg.ChannelOn("telegram") || cfg.ChannelOn("webpush")
+	return "approvals", data, err
 }
 
 // decide — решение по запросу; канал в квитанции различает локальный и удалённый вход.
@@ -323,10 +305,7 @@ func (u *UI) allowAlways(a *state.Approval) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if warn := u.overridden(prof, a.Action, config.EffectAllow, a.ID); warn != nil {
-		return id, warn
-	}
-	return id, nil
+	return id, u.overridden(prof, a.Action, config.EffectAllow, a.ID)
 }
 
 // resolvedText — кто и как решил запрос: «bot → notes.append: allowed in Telegram, just now».
@@ -575,7 +554,7 @@ func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any
 		}
 		users, err := u.Channels.TelegramWriters(ctx, tok)
 		r.URL.RawQuery = url.Values{"for": {r.PostForm.Get("for")}}.Encode()
-		data, _ := func() (map[string]any, error) { _, d, e := u.telegramPage(r); return d, e }()
+		_, data, _ := u.telegramPage(r)
 		data["page"] = "telegram"
 		data["Users"] = users
 		data["Searched"] = true
@@ -589,12 +568,7 @@ func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any
 			return redirectErr(back, M("The Telegram ID must be a number"))
 		}
 		if err := u.edit("telegram approvals", func(c *config.Config) error {
-			t := &config.Telegram{Token: "@telegram.bot", OwnerID: id}
-			if c.Approvals.Telegram != nil {
-				t.Webhook = c.Approvals.Telegram.Webhook
-			}
-			t.Webhook = r.PostForm.Get("webhook") == "1"
-			c.Approvals.Telegram = t
+			c.Approvals.Telegram = &config.Telegram{Token: "@telegram.bot", OwnerID: id, Webhook: r.PostForm.Get("webhook") == "1"}
 			c.SetChannel("telegram", true)
 			return nil
 		}); err != nil {
@@ -609,9 +583,6 @@ func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any
 	}
 	return redirectErr(back, M("Unknown step"))
 }
-
-// pathBase — последняя часть пути для коротких подписей.
-func pathBase(p string) string { return path.Base(strings.ReplaceAll(p, `\`, "/")) }
 
 // lowerFirst — «Append to a file» → «append to a file» (внутри фразы).
 func lowerFirst(s string) string {

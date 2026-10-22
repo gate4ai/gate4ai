@@ -6,7 +6,8 @@ package skill
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -59,14 +60,10 @@ Output is JSON. Exit codes: ` + "`0`" + ` ok · ` + "`2`" + ` denied_by_policy �
 
 `)
 	byConn := map[string][]Tool{}
-	var conns []string
 	for _, t := range tools {
-		if _, ok := byConn[t.Connector]; !ok {
-			conns = append(conns, t.Connector)
-		}
 		byConn[t.Connector] = append(byConn[t.Connector], t)
 	}
-	sort.Strings(conns)
+	conns := slices.Sorted(maps.Keys(byConn))
 	if len(conns) > 0 {
 		b.WriteString("## Actions\n")
 	}
@@ -91,11 +88,9 @@ func Example(t Tool) string {
 			continue
 		}
 		a := p.Schema
-		v := "<" + p.Name + ">"
+		var v string
 		switch {
-		case a.Format == "email":
-			v = "name@example.com"
-		case a.Type == manifest.TArray && a.Items.Format == "email":
+		case a.Format == "email" || a.Type == manifest.TArray && a.Items.Format == "email":
 			v = "name@example.com"
 		case a.Type == manifest.TObject || a.Type == manifest.TArray && a.Items.Type == manifest.TObject:
 			v = "'{…}'"

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/state"
@@ -21,13 +20,6 @@ type Channels struct {
 	TelegramBase string
 	tg           *switchable
 	queues       []*switchable
-}
-
-// Flush дожидается доставки уже поставленных уведомлений во все каналы.
-func (c *Channels) Flush() {
-	for _, q := range c.queues {
-		q.wait()
-	}
 }
 
 // Канал и его состояние.
@@ -148,7 +140,7 @@ func (c *Channels) Test(ctx context.Context, name string) error {
 			return fmt.Errorf("bot token %s is not in the vault", t.Token)
 		}
 		api := &BotAPI{Base: c.TelegramBase, Token: tok}
-		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		ctx, cancel := botCtx(ctx)
 		defer cancel()
 		_, err = api.SendMessage(ctx, t.OwnerID, "gate4.ai: проверка. Так будут приходить запросы подтверждения.", nil)
 		c.d.State.ChannelResult("telegram", err)
@@ -175,7 +167,7 @@ type TelegramUser struct {
 // TelegramBot проверяет токен (getMe) и возвращает имя бота.
 func (c *Channels) TelegramBot(ctx context.Context, token string) (string, error) {
 	api := &BotAPI{Base: c.TelegramBase, Token: token}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := botCtx(ctx)
 	defer cancel()
 	var me struct {
 		Username string `json:"username"`
@@ -190,7 +182,7 @@ func (c *Channels) TelegramBot(ctx context.Context, token string) (string, error
 // прочтения). Пока канал включён и опрашивает Telegram сам, getUpdates вернёт 409.
 func (c *Channels) TelegramWriters(ctx context.Context, token string) ([]TelegramUser, error) {
 	api := &BotAPI{Base: c.TelegramBase, Token: token}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := botCtx(ctx)
 	defer cancel()
 	_ = api.DeleteWebhook(ctx)
 	ups, err := api.GetUpdates(ctx, 0, 0)

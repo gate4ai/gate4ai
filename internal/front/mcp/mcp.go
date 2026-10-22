@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
 	"strings"
 	"sync"
@@ -21,7 +22,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/platform/version"
 )
 
-// ProtocolVersion — поддерживаемая версия MCP (последняя); старые клиенты получают свою, если она в списке.
+// ProtocolVersion — последняя поддерживаемая версия MCP; клиент с другой версией из списка supported получает свою.
 const ProtocolVersion = "2025-11-25"
 
 var supported = map[string]bool{"2025-11-25": true, "2025-06-18": true, "2025-03-26": true, "2024-11-05": true}
@@ -51,15 +52,15 @@ type Server struct {
 	Backend Backend
 	mu      sync.Mutex
 	names   map[string]string // tool name → action
-	// Poll — интервал проверки каталога (0 — ToolsPoll).
+	// Poll — интервал проверки каталога (0 — toolsPoll).
 	Poll time.Duration
 	// notify — уведомления клиенту (stdio): список инструментов изменился.
 	notify rpc.Notify
 }
 
-// ToolsPoll — как часто stdio-сервер проверяет, не изменился ли каталог
+// toolsPoll — как часто stdio-сервер проверяет, не изменился ли каталог
 // (установка или удаление коннектора, правка профиля).
-var ToolsPoll = 5 * time.Second
+const toolsPoll = 5 * time.Second
 
 // NewServer создаёт сервер.
 func NewServer(b Backend) *Server { return &Server{Backend: b, names: map[string]string{}} }
@@ -197,11 +198,8 @@ func envelopeSchema(result map[string]any) map[string]any {
 func toolResult(res map[string]any, isErr bool) map[string]any {
 	blocks, _ := res["content"].([]any)
 	env := map[string]any{}
-	for k, v := range res {
-		if k != "content" {
-			env[k] = v
-		}
-	}
+	maps.Copy(env, res)
+	delete(env, "content")
 	b, _ := json.MarshalIndent(env, "", "  ")
 	text := string(b)
 	if msg, _ := res["message"].(string); msg != "" && isErr {
@@ -269,7 +267,7 @@ func (s *Server) ServeStdio(ctx context.Context, r io.Reader, w io.Writer) error
 func (s *Server) watchTools(ctx context.Context) {
 	poll := s.Poll
 	if poll <= 0 {
-		poll = ToolsPoll
+		poll = toolsPoll
 	}
 	last := ""
 	for {

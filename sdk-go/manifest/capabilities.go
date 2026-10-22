@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,24 +24,11 @@ type Capabilities struct {
 	Secrets []SecretCap  `json:"secrets,omitempty" yaml:"secrets,omitempty"`
 	Files   []string     `json:"files,omitempty" yaml:"files,omitempty"` // "<папка>/**" — дерево, иначе один файл
 	Storage *StorageCap  `json:"storage,omitempty" yaml:"storage,omitempty"`
-	Events  []string     `json:"events,omitempty" yaml:"events,omitempty"` // подписки на события (целевое)
 	// Services — действия других коннекторов, которые можно вызвать через service_call.
 	Services []ServiceCap `json:"services,omitempty" yaml:"services,omitempty"`
 	// Reveal — алиасы Vault, значения которых хост передаёт коннектору
 	// (только runtime native, с отдельным согласием владельца).
 	Reveal []string `json:"reveal,omitempty" yaml:"reveal,omitempty"`
-	// Browser — устаревшее поле WASM-браузеров до sdk-go v0.6 (функции
-	// browser_* убраны): разбирается, чтобы прежние пакеты читались и сверялись
-	// с registry, но ни на что не даёт права. Новые коннекторы задают сайты в
-	// params вызова браузера (Services).
-	Browser *BrowserCap `json:"browser,omitempty" yaml:"browser,omitempty"`
-}
-
-// BrowserCap — устаревшие сайты browser_* (см. Capabilities.Browser).
-type BrowserCap struct {
-	Mode    string   `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Domains []string `json:"domains" yaml:"domains,omitempty"`
-	Blocked []string `json:"blocked,omitempty" yaml:"blocked,omitempty"`
 }
 
 // ServiceCap — действия поставщика Target с мажором контракта Contract.
@@ -267,14 +255,7 @@ type ServiceRule struct {
 }
 
 // Allows — действие action поставщика разрешено.
-func (s ServiceRule) Allows(action string) bool {
-	for _, a := range s.Actions {
-		if a == action {
-			return true
-		}
-	}
-	return false
-}
+func (s ServiceRule) Allows(action string) bool { return slices.Contains(s.Actions, action) }
 
 // checkParams проверяет шаблоны в строках параметров.
 func checkParams(field string, v any) error {
@@ -373,17 +354,9 @@ func scalars(v any) []string {
 		}
 		return []string{t}
 	case []any:
-		var out []string
-		for _, x := range t {
-			out = append(out, scalars(x)...)
-		}
-		return out
+		return scalarsOf(t)
 	case []string:
-		var out []string
-		for _, x := range t {
-			out = append(out, scalars(x)...)
-		}
-		return out
+		return scalarsOf(t)
 	case float64:
 		return []string{strconv.FormatFloat(t, 'f', -1, 64)}
 	case int:
@@ -392,6 +365,14 @@ func scalars(v any) []string {
 		return []string{strconv.FormatBool(t)}
 	}
 	return []string{fmt.Sprint(v)}
+}
+
+func scalarsOf[T any](xs []T) []string {
+	var out []string
+	for _, x := range xs {
+		out = append(out, scalars(x)...)
+	}
+	return out
 }
 
 // Expand раскрывает шаблон ${setting:…} по настройкам: ноль, одно или несколько значений.
@@ -460,9 +441,9 @@ func (c Capabilities) Resolve(settings map[string]any) (Resolved, error) {
 		}
 	}
 	for _, sc := range c.Services {
-		p, _ := expandParams(sc.Params, settings).(map[string]any)
-		if sc.Params == nil {
-			p = nil
+		var p map[string]any
+		if sc.Params != nil {
+			p = expandParams(sc.Params, settings).(map[string]any)
 		}
 		r.Services = append(r.Services, ServiceRule{Target: sc.Target, Contract: sc.Contract, Actions: sc.Actions, Params: p})
 	}
@@ -492,16 +473,6 @@ func (c Capabilities) Summary() []string {
 	for _, s := range c.Secrets {
 		out = append(out, fmt.Sprintf("secret %s for %s", s.Alias, strings.Join(s.Bind, ", ")))
 	}
-	if b := c.Browser; b != nil { // устаревшее: текст как у прежних версий (согласие и registry)
-		switch {
-		case b.Mode == "" && len(b.Blocked) == 0, b.Mode == "allowlist":
-			out = append(out, "browser on "+strings.Join(b.Domains, ", "))
-		case b.Mode == "blocklist":
-			out = append(out, "browser on all sites except "+strings.Join(b.Blocked, ", "))
-		default:
-			out = append(out, fmt.Sprintf("browser by %s: only %s or all sites except %s", b.Mode, strings.Join(b.Domains, ", "), strings.Join(b.Blocked, ", ")))
-		}
-	}
 	for _, sc := range c.Services {
 		line := fmt.Sprintf("call %s (contract %d): %s", sc.Target, sc.Contract, strings.Join(sc.Actions, ", "))
 		if len(sc.Params) > 0 {
@@ -519,25 +490,8 @@ func (c Capabilities) Summary() []string {
 	if c.Storage != nil {
 		out = append(out, fmt.Sprintf("storage %d MB", c.Storage.QuotaMB))
 	}
-	for _, e := range c.Events {
-		out = append(out, "events "+e)
-	}
 	sort.Strings(out)
 	return out
-}
-
-// Equal — возможности совпадают (для повторного согласия при обновлении).
-func (c Capabilities) Equal(o Capabilities) bool {
-	a, b := c.Summary(), o.Summary()
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // Parse читает манифест из YAML (или JSON — подмножество YAML) и проверяет его.
@@ -546,9 +500,6 @@ func Parse(b []byte) (Manifest, error) {
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&m); err != nil {
-		if strings.Contains(err.Error(), "field args not found") {
-			return m, fmt.Errorf("manifest: actions use \"args\" of ABI v1; ABI v2 declares arguments as input_schema — rebuild the connector with the current sdk-go")
-		}
 		return m, fmt.Errorf("manifest: %w", err)
 	}
 	normalizeDefaults(&m)

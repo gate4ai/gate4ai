@@ -152,9 +152,7 @@ func TestValidate(t *testing.T) {
 		"input_schema: { type: object, additionalProperties: true }",
 		"input_schema: { type: object, properties: { a: { type: string, pattern: x } } }",
 		"input_schema: { type: object, properties: { a: { type: string } } }\n    sensitive: [b]",
-	}
-	if _, err := Parse([]byte("connector: x\nactions:\n  - { name: a, class: read, args: [] }\n")); err == nil || !strings.Contains(err.Error(), "ABI v1") {
-		t.Fatal("ABI v1 manifest must fail with a clear error", err)
+		"args: []",
 	}
 	for _, b := range bad {
 		y := "connector: x\nactions:\n  - name: a\n    class: read\n    " + b + "\n"
@@ -192,21 +190,6 @@ func TestNativeAndServices(t *testing.T) {
 		if _, err := Parse([]byte(y)); err == nil {
 			t.Errorf("accepted:\n%s", y)
 		}
-	}
-}
-
-// Пакеты WASM-браузера до v0.6 читаются: capabilities.browser разбирается, текст согласия прежний.
-func TestLegacyBrowserCapability(t *testing.T) {
-	m, err := Parse([]byte("connector: browser\nruntime: wasm\ncapabilities:\n  browser:\n    domains: [\"${setting:allowed_domains}\"]\nactions:\n  - { name: read, class: read }\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s := m.Capabilities.Summary(); len(s) != 1 || s[0] != "browser on ${setting:allowed_domains}" {
-		t.Fatal(s)
-	}
-	r, err := m.Capabilities.Resolve(map[string]any{"allowed_domains": "x.example"})
-	if err != nil || len(r.Services) != 0 {
-		t.Fatal("legacy browser must grant nothing", r, err)
 	}
 }
 

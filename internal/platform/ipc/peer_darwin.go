@@ -11,21 +11,15 @@ import (
 )
 
 func peerCred(c net.Conn) (Peer, error) {
-	var p Peer
-	var serr error
-	err := rawFD(c, func(fd uintptr) {
-		x, err := unix.GetsockoptXucred(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
+	return fdPeer(c, func(fd int) (Peer, error) {
+		x, err := unix.GetsockoptXucred(fd, unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
 		if err != nil {
-			serr = err
-			return
+			return Peer{}, err
 		}
-		p = Peer{UID: int(x.Uid)}
-		if pid, err := unix.GetsockoptInt(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERPID); err == nil {
+		p := Peer{UID: int(x.Uid)}
+		if pid, err := unix.GetsockoptInt(fd, unix.SOL_LOCAL, unix.LOCAL_PEERPID); err == nil {
 			p.PID = pid
 		}
+		return p, nil
 	})
-	if err != nil {
-		return p, err
-	}
-	return p, serr
 }

@@ -10,6 +10,7 @@ package registry
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,14 +86,7 @@ type Revocation struct {
 var ReservedNames = []string{"data", "gate4ai", "egress", "secret"}
 
 // Reserved — имя коннектора зарезервировано (ReservedNames).
-func Reserved(name string) bool {
-	for _, r := range ReservedNames {
-		if r == name {
-			return true
-		}
-	}
-	return false
-}
+func Reserved(name string) bool { return slices.Contains(ReservedNames, name) }
 
 // ErrRollback — индекс старше уже виденного (откат) или просрочен.
 var ErrRollback = errors.New("registry: index is older than the one seen before (rollback) or expired")
@@ -283,10 +277,7 @@ func CompareVersions(a, b string) int {
 			y, _ = strconv.Atoi(pb[i])
 		}
 		if x != y {
-			if x < y {
-				return -1
-			}
-			return 1
+			return cmp.Compare(x, y)
 		}
 	}
 	return strings.Compare(a, b)

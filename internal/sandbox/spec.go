@@ -9,7 +9,9 @@ package sandbox
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -54,10 +56,7 @@ func TemplateFor(agent string) (Template, bool) {
 	if t, ok := Templates[agent]; ok {
 		return t, true
 	}
-	keys := make([]string, 0, len(Templates))
-	for k := range Templates {
-		keys = append(keys, k)
-	}
+	keys := slices.Collect(maps.Keys(Templates))
 	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
 	for _, k := range keys {
 		if strings.HasPrefix(agent, k) {
@@ -116,7 +115,7 @@ type Spec struct {
 }
 
 // SensitivePaths — что закрыто для чтения в песочнице.
-func SensitivePaths(home, goos string) []string {
+func SensitivePaths(goos string) []string {
 	p := []string{"~/.ssh", "~/.gnupg", "~/.aws", "~/.config/gcloud", "~/.kube", "~/.docker", "~/.netrc",
 		"~/.local/share/keyrings", "~/.mozilla", "~/.thunderbird",
 		"~/.config/gh", "~/.git-credentials", "~/.npmrc", "~/.pypirc"}
@@ -187,7 +186,7 @@ func SRTSettings(r Run, o Options) map[string]any {
 			"httpProxyPort":     r.ProxyPort,
 		},
 		"filesystem": map[string]any{
-			"denyRead":   append(SensitivePaths(o.Home, runtime.GOOS), DataDenyPaths(dataDirs(r, o), r.Socket)...),
+			"denyRead":   append(SensitivePaths(runtime.GOOS), DataDenyPaths(dataDirs(r, o), r.Socket)...),
 			"allowWrite": []string{o.Workspace},
 			"denyWrite":  []string{},
 		},
@@ -204,10 +203,14 @@ func secretEnv(r Run) []string {
 	return out
 }
 
-func proxyEnv(proxy, caPath string) []string {
-	return []string{"HTTP_PROXY=" + proxy, "HTTPS_PROXY=" + proxy, "http_proxy=" + proxy, "https_proxy=" + proxy,
+// runEnv — окружение агента в srt и контейнере: токен, сокет, запуск,
+// прокси с CA и заглушки секретов.
+func runEnv(r Run, socket, proxy, caPath string) []string {
+	env := []string{"GATE4AI_TOKEN=" + r.Token, "GATE4AI_AGENT_SOCKET=" + socket, "GATE4AI_RUN_ID=" + r.ID,
+		"HTTP_PROXY=" + proxy, "HTTPS_PROXY=" + proxy, "http_proxy=" + proxy, "https_proxy=" + proxy,
 		"NO_PROXY=", "no_proxy=",
 		"SSL_CERT_FILE=" + caPath, "NODE_EXTRA_CA_CERTS=" + caPath, "REQUESTS_CA_BUNDLE=" + caPath, "CURL_CA_BUNDLE=" + caPath}
+	return append(env, secretEnv(r)...)
 }
 
 // MCPConfig — .mcp.json для агентов, понимающих его (Claude Code).
@@ -248,7 +251,7 @@ func Build(r Run, o Options) (Spec, error) {
 			files[filepath.Join(o.Workspace, ".mcp.json")] = MCPConfig(o.GateBin)
 		}
 		spec.Argv = append([]string{"srt", "--settings", settings, "--"}, cmd...)
-		spec.Env = append(append([]string{"GATE4AI_TOKEN=" + r.Token, "GATE4AI_AGENT_SOCKET=" + r.Socket, "GATE4AI_RUN_ID=" + r.ID}, proxyEnv(r.ProxyURL, caHost)...), secretEnv(r)...)
+		spec.Env = runEnv(r, r.Socket, r.ProxyURL, caHost)
 	case ModeContainer:
 		engine := o.Engine
 		if engine == "" {
@@ -280,8 +283,7 @@ func Build(r Run, o Options) (Spec, error) {
 		// Токен и пароль прокси — в файле окружения (каталог запуска 0700), а
 		// не в argv docker, который виден в ps.
 		envFile := filepath.Join(o.TmpDir, "container.env")
-		env := append(append([]string{"GATE4AI_TOKEN=" + r.Token, "GATE4AI_AGENT_SOCKET=/run/gate4ai.sock", "GATE4AI_RUN_ID=" + r.ID}, proxyEnv(pu.String(), "/etc/gate4ai/ca.pem")...), secretEnv(r)...)
-		files[envFile] = strings.Join(env, "\n") + "\n"
+		files[envFile] = strings.Join(runEnv(r, "/run/gate4ai.sock", pu.String(), "/etc/gate4ai/ca.pem"), "\n") + "\n"
 		argv := []string{engine, "run", "--rm", "-it", "--name", "gate4ai-" + r.ID,
 			"--network", "none",
 			"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
@@ -297,7 +299,7 @@ func Build(r Run, o Options) (Spec, error) {
 		spec.Env = []string{"GATE4AI_TOKEN=" + r.Token} // для маскирования в --dry-run
 	case ModeMicroVM:
 		if !known || t.SandboxAgent == "" {
-			return Spec{}, fmt.Errorf("Docker Sandboxes support only: claude-code, codex")
+			return Spec{}, errors.New("only claude-code and codex run in Docker Sandboxes")
 		}
 		proxy := strings.Replace(r.ProxyURL, r.ProxyHost, "host.docker.internal", 1)
 		// Значения — в окружении процесса docker (spec.Env), в argv — только

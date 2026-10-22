@@ -19,6 +19,11 @@ func plistPath(home, label string) string {
 	return filepath.Join(home, "Library", "LaunchAgents", label+".plist")
 }
 
+// autostartFiles — LaunchAgent daemon и трея.
+func autostartFiles(home string) []string {
+	return []string{plistPath(home, launchDaemon), plistPath(home, launchTray)}
+}
+
 func gui() string { return fmt.Sprintf("gui/%d", os.Getuid()) }
 
 // plist — LaunchAgent; keepAlive — перезапуск после сбоя (не после штатной остановки).
@@ -75,22 +80,16 @@ func Install(s Spec) (Result, error) {
 	return r, nil
 }
 
-func Uninstall(home string, keepRunning bool) ([]string, []string, error) {
-	var notes []string
+func Uninstall(home string, keepRunning bool) (removed, notes []string) {
 	if !keepRunning && fileExists(plistPath(home, launchDaemon)) {
 		_, _ = runCmd("launchctl", "bootout", gui()+"/"+launchDaemon)
 		notes = append(notes, "the daemon started by launchd was stopped")
 	}
-	return removeFiles(plistPath(home, launchDaemon), plistPath(home, launchTray)), notes, nil
+	return removeFiles(autostartFiles(home)), notes
 }
 
 func State(home string) map[string]any {
-	var files []string
-	for _, f := range []string{plistPath(home, launchDaemon), plistPath(home, launchTray)} {
-		if fileExists(f) {
-			files = append(files, f)
-		}
-	}
+	files := existing(autostartFiles(home))
 	res := map[string]any{"installed": len(files) > 0, "files": files, "enabled": fileExists(plistPath(home, launchDaemon))}
 	if res["enabled"] == true {
 		_, err := runCmd("launchctl", "print", gui()+"/"+launchDaemon)

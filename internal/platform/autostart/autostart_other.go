@@ -13,7 +13,7 @@ func Install(Spec) (Result, error) {
 	return Result{}, errors.New("autostart is not supported on " + runtime.GOOS + ": run gate4ai daemon start from your login scripts")
 }
 
-func Uninstall(string, bool) ([]string, []string, error) { return nil, nil, nil }
+func Uninstall(string, bool) (removed, notes []string) { return nil, nil }
 
 func State(string) map[string]any { return map[string]any{"installed": false, "enabled": false} }
 

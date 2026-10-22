@@ -100,7 +100,7 @@ func (o Options) LoadAll(ctx context.Context, e *wasm.Engine, log *slog.Logger) 
 		log.Error("connectors", "err", err)
 		return nil
 	}
-	ix := o.cachedIndex()
+	ix := o.CachedIndex()
 	var out []connectors.Client
 	for _, it := range list {
 		c, err := o.load(it, ix, e)
@@ -113,18 +113,27 @@ func (o Options) LoadAll(ctx context.Context, e *wasm.Engine, log *slog.Logger) 
 	return out
 }
 
-// Load загружает один установленный коннектор (после установки или обновления).
-func (o Options) Load(name string, e *wasm.Engine) (connectors.Client, error) {
+// installed — установленный коннектор name.
+func (o Options) installed(name string) (Installed, error) {
 	list, err := List(o.Dir)
 	if err != nil {
-		return nil, err
+		return Installed{}, err
 	}
 	for _, it := range list {
 		if it.Name == name {
-			return o.load(it, o.cachedIndex(), e)
+			return it, nil
 		}
 	}
-	return nil, fmt.Errorf("connector %s is not installed", name)
+	return Installed{}, fmt.Errorf("connector %s is not installed", name)
+}
+
+// Load загружает один установленный коннектор (после установки или обновления).
+func (o Options) Load(name string, e *wasm.Engine) (connectors.Client, error) {
+	it, err := o.installed(name)
+	if err != nil {
+		return nil, err
+	}
+	return o.load(it, o.CachedIndex(), e)
 }
 
 // ErrRevoked — версия коннектора отозвана.
@@ -132,17 +141,11 @@ var ErrRevoked = errors.New("revoked")
 
 // Check проверяет установленный коннектор без загрузки (целостность, согласие, отзыв).
 func (o Options) Check(name string) error {
-	list, err := List(o.Dir)
-	if err != nil {
-		return err
+	it, err := o.installed(name)
+	if err == nil {
+		_, err = o.check(it, o.CachedIndex())
 	}
-	for _, it := range list {
-		if it.Name == name {
-			_, err := o.check(it, o.cachedIndex())
-			return err
-		}
-	}
-	return fmt.Errorf("connector %s is not installed", name)
+	return err
 }
 
 func (o Options) load(it Installed, ix *registry.Index, e *wasm.Engine) (connectors.Client, error) {
@@ -152,11 +155,7 @@ func (o Options) load(it Installed, ix *registry.Index, e *wasm.Engine) (connect
 	}
 	var c connectors.Client
 	if it.Manifest.Runtime == manifest.RuntimeNative {
-		log := o.Log
-		if log == nil {
-			log = slog.Default()
-		}
-		p, err := native.New(it.Module(), it.Manifest, e, log)
+		p, err := native.New(it.Module(), it.Manifest, e, o.log())
 		if err != nil {
 			return nil, err
 		}

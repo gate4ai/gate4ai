@@ -28,10 +28,7 @@ func errView(l, msg string) ErrView {
 	} else if m := reURL.FindStringSubmatch(msg); m != nil {
 		host = m[1]
 	}
-	where := tr(l, "the server")
-	if host != "" {
-		where = host
-	}
+	where := or(host, tr(l, "the server"))
 	var text Msg
 	switch {
 	case strings.Contains(msg, "lookup ") && (strings.Contains(msg, "no such host") || strings.Contains(msg, "i/o timeout") || strings.Contains(msg, "server misbehaving")):
@@ -71,7 +68,7 @@ var versionComments = []struct {
 }{
 	{regexp.MustCompile(`^initial$`), "First version"},
 	{regexp.MustCompile(`^connector (\S+): actions ask in profile (\S+)$`), "Connector %s added to %s: every action asks"},
-	{regexp.MustCompile(`^(?:web: )?(?:setup: )?add agent (\S+)$`), "Agent %s added"},
+	{regexp.MustCompile(`^web: (?:setup: )?add agent (\S+)$`), "Agent %s added"},
 	{regexp.MustCompile(`^web: remove agent (\S+)$`), "Agent %s removed"},
 	{regexp.MustCompile(`^web: rule in (\S+)$`), "Rule changed for %s"},
 	{regexp.MustCompile(`^web: remove rule (\S+)$`), "Rule %s removed"},

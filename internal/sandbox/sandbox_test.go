@@ -178,7 +178,7 @@ profiles:
       - {id: no-evil-gh, action: egress.connect, when: "host == 'evil.github.test'", effect: deny, reason: blocked repo host}
 egress:
   secrets:
-    - {domain: api.anthropic.test, header: X-Api-Key, placeholder: GATE4AI_PLACEHOLDER, secret: "@anthropic.key"}
+    - {domain: api.anthropic.test, header: X-Api-Key, env: ANTHROPIC_API_KEY, secret: "@anthropic.key"}
 `
 
 func TestRunsAndEgress(t *testing.T) {
@@ -235,6 +235,7 @@ func TestRunsAndEgress(t *testing.T) {
 		t.Fatal("agent called internal connector", res)
 	}
 
+	ph := run.SecretEnv["ANTHROPIC_API_KEY"]
 	pu, _ := url.Parse(run.ProxyURL)
 	hc := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(pu)}}
 	get := func(u string, h map[string]string) (int, string) {
@@ -254,7 +255,7 @@ func TestRunsAndEgress(t *testing.T) {
 	if code, body := get("http://api.anthropic.test/v1", nil); code != 200 || body != "key=" {
 		t.Fatal(code, body)
 	}
-	if code, body := get("http://api.anthropic.test/v1", map[string]string{"X-Api-Key": "GATE4AI_PLACEHOLDER"}); code != 403 || !strings.Contains(body, "secret_denied") {
+	if code, body := get("http://api.anthropic.test/v1", map[string]string{"X-Api-Key": ph}); code != 403 || !strings.Contains(body, "secret_denied") {
 		t.Fatal(code, body)
 	}
 	// Не в списке — отказ.
@@ -272,7 +273,7 @@ func TestRunsAndEgress(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
-	if code, body := get("http://code.github.test/repo", map[string]string{"X-Api-Key": "GATE4AI_PLACEHOLDER"}); code != 200 || body != "key=GATE4AI_PLACEHOLDER" {
+	if code, body := get("http://code.github.test/repo", map[string]string{"X-Api-Key": ph}); code != 200 || body != "key="+ph {
 		t.Fatal("ask domain:", code, body)
 	}
 	// Правило политики на egress.connect запрещает конкретный хост.
@@ -298,7 +299,7 @@ func TestRunsAndEgress(t *testing.T) {
 }
 
 // Прокси в контейнере без сети: 127.0.0.1:порт контейнера → сокет → прокси на
-// хосте (B.H3). Проверяется сама пересылка: shim и мост на хосте.
+// хосте. Проверяется сама пересылка: shim и мост на хосте.
 func TestProxyBridgeAndShim(t *testing.T) {
 	proxy, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -362,7 +363,7 @@ func TestShimRunsCommand(t *testing.T) {
 
 // Каталог данных daemon закрыт для чтения в srt и при нестандартном
 // расположении (GATE4AI_HOME, XDG_STATE_HOME); сокет запуска внутри него
-// остаётся доступным (B.M7).
+// остаётся доступным.
 func TestSRTDeniesDataHome(t *testing.T) {
 	home := t.TempDir()
 	os.MkdirAll(filepath.Join(home, "run"), 0o700)

@@ -151,7 +151,7 @@ func (f *loginChrome) eval(expr string) any {
 			f.focus = sel
 		}
 		if fl != nil {
-			// Как прежний actJS: у input нет видимого текста — его value.
+			// Как actJS: у input нет видимого текста — его value.
 			return map[string]any{"text": fl.value}
 		}
 		return map[string]any{"text": ""}

@@ -163,11 +163,11 @@ func (g *guard) check(arg, real string) error {
 	return nil
 }
 
-// stat — настоящий путь аргумента и проверка закрытых путей до действия.
-func (g *guard) stat(h *abi.Host, p string) (abi.FSStatResponse, error) {
+// stat — проверка закрытых путей по настоящему пути аргумента до действия.
+func (g *guard) stat(h *abi.Host, p string) error {
 	st, err := h.FSStat(p)
 	if err != nil {
-		return st, err
+		return err
 	}
-	return st, g.check(p, st.RealPath)
+	return g.check(p, st.RealPath)
 }

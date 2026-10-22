@@ -14,7 +14,7 @@ import (
 )
 
 // Параллельные tls_dial не открывают больше MaxConns соединений: слот
-// занимается до dial (B.L7).
+// занимается до dial.
 func TestMaxConnsUnderConcurrentDial(t *testing.T) {
 	d := dispatcher(t, "version: \"1\"\ncapabilities: { network: [ { host: 127.0.0.1, scheme: tcp } ] }\nactions: []\n", nil)
 	release := make(chan struct{})

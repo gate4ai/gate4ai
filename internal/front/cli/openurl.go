@@ -46,7 +46,7 @@ const handoffTTL = 5 * time.Minute
 
 // OpenLoginURL открывает одноразовую ссылку входа так, чтобы токен не попал в
 // argv (на Linux и macOS argv любого процесса видят все локальные
-// пользователи, а Web UI на loopback доступен и им — код-ревью E.11): браузер
+// пользователи, а Web UI на loopback доступен и им): браузер
 // получает путь к странице-передатчику (файл 0600 в личном каталоге кэша),
 // которая сама переходит по ссылке. На Windows argv чужих процессов другим
 // пользователям не виден — ссылка открывается как есть. Snap-браузеры не
@@ -72,11 +72,10 @@ func writeHandoff(u string) (string, error) {
 		return "", err
 	}
 	_ = os.Chmod(dir, 0o700)
-	if old, _ := filepath.Glob(filepath.Join(dir, "login-*.html")); len(old) > 0 {
-		for _, f := range old {
-			if fi, err := os.Stat(f); err == nil && time.Since(fi.ModTime()) > handoffTTL {
-				_ = os.Remove(f)
-			}
+	old, _ := filepath.Glob(filepath.Join(dir, "login-*.html"))
+	for _, f := range old {
+		if fi, err := os.Stat(f); err == nil && time.Since(fi.ModTime()) > handoffTTL {
+			_ = os.Remove(f)
 		}
 	}
 	f, err := os.CreateTemp(dir, "login-*.html")

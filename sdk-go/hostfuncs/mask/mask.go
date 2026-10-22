@@ -80,17 +80,15 @@ func Forms(v string) []string {
 		}
 	}
 	out = append(out, url.QueryEscape(v), url.PathEscape(v), hex.EncodeToString([]byte(v)), html.EscapeString(v))
-	if b, err := json.Marshal(v); err == nil {
-		j := string(b[1 : len(b)-1])
-		out = append(out, j, strings.ReplaceAll(j, "/", `\/`))
-	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if enc.Encode(v) == nil {
-		j := strings.TrimSpace(buf.String())
-		j = j[1 : len(j)-1]
-		out = append(out, j, strings.ReplaceAll(j, "/", `\/`))
+	for _, escHTML := range []bool{true, false} { // JSON с экранированием <>& (как json.Marshal) и без
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(escHTML)
+		if enc.Encode(v) == nil {
+			j := strings.TrimSpace(buf.String())
+			j = j[1 : len(j)-1]
+			out = append(out, j, strings.ReplaceAll(j, "/", `\/`))
+		}
 	}
 	return out
 }
@@ -113,7 +111,6 @@ func (s *Set) intervals(b []byte) [][2]int {
 	}
 	lb := lower(b)
 	cover := make([]int, len(b)+1) // разностный массив покрытия
-	found := false
 	for _, p := range s.pats {
 		for off := 0; off+len(p) <= len(lb); {
 			i := bytes.Index(lb[off:], p)
@@ -122,12 +119,8 @@ func (s *Set) intervals(b []byte) [][2]int {
 			}
 			cover[off+i]++
 			cover[off+i+len(p)]--
-			found = true
 			off += i + 1
 		}
-	}
-	if !found {
-		return nil
 	}
 	var out [][2]int
 	depth, start := 0, 0
@@ -174,9 +167,13 @@ func (s *Set) String(str, repl string) string {
 // меняется: так можно маскировать поток с известным Content-Length).
 func (s *Set) Fill(b []byte) {
 	for _, x := range s.intervals(b) {
-		for i := x[0]; i < x[1]; i++ {
-			b[i] = '*'
-		}
+		stars(b[x[0]:x[1]])
+	}
+}
+
+func stars(b []byte) {
+	for i := range b {
+		b[i] = '*'
 	}
 }
 
@@ -241,14 +238,10 @@ func (m *reader) emit(cut int) {
 		return
 	}
 	masked := append([]byte(nil), m.pending...)
-	for i := 0; i < m.force && i < len(masked); i++ {
-		masked[i] = '*'
-	}
+	stars(masked[:min(m.force, len(masked))])
 	force := 0
 	for _, x := range m.s.intervals(m.pending) {
-		for i := x[0]; i < x[1]; i++ {
-			masked[i] = '*'
-		}
+		stars(masked[x[0]:x[1]])
 		if x[0] < cut && x[1] > cut {
 			force = max(force, x[1]-cut)
 		}

@@ -11,7 +11,7 @@
 
 {{define "relay_direct"}}<p>{{T "The public address was set when gate4.ai started (--public). No relay is needed."}}</p>
 {{template "cloud_addr" (dict "Addr" .Data.Direct "Base" .Base)}}
-<p class="help">{{TH "MCP answers both at the root of the address and at <code>%s/mcp</code>. To change the address, restart gate4.ai with other <code>--public</code> / <code>--public-url</code>." .Data.Direct}}</p>{{end}}
+<p class="help">{{TH "MCP answers at the root of the address. To change the address, restart gate4.ai with other <code>--public</code> / <code>--public-url</code>."}}</p>{{end}}
 
 {{template "head" .}}
 {{$d := .Data}}

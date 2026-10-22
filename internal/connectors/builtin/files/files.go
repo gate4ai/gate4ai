@@ -5,7 +5,6 @@
 // поверх функций хоста fs_* с той же проверкой возможностей, что у WASM.
 // Скрытые файлы ниже корня, ключи и каталоги секретов закрыты всегда
 // (guard.go), открыть — allow_hidden и allow_paths.
-// До v0.6 ядра — отдельный WASM-коннектор gate4ai-files из магазина.
 package files
 
 import (
@@ -92,7 +91,7 @@ func (Files) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	if _, err := g.stat(h, p); err != nil {
+	if err := g.stat(h, p); err != nil {
 		return abi.ExecResult{}, err
 	}
 	switch r.Action {

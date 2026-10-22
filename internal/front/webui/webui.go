@@ -14,6 +14,7 @@
 package webui
 
 import (
+	"cmp"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -25,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -51,16 +53,9 @@ var funcs = template.FuncMap{
 		b, _ := json.MarshalIndent(v, "", "  ")
 		return string(b)
 	},
-	"join":   strings.Join,
-	"isCode": func(w string) bool { _, ok := DescribeWhen(w); return !ok },
-	"has": func(list []string, s string) bool {
-		for _, x := range list {
-			if x == s {
-				return true
-			}
-		}
-		return false
-	},
+	"join":      strings.Join,
+	"isCode":    func(w string) bool { _, ok := DescribeWhen(w); return !ok },
+	"has":       slices.Contains[[]string],
 	"accAnchor": AccountAnchor,
 	"secAnchor": SecretAnchor,
 	"inc":       func(i int) int { return i + 1 },
@@ -99,12 +94,8 @@ var titles = map[string]string{"overview": "Home", "approvals": "Approvals", "te
 	"policy_yaml": "YAML", "journal": "Journal", "receipt": "Journal entry", "vault": "Passwords and accounts", "settings": "Settings", "relay": "Internet access",
 	"remote_only": "Only on this computer"}
 
-func or(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
+// or — первое непустое.
+var or = cmp.Or[string]
 
 // agoIn — «3 min ago» на языке l (t — time.Time; нулевое — «never»).
 func agoIn(l string, v any) string {
@@ -289,7 +280,6 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		if req.Remote {
 			var err error
 			if link, err = u.RemoteLoginURL(); err != nil {
-				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(409)
 				code := "no_public_address"
 				if errors.Is(err, errRelayOffline) {
@@ -314,7 +304,7 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		for _, a := range pend {
 			items = append(items, map[string]any{"id": a.ID, "agent": a.Agent, "action": a.Action, "hash": audit.Short(a.PreviewHash),
 				"summary": strings.SplitN(a.Preview, "\n", 2)[0], "reason": a.Decision.Reason, "expires": a.Expires,
-				// web_only — трей не даёт «Разрешить» одним нажатием (код-ревью E.5).
+				// web_only — трей не даёт «Разрешить» одним нажатием.
 				"web_only": approval.WebOnly(a.Action)})
 		}
 		_, n := u.D.Config.CurrentRaw()
@@ -369,7 +359,7 @@ func (u *UI) handler(m mount) http.Handler {
 
 	// Удалённо: обзор, подтверждения, журнал (и подписка на push).
 	get("/{$}", u.overview(m))
-	get("/approvals", u.approvalsPage(m))
+	get("/approvals", u.approvalsPage)
 	mux.HandleFunc("GET "+b+"/approvals/live", u.livePending(m))
 	get("/journal", u.journal)
 	get("/journal/{hash}", u.receipt)
@@ -396,7 +386,6 @@ func (u *UI) handler(m mount) http.Handler {
 		get(path, f)
 	}
 	localPage("/agents", u.agents)
-	localPage("/agents/new", u.agentNew)
 	localPage("/agents/{name}", u.agentPage)
 	localPage("/connectors", u.connectorsPage)
 	localPage("/connectors/{name}", u.connectorPage)
@@ -436,7 +425,6 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/connectors/install", u.installConnector)
 	change("/connectors/refresh", u.refreshIndex)
 	change("/connectors/{name}/settings", u.saveConnectorSettings)
-	change("/connectors/{name}/profiles", u.saveConnectorProfiles)
 	change("/connectors/{name}/remove", u.removeConnector)
 	change("/connectors/{name}/decision", u.saveActionDecision)
 	change("/policy", u.savePolicy)
@@ -594,15 +582,6 @@ func (u *UI) counts(v *view) {
 	}
 }
 
-// sid — сессия запроса ("" — нет).
-func (u *UI) sid(m mount, r *http.Request) string {
-	id, _, ok := u.session(m, r)
-	if !ok {
-		return ""
-	}
-	return id
-}
-
 // popNote — сообщение после действия для этой сессии (показывается один раз).
 func (u *UI) popNote(sid string) (note, bool) {
 	u.mu.Lock()
@@ -640,7 +619,7 @@ func (u *UI) render(w http.ResponseWriter, r *http.Request, name string, v view,
 
 // fill — сообщения страницы: только из сессии (после действия). Из адреса
 // (?flash=, ?error=) текст не берётся: по ссылке владельцу нельзя показать
-// произвольный «системный» текст (код-ревью E.20).
+// произвольный «системный» текст.
 func (u *UI) fill(v *view, r *http.Request, sid string) {
 	l := u.lang(r)
 	if n, ok := u.popNote(sid); ok {
@@ -745,5 +724,3 @@ func localPath(to string) string {
 }
 
 var owner = auth.OwnerVia("webui")
-
-func urlq(s string) string { return template.URLQueryEscaper(s) }

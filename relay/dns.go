@@ -156,18 +156,14 @@ func ListenDNS(addr string, h *DNS) (*dns.Server, *dns.Server, error) {
 	udp := &dns.Server{Addr: addr, Net: "udp", Handler: h}
 	tcp := &dns.Server{Addr: addr, Net: "tcp", Handler: h}
 	errc := make(chan error, 2)
-	udp.NotifyStartedFunc = func() { errc <- nil }
-	tcp.NotifyStartedFunc = func() { errc <- nil }
-	go func() {
-		if err := udp.ListenAndServe(); err != nil {
-			errc <- err
-		}
-	}()
-	go func() {
-		if err := tcp.ListenAndServe(); err != nil {
-			errc <- err
-		}
-	}()
+	for _, srv := range []*dns.Server{udp, tcp} {
+		srv.NotifyStartedFunc = func() { errc <- nil }
+		go func() {
+			if err := srv.ListenAndServe(); err != nil {
+				errc <- err
+			}
+		}()
+	}
 	for i := 0; i < 2; i++ {
 		if err := <-errc; err != nil {
 			return nil, nil, err

@@ -349,7 +349,7 @@ func (d *Daemon) installDevFolder(ctx context.Context, folder string, pin selfPi
 	if err := pin.matches(plan); err != nil {
 		return "", err
 	}
-	info, err := d.installPlan(opts, plan, pin.Capabilities)
+	info, _, err := d.installPlan(opts, plan, pin.Capabilities)
 	if err != nil {
 		return "", err
 	}
@@ -373,32 +373,8 @@ func (d *Daemon) installStorePinned(ctx context.Context, pin selfPin) error {
 	if err := pin.matches(plan); err != nil {
 		return err
 	}
-	info, err := d.installPlan(opts, plan, pin.Capabilities)
-	if err != nil {
-		return err
-	}
-	d.Log.Info("connector installed by an agent's change", "connector", info.Connector, "version", info.Version, "trust", info.Trust)
-	return nil
-}
-
-// installPlan — установка проверенного плана под installMu (как
-// InstallConnectorDev, но без повторной подготовки пакета).
-func (d *Daemon) installPlan(opts store.Options, plan *store.Plan, consent []string) (store.Info, error) {
-	d.installMu.Lock()
-	defer d.installMu.Unlock()
-	if !plan.ConsentOK(consent) {
-		return store.Info{}, store.ErrConsent
-	}
-	d.stopNative(plan.Connector)
-	info, err := opts.Install(plan, consent)
-	if err != nil {
-		d.restartNative(plan.Connector)
-		return store.Info{}, err
-	}
-	if err := d.reloadConnector(info.Connector, false); err != nil {
-		d.Log.Warn("connector reloaded with a warning", "connector", info.Connector, "err", err)
-	}
-	return info, nil
+	_, _, err = d.installPlan(opts, plan, pin.Capabilities)
+	return err
 }
 
 // alwaysAskSelf — правки, которые подтверждает только человек, даже при

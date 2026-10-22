@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/gate4ai/gate4ai/sdk-go/registry"
@@ -18,8 +18,7 @@ import (
 // Нативный пакет — по .g4c на платформу и список платформ
 // <connector>-<version>.platforms.json. Запись индекса registry ссылается на
 // список теми же полями, что на пакет WASM: url — на список, sha256 — его
-// файла, digest — SetDigest. Так индекс остаётся в формате, который читают
-// и прежние версии ядра (они просто не могут поставить такую версию).
+// файла, digest — SetDigest.
 const SetExt = ".platforms.json"
 
 // PlatformSet — список платформ нативного пакета.
@@ -44,17 +43,12 @@ func HostPlatform() string { return runtime.GOOS + "/" + runtime.GOARCH }
 
 // SetDigest — дайджест набора: дайджесты пакетов по платформам в порядке имён.
 func SetDigest(s PlatformSet) string {
-	plats := make([]string, 0, len(s.Platforms))
-	for p := range s.Platforms {
-		plats = append(plats, p)
-	}
-	sort.Strings(plats)
 	var b strings.Builder
 	b.WriteString("gate4ai-connector-set-v1\n" + s.Connector + "\n" + s.Version + "\n")
-	for _, p := range plats {
+	for _, p := range setPlatforms(s) {
 		b.WriteString(p + " " + s.Platforms[p].Digest + "\n")
 	}
-	return sum([]byte(b.String()))
+	return SHA256([]byte(b.String()))
 }
 
 // ParseSet читает список платформ.
@@ -80,8 +74,8 @@ func ParseSet(b []byte) (PlatformSet, error) {
 // пакет WASM или, для нативного, пакет под платформу platform ("" — все
 // платформы списка, для CI registry; возвращается пакет первой по имени).
 func FetchRelease(ctx context.Context, base, name, publisher string, rel registry.Release, pub registry.Publisher, platform string) (*Package, error) {
-	ref := resolveRef(base, rel.URL)
-	b, err := fetch(ctx, ref)
+	ref := ResolveRef(base, rel.URL)
+	b, err := Fetch(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", ref, err)
 	}
@@ -107,11 +101,7 @@ func FetchRelease(ctx context.Context, base, name, publisher string, rel registr
 	}
 	plats := []string{platform}
 	if platform == "" {
-		plats = nil
-		for p := range set.Platforms {
-			plats = append(plats, p)
-		}
-		sort.Strings(plats)
+		plats = setPlatforms(set)
 	}
 	var first *Package
 	for _, p := range plats {
@@ -119,8 +109,8 @@ func FetchRelease(ctx context.Context, base, name, publisher string, rel registr
 		if !ok {
 			return nil, fmt.Errorf("connector %s %s has no package for %s (only %s)", name, rel.Version, p, strings.Join(setPlatforms(set), ", "))
 		}
-		aref := resolveRef(ref, a.URL)
-		ab, err := fetch(ctx, aref)
+		aref := ResolveRef(ref, a.URL)
+		ab, err := Fetch(ctx, aref)
 		if err != nil {
 			return nil, fmt.Errorf("download %s: %w", aref, err)
 		}
@@ -138,11 +128,4 @@ func FetchRelease(ctx context.Context, base, name, publisher string, rel registr
 	return first, nil
 }
 
-func setPlatforms(s PlatformSet) []string {
-	var out []string
-	for p := range s.Platforms {
-		out = append(out, p)
-	}
-	slices.Sort(out)
-	return out
-}
+func setPlatforms(s PlatformSet) []string { return slices.Sorted(maps.Keys(s.Platforms)) }

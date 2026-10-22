@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -45,10 +46,7 @@ func (b backend) Call(ctx context.Context, action string, args map[string]any) (
 		}
 		wait, _ := args["wait"].(string)
 		d, _ := config.ParseDuration(wait)
-		if d > 2*time.Minute {
-			d = 2 * time.Minute
-		}
-		res = b.d.Pipeline.WaitFor(ctx, id, d)
+		res = b.d.Pipeline.WaitFor(ctx, id, min(d, maxPublicWait))
 	} else {
 		res = b.d.Pipeline.Execute(ctx, pipeline.Call{Agent: b.p.Agent, Action: action, Args: args})
 	}
@@ -56,9 +54,9 @@ func (b backend) Call(ctx context.Context, action string, args map[string]any) (
 }
 
 func toMap(v any) map[string]any {
-	b, _ := jsonMarshal(v)
+	b, _ := json.Marshal(v)
 	var m map[string]any
-	_ = jsonUnmarshal(b, &m)
+	_ = json.Unmarshal(b, &m)
 	return m
 }
 
@@ -131,7 +129,7 @@ func externalURL(r *http.Request) string {
 
 // PublicHandler — то, что видно снаружи (relay, прямой HTTPS). Разделение по путям:
 //   - OAuth 2.1 (/.well-known/…, /authorize, /token, /register, /revoke) и MCP
-//     (POST/DELETE на корень; /mcp — совместимость) — токен агента;
+//     (POST/DELETE на корень) — токен агента;
 //   - /v1/whoami, /v1/tools, /v1/call, /v1/status/{id} — API агента (удалённый CLI), токен агента;
 //   - маршруты AddPublic: /ui/ (Web UI, сессия), /telegram (вебхук, секрет бота).
 //
@@ -156,8 +154,9 @@ func (d *Daemon) PublicHandler() http.Handler {
 	})
 }
 
-// publicAgent — агент по токену на публичном адресе; владельца здесь нет.
-func (d *Daemon) publicAgent(r *http.Request, via string) (string, error) {
+// tokenAgent — агент по токену запроса; seen — откуда он обратился («последнее
+// обращение» в Web UI).
+func (d *Daemon) tokenAgent(r *http.Request, seen string) (string, error) {
 	tok := bearer(r)
 	if tok == "" {
 		return "", errors.New("authorization required")
@@ -169,7 +168,7 @@ func (d *Daemon) publicAgent(r *http.Request, via string) (string, error) {
 	if _, ok := d.Config.Current().Agents[agent]; !ok {
 		return "", fmt.Errorf("agent %q is not in the configuration", agent)
 	}
-	d.State.Seen(agent, via, tok)
+	d.State.Seen(agent, seen, tok)
 	return agent, nil
 }
 
@@ -179,10 +178,10 @@ func (d *Daemon) buildPublic() http.Handler {
 	as.Routes(mux)
 	d.agentRoutes(mux, func(h func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			agent, err := d.publicAgent(r, "https")
+			agent, err := d.tokenAgent(r, "https")
 			if err != nil {
 				w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+as.ResourceMetadataURL(r)+`"`)
-				writeErr(w, http.StatusUnauthorized, "unauthorized", err.Error())
+				WriteError(w, http.StatusUnauthorized, "unauthorized", err.Error())
 				return
 			}
 			p := auth.AgentVia(agent, "https")
@@ -197,22 +196,22 @@ func (d *Daemon) buildPublic() http.Handler {
 	}
 	// MCP (Streamable HTTP) — по корню адреса устройства (его пользователь
 	// вставляет в Claude.ai / ChatGPT); GET корня — подсказка или 405 для
-	// SSE-потока, которого нет. /mcp — для коннекторов, добавленных раньше.
+	// SSE-потока, которого нет.
 	serveMCP := func(w http.ResponseWriter, r *http.Request) {
-		agent, err := d.publicAgent(r, "mcp-http")
+		agent, err := d.tokenAgent(r, "mcp-http")
 		if err != nil {
 			w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+as.ResourceMetadataURL(r)+`"`)
-			writeErr(w, http.StatusUnauthorized, "invalid_token", "authorization required")
+			WriteError(w, http.StatusUnauthorized, "invalid_token", "authorization required")
 			return
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
 		if err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
+			WriteError(w, 400, "bad_request", err.Error())
 			return
 		}
 		srv := mcp.NewServer(backend{d: d, p: auth.AgentVia(agent, "mcp-http")})
 		if _, err := srv.Handle(r.Context(), "tools/list", nil); err != nil {
-			writeErr(w, 500, "catalog", err.Error())
+			WriteError(w, 500, "catalog", err.Error())
 			return
 		}
 		out, _ := srv.HandleMessage(r.Context(), body)
@@ -231,8 +230,6 @@ func (d *Daemon) buildPublic() http.Handler {
 	endSession := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }
 	mux.HandleFunc("POST /{$}", serveMCP)
 	mux.HandleFunc("DELETE /{$}", endSession)
-	mux.HandleFunc("POST /mcp", serveMCP)
-	mux.HandleFunc("DELETE /mcp", endSession)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 			w.Header().Set("Allow", "POST, DELETE")
@@ -256,9 +253,7 @@ func (d *Daemon) ServePublic(l net.Listener, external string) {
 	// с запасом; простаивающие соединения из интернета не копятся.
 	srv := &http.Server{Handler: h, ReadHeaderTimeout: 15 * time.Second, ReadTimeout: time.Minute,
 		WriteTimeout: maxPublicWait + time.Minute, IdleTimeout: 2 * time.Minute}
-	d.mu.Lock()
-	d.servers = append(d.servers, srv)
-	d.mu.Unlock()
+	d.TrackServer(srv)
 	go func() {
 		if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			d.Log.Error("public listener", "err", err)
@@ -270,5 +265,5 @@ func isInitialize(body []byte) bool {
 	var m struct {
 		Method string `json:"method"`
 	}
-	return jsonUnmarshal(body, &m) == nil && m.Method == "initialize"
+	return json.Unmarshal(body, &m) == nil && m.Method == "initialize"
 }

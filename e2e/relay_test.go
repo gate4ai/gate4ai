@@ -64,7 +64,7 @@ func startRelay(t *testing.T) *relayProc {
 	if testing.Short() {
 		t.Skip("e2e builds binaries")
 	}
-	bin := binary(t, "relay", "./cmd/gate4ai-relay")
+	bin := binary(t, "./relay/cmd/gate4ai-relay")
 	cert, leaf, err := relay.SelfSigned("localhost")
 	if err != nil {
 		t.Fatal(err)

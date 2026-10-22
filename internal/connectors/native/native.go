@@ -32,9 +32,11 @@ import (
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 )
 
-// Hosts — функции хоста для одного вызова коннектора.
+// Hosts — функции хоста для одного вызова коннектора и маскирование
+// значений секретов в stderr процесса.
 type Hosts interface {
 	Dispatcher(ctx context.Context, m manifest.Manifest, lim manifest.Limits, settings map[string]any) (*hostfuncs.Dispatcher, error)
+	MaskString(s string) string
 }
 
 // Падения подряд, после которых коннектор считается неисправным.
@@ -189,12 +191,8 @@ func (p *Process) stderr(r io.Reader) {
 	sc.Buffer(make([]byte, 4096), 64<<10)
 	// Пакет получает значения (Revealed, коды от человека): отладочная строка
 	// или паника со значением не должна лечь в лог открытым текстом.
-	mask := func(s string) string { return s }
-	if m, ok := p.hosts.(interface{ MaskString(string) string }); ok {
-		mask = m.MaskString
-	}
 	for sc.Scan() {
-		p.log.Info(mask(sc.Text()), "connector", p.man.Connector, "stream", "stderr")
+		p.log.Info(p.hosts.MaskString(sc.Text()), "connector", p.man.Connector, "stream", "stderr")
 	}
 }
 
@@ -254,7 +252,8 @@ func (p *Process) call(ctx context.Context, method string, settings map[string]a
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
 			return nil, abi.Errorf(abi.CodeLimit, "connector %s: time limit %ds exceeded", p.man.Connector, lim.TimeoutS)
 		case errors.Is(ctx.Err(), context.Canceled):
-			return nil, cancelled(p.man.Connector)
+			// Отменил тот, кто начал вызов (агент прервал CLI, закрылся HTTP-запрос): коннектор не падал.
+			return nil, abi.Errorf(abi.CodeCancelled, "connector %s: the call was cancelled because the request that started it ended", p.man.Connector)
 		}
 		return nil, abi.Errorf(abi.CodeConnector, "connector %s crashed: %v", p.man.Connector, err)
 	}
@@ -423,10 +422,4 @@ func BuildGo(ctx context.Context, srcDir, platform, out string) error {
 		return fmt.Errorf("go build %s for %s: %v\n%s", srcDir, platform, err, b)
 	}
 	return nil
-}
-
-// cancelled — вызов отменён тем, кто его начал (агент прервал CLI, закрылся
-// HTTP-запрос): коннектор не падал.
-func cancelled(name string) error {
-	return abi.Errorf(abi.CodeCancelled, "connector %s: the call was cancelled because the request that started it ended", name)
 }

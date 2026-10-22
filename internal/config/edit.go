@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 
@@ -187,14 +188,11 @@ func (c *Config) PutRule(profile string, r Rule) error {
 	if r.ID == "" {
 		return errors.New("rule id is required")
 	}
-	for i := range p.Rules {
-		if p.Rules[i].ID == r.ID {
-			p.Rules[i] = r
-			c.Profiles[profile] = p
-			return nil
-		}
+	if i := slices.IndexFunc(p.Rules, func(x Rule) bool { return x.ID == r.ID }); i >= 0 {
+		p.Rules[i] = r
+	} else {
+		p.Rules = append(p.Rules, r)
 	}
-	p.Rules = append(p.Rules, r)
 	c.Profiles[profile] = p
 	return nil
 }
@@ -240,14 +238,11 @@ func (c *Config) PutLimit(profile string, l Limit) error {
 	if err != nil {
 		return err
 	}
-	for i := range p.Limits {
-		if p.Limits[i].ID == l.ID {
-			p.Limits[i] = l
-			c.Profiles[profile] = p
-			return nil
-		}
+	if i := slices.IndexFunc(p.Limits, func(x Limit) bool { return x.ID == l.ID }); i >= 0 {
+		p.Limits[i] = l
+	} else {
+		p.Limits = append(p.Limits, l)
 	}
-	p.Limits = append(p.Limits, l)
 	c.Profiles[profile] = p
 	return nil
 }
@@ -310,31 +305,29 @@ func (c *Config) ChannelOn(name string) bool {
 // AddSettingItems дополняет список key в настройках коннектора conn (без
 // повторов, порядок сохраняется): сайты браузера, корни файлов.
 func (c *Config) AddSettingItems(conn, key string, items []string) {
-	cur := map[string]any{}
-	for k, v := range c.Connectors[conn] {
-		cur[k] = v
-	}
-	list := settingList(cur[key])
-	for _, it := range items {
-		if it = strings.TrimSpace(it); it != "" && !slices.Contains(list, it) {
-			list = append(list, it)
+	c.editSettingList(conn, key, func(list []string) []string {
+		for _, it := range items {
+			if it = strings.TrimSpace(it); it != "" && !slices.Contains(list, it) {
+				list = append(list, it)
+			}
 		}
-	}
-	vals := make([]any, len(list))
-	for i, v := range list {
-		vals[i] = v
-	}
-	cur[key] = vals
-	c.SetConnectorSettings(conn, cur)
+		return list
+	})
 }
 
 // RemoveSettingItems убирает элементы из списка key в настройках коннектора.
 func (c *Config) RemoveSettingItems(conn, key string, items []string) {
+	c.editSettingList(conn, key, func(list []string) []string {
+		return slices.DeleteFunc(list, func(s string) bool { return slices.Contains(items, s) })
+	})
+}
+
+// editSettingList заменяет список key в настройках коннектора результатом f
+// (копия настроек: прежняя карта не меняется).
+func (c *Config) editSettingList(conn, key string, f func([]string) []string) {
 	cur := map[string]any{}
-	for k, v := range c.Connectors[conn] {
-		cur[k] = v
-	}
-	list := slices.DeleteFunc(settingList(cur[key]), func(s string) bool { return slices.Contains(items, s) })
+	maps.Copy(cur, c.Connectors[conn])
+	list := f(settingList(cur[key]))
 	vals := make([]any, len(list))
 	for i, v := range list {
 		vals[i] = v

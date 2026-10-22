@@ -137,7 +137,7 @@ func TestLatestResolveRevoked(t *testing.T) {
 }
 
 // Откат индекса (старее виденного, пропал отзыв при той же отметке) и
-// просроченный индекс не принимаются (B.M8).
+// просроченный индекс не принимаются.
 func TestCheckNewer(t *testing.T) {
 	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 	prev := &Index{Updated: "2026-10-21", Revoked: []Revocation{{Connector: "a", Version: "1", Reason: "x"}}}

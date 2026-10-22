@@ -44,7 +44,7 @@ func openState(t *testing.T) *state.Store {
 }
 
 // Нажатие «Разрешить» не держит цикл опроса Telegram на время исполнения
-// действия (C.M3): бот сразу отвечает и принимает следующие обновления.
+// действия: бот сразу отвечает и принимает следующие обновления.
 func TestTelegramApproveDoesNotBlockPolling(t *testing.T) {
 	st := openState(t)
 	a := &state.Approval{ID: "a_1", Created: time.Now(), Expires: time.Now().Add(time.Hour), Agent: "x", Action: "browser.fill_secret",
@@ -75,7 +75,7 @@ func TestTelegramApproveDoesNotBlockPolling(t *testing.T) {
 	}
 }
 
-// «Показать текст» длиннее лимита Telegram обрезается с пометкой (C.L5).
+// «Показать текст» длиннее лимита Telegram обрезается с пометкой.
 func TestTelegramPreviewTruncated(t *testing.T) {
 	a := &state.Approval{Preview: strings.Repeat("я", 5000), PreviewHash: "a3f9c21e00"}
 	got := previewText(a)
@@ -94,7 +94,7 @@ func (s slowNotifier) Notify(*state.Approval)        { time.Sleep(s.delay) }
 func (s slowNotifier) Resolved(*state.Approval)      { time.Sleep(s.delay) }
 func (s slowNotifier) Denied(string, string, string) { time.Sleep(s.delay) }
 
-// Медленный канал не задерживает вызов агента (C.L3): событие ставится в
+// Медленный канал не задерживает вызов агента: событие ставится в
 // очередь канала.
 func TestSlowChannelDoesNotBlock(t *testing.T) {
 	sw := &switchable{}

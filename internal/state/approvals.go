@@ -64,7 +64,7 @@ func (s *Store) PutApproval(a *Approval) error {
 	_, err := s.db.Exec(`INSERT INTO approvals(id,created,expires,agent,action,class,status,preview,preview_hash,decision,args,provenance,nonce)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		a.ID, a.Created.UnixNano(), a.Expires.UnixNano(), a.Agent, a.Action, a.Class, a.Status, a.Preview, a.PreviewHash,
-		mustJSON(a.Decision), s.seal("approval:"+a.ID, args), mustJSON(a.Provenance), a.Nonce)
+		mustJSON(a.Decision), s.aead.Seal("approval:"+a.ID, args), mustJSON(a.Provenance), a.Nonce)
 	return err
 }
 
@@ -97,7 +97,7 @@ func (s *Store) scanApproval(row interface{ Scan(...any) error }) (*Approval, er
 	if result != "" {
 		a.Result = json.RawMessage(result)
 	}
-	plain, err := s.open("approval:"+a.ID, box)
+	plain, err := s.aead.Open("approval:"+a.ID, box)
 	if err != nil {
 		return nil, err
 	}
@@ -125,20 +125,7 @@ func (s *Store) ListApprovals(status string, limit int) ([]*Approval, error) {
 		q += ` LIMIT ?`
 		args = append(args, limit)
 	}
-	rows, err := s.db.Query(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*Approval
-	for rows.Next() {
-		a, err := s.scanApproval(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	return s.queryApprovals(q, args...)
 }
 
 // ErrExpired — срок запроса истёк: решение человека не принимается

@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/chacha20poly1305"
 	_ "modernc.org/sqlite"
 
 	"github.com/gate4ai/gate4ai/internal/policy"
@@ -26,10 +25,10 @@ import (
 
 // Store — State Store.
 type Store struct {
-	db  *sql.DB
-	key []byte
-	Now func() time.Time
-	mu  sync.Mutex
+	db   *sql.DB
+	aead *keys.AEAD
+	Now  func() time.Time
+	mu   sync.Mutex
 
 	seen map[string]time.Time // агент+канал → последняя запись agent_seen (Seen)
 }
@@ -67,39 +66,18 @@ func Open(path string, ks keys.Store) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	key, err := keys.RandomBytes(ks, "state.aead", chacha20poly1305.KeySize)
+	aead, err := keys.OpenAEAD(ks, "state.aead")
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, key: key, Now: time.Now}, nil
+	return &Store{db: db, aead: aead, Now: time.Now}, nil
 }
 
 // Close закрывает базу.
 func (s *Store) Close() error { return s.db.Close() }
 
-func (s *Store) seal(ad string, plain []byte) []byte {
-	a, _ := chacha20poly1305.NewX(s.key)
-	nonce := make([]byte, a.NonceSize())
-	_, _ = rand.Read(nonce)
-	return a.Seal(nonce, nonce, plain, []byte(ad))
-}
-
-func (s *Store) open(ad string, box []byte) ([]byte, error) {
-	a, _ := chacha20poly1305.NewX(s.key)
-	if len(box) < a.NonceSize() {
-		return nil, errors.New("state: ciphertext too short")
-	}
-	return a.Open(nil, box[:a.NonceSize()], box[a.NonceSize():], []byte(ad))
-}
-
 // ---- Счётчики ----
-
-// RecordAction учитывает выполненное действие в счётчиках.
-func (s *Store) RecordAction(agent, action, class string, amount float64) error {
-	_, err := s.ReserveAction(agent, action, class, amount)
-	return err
-}
 
 // ReserveAction учитывает действие в счётчиках до исполнения (резерв лимита):
 // параллельный вызов уже видит его. Возвращает id строки для ReleaseAction.
@@ -273,8 +251,7 @@ var ErrBadToken = errors.New("invalid or revoked token")
 
 // AgentByToken возвращает агента по токену доступа (не refresh).
 func (s *Store) AgentByToken(tok string) (string, error) {
-	agent, kind, label, err := s.lookup(tok)
-	_ = label
+	agent, kind, _, err := s.lookup(tok)
 	if err != nil || kind == "refresh" {
 		return "", ErrBadToken
 	}
@@ -307,7 +284,12 @@ func (s *Store) RevokeAgent(agent string) (int, error) {
 	if err := s.Set(revokedKey+agent, strconv.FormatInt(s.Now().UnixNano(), 10)); err != nil {
 		return 0, err
 	}
-	res, err := s.db.Exec(`UPDATE tokens SET revoked=1 WHERE agent=? AND revoked=0`, agent)
+	return s.revoke(`UPDATE tokens SET revoked=1 WHERE agent=? AND revoked=0`, agent)
+}
+
+// revoke исполняет UPDATE отзыва; возвращает число отозванных.
+func (s *Store) revoke(q string, args ...any) (int, error) {
+	res, err := s.db.Exec(q, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -337,12 +319,7 @@ func (s *Store) AgentRevokedAt(agent string) (time.Time, error) {
 
 // RevokeLabel отзывает токены агента с меткой label; возвращает число отозванных.
 func (s *Store) RevokeLabel(agent, label string) (int, error) {
-	res, err := s.db.Exec(`UPDATE tokens SET revoked=1 WHERE agent=? AND label=? AND revoked=0`, agent, label)
-	if err != nil {
-		return 0, err
-	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	return s.revoke(`UPDATE tokens SET revoked=1 WHERE agent=? AND label=? AND revoked=0`, agent, label)
 }
 
 // ExtendToken продлевает действующий токен до now+ttl (токен запуска агента
@@ -390,9 +367,8 @@ func (s *Store) Tokens() ([]TokenInfo, error) {
 	for rows.Next() {
 		var t TokenInfo
 		var h string
-		var c int64
+		var c, lu int64
 		var r int
-		var lu int64
 		if err := rows.Scan(&h, &t.Agent, &t.Label, &t.Kind, &c, &r, &lu); err != nil {
 			return nil, err
 		}

@@ -35,40 +35,34 @@ func (e *Engine) Builtin(m manifest.Manifest, c connector.Connector) (*Builtin, 
 
 func (b *Builtin) Manifest() manifest.Manifest { return b.man }
 
-func (b *Builtin) run(ctx context.Context, op string, settings map[string]any, req, out any) ([]abi.EvidenceItem, error) {
+// builtinCall исполняет op коннектора ядра; результат дополняется
+// доказательствами хоста (ev — поле Evidence результата). При ошибке —
+// пустой результат, без частично разобранного ответа.
+func builtinCall[R any](ctx context.Context, b *Builtin, op string, settings map[string]any, req any, ev func(*R) *[]abi.EvidenceItem) (R, error) {
+	var res R
 	lim := b.man.Limits.WithDefaults()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(lim.TimeoutS)*time.Second)
 	defer cancel()
 	d, err := b.e.Dispatcher(ctx, b.man, lim, settings)
 	if err != nil {
-		return nil, err
+		return res, err
 	}
 	defer d.Close()
 	in, _ := json.Marshal(req)
-	if err := abi.Decode(connector.Handle(b.man, b.c, d, op, in), out); err != nil {
-		return nil, err
+	if err := abi.Decode(connector.Handle(b.man, b.c, d, op, in), &res); err != nil {
+		var zero R
+		return zero, err
 	}
-	return d.Evidence(), nil
+	*ev(&res) = append(*ev(&res), d.Evidence()...)
+	return res, nil
 }
 
 func (b *Builtin) Execute(ctx context.Context, req abi.ExecRequest) (abi.ExecResult, error) {
-	var res abi.ExecResult
-	ev, err := b.run(ctx, connector.OpExecute, req.Settings, req, &res)
-	if err != nil {
-		return abi.ExecResult{}, err
-	}
-	res.Evidence = append(res.Evidence, ev...)
-	return res, nil
+	return builtinCall(ctx, b, connector.OpExecute, req.Settings, req, func(r *abi.ExecResult) *[]abi.EvidenceItem { return &r.Evidence })
 }
 
 func (b *Builtin) Verify(ctx context.Context, req abi.VerifyRequest) (abi.VerifyResult, error) {
-	var res abi.VerifyResult
-	ev, err := b.run(ctx, connector.OpVerify, req.Settings, req, &res)
-	if err != nil {
-		return abi.VerifyResult{}, err
-	}
-	res.Evidence = append(res.Evidence, ev...)
-	return res, nil
+	return builtinCall(ctx, b, connector.OpVerify, req.Settings, req, func(r *abi.VerifyResult) *[]abi.EvidenceItem { return &r.Evidence })
 }
 
 func (b *Builtin) Close() error { return nil }

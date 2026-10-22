@@ -279,7 +279,7 @@ func TestConnectorLoginOnRootPage(t *testing.T) {
 	if err != nil || res.Structured.(map[string]any)["status"] != "logged_in" {
 		t.Fatal(res, err)
 	}
-	// Без учёток вызывающего сайт входа вне его сайтов — как раньше.
+	// Без учёток вызывающего сайт входа вне его сайтов закрыт.
 	b.EndCall("root9")
 	eng.values = nil // вышли из кабинета
 	open.Accounts, open.Caller = nil, &abi.Caller{Connector: "lk_emias", Call: "root10", Params: caller.Params}
@@ -354,7 +354,7 @@ func TestViaAccount(t *testing.T) {
 	}
 }
 
-// Правило поля задаёт владелец (A.M5): селектор вызывающего не уводит секрет
+// Правило поля задаёт владелец: селектор вызывающего не уводит секрет
 // поля type: text в другое поле; без селектора владельца вызывающий выбирает
 // только поле пароля; коннектор входа учётки (via) задаёт поле сам.
 func TestFillSecretOwnerSelector(t *testing.T) {

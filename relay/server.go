@@ -92,9 +92,6 @@ func (s *Server) AddRoute(host, addr string) error {
 	}
 	s.Routes[host] = addr
 	if proxy {
-		if s.proxyRoutes == nil {
-			s.proxyRoutes = map[string]bool{}
-		}
 		s.proxyRoutes[host] = true
 	}
 	return nil
@@ -370,13 +367,6 @@ func (s *Server) dropWaiter(id string, ch chan struct{}) {
 	}
 }
 
-// waiting — сколько соединений ждут туннель устройства (тесты).
-func (s *Server) waiting(id string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.waiters[id])
-}
-
 // apiConnState считает открытые соединения API; туннели после Hijack
 // учитываются в gate4ai_relay_devices_online.
 func (s *Server) apiConnState(_ net.Conn, st http.ConnState) {
@@ -420,10 +410,15 @@ func (s *Server) Disconnect(id string) {
 	}
 }
 
-func deviceAuth(r *http.Request) (string, string) {
+// authDevice — id устройства запроса по его токену; false — ответ 401 уже отправлен.
+func (s *Server) authDevice(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := r.Header.Get("X-Gate4ai-Device")
 	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return id, tok
+	if !s.Store.Auth(id, tok) {
+		http.Error(w, "unauthorized", 401)
+		return "", false
+	}
+	return id, true
 }
 
 func (s *Server) apiHandler() http.Handler {
@@ -452,9 +447,8 @@ func (s *Server) apiHandler() http.Handler {
 		writeJSON(w, map[string]string{"device_id": id, "token": tok, "host": s.DeviceHost(id)})
 	})
 	mux.HandleFunc("GET /tunnel", func(w http.ResponseWriter, r *http.Request) {
-		id, tok := deviceAuth(r)
-		if !s.Store.Auth(id, tok) {
-			http.Error(w, "unauthorized", 401)
+		id, ok := s.authDevice(w, r)
+		if !ok {
 			return
 		}
 		ws, err := websocket.Accept(w, r, nil)
@@ -490,9 +484,8 @@ func (s *Server) apiHandler() http.Handler {
 	mux.HandleFunc("POST /api/acme/txt", func(w http.ResponseWriter, r *http.Request) { s.txt(w, r, true) })
 	mux.HandleFunc("DELETE /api/acme/txt", func(w http.ResponseWriter, r *http.Request) { s.txt(w, r, false) })
 	mux.HandleFunc("POST /api/witness", func(w http.ResponseWriter, r *http.Request) {
-		id, tok := deviceAuth(r)
-		if !s.Store.Auth(id, tok) {
-			http.Error(w, "unauthorized", 401)
+		id, ok := s.authDevice(w, r)
+		if !ok {
 			return
 		}
 		s.limits()
@@ -520,8 +513,11 @@ func (s *Server) apiHandler() http.Handler {
 	// Чекпоинты видит только само устройство: id публичен (CT-логи), а seq и
 	// времена выдают, сколько и когда пользователь действует через шлюз.
 	mux.HandleFunc("GET /api/witness/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id, tok := deviceAuth(r)
-		if id != r.PathValue("id") || !s.Store.Auth(id, tok) {
+		id, ok := s.authDevice(w, r)
+		if !ok {
+			return
+		}
+		if id != r.PathValue("id") {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
@@ -569,9 +565,8 @@ func validCheckpoint(cp WitnessedCheckpoint) bool {
 }
 
 func (s *Server) txt(w http.ResponseWriter, r *http.Request, set bool) {
-	id, tok := deviceAuth(r)
-	if !s.Store.Auth(id, tok) {
-		http.Error(w, "unauthorized", 401)
+	id, ok := s.authDevice(w, r)
+	if !ok {
 		return
 	}
 	var req struct {

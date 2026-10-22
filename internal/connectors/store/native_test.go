@@ -136,7 +136,7 @@ func (r *registryEnv) publishNative(t *testing.T, version string) {
 	write(t, pkgs, "bank-"+version+SetExt, sb)
 	e := r.index.Connectors["bank"]
 	e.Versions = append(e.Versions, registry.Release{Version: version, URL: "packages/bank-" + version + SetExt, SHA256: SHA256(sb),
-		Digest: SetDigest(set), Capabilities: p.Manifest.Capabilities.Summary()})
+		Digest: SetDigest(set), Capabilities: p.Manifest.Summary()})
 	r.index.Connectors["bank"] = e
 	r.save(t)
 }

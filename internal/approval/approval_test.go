@@ -278,7 +278,7 @@ func TestDesktopNotificationIsNotCode(t *testing.T) {
 	}
 }
 
-// Одноразовые токены в адресе не уходят в уведомления (L4).
+// Одноразовые токены в адресе не уходят в уведомления.
 func TestSummaryMasksURLTokens(t *testing.T) {
 	a := &state.Approval{ID: "a_1", Agent: "bot", Action: "browser.open", PreviewHash: "a3f9c21e00",
 		Args: map[string]any{"url": "https://example.com/cb?code=SECRET123&x=1"}}
@@ -402,3 +402,13 @@ func TestTelegramQuestion(t *testing.T) {
 		t.Fatal("cancel:", got)
 	}
 }
+
+// Flush дожидается доставки уже поставленных уведомлений во все каналы.
+func (c *Channels) Flush() {
+	for _, q := range c.queues {
+		q.wait()
+	}
+}
+
+// wait — дождаться доставки поставленных событий (тесты).
+func (s *switchable) wait() { s.wg.Wait() }

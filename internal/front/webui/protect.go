@@ -7,7 +7,7 @@ package webui
 // устройства (`gate4ai ui`, трей; по умолчанию — только она), пароль (хэш
 // argon2id в State Store) и подтверждение входа в личном Telegram-боте — на
 // другом устройстве, не на этом компьютере. Без пароля и Telegram ссылка сразу
-// даёт сессию, как раньше. С ними ссылка открывает только попытку входа,
+// даёт сессию. С ними ссылка открывает только попытку входа,
 // привязанную к браузеру cookie; поэтому агент на этом же компьютере, выполнив
 // `gate4ai ui --print`, готовой сессии не получает. Без ссылки вход начинается на
 // постоянном адресе Web UI — и на этом компьютере, и удалённо (/ui/ на публичном
@@ -47,9 +47,6 @@ func (p Protection) Extra() bool { return p.Password != "" || p.Telegram }
 // Custom — защита отличается от умолчания (только ссылка).
 func (p Protection) Custom() bool { return p.NoLink || p.Extra() }
 
-// linkRequired — нужна ли одноразовая ссылка.
-func (p Protection) linkRequired(m mount) bool { return !p.NoLink }
-
 // valid — хотя бы один способ входа остаётся.
 func (p Protection) valid() error {
 	if p.NoLink && !p.Extra() {
@@ -61,15 +58,9 @@ func (p Protection) valid() error {
 // lastMethod — единственный включённый способ входа (link, password, telegram):
 // его не выключить, пока не включён другой. "" — включено несколько.
 func (p Protection) lastMethod() string {
-	var on []string
+	on := p.Requires()
 	if !p.NoLink {
 		on = append(on, "link")
-	}
-	if p.Password != "" {
-		on = append(on, "password")
-	}
-	if p.Telegram {
-		on = append(on, "telegram")
 	}
 	if len(on) == 1 {
 		return on[0]
@@ -203,17 +194,22 @@ func (u *UI) setAttemptCookie(w http.ResponseWriter, m mount, id string) {
 // начало входа (пароль и/или кнопка «Войти»), иначе — как получить ссылку.
 func (u *UI) loginPage(w http.ResponseWriter, r *http.Request, m mount) {
 	p := u.Protection()
-	l := u.lang(r)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(401)
-	v := view{Base: m.base, Remote: m.remote, Lang: l, Path: m.base + "/"}
-	if !p.linkRequired(m) {
+	v := view{Path: m.base + "/"}
+	if p.NoLink {
 		v.Data = map[string]any{"Start": true, "Password": p.Password != "", "Telegram": map[bool]string{true: tgNeed}[p.Telegram]}
-		_ = tplIn(l).ExecuteTemplate(w, "login_step.html", v)
+		u.login401(w, r, m, "login_step.html", v)
 		return
 	}
 	v.Data = map[string]any{"Password": p.Password != ""}
-	_ = tplIn(l).ExecuteTemplate(w, "login.html", v)
+	u.login401(w, r, m, "login.html", v)
+}
+
+// login401 — страница входа name с кодом 401: вход ещё не выполнен.
+func (u *UI) login401(w http.ResponseWriter, r *http.Request, m mount, name string, v view) {
+	v.Base, v.Remote, v.Lang = m.base, m.remote, u.lang(r)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(401)
+	_ = tplIn(v.Lang).ExecuteTemplate(w, name, v)
 }
 
 // errWrongPassword — неверный пароль Web UI.
@@ -387,7 +383,7 @@ func (u *UI) loginPost(m mount) http.HandlerFunc {
 		// Без ссылки попытка начинается кнопкой «Войти» на постоянном адресе (POST
 		// с проверкой Origin: чужой сайт попытку не начнёт и Telegram не потревожит).
 		// Повторное «Войти» начинает попытку заново (неверные пароли считает общая задержка).
-		if p := u.Protection(); r.PostForm.Get("start") == "1" && !p.linkRequired(m) {
+		if p := u.Protection(); r.PostForm.Get("start") == "1" && p.NoLink {
 			delete(u.attempts, id)
 			id = u.newAttempt(m, p)
 			a = u.attempts[id]
@@ -409,9 +405,7 @@ func (u *UI) loginPost(m mount) http.HandlerFunc {
 				if a.tries++; a.tries >= maxTries {
 					delete(u.attempts, id)
 					u.mu.Unlock()
-					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					w.WriteHeader(401)
-					_ = tplIn(u.lang(r)).ExecuteTemplate(w, "login.html", view{Base: m.base, Remote: m.remote, Lang: u.lang(r), Error: tr(u.lang(r), "Too many wrong passwords — start signing in again.")})
+					u.login401(w, r, m, "login.html", view{Error: tr(u.lang(r), "Too many wrong passwords — start signing in again.")})
 					return
 				}
 				u.mu.Unlock()
@@ -488,9 +482,7 @@ func (u *UI) loginStep(w http.ResponseWriter, r *http.Request, m mount, id, errM
 	data := map[string]any{"Code": st.code, "Password": st.password, "Telegram": st.telegram, "TelegramError": st.tgErr,
 		// Пока ждём нажатия в Telegram, страница обновляется сама (пароль уже введён).
 		"Refresh": st.telegram == tgSent}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(401)
-	_ = tplIn(u.lang(r)).ExecuteTemplate(w, "login_step.html", view{Base: m.base, Remote: m.remote, Lang: u.lang(r), Path: m.base + "/", CSRF: st.csrf, Error: tr(u.lang(r), errMsg), Data: data})
+	u.login401(w, r, m, "login_step.html", view{Path: m.base + "/", CSRF: st.csrf, Error: tr(u.lang(r), errMsg), Data: data})
 }
 
 // ---- Настройки → Защита входа ----

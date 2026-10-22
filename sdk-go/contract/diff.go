@@ -123,7 +123,7 @@ func diffSchema(action, path string, o, n *manifest.Schema, input bool) []Change
 	}
 	if input {
 		if tighter(o.Minimum, n.Minimum, true) || tighter(o.Maximum, n.Maximum, false) ||
-			tighterInt(o.MaxLength, n.MaxLength, false) || tighterInt(o.MinItems, n.MinItems, true) || tighterInt(o.MaxItems, n.MaxItems, false) {
+			tighter(o.MaxLength, n.MaxLength, false) || tighter(o.MinItems, n.MinItems, true) || tighter(o.MaxItems, n.MaxItems, false) {
 			brk("range narrowed")
 		}
 	}
@@ -184,7 +184,7 @@ func setDiff(a, b []string) []string {
 }
 
 // tighter — граница стала строже (min выросла / max уменьшилась или появилась).
-func tighter(o, n *float64, isMin bool) bool {
+func tighter[T int | float64](o, n *T, isMin bool) bool {
 	switch {
 	case n == nil:
 		return false
@@ -194,17 +194,4 @@ func tighter(o, n *float64, isMin bool) bool {
 		return *n > *o
 	}
 	return *n < *o
-}
-
-func tighterInt(o, n *int, isMin bool) bool {
-	var of, nf *float64
-	if o != nil {
-		v := float64(*o)
-		of = &v
-	}
-	if n != nil {
-		v := float64(*n)
-		nf = &v
-	}
-	return tighter(of, nf, isMin)
 }

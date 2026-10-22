@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -95,7 +96,7 @@ func CheckChange(ch Change) error {
 	case OpRemoveRule:
 		return need("rule_id", ch.RuleID)
 	case OpAddListItems, OpRemoveListItems:
-		if err := errors.Join(need("list", ch.List)); err != nil {
+		if err := need("list", ch.List); err != nil {
 			return err
 		}
 		if len(ch.Items) == 0 {
@@ -122,11 +123,7 @@ func CheckChange(ch Change) error {
 		if len(ch.Items) == 0 {
 			return fmt.Errorf("%s: items are required", ch.Op)
 		}
-		items := make([]any, len(ch.Items))
-		for i, it := range ch.Items {
-			items[i] = it
-		}
-		if hasAlias(items) || SecretKey(ch.Key) {
+		if slices.ContainsFunc(ch.Items, func(it string) bool { return hasAlias(it) }) || SecretKey(ch.Key) {
 			return fmt.Errorf("%s: secrets and vault aliases cannot be set by agents", ch.Op)
 		}
 	case OpAddCredential:
@@ -262,12 +259,8 @@ func (c *Config) ApplyChange(profile string, ch Change) error {
 		var m map[string]any
 		_ = json.Unmarshal([]byte(ch.SettingsJSON), &m)
 		cur := map[string]any{}
-		for k, v := range c.Connectors[ch.Connector] {
-			cur[k] = v
-		}
-		for k, v := range m {
-			cur[k] = v
-		}
+		maps.Copy(cur, c.Connectors[ch.Connector])
+		maps.Copy(cur, m)
 		c.SetConnectorSettings(ch.Connector, cur)
 	}
 	return nil

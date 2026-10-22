@@ -22,7 +22,7 @@
 | `cmd/`, `internal/` (ядро: daemon, CLI, трей) | AGPL-3.0-only | ядро, `sdk-go`; `relay` — только в тестах |
 | `sdk-go/` (манифест, ABI, PDK, формат индекса registry) | Apache-2.0 (свой `LICENSE`) | только `sdk-go` |
 | `relay/` (сервер relay) | AGPL-3.0-only | `relay`, `sdk-go` |
-| `connectors/<имя>/` (официальные коннекторы: `mail`, `browser`; `auth/` — auth-модули) | AGPL-3.0-only | свой каталог, `sdk-go`, ядро; другой коннектор — никогда |
+| `connectors/<имя>/` (официальные коннекторы: `mail`, `browser`) | AGPL-3.0-only | свой каталог, `sdk-go`, ядро; другой коннектор — никогда |
 | `e2e/` (сквозные тесты) | AGPL-3.0-only | что угодно; `e2e` не импортирует никто |
 
 Направление зависимостей проверяет `scripts/deps-check.sh` (в CI — `scripts/ci.sh`); какой компонент спецификации в каком пакете — [architecture.md](architecture.md).
@@ -34,6 +34,6 @@
 - Сторонние коннекторы требуют `github.com/gate4ai/gate4ai` и импортируют только `sdk-go/...`.
 - `dev` работает со всеми клонами сразу и ничего не импортирует.
 
-## Архив: прежние отдельные репозитории
+## Архивные клоны
 
-До 2026-10-21 `sdk-go`, `relay`, `gate4ai-mail`, `gate4ai-browser`, `gate4ai-files` и `e2e` были отдельными репозиториями. Их код перенесён в `gate4ai/` без истории, на GitHub они удалены; обратной совместимости с их путями модулей и релизами нет. Если в каталоге проекта остались их клоны (`relay/`, `sdk-go/`, `e2e/`, `connectors/mail/`, `connectors/browser/` в корне), это архив: в README каждого есть пометка, деплоя и релизов в их workflow нет, а `dev/scripts` их не тестирует и не включает в `go.work` (список репозиториев — `project_repos` в `dev/scripts/workset.sh`). Правки — только в `gate4ai/`; сами клоны можно удалить.
+Клоны `relay/`, `sdk-go/`, `e2e/`, `connectors/mail/`, `connectors/browser/` в корне каталога проекта (если есть) — архив прежних отдельных репозиториев, их код — в `gate4ai/`: в README каждого есть пометка, деплоя и релизов в их workflow нет, а `dev/scripts` их не тестирует и не включает в `go.work` (список репозиториев — `project_repos` в `dev/scripts/workset.sh`). Правки — только в `gate4ai/`; сами клоны можно удалить.

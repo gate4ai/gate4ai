@@ -4,11 +4,10 @@ package config
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"os"
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -43,15 +42,6 @@ func (es Errors) Error() string {
 // ExtraValidator — дополнительная проверка (например, компиляция CEL в policy).
 // Возвращает ошибки с путями вида "profiles.assistant.rules[0].when".
 type ExtraValidator func(*Config) Errors
-
-// LoadFile читает и проверяет файл конфигурации.
-func LoadFile(path string, extra ...ExtraValidator) (*Config, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return Parse(b, extra...)
-}
 
 // Parse разбирает YAML, проверяет схему и заполняет значения по умолчанию.
 func Parse(b []byte, extra ...ExtraValidator) (*Config, error) {
@@ -204,8 +194,8 @@ func (c *Config) Validate() Errors {
 	}
 	for i, s := range c.Egress.Secrets {
 		p := fmt.Sprintf("egress.secrets[%d]", i)
-		if s.Domain == "" || s.Header == "" || (s.Placeholder == "" && s.Env == "") {
-			add(p, "domain, header and env (or placeholder) are required")
+		if s.Domain == "" || s.Header == "" || s.Env == "" {
+			add(p, "domain, header and env are required")
 		}
 		if s.Env != "" && !envNameRe.MatchString(s.Env) {
 			add(p+".env", "must be an environment variable name like ANTHROPIC_API_KEY")
@@ -213,14 +203,6 @@ func (c *Config) Validate() Errors {
 		if !strings.HasPrefix(s.Secret, "@") {
 			add(p+".secret", "secret must be a vault alias like @anthropic.key")
 		}
-	}
-	switch c.Browser.Engine {
-	case "", "stagehand", "cdp":
-	default:
-		add("browser.engine", "must be stagehand or cdp")
-	}
-	if c.Browser.ModelKey != "" && !strings.HasPrefix(c.Browser.ModelKey, "@") {
-		add("browser.model_key", "must be a vault alias like @llm.key")
 	}
 	for i, k := range append(append([]string{}, c.Store.RegistryKeys...), c.Store.TrustedKeys...) {
 		if !strings.HasPrefix(k, "ed25519:") {
@@ -234,14 +216,7 @@ func (c *Config) Validate() Errors {
 	return es
 }
 
-func sortedKeys[V any](m map[string]V) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	sort.Strings(ks)
-	return ks
-}
+func sortedKeys[V any](m map[string]V) []string { return slices.Sorted(maps.Keys(m)) }
 
 // lineOf ищет строку YAML по пути "a.b[2].c"; возвращает строку ближайшего найденного узла.
 func lineOf(root *yaml.Node, path string) int {
@@ -295,12 +270,6 @@ func splitPath(p string) []string {
 		}
 	}
 	return out
-}
-
-// IsSchemaError — является ли err ошибкой схемы.
-func IsSchemaError(err error) bool {
-	var es Errors
-	return errors.As(err, &es)
 }
 
 // envNameRe — имя переменной окружения для заглушки egress-секрета.

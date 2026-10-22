@@ -86,17 +86,6 @@ func (m *Memory) Delete(name string) error {
 	return nil
 }
 
-// Names возвращает имена ключей (для тестов и Web UI).
-func (m *Memory) Names() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]string, 0, len(m.m))
-	for k := range m.m {
-		out = append(out, k)
-	}
-	return out
-}
-
 // RandomBytes возвращает (создавая при первом обращении) случайный ключ длины n.
 func RandomBytes(s Store, name string, n int) ([]byte, error) {
 	v, err := s.Get(name)

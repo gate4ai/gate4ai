@@ -210,9 +210,8 @@ func (s *stubEngine) Eval(context.Context, string, any) error  { return nil }
 func (s *stubEngine) InsertText(context.Context, string) error { return nil }
 func (s *stubEngine) Key(context.Context, string) error        { return nil }
 
-func TestExecutorPacingAndExtractStub(t *testing.T) {
-	var steps []string
-	x := &Executor{Engine: &stubEngine{}, Sites: domain.Sites{Domains: []string{"example.com"}}, Pacing: func(_ context.Context, s string) error { steps = append(steps, s); return nil }}
+func TestExecutorExtractStub(t *testing.T) {
+	x := &Executor{Engine: &stubEngine{}, Sites: domain.Sites{Domains: []string{"example.com"}}}
 	ctx := context.Background()
 	if _, err := x.Open(ctx, "https://example.com/"); err != nil {
 		t.Fatal(err)
@@ -224,9 +223,6 @@ func TestExecutorPacingAndExtractStub(t *testing.T) {
 	data, err := x.Extract(ctx, "find the total")
 	if err != nil || data != "stub answer for: find the total" {
 		t.Fatal(data, err)
-	}
-	if strings.Join(steps, ",") != "navigate,observe,extract" {
-		t.Fatal(steps)
 	}
 }
 

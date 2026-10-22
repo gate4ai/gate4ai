@@ -251,7 +251,7 @@ func TestProtected(t *testing.T) {
 }
 
 // Дописывание в файл больше предела fs_read (16 МиБ) подтверждается по хвосту,
-// а не даёт ложное not_confirmed (B.L3).
+// а не даёт ложное not_confirmed.
 func TestAppendToLargeFileVerified(t *testing.T) {
 	h, c, home := setup(t)
 	big := filepath.Join(home, "Documents", "obsidian", "big.log")

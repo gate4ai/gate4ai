@@ -12,7 +12,7 @@ import (
 // quickstartYAML — первый блок ```yaml из docs/quickstart.md ядра.
 func quickstartYAML(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(src(t, "gate4ai"), "docs", "quickstart.md"))
+	b, err := os.ReadFile(filepath.Join(src(t, ""), "docs", "quickstart.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

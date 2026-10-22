@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -25,6 +26,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/front/skill"
 	"github.com/gate4ai/gate4ai/internal/hostsvc/egress"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
+	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
@@ -54,10 +56,9 @@ type runState struct {
 // RunTTL — срок токена и учётных данных прокси запуска без keepalive от
 // `gate4ai run` (если CLI убит, запуск гаснет сам); KeepAliveEvery — как часто
 // CLI продлевает запуск.
-var (
-	RunTTL         = 30 * time.Minute
-	KeepAliveEvery = 5 * time.Minute
-)
+var RunTTL = 30 * time.Minute
+
+const KeepAliveEvery = 5 * time.Minute
 
 func randHex(n int) string {
 	b := make([]byte, n)
@@ -93,7 +94,7 @@ func Attach(ctx context.Context, d *daemon.Daemon, runDir, listen string) (*Runs
 }
 
 func (r *Runs) auth(user, pass string) (agent, run string, ok bool) {
-	id, ok := cutPrefix(user, "run-")
+	id, ok := strings.CutPrefix(user, "run-")
 	if !ok {
 		return "", "", false
 	}
@@ -104,13 +105,6 @@ func (r *Runs) auth(user, pass string) (agent, run string, ok bool) {
 		return "", "", false
 	}
 	return st.agent, id, true
-}
-
-func cutPrefix(s, p string) (string, bool) {
-	if len(s) > len(p) && s[:len(p)] == p {
-		return s[len(p):], true
-	}
-	return "", false
 }
 
 // decide: allow_domains профиля — сразу; ask_domains — через pipeline
@@ -155,13 +149,10 @@ func (r *Runs) secrets(run, host string, port int) []egress.Injection {
 		if len(s.Agents) > 0 && !slices.Contains(s.Agents, agent) {
 			continue
 		}
-		// С env — только заглушка этого запуска; без env — постоянная из
-		// конфигурации (совместимость).
-		ph := s.Placeholder
-		if s.Env != "" {
-			if ph = phs[s.Env]; ph == "" {
-				continue
-			}
+		// Только заглушка этого запуска.
+		ph := phs[s.Env]
+		if ph == "" {
+			continue
 		}
 		if h, p, ok := egressOrigin(s.Domain); !ok || h != host || p != port {
 			continue
@@ -212,17 +203,11 @@ func (r *Runs) allowLocal(agent, host string) bool {
 	return false
 }
 
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 func (r *Runs) routes(mux *http.ServeMux) {
 	owner := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, req *http.Request) {
 			if !daemon.PrincipalFrom(req.Context()).IsOwner() {
-				writeJSON(w, 403, map[string]any{"error": map[string]string{"code": "owner_only", "message": "owner only"}})
+				daemon.WriteError(w, 403, "owner_only", "owner only")
 				return
 			}
 			h(w, req)
@@ -235,21 +220,21 @@ func (r *Runs) routes(mux *http.ServeMux) {
 		_ = json.NewDecoder(req.Body).Decode(&body)
 		run, err := r.Start(body.Agent)
 		if err != nil {
-			writeJSON(w, 400, map[string]any{"error": map[string]string{"code": "run", "message": err.Error()}})
+			daemon.WriteError(w, 400, "run", err.Error())
 			return
 		}
-		writeJSON(w, 200, run)
+		daemon.WriteJSON(w, 200, run)
 	}))
 	mux.HandleFunc("POST /v1/runs/{id}/keepalive", owner(func(w http.ResponseWriter, req *http.Request) {
 		if err := r.KeepAlive(req.PathValue("id")); err != nil {
-			writeJSON(w, 404, map[string]any{"error": map[string]string{"code": "not_found", "message": err.Error()}})
+			daemon.WriteError(w, 404, "not_found", err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		daemon.WriteJSON(w, 200, map[string]bool{"ok": true})
 	}))
 	mux.HandleFunc("DELETE /v1/runs/{id}", owner(func(w http.ResponseWriter, req *http.Request) {
 		r.Stop(req.PathValue("id"))
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		daemon.WriteJSON(w, 200, map[string]bool{"ok": true})
 	}))
 	mux.HandleFunc("GET /v1/egress/log", owner(func(w http.ResponseWriter, req *http.Request) {
 		n, _ := strconv.Atoi(req.URL.Query().Get("limit"))
@@ -258,10 +243,10 @@ func (r *Runs) routes(mux *http.ServeMux) {
 		}
 		l, err := r.D.State.EgressLog(n)
 		if err != nil {
-			writeJSON(w, 500, map[string]any{"error": map[string]string{"code": "egress", "message": err.Error()}})
+			daemon.WriteError(w, 500, "egress", err.Error())
 			return
 		}
-		writeJSON(w, 200, l)
+		daemon.WriteJSON(w, 200, l)
 	}))
 }
 
@@ -292,8 +277,6 @@ func (r *Runs) Start(agent string) (Run, error) {
 			continue
 		}
 		if s.Env == "" {
-			r.D.Log.Warn("egress secret without env: its placeholder is permanent and shared by runs; set env for a one-time placeholder per run",
-				"domain", s.Domain, "secret", s.Secret)
 			continue
 		}
 		prefix := s.Placeholder
@@ -311,7 +294,7 @@ func (r *Runs) Start(agent string) (Run, error) {
 	}
 	proxy := (&url.URL{Scheme: "http", User: url.UserPassword("run-"+id, pass), Host: net.JoinHostPort(host, strconv.Itoa(r.Addr.Port))}).String()
 	var tools []skill.Tool
-	b, _ := json.Marshal(r.D.Tools(agentPrincipal(agent)))
+	b, _ := json.Marshal(r.D.Tools(auth.AgentVia(agent, "run")))
 	_ = json.Unmarshal(b, &tools)
 	return Run{ID: id, Agent: agent, Token: tok, Socket: sock, ProxyURL: proxy, ProxyHost: host, ProxyPort: r.Addr.Port, Home: r.D.Home,
 		SecretEnv: phs, KeepAliveS: int(KeepAliveEvery / time.Second),
@@ -356,10 +339,7 @@ func (r *Runs) Stop(id string) {
 
 func (r *Runs) closeAll() {
 	r.mu.Lock()
-	ids := make([]string, 0, len(r.runs))
-	for id := range r.runs {
-		ids = append(ids, id)
-	}
+	ids := slices.Collect(maps.Keys(r.runs))
 	r.mu.Unlock()
 	for _, id := range ids {
 		r.Stop(id)

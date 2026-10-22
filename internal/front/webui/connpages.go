@@ -5,6 +5,7 @@ package webui
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -41,16 +42,12 @@ func (u *UI) storeItems(ctx context.Context, l string, refresh bool) ([]storeIte
 	var ierr string
 	if (ix == nil || refresh) && opts.Registry != "" {
 		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		var err error
-		if nix, err2 := opts.RefreshIndex(cctx); err2 == nil {
+		if nix, err := opts.RefreshIndex(cctx); err == nil {
 			ix = nix
 		} else {
-			err = err2
-		}
-		cancel()
-		if err != nil {
 			ierr = err.Error()
 		}
+		cancel()
 	} else if opts.Registry == "" {
 		ierr = "the store is not configured: set the store address in Settings → Advanced"
 	}
@@ -170,7 +167,7 @@ func (u *UI) installConnector(w http.ResponseWriter, r *http.Request) map[string
 		consent = []string{}
 	}
 	local, dev := r.PostForm.Get("local") == "1", r.PostForm.Get("dev") == "1"
-	info, plan, warn, err := u.D.InstallConnectorDev(r.Context(), src, consent, local && dev)
+	info, _, warn, err := u.D.InstallConnectorDev(r.Context(), src, consent, local && dev)
 	if errors.Is(err, store.ErrConsent) {
 		again := url.Values{"install": {src}}
 		if local {
@@ -184,16 +181,7 @@ func (u *UI) installConnector(w http.ResponseWriter, r *http.Request) map[string
 	if err != nil {
 		return redirectErr("/connectors", err)
 	}
-	_ = plan
 	profs := r.PostForm["profiles"]
-	if len(profs) == 0 && !r.PostForm.Has("grants") {
-		// Форма без выбора агентов (старые клиенты): как раньше — всем профилям с агентами.
-		for _, g := range grants(u.D.Config.Current()) {
-			if g.Checked {
-				profs = append(profs, g.Profile)
-			}
-		}
-	}
 	if len(profs) > 0 {
 		if err := u.edit("connector "+info.Connector+" for profiles", func(c *config.Config) error {
 			for _, p := range profs {
@@ -247,11 +235,7 @@ func (u *UI) connectorPage(r *http.Request) (string, map[string]any, error) {
 			fields[i].HasSecret = err == nil
 		}
 	}
-	profiles := make([]string, 0, len(cfg.Profiles))
-	for p := range cfg.Profiles {
-		profiles = append(profiles, p)
-	}
-	sort.Strings(profiles)
+	profiles := slices.Sorted(maps.Keys(cfg.Profiles))
 	in := u.installed()[name]
 	access := accessProfiles(cfg, name)
 	prof := connectorProfile(cfg, access, r.URL.Query().Get("profile"))
@@ -283,9 +267,7 @@ func (u *UI) saveConnectorSettings(w http.ResponseWriter, r *http.Request) map[s
 	}
 	f := r.PostForm
 	cur := map[string]any{}
-	for k, v := range u.D.Config.Current().Connectors[name] {
-		cur[k] = v
-	}
+	maps.Copy(cur, u.D.Config.Current().Connectors[name])
 	// Почтовый сервис: серверы по умолчанию.
 	if p := f.Get("provider"); p != "" {
 		for _, mp := range mailProviders {
@@ -340,22 +322,6 @@ func (u *UI) saveConnectorSettings(w http.ResponseWriter, r *http.Request) map[s
 		return redirectErr(back, err)
 	}
 	return redirect(back, "Saved")
-}
-
-func (u *UI) saveConnectorProfiles(w http.ResponseWriter, r *http.Request) map[string]any {
-	name := r.PathValue("name")
-	on := r.PostForm["profiles"]
-	if err := u.edit("connector "+name+" profiles", func(c *config.Config) error {
-		for p := range c.Profiles {
-			if err := c.SetProfileConnector(p, name, slices.Contains(on, p)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return redirectErr("/connectors/"+url.PathEscape(name), err)
-	}
-	return redirect("/connectors/"+url.PathEscape(name), "Access saved")
 }
 
 func (u *UI) removeConnector(w http.ResponseWriter, r *http.Request) map[string]any {

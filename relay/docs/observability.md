@@ -91,7 +91,7 @@
 5. **Флаги relay** — переменная в `/etc/gate4ai-relay/env` и drop-in для unit (их CI не перезаписывает; CI меняет только бинарник, который должен уже поддерживать эти флаги — [README](../README.md#выкладка-relaygate4ai)):
    ```sh
    echo 'RELAY_OBSERVABILITY=--metrics 127.0.0.1:9464 --otlp 127.0.0.1:4318 --trace-ratio 0.1 --route grafana.gate4.ai=127.0.0.1:8444' >> /etc/gate4ai-relay/env
-   # сайт — тоже на Caddy (раньше — на 127.0.0.1:8443, где TLS завершал сам сайт):
+   # сайт — тоже на Caddy:
    sed -i 's|^RELAY_ROUTES=.*|RELAY_ROUTES=--route gate4.ai=127.0.0.1:8444 --route www.gate4.ai=127.0.0.1:8444|' /etc/gate4ai-relay/env
    mkdir -p /etc/systemd/system/gate4ai-relay.service.d
    # ExecStart — тот же, что в unit (systemctl cat gate4ai-relay), плюс $RELAY_OBSERVABILITY в конце:
@@ -114,7 +114,7 @@
    ```
    Затем `https://grafana.gate4.ai` → вход `admin` → дашборд **gate4ai / gate4ai relay**. Снаружи (с другой машины) `curl -m5 http://<IP>:9090` и т. п. не должны соединяться.
 
-**Выложено на relay.gate4.ai 2026-10-18:** стек в `/opt/gate4ai-observability`, флаги relay — `RELAY_OBSERVABILITY` и drop-in `observability.conf`, пароль администратора — `/opt/gate4ai-observability/secrets/grafana_admin_password`.
+**На relay.gate4.ai:** стек в `/opt/gate4ai-observability`, флаги relay — `RELAY_OBSERVABILITY` и drop-in `observability.conf`, пароль администратора — `/opt/gate4ai-observability/secrets/grafana_admin_password`.
 
 ### Сайт gate4.ai
 

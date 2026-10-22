@@ -47,24 +47,6 @@ func (d *Daemon) restartNative(name string) {
 // BuiltinConnectors — коннекторы ядра: из магазина не ставятся.
 var BuiltinConnectors = []string{files.Name, SelfConnector, "egress"}
 
-// retireBuiltinPackages удаляет пакеты из магазина с именами коннекторов ядра
-// (files до v0.6 ставился из магазина): настройки и правила остаются — имена
-// действий те же.
-func (d *Daemon) retireBuiltinPackages() {
-	opts := store.Options{Dir: d.ConnectorsDir}
-	for _, name := range BuiltinConnectors {
-		info, err := opts.Info(name)
-		if err != nil {
-			continue
-		}
-		if err := opts.Remove(name); err != nil {
-			d.Log.Error("store package of a built-in connector not removed", "connector", name, "err", err)
-			continue
-		}
-		d.Log.Info("store package replaced by the built-in connector", "connector", name, "package_version", info.Version)
-	}
-}
-
 // dropRevoked выгружает отозванные версии по кэшу индекса registry.
 func (d *Daemon) dropRevoked() {
 	list, err := store.List(d.ConnectorsDir)
@@ -104,44 +86,43 @@ func (d *Daemon) reloadConnector(name string, removed bool) error {
 	return nil
 }
 
-// InstallConnector ставит коннектор (файл .g4c или имя из registry) с согласием
+// InstallConnectorDev ставит коннектор (файл .g4c или имя из registry) с согласием
 // на возможности consent; при ErrConsent возвращает план для показа владельцу.
-func (d *Daemon) InstallConnector(ctx context.Context, source string, consent []string) (store.Info, *store.Plan, string, error) {
-	return d.InstallConnectorDev(ctx, source, consent, false)
-}
-
-// InstallConnectorDev — InstallConnector; dev — своя сборка без доверенной подписи
-// (папка с исходниками, файл или адрес .g4c), как `connectors install --dev`.
+// dev — своя сборка без доверенной подписи (папка с исходниками, файл или адрес
+// .g4c), как `connectors install --dev`.
 func (d *Daemon) InstallConnectorDev(ctx context.Context, source string, consent []string, dev bool) (store.Info, *store.Plan, string, error) {
 	opts := d.StoreOptions()
 	plan, err := opts.Prepare(ctx, source, dev)
 	if err != nil {
 		return store.Info{}, nil, "", err
 	}
+	info, warn, err := d.installPlan(opts, plan, consent)
+	return info, plan, warn, err
+}
+
+// installPlan ставит подготовленный план под installMu (без согласия —
+// ErrConsent); warn — политика не сошлась с новым каталогом (см. reloadConnector).
+func (d *Daemon) installPlan(opts store.Options, plan *store.Plan, consent []string) (info store.Info, warn string, err error) {
 	d.installMu.Lock()
 	defer d.installMu.Unlock()
-	if plan.ConsentOK(consent) {
-		d.stopNative(plan.Connector)
+	if !plan.ConsentOK(consent) {
+		return store.Info{}, "", store.ErrConsent
 	}
-	info, err := opts.Install(plan, consent)
-	if err != nil {
+	d.stopNative(plan.Connector)
+	if info, err = opts.Install(plan, consent); err != nil {
 		d.restartNative(plan.Connector)
-		return store.Info{}, plan, "", err
+		return store.Info{}, "", err
 	}
-	warn := ""
 	if err := d.reloadConnector(info.Connector, false); err != nil {
 		warn = err.Error()
+		d.Log.Warn("connector reloaded with a warning", "connector", info.Connector, "err", err)
 	}
 	d.Log.Info("connector installed", "connector", info.Connector, "version", info.Version, "trust", info.Trust)
-	return info, plan, warn, nil
+	return info, warn, nil
 }
 
-// PrepareConnector — план установки (возможности, доверие) без установки.
-func (d *Daemon) PrepareConnector(ctx context.Context, source string) (*store.Plan, error) {
-	return d.StoreOptions().Prepare(ctx, source, false)
-}
-
-// PrepareConnectorDev — PrepareConnector для своей сборки (dev, см. InstallConnectorDev).
+// PrepareConnectorDev — план установки (возможности, доверие) без установки;
+// dev — своя сборка (см. InstallConnectorDev).
 func (d *Daemon) PrepareConnectorDev(ctx context.Context, source string, dev bool) (*store.Plan, error) {
 	return d.StoreOptions().Prepare(ctx, source, dev)
 }
@@ -175,7 +156,7 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 	owner := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if !PrincipalFrom(r.Context()).IsOwner() {
-				writeErr(w, 403, "owner_only", "only the owner manages connectors")
+				WriteError(w, 403, "owner_only", "only the owner manages connectors")
 				return
 			}
 			h(w, r)
@@ -184,7 +165,7 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/connectors", owner(func(w http.ResponseWriter, r *http.Request) {
 		list, err := store.List(d.ConnectorsDir)
 		if err != nil {
-			writeErr(w, 500, "store", err.Error())
+			WriteError(w, 500, "store", err.Error())
 			return
 		}
 		out := []map[string]any{}
@@ -206,55 +187,46 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			}
 			out = append(out, row)
 		}
-		writeJSON(w, 200, map[string]any{"connectors": out})
+		WriteJSON(w, 200, map[string]any{"connectors": out})
 	}))
 	install := func(w http.ResponseWriter, r *http.Request, source string, dev bool, consent []string, update bool, origin string) {
 		opts := d.StoreOptions()
 		plan, err := opts.Prepare(r.Context(), source, dev)
 		if err != nil {
-			writeErr(w, 400, "store", err.Error())
+			WriteError(w, 400, "store", err.Error())
 			return
 		}
 		if origin != "" {
 			if !dev || !strings.HasPrefix(origin, store.SourceDir) || plan.Trust != store.TrustLocal {
-				writeErr(w, 400, "bad_request", "origin is only for your own build from a source folder (dir:<path>, --dev)")
+				WriteError(w, 400, "bad_request", "origin is only for your own build from a source folder (dir:<path>, --dev)")
 				return
 			}
 			plan.Source = origin
 		}
 		if update && plan.Installed == plan.Version && !strings.HasPrefix(plan.Source, store.SourceDir) {
-			writeJSON(w, 200, map[string]any{"status": "up_to_date", "plan": plan})
+			WriteJSON(w, 200, map[string]any{"status": "up_to_date", "plan": plan})
 			return
 		}
-		d.installMu.Lock()
-		defer d.installMu.Unlock()
-		if plan.ConsentOK(consent) {
-			d.stopNative(plan.Connector)
-		}
-		info, err := opts.Install(plan, consent)
-		if err != nil {
-			d.restartNative(plan.Connector)
-		}
+		info, warn, err := d.installPlan(opts, plan, consent)
 		if errors.Is(err, store.ErrConsent) {
-			writeJSON(w, 409, map[string]any{"error": map[string]string{"code": "consent_required",
+			WriteJSON(w, 409, map[string]any{"error": map[string]string{"code": "consent_required",
 				"message": "review the capabilities and confirm"}, "plan": plan})
 			return
 		}
 		if err != nil {
-			writeErr(w, 500, "store", err.Error())
+			WriteError(w, 500, "store", err.Error())
 			return
 		}
 		res := map[string]any{"status": "installed", "installed": info}
-		if err := d.reloadConnector(info.Connector, false); err != nil {
-			res["warning"] = err.Error()
+		if warn != "" {
+			res["warning"] = warn
 		}
-		d.Log.Info("connector installed", "connector", info.Connector, "version", info.Version, "trust", info.Trust)
-		writeJSON(w, 200, res)
+		WriteJSON(w, 200, res)
 	}
 	mux.HandleFunc("POST /v1/connectors/install", owner(func(w http.ResponseWriter, r *http.Request) {
 		var req installReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Source == "" {
-			writeErr(w, 400, "bad_request", "source is required")
+			WriteError(w, 400, "bad_request", "source is required")
 			return
 		}
 		install(w, r, req.Source, req.Dev, req.Consent, false, req.Origin)
@@ -265,7 +237,7 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			Consent []string `json:"consent"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-			writeErr(w, 400, "bad_request", "name is required")
+			WriteError(w, 400, "bad_request", "name is required")
 			return
 		}
 		// Коннектор из папки с исходниками пересобирается из неё же (своя сборка).
@@ -280,26 +252,26 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			Name string `json:"name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-			writeErr(w, 400, "bad_request", "name is required")
+			WriteError(w, 400, "bad_request", "name is required")
 			return
 		}
 		// Тот же путь, что у Web UI: нативный процесс останавливается (на
 		// Windows иначе exe занят), установка того же коннектора ждёт.
 		warn, err := d.RemoveConnector(req.Name)
 		if err != nil {
-			writeErr(w, 400, "store", err.Error())
+			WriteError(w, 400, "store", err.Error())
 			return
 		}
 		res := map[string]any{"status": "removed", "connector": req.Name}
 		if warn != "" {
 			res["warning"] = warn
 		}
-		writeJSON(w, 200, res)
+		WriteJSON(w, 200, res)
 	}))
 	mux.HandleFunc("GET /v1/connectors/logs", owner(func(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("name")
 		if name == "" {
-			writeErr(w, 400, "bad_request", "name is required")
+			WriteError(w, 400, "bad_request", "name is required")
 			return
 		}
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -307,20 +279,20 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 		if s := r.URL.Query().Get("since"); s != "" {
 			dur, err := time.ParseDuration(s)
 			if err != nil {
-				writeErr(w, 400, "bad_request", "since: "+err.Error())
+				WriteError(w, 400, "bad_request", "since: "+err.Error())
 				return
 			}
 			since = time.Now().Add(-dur)
 		}
-		writeJSON(w, 200, map[string]any{"connector": name, "lines": d.ConnLogs.Lines(name, since, limit)})
+		WriteJSON(w, 200, map[string]any{"connector": name, "lines": d.ConnLogs.Lines(name, since, limit)})
 	}))
 	mux.HandleFunc("POST /v1/connectors/refresh", owner(func(w http.ResponseWriter, r *http.Request) {
 		ix, err := d.StoreOptions().RefreshIndex(r.Context())
 		if err != nil {
-			writeErr(w, 400, "store", err.Error())
+			WriteError(w, 400, "store", err.Error())
 			return
 		}
 		d.dropRevoked()
-		writeJSON(w, 200, map[string]any{"status": "ok", "connectors": len(ix.Connectors), "revoked": len(ix.Revoked)})
+		WriteJSON(w, 200, map[string]any{"status": "ok", "connectors": len(ix.Connectors), "revoked": len(ix.Revoked)})
 	}))
 }

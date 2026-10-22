@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -48,15 +49,7 @@ func HostMatches(host, pattern string) bool {
 // Matches — хост URL совпадает с одним из шаблонов.
 func Matches(raw string, patterns []string) bool {
 	h := HostOf(raw)
-	if h == "" {
-		return false
-	}
-	for _, p := range patterns {
-		if HostMatches(h, p) {
-			return true
-		}
-	}
-	return false
+	return h != "" && slices.ContainsFunc(patterns, func(p string) bool { return HostMatches(h, p) })
 }
 
 // Sites — какие сайты разрешены: белый список (только Domains) или чёрный
@@ -127,15 +120,7 @@ func BindOrigin(raw string) (string, error) {
 // OriginIn — origin адреса raw — один из origins (канонических, BindOrigin).
 func OriginIn(raw string, origins []string) bool {
 	o := OriginOf(raw)
-	if o == "" {
-		return false
-	}
-	for _, x := range origins {
-		if OriginOf(x) == o {
-			return true
-		}
-	}
-	return false
+	return o != "" && slices.ContainsFunc(origins, func(x string) bool { return OriginOf(x) == o })
 }
 
 func isLoopback(host string) bool {

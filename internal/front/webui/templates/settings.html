@@ -94,7 +94,7 @@
 {{template "cloud_addr" (dict "Addr" $d.Relay.MCPURL "Base" .Base)}}
 <details><summary>{{T "Technical details"}}</summary><p class="help">
 {{T "Relay:"}} <code>{{$d.Relay.URL}}</code><br>{{T "Device ID:"}} <code>{{$d.Relay.DeviceID}}</code><br>
-{{TH "MCP answers both at the root of the address and at <code>%s/mcp</code>. The Web UI for the phone is <code>%s/ui/</code>." $d.Relay.MCPURL $d.Relay.MCPURL}}</p></details>
+{{TH "MCP answers at the root of the address. The Web UI for the phone is <code>%s/ui/</code>." $d.Relay.MCPURL}}</p></details>
 {{else}}<p>{{T "Needed only for cloud assistants (Claude.ai, ChatGPT) and for signing in from the phone. Local assistants work without it."}}</p>
 <form method="post" action="{{.Base}}/settings/relay"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="url" value="{{$d.RelayDefault}}">
 <button class="primary">{{T "Turn on through %s" $d.RelayDefaultHost}}</button></form>

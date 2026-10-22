@@ -3,8 +3,7 @@
 // Package worker — браузерный воркер нативного коннектора browser:
 // выделенный профиль настоящего Chrome по CDP, движок Stagehand Go SDK v4
 // (или прямой CDP). Сайты проверяются по списку до и после редиректов. Все
-// переходы, клики и ввод идут через Executor — единую точку исполнения с
-// точкой для темпа (pacing); сейчас задержки нулевые.
+// переходы, клики и ввод идут через Executor — единую точку исполнения.
 package worker
 
 import (
@@ -36,12 +35,6 @@ type Engine interface {
 	Close() error
 }
 
-// Pacing — задержка перед шагом Executor (точка для будущего «человеческого» темпа).
-type Pacing func(ctx context.Context, step string) error
-
-// NoPacing — нулевые задержки (MVP).
-func NoPacing(context.Context, string) error { return nil }
-
 // ErrDomain — сайт не разрешён списком сайтов (настройки браузера или params вызывающего).
 var ErrDomain = errors.New("site is not allowed by the browser's site list")
 
@@ -55,18 +48,20 @@ type Executor struct {
 	// RedactParams — параметры адресов и поля JSON, значения которых network
 	// не показывает (настройка redact_params: личные идентификаторы сайта).
 	RedactParams []string
-	Pacing       Pacing
 
 	secret    string   // метка документа, на котором введён секрет (markJS)
 	sticky    bool     // секрет введён, метку поставить не удалось: до перехода через Open
 	secretSel []string // поля, куда введены секреты (закрашиваются на снимках)
 }
 
-func (x *Executor) pace(ctx context.Context, step string) error {
-	if x.Pacing == nil {
+// wait — пауза опроса d; раньше — ошибка, если ctx отменён.
+func wait(ctx context.Context, d time.Duration) error {
+	select {
+	case <-time.After(d):
 		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return x.Pacing(ctx, step)
 }
 
 // CheckURL — URL разрешён списком сайтов коннектора (дополнительно к политике).
@@ -97,10 +92,8 @@ func (x *Executor) settledURL(ctx context.Context) (string, error) {
 		if err := x.CheckURL(u); err == nil || time.Now().After(deadline) {
 			return u, err
 		}
-		select {
-		case <-time.After(ActPoll):
-		case <-ctx.Done():
-			return "", ctx.Err()
+		if err := wait(ctx, ActPoll); err != nil {
+			return "", err
 		}
 	}
 }
@@ -109,9 +102,6 @@ func (x *Executor) settledURL(ctx context.Context) (string, error) {
 // иначе страница закрывается переходом на about:blank.
 func (x *Executor) Open(ctx context.Context, u string) (string, error) {
 	if err := x.CheckURL(u); err != nil {
-		return "", err
-	}
-	if err := x.pace(ctx, "navigate"); err != nil {
 		return "", err
 	}
 	if err := x.Engine.Navigate(ctx, u); err != nil {
@@ -133,9 +123,6 @@ func (x *Executor) Open(ctx context.Context, u string) (string, error) {
 
 // Observe — адрес, заголовок и текст текущей страницы (max символов, 0 — без предела).
 func (x *Executor) Observe(ctx context.Context, max int) (url, title, text string, truncated bool, err error) {
-	if err = x.pace(ctx, "observe"); err != nil {
-		return
-	}
 	if url, err = x.settledURL(ctx); err != nil {
 		return
 	}
@@ -156,9 +143,6 @@ func (x *Executor) Observe(ctx context.Context, max int) (url, title, text strin
 // Screenshot — снимок элемента текущей страницы; если на ней введён секрет —
 // с закрашенными полями секрета и пароля.
 func (x *Executor) Screenshot(ctx context.Context, selector string) ([]byte, error) {
-	if err := x.pace(ctx, "screenshot"); err != nil {
-		return nil, err
-	}
 	if x.SecretOnPage(ctx) {
 		return x.coveredScreenshot(ctx, selector)
 	}
@@ -168,9 +152,6 @@ func (x *Executor) Screenshot(ctx context.Context, selector string) ([]byte, err
 // Extract — извлечение по инструкции с текущей страницы (Act с естественным
 // языком для изменений не используется: в нём нет точки перехвата политикой).
 func (x *Executor) Extract(ctx context.Context, instruction string) (any, error) {
-	if err := x.pace(ctx, "extract"); err != nil {
-		return nil, err
-	}
 	if err := x.readable(ctx); err != nil {
 		return nil, err
 	}
@@ -228,9 +209,6 @@ func (x *Executor) actExpr(ctx context.Context, sel, text, method string) (expr 
 // Act — click / fill / press / wait по селектору: ждёт элемент (до TimeoutMS),
 // выполняет метод; итоговый адрес проверяется по списку доменов.
 func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
-	if err := x.pace(ctx, "act:"+r.Method); err != nil {
-		return ActResponse{}, err
-	}
 	before, err := x.settledURL(ctx)
 	if err != nil {
 		return ActResponse{}, err
@@ -263,10 +241,8 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 			}
 			return ActResponse{}, fmt.Errorf("%w: %s", ErrNotFound, what)
 		}
-		select {
-		case <-time.After(ActPoll):
-		case <-ctx.Done():
-			return ActResponse{}, ctx.Err()
+		if err := wait(ctx, ActPoll); err != nil {
+			return ActResponse{}, err
 		}
 	}
 	switch r.Method {
@@ -353,10 +329,8 @@ func (x *Executor) expect(ctx context.Context, r ActRequest, before string) erro
 			}
 			return fmt.Errorf("%w: waited %s for %s", ErrNoEffect, timeout, strings.Join(what, " and "))
 		}
-		select {
-		case <-time.After(ActPoll):
-		case <-ctx.Done():
-			return ctx.Err()
+		if err := wait(ctx, ActPoll); err != nil {
+			return err
 		}
 	}
 }
@@ -395,10 +369,8 @@ func (x *Executor) WaitFor(ctx context.Context, sel, text string, timeoutMS int)
 		if time.Now().After(deadline) {
 			return fmt.Errorf("%w: %s %q did not appear in %s", ErrNotFound, sel, text, timeout)
 		}
-		select {
-		case <-time.After(ActPoll):
-		case <-ctx.Done():
-			return ctx.Err()
+		if err := wait(ctx, ActPoll); err != nil {
+			return err
 		}
 	}
 }

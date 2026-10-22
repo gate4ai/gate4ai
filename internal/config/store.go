@@ -191,19 +191,17 @@ func (s *Store) put(author, comment string, raw []byte, base int) (Version, erro
 		s.mu.Unlock()
 		return Version{}, ErrConflict
 	}
-	parent := s.n
 	n := s.n + 1
-	v := Version{N: n, At: s.now().UTC(), Author: author, Comment: comment, Parent: parent}
+	v := Version{N: n, At: s.now().UTC(), Author: author, Comment: comment, Parent: s.n}
 	meta, _ := json.MarshalIndent(v, "", "  ")
-	if err := writeAtomic(s.versionPath(n), raw); err != nil {
-		s.mu.Unlock()
-		return Version{}, err
+	err = writeAtomic(s.versionPath(n), raw)
+	if err == nil {
+		err = writeAtomic(strings.TrimSuffix(s.versionPath(n), ".yaml")+".meta.json", meta)
 	}
-	if err := writeAtomic(strings.TrimSuffix(s.versionPath(n), ".yaml")+".meta.json", meta); err != nil {
-		s.mu.Unlock()
-		return Version{}, err
+	if err == nil {
+		err = writeAtomic(filepath.Join(s.dir, "current"), []byte(strconv.Itoa(n)+"\n"))
 	}
-	if err := writeAtomic(filepath.Join(s.dir, "current"), []byte(strconv.Itoa(n)+"\n")); err != nil {
+	if err != nil {
 		s.mu.Unlock()
 		return Version{}, err
 	}
@@ -241,24 +239,19 @@ func writeAtomic(path string, b []byte) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
+	_, err = tmp.Write(b)
+	if err == nil {
+		err = tmp.Chmod(0o600)
 	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
+	if err == nil {
+		// Данные — на диск до переименования: после сбоя питания current не
+		// укажет на пустую или усечённую версию.
+		err = tmp.Sync()
 	}
-	// Данные — на диск до переименования: после сбоя питания current не
-	// укажет на пустую или усечённую версию.
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
 	}
-	if err := tmp.Close(); err != nil {
+	if err != nil {
 		os.Remove(tmp.Name())
 		return err
 	}

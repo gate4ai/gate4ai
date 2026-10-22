@@ -7,7 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ func (p *Pipeline) requestApproval(agent, action string, act manifest.Action, ar
 	a.Preview = Preview(agent, action, p.maskArgs(act, args), dec)
 	if f := p.Describe[strings.SplitN(action, ".", 2)[0]]; f != nil {
 		if text, err := f(agent, args); err == nil && text != "" {
-			a.Preview = previewText(agent, action, text, dec)
+			a.Preview = previewText(agent, action, strings.TrimRight(text, "\n")+"\n", dec)
 		}
 	}
 	if text := p.accountPreview(agent, action, act, args); text != "" {
@@ -54,16 +55,9 @@ func (p *Pipeline) requestApproval(agent, action string, act manifest.Action, ar
 // Preview — что именно будет сделано и почему нужно подтверждение.
 func Preview(agent, action string, args map[string]any, dec policy.Decision) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s wants to run %s\n", agent, action)
-	keys := make([]string, 0, len(args))
-	for k := range args {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v := args[k]
+	for _, k := range slices.Sorted(maps.Keys(args)) {
 		var s string
-		switch t := v.(type) {
+		switch t := args[k].(type) {
 		case string:
 			s = t
 		case []any:
@@ -84,25 +78,21 @@ func Preview(agent, action string, args map[string]any, dec policy.Decision) str
 		}
 		fmt.Fprintf(&b, "  %s: %s\n", k, s)
 	}
+	return previewText(agent, action, b.String(), dec)
+}
+
+// previewText — превью с описанием действия (body — строки с \n в конце).
+func previewText(agent, action, body string, dec policy.Decision) string {
 	why := dec.Reason
 	if len(dec.RuleIDs) > 0 {
 		why += " [" + strings.Join(dec.RuleIDs, ", ") + "]"
 	}
-	fmt.Fprintf(&b, "Why approval is needed: %s", why)
-	return b.String()
+	return fmt.Sprintf("%s wants to run %s\n%sWhy approval is needed: %s", agent, action, body, why)
 }
 
-// previewText — превью с описанием действия вместо списка аргументов.
-func previewText(agent, action, text string, dec policy.Decision) string {
-	why := dec.Reason
-	if len(dec.RuleIDs) > 0 {
-		why += " [" + strings.Join(dec.RuleIDs, ", ") + "]"
-	}
-	return fmt.Sprintf("%s wants to run %s\n%s\nWhy approval is needed: %s", agent, action, strings.TrimRight(text, "\n"), why)
-}
-
-// wait ждёт решения до d; если решения нет — pending с id.
-func (p *Pipeline) wait(ctx context.Context, id string, d time.Duration) Result {
+// WaitFor ждёт решения по id до d (и для `gate4ai status <id> --wait`); если
+// решения нет — pending с id.
+func (p *Pipeline) WaitFor(ctx context.Context, id string, d time.Duration) Result {
 	if d > 0 {
 		ch := make(chan struct{})
 		p.mu.Lock()
@@ -216,7 +206,7 @@ func (p *Pipeline) finish(ctx context.Context, a *state.Approval, status, channe
 		if dec, revoked := p.revoked(a); revoked {
 			// Доступ агента отозван после запроса: «отзыв в один клик»
 			// останавливает и поставленные в очередь действия.
-			res = p.denyAt(a.Agent, act, a.Action, a.Args, dec, appr, "")
+			res = p.deny(a.Agent, act, a.Action, a.Args, dec, appr, "")
 			break
 		}
 		// Действие исполняется не в контексте того, кто одобрил: HTTP-запрос
@@ -225,7 +215,7 @@ func (p *Pipeline) finish(ctx context.Context, a *state.Approval, status, channe
 		// профиль проверяются заново перед исполнением (execute → admit).
 		res = p.run(context.WithoutCancel(ctx), a.Agent, a.Action, cli, act, a.Args, a.Decision, appr)
 	default:
-		res = p.deny(a.Agent, act, a.Action, a.Args, a.Decision, appr)
+		res = p.deny(a.Agent, act, a.Action, a.Args, a.Decision, appr, "")
 	}
 	res.ID = a.ID
 	if err := p.State.SetResult(a.ID, res); err != nil {
@@ -279,8 +269,3 @@ func (p *Pipeline) ExpireDue(ctx context.Context) int {
 
 // Wait дожидается завершения фоновых решений (для остановки и тестов).
 func (p *Pipeline) Wait() { p.running.Wait() }
-
-// WaitFor — ожидание итога по id до d (для `gate4ai status <id> --wait`).
-func (p *Pipeline) WaitFor(ctx context.Context, id string, d time.Duration) Result {
-	return p.wait(ctx, id, d)
-}

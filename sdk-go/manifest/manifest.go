@@ -201,51 +201,14 @@ func ClassRank(class string) int {
 
 // CallsAction — действие a объявило подвызов target.action.
 func (a Action) CallsAction(target, action string) bool {
-	for _, c := range a.Calls {
-		if c == target+"."+action {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(a.Calls, target+"."+action)
 }
 
-// Summary — возможности и подвызовы действий человеческим языком: то, на что
-// владелец соглашается при установке (изменение — повторное согласие). Кроме
-// LegacySummary сюда входят среда исполнения без песочницы (native), действия
-// классов выше read и лимиты выше значений по умолчанию (ConsentExtras).
+// Summary — возможности, учётки, подвызовы действий, среда исполнения без
+// песочницы (native), действия классов выше read и лимиты выше значений по
+// умолчанию человеческим языком: то, на что владелец соглашается при установке
+// (изменение — повторное согласие).
 func (m *Manifest) Summary() []string {
-	out := append(m.LegacySummary(), m.ConsentExtras()...)
-	sort.Strings(out)
-	return out
-}
-
-// ConsentExtras — строки согласия, которых не было в прежних версиях Summary:
-// runtime native, действия классов write / external / money, лимиты выше
-// значений по умолчанию. Их смена (wasm → native, новое действие money,
-// timeout_s в час) требует согласия заново.
-func (m *Manifest) ConsentExtras() []string {
-	var out []string
-	if m.Runtime == RuntimeNative {
-		out = append(out, "runs as a separate program without a sandbox, with your user's rights")
-	}
-	byClass := map[string][]string{}
-	for _, a := range m.Actions {
-		byClass[a.Class] = append(byClass[a.Class], a.Name)
-	}
-	for _, c := range []string{"write", "external", "money"} {
-		if names := byClass[c]; len(names) > 0 {
-			sort.Strings(names)
-			out = append(out, fmt.Sprintf("class %s actions: %s", c, strings.Join(names, ", ")))
-		}
-	}
-	out = append(out, m.Limits.Summary(m.Runtime)...)
-	return out
-}
-
-// LegacySummary — Summary в форме до версии с ConsentExtras: так записаны
-// согласия в install.json и возможности версий в registry, сделанные прежними
-// версиями gate4ai (хост принимает их, см. store).
-func (m *Manifest) LegacySummary() []string {
 	out := m.Capabilities.Summary()
 	for _, c := range m.Credentials {
 		detail := "slot " + c.Slot
@@ -262,11 +225,23 @@ func (m *Manifest) LegacySummary() []string {
 		}
 		out = append(out, fmt.Sprintf("signs in on %s with your account (%s)", strings.Join(c.Bind, ", "), detail))
 	}
+	byClass := map[string][]string{}
 	for _, a := range m.Actions {
 		if len(a.Calls) > 0 {
 			out = append(out, fmt.Sprintf("action %s calls %s", a.Name, a.CallsText()))
 		}
+		byClass[a.Class] = append(byClass[a.Class], a.Name)
 	}
+	if m.Runtime == RuntimeNative {
+		out = append(out, "runs as a separate program without a sandbox, with your user's rights")
+	}
+	for _, c := range []string{"write", "external", "money"} {
+		if names := byClass[c]; len(names) > 0 {
+			sort.Strings(names)
+			out = append(out, fmt.Sprintf("class %s actions: %s", c, strings.Join(names, ", ")))
+		}
+	}
+	out = append(out, m.Limits.Summary(m.Runtime)...)
 	sort.Strings(out)
 	return out
 }
@@ -404,15 +379,9 @@ func (m *Manifest) Validate() error {
 				return fmt.Errorf("manifest %s.%s: bad or duplicate call %q (want <connector>.<action>)", m.Connector, a.Name, c)
 			}
 			seenCall[c] = true
-			declared := false
-			for _, sc := range m.Capabilities.Services {
-				if sc.Target == target {
-					for _, x := range sc.Actions {
-						declared = declared || x == action
-					}
-				}
-			}
-			if !declared {
+			if !slices.ContainsFunc(m.Capabilities.Services, func(sc ServiceCap) bool {
+				return sc.Target == target && slices.Contains(sc.Actions, action)
+			}) {
 				return fmt.Errorf("manifest %s.%s: call %s is not declared in capabilities.services", m.Connector, a.Name, c)
 			}
 		}
@@ -428,14 +397,7 @@ var Platforms = map[string]bool{"linux/amd64": true, "linux/arm64": true, "darwi
 	"windows/amd64": true, "windows/arm64": true}
 
 // IsService — действие доступно другим коннекторам через service_call.
-func (m *Manifest) IsService(action string) bool {
-	for _, s := range m.Services {
-		if s == action {
-			return true
-		}
-	}
-	return false
-}
+func (m *Manifest) IsService(action string) bool { return slices.Contains(m.Services, action) }
 
 // ArgError — ошибка нормализации аргументов (отдаётся агенту как invalid_arguments).
 type ArgError struct{ Msg string }
@@ -454,8 +416,6 @@ func (a Action) JSONSchema() map[string]any { return a.InputSchema.JSONSchema() 
 
 // ArgNames — имена аргументов верхнего уровня.
 func (a Action) ArgNames() []string { return a.InputSchema.Names() }
-
-func sortStrings(s []string) { sort.Strings(s) }
 
 // Origins — origin слота с подставленными настройками экземпляра (канонические).
 func (c CredentialSlot) Origins(settings map[string]any) []string {

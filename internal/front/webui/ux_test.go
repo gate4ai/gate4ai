@@ -81,7 +81,7 @@ func TestFirstRunPaths(t *testing.T) {
 		t.Fatal("checklist", p)
 	}
 	// Все страницы отрисовываются.
-	for _, path := range []string{"/approvals", "/approvals/telegram", "/agents", "/agents/new", "/agents/new?client=cursor", "/agents/bot",
+	for _, path := range []string{"/approvals", "/approvals/telegram", "/agents", "/agents/bot",
 		"/agents/bot?client=cloud", "/agents/bot?client=codex", "/connectors", "/connectors/notes", "/policy", "/policy?sim=notes.append",
 		"/policy/rule", "/policy/rule?profile=p&action=notes.append", "/policy/templates", "/policy/yaml", "/journal", "/vault", "/settings", "/settings/relay",
 		"/setup", "/setup/access?client=cursor", "/setup/access?client=cloud", "/setup/check?agent=bot&client=cursor", "/settings/notifications", "/settings/login",
@@ -98,8 +98,8 @@ func TestFirstRunPaths(t *testing.T) {
 	if cfg.Agents["cursor"].Profile != "cursor" || !cfg.Profiles["cursor"].HasConnector("notes") || len(cfg.Profiles["cursor"].Rules) != 1 {
 		t.Fatalf("%+v", cfg.Profiles["cursor"])
 	}
-	// Прежний адрес мастера агента ведёт в мастер первого запуска.
-	if p := get("/agents/new?client=cli"); !strings.Contains(p, `name="conn" value="notes"`) || !strings.Contains(p, `name="effect.notes.write"`) {
+	// Шаг «что можно» мастера первого запуска: коннекторы и решения по группам.
+	if p := get("/setup/access?client=cli"); !strings.Contains(p, `name="conn" value="notes"`) || !strings.Contains(p, `name="effect.notes.write"`) {
 		t.Fatal("setup access step", p)
 	}
 	// С существующим профилем поля нового профиля не приходят и не нужны.

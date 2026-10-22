@@ -64,7 +64,7 @@ func TestClosedRealChrome(t *testing.T) {
 	if len(procs) != 2 {
 		t.Fatal("launches:", len(procs))
 	}
-	if _, err := s.x.Engine.URL(ctx); err != nil {
+	if _, err := s.Engine.URL(ctx); err != nil {
 		t.Fatal("the new Chrome does not answer:", err)
 	}
 }

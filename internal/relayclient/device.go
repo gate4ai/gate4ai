@@ -60,22 +60,14 @@ func (d *Device) Online() bool { return d.online.Load() }
 
 // phase — этап подключения работающего устройства и последняя ошибка туннеля.
 func (d *Device) phase() (string, string) {
-	switch err := d.LastError(); {
+	switch e := d.lastErr.Load(); {
 	case d.Online():
 		return PhaseOnline, ""
-	case err == "":
+	case e == nil:
 		return PhaseConnecting, ""
 	default:
-		return PhaseReconnecting, err
+		return PhaseReconnecting, *e
 	}
-}
-
-// LastError — последняя ошибка туннеля ("" — ещё не было).
-func (d *Device) LastError() string {
-	if e := d.lastErr.Load(); e != nil {
-		return *e
-	}
-	return ""
 }
 
 func (d *Device) httpClient() *http.Client {
@@ -119,9 +111,7 @@ func (d *Device) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		}
-		if backoff *= 2; backoff > d.MaxBackoff {
-			backoff = d.MaxBackoff
-		}
+		backoff = min(backoff*2, d.MaxBackoff)
 	}
 	return nil
 }
@@ -172,12 +162,8 @@ func (d *Device) once(ctx context.Context) error {
 
 // Register регистрирует устройство на relay.
 func Register(ctx context.Context, relayURL string, relayTLS *tls.Config, dial func(context.Context, string, string) (net.Conn, error)) (id, token, host string, err error) {
-	if dial == nil {
-		dial = TestDialer
-	}
-	c := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: relayTLS, DialContext: dial}}
 	req, _ := http.NewRequestWithContext(ctx, "POST", strings.TrimSuffix(relayURL, "/")+"/api/devices", nil)
-	resp, err := c.Do(req)
+	resp, err := (&Device{RelayTLS: relayTLS, Dial: dial}).httpClient().Do(req)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -194,13 +180,20 @@ func Register(ctx context.Context, relayURL string, relayTLS *tls.Config, dial f
 	return v.ID, v.Token, v.Host, err
 }
 
-func (d *Device) post(ctx context.Context, method, path string, body any) error {
-	b, _ := json.Marshal(body)
-	req, _ := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(d.RelayURL, "/")+path, bytes.NewReader(b))
+// do — запрос устройства к API relay; body nil — без тела.
+func (d *Device) do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	req, _ := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(d.RelayURL, "/")+path, bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+d.Token)
 	req.Header.Set("X-Gate4ai-Device", d.ID)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := d.httpClient().Do(req)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return d.httpClient().Do(req)
+}
+
+func (d *Device) post(ctx context.Context, method, path string, body any) error {
+	b, _ := json.Marshal(body)
+	resp, err := d.do(ctx, method, path, b)
 	if err != nil {
 		return err
 	}
@@ -224,10 +217,7 @@ func (d *Device) Witness(cp audit.Checkpoint) error {
 func (d *Device) LastWitnessed() (audit.Checkpoint, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", strings.TrimSuffix(d.RelayURL, "/")+"/api/witness/"+d.ID, nil)
-	req.Header.Set("Authorization", "Bearer "+d.Token)
-	req.Header.Set("X-Gate4ai-Device", d.ID)
-	resp, err := d.httpClient().Do(req)
+	resp, err := d.do(ctx, "GET", "/api/witness/"+d.ID, nil)
 	if err != nil {
 		return audit.Checkpoint{}, false, err
 	}
@@ -296,7 +286,6 @@ type ACMEConfig struct {
 	CA         string // по умолчанию Let's Encrypt production
 	Email      string
 	Provider   certmagic.DNSProvider
-	Resolvers  []string
 
 	// issuer — эмитент вместо ACME (тесты); renewCheck — как часто проверять
 	// продление (0 — по умолчанию certmagic).
@@ -340,7 +329,7 @@ func acmeConfig(c ACMEConfig) (*certmagic.Config, *certmagic.Cache) {
 	}
 	issuer := certmagic.NewACMEIssuer(cfg, certmagic.ACMEIssuer{CA: ca, Email: c.Email, Agreed: true,
 		DisableHTTPChallenge: true, DisableTLSALPNChallenge: true,
-		DNS01Solver: &certmagic.DNS01Solver{DNSManager: certmagic.DNSManager{DNSProvider: c.Provider, Resolvers: c.Resolvers}}})
+		DNS01Solver: &certmagic.DNS01Solver{DNSManager: certmagic.DNSManager{DNSProvider: c.Provider}}})
 	cfg.Issuers = []certmagic.Issuer{quietIssuer{issuer}}
 	return cfg, cache
 }

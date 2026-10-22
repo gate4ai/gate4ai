@@ -11,7 +11,7 @@ import (
 )
 
 // Просроченный запрос нельзя одобрить или отклонить, только перевести в
-// timeout (C.L1).
+// timeout.
 func TestDecideExpired(t *testing.T) {
 	s, _ := openT(t)
 	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
@@ -35,7 +35,7 @@ func TestDecideExpired(t *testing.T) {
 	}
 }
 
-// Ошибка чтения счётчиков видна PDP (C.M5); резерв лимита снимается (C.M4).
+// Ошибка чтения счётчиков видна PDP; резерв лимита снимается.
 func TestCountersErrorAndReservation(t *testing.T) {
 	s, _ := openT(t)
 	id, err := s.ReserveAction("a", "email.send", "external", 0)
@@ -60,7 +60,7 @@ func TestCountersErrorAndReservation(t *testing.T) {
 	}
 }
 
-// Момент отзыва агента запоминается (H5).
+// Момент отзыва агента запоминается.
 func TestAgentRevokedAt(t *testing.T) {
 	s, _ := openT(t)
 	if at, err := s.AgentRevokedAt("a"); err != nil || !at.IsZero() {

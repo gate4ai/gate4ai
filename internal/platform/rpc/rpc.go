@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package rpc — JSON-RPC 2.0 построчно (одно сообщение — одна строка) поверх
-// любого потока: stdio дочерних процессов-коннекторов.
+// любого потока: MCP по stdio.
 package rpc
 
 import (
@@ -40,11 +40,8 @@ const (
 	CodeMethodNotFound = -32601
 	CodeInvalidParams  = -32602
 	CodeInternal       = -32603
-	CodeApp            = -32000 // ошибка приложения (коннектора)
+	CodeApp            = -32000 // ошибка приложения
 )
-
-// ErrClosed — соединение закрыто (процесс коннектора завершился).
-var ErrClosed = errors.New("rpc: connection closed")
 
 // MaxLine — максимальный размер сообщения.
 const MaxLine = 64 << 20
@@ -60,16 +57,12 @@ const MaxInFlight = 64
 // отменить их контекст (долгие ожидания вроде status --wait не держат выход).
 var DrainTimeout = 10 * time.Second
 
-// Serve читает запросы из r и пишет ответы в w до EOF.
-func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
-	return ServeWith(ctx, r, w, h, nil)
-}
-
 // Notify — уведомление собеседнику (сервер → клиент, без id).
 type Notify func(method string, params any)
 
-// ServeWith — Serve, где сервер может сам слать уведомления: start получает
-// функцию отправки (в той же очереди записи, что и ответы).
+// ServeWith читает запросы из r и пишет ответы в w до EOF; сервер может сам
+// слать уведомления: start (может быть nil) получает функцию отправки (в той же
+// очереди записи, что и ответы).
 func ServeWith(ctx context.Context, r io.Reader, w io.Writer, h Handler, start func(Notify)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), MaxLine)
@@ -144,99 +137,4 @@ func ServeWith(ctx context.Context, r io.Reader, w io.Writer, h Handler, start f
 		<-done
 	}
 	return sc.Err()
-}
-
-// Client — клиент JSON-RPC с мультиплексированием по id.
-type Client struct {
-	w   io.Writer
-	wmu sync.Mutex
-
-	mu      sync.Mutex
-	next    int64
-	pending map[int64]chan Message
-	closed  bool
-	done    chan struct{}
-}
-
-// NewClient запускает чтение ответов из r.
-func NewClient(r io.Reader, w io.Writer) *Client {
-	c := &Client{w: w, pending: map[int64]chan Message{}, done: make(chan struct{})}
-	go c.read(r)
-	return c
-}
-
-func (c *Client) read(r io.Reader) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64<<10), MaxLine)
-	for sc.Scan() {
-		var m Message
-		if json.Unmarshal(sc.Bytes(), &m) != nil || m.ID == nil {
-			continue
-		}
-		c.mu.Lock()
-		ch := c.pending[*m.ID]
-		delete(c.pending, *m.ID)
-		c.mu.Unlock()
-		if ch != nil {
-			ch <- m
-		}
-	}
-	c.mu.Lock()
-	c.closed = true
-	for id, ch := range c.pending {
-		close(ch)
-		delete(c.pending, id)
-	}
-	c.mu.Unlock()
-	close(c.done)
-}
-
-// Done закрывается, когда соединение оборвалось.
-func (c *Client) Done() <-chan struct{} { return c.done }
-
-// Call вызывает метод и декодирует результат в out (может быть nil).
-func (c *Client) Call(ctx context.Context, method string, params, out any) error {
-	pb, err := json.Marshal(params)
-	if err != nil {
-		return err
-	}
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return ErrClosed
-	}
-	c.next++
-	id := c.next
-	ch := make(chan Message, 1)
-	c.pending[id] = ch
-	c.mu.Unlock()
-
-	b, _ := json.Marshal(Message{JSONRPC: "2.0", ID: &id, Method: method, Params: pb})
-	c.wmu.Lock()
-	_, err = c.w.Write(append(b, '\n'))
-	c.wmu.Unlock()
-	if err != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return ErrClosed
-	}
-	select {
-	case m, ok := <-ch:
-		if !ok {
-			return ErrClosed
-		}
-		if m.Error != nil {
-			return m.Error
-		}
-		if out != nil {
-			return json.Unmarshal(m.Result, out)
-		}
-		return nil
-	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return ctx.Err()
-	}
 }

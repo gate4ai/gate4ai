@@ -4,7 +4,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,16 +12,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/gate4ai/gate4ai/sdk-go/registry"
 )
 
 // TrustLocal — пакет владельца из файла (--dev). Уровни доверия издателей
 // registry — в sdk-go/registry.
 const TrustLocal = "local"
 
-// fetch читает путь или http(s)-URL.
-func fetch(ctx context.Context, src string) ([]byte, error) { return fetchN(ctx, src, maxPackage) }
+// Fetch читает путь или http(s)-URL (пакет, список платформ).
+func Fetch(ctx context.Context, src string) ([]byte, error) { return fetchN(ctx, src, maxPackage) }
 
 // isURL — источник по адресу http(s).
 func isURL(src string) bool {
@@ -48,14 +45,8 @@ func fetchN(ctx context.Context, src string, limit int64) ([]byte, error) {
 	return os.ReadFile(src)
 }
 
-// Fetch читает путь или http(s)-URL (пакет, список платформ).
-func Fetch(ctx context.Context, src string) ([]byte, error) { return fetch(ctx, src) }
-
 // ResolveRef — ссылка ref относительно base (адреса индекса или списка платформ).
-func ResolveRef(base, ref string) string { return resolveRef(base, ref) }
-
-// resolveRef — ссылка относительно индекса.
-func resolveRef(base, ref string) string {
+func ResolveRef(base, ref string) string {
 	if strings.Contains(ref, "://") || filepath.IsAbs(ref) {
 		return ref
 	}
@@ -68,25 +59,12 @@ func resolveRef(base, ref string) string {
 
 // IndexData — индекс и подпись: данные для подписи — сам файл index.json.
 func IndexData(ctx context.Context, src string) (raw []byte, sig string, err error) {
-	if raw, err = fetch(ctx, src); err != nil {
+	if raw, err = Fetch(ctx, src); err != nil {
 		return nil, "", fmt.Errorf("registry index: %w", err)
 	}
-	s, err := fetch(ctx, src+".sig")
+	s, err := Fetch(ctx, src+".sig")
 	if err != nil {
 		return nil, "", fmt.Errorf("registry index signature: %w", err)
 	}
 	return raw, strings.TrimSpace(string(s)), nil
-}
-
-// LoadIndex загружает индекс и проверяет подпись ключами registry.
-func LoadIndex(ctx context.Context, src string, keys []string) (*registry.Index, []byte, error) {
-	raw, sig, err := IndexData(ctx, src)
-	if err != nil {
-		return nil, nil, err
-	}
-	ix, err := registry.ParseIndex(raw, sig, keys)
-	if errors.Is(err, registry.ErrNoKeys) || errors.Is(err, registry.ErrBadSignature) {
-		err = fmt.Errorf("%w (store.registry_keys)", err)
-	}
-	return ix, raw, err
 }

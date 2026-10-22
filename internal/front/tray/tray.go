@@ -34,7 +34,7 @@ const SelfConfigPrefix = "gate4ai."
 
 // NeedsWebUI — запрос нельзя решать одним нажатием в трее: изменение политики
 // или установка своей сборки показываются полностью только в Web UI, а в меню
-// трея видны лишь заголовок и причина (код-ревью E.5).
+// трея видны лишь заголовок и причина.
 func (p Pending) NeedsWebUI() bool {
 	return p.WebOnly || strings.HasPrefix(p.Action, SelfConfigPrefix)
 }

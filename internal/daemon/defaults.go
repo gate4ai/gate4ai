@@ -13,11 +13,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 	"github.com/gate4ai/gate4ai/sdk-go/registry"
 
 	"github.com/gate4ai/gate4ai/internal/config"
-	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 )
 
@@ -27,7 +25,7 @@ const defaultsFile = "default-connectors.json"
 
 // DefaultsRetry — первая пауза перед повтором установки коннекторов по
 // умолчанию (магазин недоступен); дальше вдвое больше, до DefaultsRetryMax.
-var DefaultsRetry, DefaultsRetryMax = 30 * time.Second, 30 * time.Minute
+const DefaultsRetry, DefaultsRetryMax = 30 * time.Second, 30 * time.Minute
 
 func (d *Daemon) defaultsPath() string { return filepath.Join(d.Home, defaultsFile) }
 
@@ -86,39 +84,9 @@ func (d *Daemon) InstallDefaults(ctx context.Context) {
 	}
 }
 
-// nativeSince — коннекторы, которые стали нативными: установленная WASM-версия
-// пользуется убранными функциями хоста (browser_*) и заменяется из магазина.
-var nativeSince = map[string]bool{"browser": true}
-
-// outdated — установленный коннектор надо заменить версией из магазина.
-func (d *Daemon) outdated(name string) bool {
-	list, _ := store.List(d.ConnectorsDir)
-	for _, it := range list {
-		if it.Name == name {
-			return nativeSince[name] && it.Manifest.Runtime != manifest.RuntimeNative
-		}
-	}
-	return false
-}
-
-// updateWasmBrowser — установленный WASM-браузер (до v0.6 ядра) ставится заново
-// из магазина нативным пакетом тем же путём, что коннекторы по умолчанию.
-func (d *Daemon) updateWasmBrowser() {
-	for name := range nativeSince {
-		if !d.outdated(name) || slices.Contains(d.pendingDefaults(), name) {
-			continue
-		}
-		if err := d.savePendingDefaults(append(d.pendingDefaults(), name)); err != nil {
-			d.Log.Error("connector update not scheduled", "connector", name, "err", err)
-			continue
-		}
-		d.Log.Info("WASM connector will be replaced by its native version from the store", "connector", name)
-	}
-}
-
 func (d *Daemon) installDefault(ctx context.Context, name string) error {
 	opts := d.StoreOptions()
-	if _, err := opts.Info(name); err == nil && !d.outdated(name) {
+	if _, err := opts.Info(name); err == nil {
 		return nil
 	}
 	plan, err := opts.Prepare(ctx, name, false)
@@ -131,7 +99,7 @@ func (d *Daemon) installDefault(ctx context.Context, name string) error {
 	d.installMu.Lock()
 	defer d.installMu.Unlock()
 	// Владелец мог поставить коннектор сам, пока шла загрузка: его установка важнее.
-	if _, err := opts.Info(name); err == nil && !d.outdated(name) {
+	if _, err := opts.Info(name); err == nil {
 		return nil
 	}
 	if plan.Native {

@@ -3,8 +3,10 @@
 package policy
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/gate4ai/gate4ai/internal/config"
 )
@@ -57,12 +59,9 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 				fired = b
 			}
 		}
-		if fired && req.Nested && c.rule.Effect == config.EffectAsk {
-			// Вложенный вызов не спрашивают отдельно: его покрывает подтверждение
-			// родительского действия, где подвызов показан (calls).
-			continue
-		}
-		if fired {
+		// Вложенный вызов не спрашивают отдельно: его покрывает подтверждение
+		// родительского действия, где подвызов показан (calls).
+		if fired && !(req.Nested && c.rule.Effect == config.EffectAsk) {
 			hits = append(hits, hit{c.rule.ID, c.rule.Effect, c.rule.Reason, c.rule.Obligations})
 		}
 	}
@@ -71,18 +70,16 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 		if !ActionMatches(l.Action, req.Action) {
 			continue
 		}
-		reason := l.Reason
-		if l.PerDay > 0 && counters.CountToday(req.Agent, l.Action) >= l.PerDay {
-			if reason == "" {
-				reason = fmt.Sprintf("daily limit of %d actions %s reached", l.PerDay, l.Action)
-			}
-			hits = append(hits, hit{l.ID, config.EffectDeny, reason, nil})
-		} else if l.AmountPerDay > 0 && counters.AmountToday(req.Agent, l.Action)+amount > l.AmountPerDay {
-			if reason == "" {
-				reason = fmt.Sprintf("daily amount limit %.2f for %s exceeded", l.AmountPerDay, l.Action)
-			}
-			hits = append(hits, hit{l.ID, config.EffectDeny, reason, nil})
+		var reason string
+		switch {
+		case l.PerDay > 0 && counters.CountToday(req.Agent, l.Action) >= l.PerDay:
+			reason = fmt.Sprintf("daily limit of %d actions %s reached", l.PerDay, l.Action)
+		case l.AmountPerDay > 0 && counters.AmountToday(req.Agent, l.Action)+amount > l.AmountPerDay:
+			reason = fmt.Sprintf("daily amount limit %.2f for %s exceeded", l.AmountPerDay, l.Action)
+		default:
+			continue
 		}
+		hits = append(hits, hit{l.ID, config.EffectDeny, cmp.Or(l.Reason, reason), nil})
 	}
 
 	if err := stateErr(req, counters); err != nil {
@@ -99,9 +96,7 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 				continue
 			}
 			d.RuleIDs = append(d.RuleIDs, h.id)
-			if d.Reason == "" && h.reason != "" {
-				d.Reason = h.reason
-			}
+			d.Reason = cmp.Or(d.Reason, h.reason)
 			for _, o := range h.obl {
 				obl[o] = true
 			}
@@ -109,13 +104,8 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 		if len(d.RuleIDs) == 0 {
 			continue
 		}
-		if d.Reason == "" {
-			d.Reason = fmt.Sprintf("rule %s: %s", d.RuleIDs[0], eff)
-		}
-		for o := range obl {
-			d.Obligations = append(d.Obligations, o)
-		}
-		sort.Strings(d.Obligations)
+		d.Reason = cmp.Or(d.Reason, fmt.Sprintf("rule %s: %s", d.RuleIDs[0], eff))
+		d.Obligations = slices.Sorted(maps.Keys(obl))
 		return d
 	}
 	if req.Nested {
@@ -138,18 +128,6 @@ func stateErr(req Request, counters Counters) error {
 	return nil
 }
 
-// Tighten применяет консультативный сигнал (например, от LLM «похоже на фишинг»):
-// он может только ужесточить решение allow → ask, но не ослабить.
-func Tighten(d Decision, signal string) Decision {
-	if d.Effect == config.EffectAllow {
-		d.Effect = config.EffectAsk
-		d.RuleIDs = append(append([]string{}, d.RuleIDs...), "advisory")
-		d.Reason = "advisory signal: " + signal
-		d.Default = false
-	}
-	return d
-}
-
 func (e *Engine) activation(req Request, counters Counters) map[string]any {
 	vars := map[string]any{}
 	prov := map[string][]string{}
@@ -161,9 +139,7 @@ func (e *Engine) activation(req Request, counters Counters) map[string]any {
 		prov[k] = append([]string{}, v...)
 	}
 	lists := map[string][]string{}
-	for k, v := range e.cfg.Lists {
-		lists[k] = v
-	}
+	maps.Copy(lists, e.cfg.Lists)
 	now := req.Now
 	vars["provenance"] = prov
 	vars["counters"] = map[string]float64{

@@ -132,13 +132,9 @@ func decide(t *tray.Tray, id string, approve bool, refresh chan<- struct{}) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := t.Decide(ctx, id, approve); err != nil {
-		_, body := tray.Problem(err)
-		_ = tray.Notify(tray.T("not_decided"), body)
+		notifyProblem(tray.T("not_decided"), err)
 	}
-	select {
-	case refresh <- struct{}{}:
-	default:
-	}
+	nudge(refresh)
 }
 
 func openUI(t *tray.Tray) {
@@ -149,8 +145,7 @@ func openUI(t *tray.Tray) {
 		err = cli.OpenLoginURL(u)
 	}
 	if err != nil {
-		_, body := tray.Problem(err)
-		_ = tray.Notify(tray.T("ui_failed"), body)
+		notifyProblem(tray.T("ui_failed"), err)
 	}
 }
 
@@ -160,15 +155,25 @@ func start(refresh chan<- struct{}) {
 	defer cancel()
 	err := cli.StartBackground(ctx, gateBinary())
 	if err != nil {
-		_, body := tray.Problem(err)
-		_ = tray.Notify(tray.T("start_failed"), body)
+		notifyProblem(tray.T("start_failed"), err)
 	} else {
 		_ = tray.Notify(tray.T("started"), tray.T("started_body"))
 	}
+	nudge(refresh)
+}
+
+// nudge — перечитать состояние сейчас, не дожидаясь тика (уже запрошено — не ждать).
+func nudge(refresh chan<- struct{}) {
 	select {
 	case refresh <- struct{}{}:
 	default:
 	}
+}
+
+// notifyProblem — уведомление title с ошибкой err словами для человека.
+func notifyProblem(title string, err error) {
+	_, body := tray.Problem(err)
+	_ = tray.Notify(title, body)
 }
 
 func gateBinary() string {
@@ -177,7 +182,8 @@ func gateBinary() string {
 		name += ".exe"
 	}
 	if self, err := os.Executable(); err == nil {
-		if p := filepath.Join(filepath.Dir(self), name); fileExists(p) {
+		p := filepath.Join(filepath.Dir(self), name)
+		if _, err := os.Stat(p); err == nil {
 			return p
 		}
 	}
@@ -185,9 +191,4 @@ func gateBinary() string {
 		return p
 	}
 	return name
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }

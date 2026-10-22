@@ -11,11 +11,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -91,14 +91,7 @@ func (p selfPin) lines() []string {
 // matches — план установки совпадает с закреплённым: имя, версия,
 // возможности и runtime.
 func (p selfPin) matches(plan *store.Plan) error {
-	sorted := func(s []string) []string {
-		out := slices.Clone(s)
-		if out == nil {
-			out = []string{}
-		}
-		slices.Sort(out)
-		return out
-	}
+	sorted := func(s []string) []string { return slices.Sorted(slices.Values(s)) }
 	switch {
 	case plan.Connector != p.Connector || plan.Version != p.Version:
 		return fmt.Errorf("the package is %s %s, the owner approved %s %s", plan.Connector, plan.Version, p.Connector, p.Version)
@@ -228,12 +221,7 @@ func actionClasses(m manifest.Manifest) []string {
 			delete(by, c)
 		}
 	}
-	rest := make([]string, 0, len(by))
-	for c := range by {
-		rest = append(rest, c)
-	}
-	sort.Strings(rest)
-	for _, c := range rest {
+	for _, c := range slices.Sorted(maps.Keys(by)) {
 		out = append(out, c+": "+strings.Join(by[c], ", "))
 	}
 	return out
@@ -396,13 +384,8 @@ func (d *Daemon) settingWarnings(ch config.Change) []string {
 		return nil
 	}
 	sens := d.bindSettings(ch.Connector)
-	keys := make([]string, 0, len(touched))
-	for k := range touched {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
 	var out []string
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(touched)) {
 		caps, ok := sens[k]
 		if !ok {
 			continue

@@ -14,6 +14,9 @@ const (
 	runTray   = "gate4ai-tray"
 )
 
+// runPath — значение ключа Run для вывода (files, removed).
+func runPath(value string) string { return `HKCU\` + runKey + `\` + value }
+
 func Install(s Spec) (Result, error) {
 	var r Result
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
@@ -30,29 +33,28 @@ func Install(s Spec) (Result, error) {
 	if err := k.SetStringValue(runDaemon, cmd); err != nil {
 		return r, err
 	}
-	r.Files = append(r.Files, `HKCU\`+runKey+`\`+runDaemon)
+	r.Files = append(r.Files, runPath(runDaemon))
 	if s.Tray != "" {
 		if err := k.SetStringValue(runTray, winQuote(s.Tray)); err != nil {
 			return r, err
 		}
-		r.Files = append(r.Files, `HKCU\`+runKey+`\`+runTray)
+		r.Files = append(r.Files, runPath(runTray))
 	}
 	return r, nil
 }
 
-func Uninstall(string, bool) ([]string, []string, error) {
+func Uninstall(string, bool) (removed, notes []string) {
 	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
 	if err != nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	defer k.Close()
-	var removed []string
 	for _, v := range []string{runDaemon, runTray} {
 		if k.DeleteValue(v) == nil {
-			removed = append(removed, `HKCU\`+runKey+`\`+v)
+			removed = append(removed, runPath(v))
 		}
 	}
-	return removed, []string{"a running daemon keeps running until gate4ai daemon stop or logout"}, nil
+	return removed, []string{"a running daemon keeps running until gate4ai daemon stop or logout"}
 }
 
 func State(string) map[string]any {
@@ -61,7 +63,7 @@ func State(string) map[string]any {
 	if k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE); err == nil {
 		for _, v := range []string{runDaemon, runTray} {
 			if _, _, err := k.GetStringValue(v); err == nil {
-				files = append(files, `HKCU\`+runKey+`\`+v)
+				files = append(files, runPath(v))
 				enabled = enabled || v == runDaemon
 			}
 		}

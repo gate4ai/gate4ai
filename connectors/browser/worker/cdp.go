@@ -243,7 +243,8 @@ func (c *CDP) Navigate(ctx context.Context, url string) error {
 	}
 }
 
-func (c *CDP) eval(ctx context.Context, expr string, out any) error {
+// Eval — Runtime.evaluate по значению.
+func (c *CDP) Eval(ctx context.Context, expr string, out any) error {
 	var r struct {
 		Result struct {
 			Value json.RawMessage `json:"value"`
@@ -260,9 +261,6 @@ func (c *CDP) eval(ctx context.Context, expr string, out any) error {
 	}
 	return json.Unmarshal(r.Result.Value, out)
 }
-
-// Eval — Runtime.evaluate по значению.
-func (c *CDP) Eval(ctx context.Context, expr string, out any) error { return c.eval(ctx, expr, out) }
 
 // InsertText — Input.insertText в элемент в фокусе.
 func (c *CDP) InsertText(ctx context.Context, text string) error {
@@ -290,26 +288,26 @@ func (c *CDP) Key(ctx context.Context, key string) error {
 
 func (c *CDP) URL(ctx context.Context) (string, error) {
 	var s string
-	err := c.eval(ctx, "location.href", &s)
+	err := c.Eval(ctx, "location.href", &s)
 	return s, err
 }
 
 func (c *CDP) Title(ctx context.Context) (string, error) {
 	var s string
-	err := c.eval(ctx, "document.title", &s)
+	err := c.Eval(ctx, "document.title", &s)
 	return s, err
 }
 
 func (c *CDP) Text(ctx context.Context) (string, error) {
 	var s string
-	err := c.eval(ctx, visibleTextJS+"(document.body)", &s)
+	err := c.Eval(ctx, visibleTextJS+"(document.body)", &s)
 	return s, err
 }
 
 func (c *CDP) Screenshot(ctx context.Context, selector string) ([]byte, error) {
 	sel, _ := json.Marshal(selector)
 	var box struct{ X, Y, W, H float64 }
-	if err := c.eval(ctx, `(() => { const e = document.querySelector(`+string(sel)+`); if (!e) return null;
+	if err := c.Eval(ctx, `(() => { const e = document.querySelector(`+string(sel)+`); if (!e) return null;
 		const r = e.getBoundingClientRect(); return {X: r.x + scrollX, Y: r.y + scrollY, W: r.width, H: r.height}; })()`, &box); err != nil {
 		return nil, err
 	}

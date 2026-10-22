@@ -27,9 +27,9 @@ profiles:
 egress:
   secrets:
     - {domain: api.anthropic.test, header: X-Api-Key, env: ANTHROPIC_API_KEY, placeholder: sk-ant-gate4ai, secret: "@a", agents: [claude-code]}
-    - {domain: "https://api.other.test:8443", header: Authorization, placeholder: GATE4AI_PLACEHOLDER_B, secret: "@b"}
-    - {domain: "*.wild.test", header: Authorization, placeholder: GATE4AI_PLACEHOLDER_C, secret: "@c"}
-    - {domain: "http://plain.test", header: Authorization, placeholder: GATE4AI_PLACEHOLDER_D, secret: "@d"}
+    - {domain: "https://api.other.test:8443", header: Authorization, env: KEY_B, secret: "@b"}
+    - {domain: "*.wild.test", header: Authorization, env: KEY_C, secret: "@c"}
+    - {domain: "http://plain.test", header: Authorization, env: KEY_D, secret: "@d"}
 `
 
 func egressRuns(t *testing.T) (*Runs, *daemon.Daemon) {
@@ -72,7 +72,7 @@ func TestEgressSecretsBinding(t *testing.T) {
 		t.Fatal("run must carry the daemon home", run1.Home)
 	}
 	ph1, ph2 := run1.SecretEnv["ANTHROPIC_API_KEY"], run2.SecretEnv["ANTHROPIC_API_KEY"]
-	if !strings.HasPrefix(ph1, "sk-ant-gate4ai-") || len(ph1) < 40 || ph1 == ph2 || len(other.SecretEnv) != 0 {
+	if !strings.HasPrefix(ph1, "sk-ant-gate4ai-") || len(ph1) < 40 || ph1 == ph2 || other.SecretEnv["ANTHROPIC_API_KEY"] != "" || !strings.HasPrefix(other.SecretEnv["KEY_B"], "gate4ai-") {
 		t.Fatal(run1.SecretEnv, run2.SecretEnv, other.SecretEnv)
 	}
 	// Запуск видит только свою заглушку.
@@ -89,7 +89,7 @@ func TestEgressSecretsBinding(t *testing.T) {
 	}{
 		{other.ID, "api.anthropic.test", 443, 0}, // не тот агент
 		{run1.ID, "api.anthropic.test", 8443, 0}, // не тот порт
-		{other.ID, "api.other.test", 8443, 1},    // без env — постоянная заглушка (совместимость)
+		{other.ID, "api.other.test", 8443, 1},    // заглушка своего запуска
 		{other.ID, "api.other.test", 443, 0},
 		{other.ID, "x.wild.test", 443, 0}, // wildcard не действует
 		{other.ID, "plain.test", 80, 0},   // не https

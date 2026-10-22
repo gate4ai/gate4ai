@@ -5,6 +5,7 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -372,9 +373,7 @@ var Templates = []Template{
 				return err
 			}
 			s := map[string]any{}
-			for k, v := range c.Connectors["files"] {
-				s[k] = v
-			}
+			maps.Copy(s, c.Connectors["files"])
 			roots := toStrings(s["roots"])
 			if !slices.Contains(roots, dir) {
 				roots = append(roots, dir)
@@ -399,9 +398,7 @@ var Templates = []Template{
 				return err
 			}
 			s := map[string]any{}
-			for k, v := range c.Connectors["browser"] {
-				s[k] = v
-			}
+			maps.Copy(s, c.Connectors["browser"])
 			s["allowed_domains"] = items
 			c.SetConnectorSettings("browser", s)
 			return nil

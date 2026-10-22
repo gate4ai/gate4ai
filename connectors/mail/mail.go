@@ -17,6 +17,7 @@ import (
 	"mime/quotedprintable"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -218,16 +219,27 @@ func addrs(as []imap.Address) []string {
 	return out
 }
 
-func (c *Mail) list(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, error) {
+// openFolder — IMAP-сессия с папкой из аргумента folder (по умолчанию INBOX),
+// выбранной только для чтения.
+func openFolder(h *abi.Host, s Settings, a map[string]any) (*imapclient.Client, string, error) {
 	cl, err := dialIMAP(h, s.IMAP)
+	if err != nil {
+		return nil, "", err
+	}
+	folder := strArg(a, "folder", "INBOX")
+	if _, err := cl.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+		logout(cl)
+		return nil, "", fmt.Errorf("folder %q: %w", folder, err)
+	}
+	return cl, folder, nil
+}
+
+func (c *Mail) list(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, error) {
+	cl, folder, err := openFolder(h, s, a)
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
 	defer logout(cl)
-	folder := strArg(a, "folder", "INBOX")
-	if _, err := cl.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
-		return abi.ExecResult{}, fmt.Errorf("folder %q: %w", folder, err)
-	}
 	crit := &imap.SearchCriteria{}
 	if b, _ := a["unseen_only"].(bool); b {
 		crit.NotFlag = []imap.Flag{imap.FlagSeen}
@@ -240,10 +252,7 @@ func (c *Mail) list(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, 
 		return abi.ExecResult{}, err
 	}
 	uids := data.AllUIDs()
-	limit := intArg(a, "limit", 20)
-	if limit > 100 {
-		limit = 100
-	}
+	limit := min(intArg(a, "limit", 20), 100)
 	if len(uids) > limit {
 		uids = uids[len(uids)-limit:]
 	}
@@ -255,10 +264,7 @@ func (c *Mail) list(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, 
 		}
 		var msgs []Summary
 		for _, m := range fetched {
-			sm := Summary{UID: uint32(m.UID)}
-			for _, f := range m.Flags {
-				sm.Seen = sm.Seen || f == imap.FlagSeen
-			}
+			sm := Summary{UID: uint32(m.UID), Seen: slices.Contains(m.Flags, imap.FlagSeen)}
 			if e := m.Envelope; e != nil {
 				sm.Subject, sm.From, sm.To = e.Subject, addrs(e.From), addrs(e.To)
 				if e.MessageID != "" {
@@ -278,15 +284,11 @@ func (c *Mail) list(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, 
 }
 
 func (c *Mail) read(h *abi.Host, s Settings, a map[string]any) (abi.ExecResult, error) {
-	cl, err := dialIMAP(h, s.IMAP)
+	cl, folder, err := openFolder(h, s, a)
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
 	defer logout(cl)
-	folder := strArg(a, "folder", "INBOX")
-	if _, err := cl.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
-		return abi.ExecResult{}, fmt.Errorf("folder %q: %w", folder, err)
-	}
 	uid := uint32(intArg(a, "uid", 0))
 	raw, err := fetchRaw(cl, imap.UID(uid))
 	if err != nil {
@@ -335,10 +337,7 @@ func parseMessage(raw []byte, max int) (map[string]any, error) {
 	var attachments []string
 	for {
 		p, err := mr.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
+		if err != nil { // io.EOF — частей больше нет
 			break
 		}
 		switch ph := p.Header.(type) {
@@ -600,11 +599,8 @@ func (c *smtpConn) cmd(line string, want ...int) (string, error) {
 		if len(l) > 3 && l[3] == '-' {
 			continue
 		}
-		code, _ := strconv.Atoi(l[:3])
-		for _, w := range want {
-			if code == w {
-				return strings.Join(text, " "), nil
-			}
+		if code, _ := strconv.Atoi(l[:3]); slices.Contains(want, code) {
+			return strings.Join(text, " "), nil
 		}
 		return "", fmt.Errorf("smtp %s: %s", verb, l)
 	}
@@ -638,10 +634,8 @@ func findFolder(cl *imapclient.Client, configured string, attr imap.MailboxAttr,
 	found := ""
 	for _, m := range list {
 		all = append(all, m.Mailbox)
-		for _, a := range m.Attrs {
-			if a == attr && found == "" {
-				found = m.Mailbox
-			}
+		if found == "" && slices.Contains(m.Attrs, attr) {
+			found = m.Mailbox
 		}
 	}
 	if found != "" {

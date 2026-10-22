@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"path"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -236,11 +236,7 @@ func (u *UI) ruleData(f ruleForm, note Msg, approvalID string) map[string]any {
 	cfg := u.D.Config.Current()
 	tools := u.tools()
 	t, hasTool := toolSchema(tools, f.Action)
-	profiles := make([]string, 0, len(cfg.Profiles))
-	for p := range cfg.Profiles {
-		profiles = append(profiles, p)
-	}
-	sort.Strings(profiles)
+	profiles := slices.Sorted(maps.Keys(cfg.Profiles))
 	data := map[string]any{"F": f, "Chips": ruleChips(f.Lang, f), "Tools": tools, "Profiles": profiles, "Kinds": condKinds, "Lists": cfg.Lists,
 		"Note": note, "Approval": approvalID}
 	if hasTool {

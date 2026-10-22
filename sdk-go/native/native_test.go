@@ -178,7 +178,7 @@ func TestServeCancelAndDeadline(t *testing.T) {
 }
 
 // Собеседник перестал читать: Call и NotifyContext возвращаются по сроку, а не
-// висят на записи в полный pipe (раньше Close хоста не доходил до kill).
+// висят на записи в полный pipe.
 func TestSendDoesNotHangOnStuckReader(t *testing.T) {
 	inR, _ := io.Pipe()
 	_, outW := io.Pipe() // никто не читает: запись блокируется

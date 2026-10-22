@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/mail"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -139,14 +140,7 @@ func (p *Properties) UnmarshalJSON(data []byte) error {
 func (s *Schema) IsObject() bool { return s.Type == TObject || s.Type == "" }
 
 // IsRequired — поле обязательно.
-func (s *Schema) IsRequired(name string) bool {
-	for _, r := range s.Required {
-		if r == name {
-			return true
-		}
-	}
-	return false
-}
+func (s *Schema) IsRequired(name string) bool { return slices.Contains(s.Required, name) }
 
 // Names — имена полей объекта.
 func (s *Schema) Names() []string {
@@ -258,7 +252,7 @@ func (s *Schema) object(path string, v any) (any, error) {
 		}
 	}
 	if len(unknown) > 0 {
-		sortStrings(unknown)
+		slices.Sort(unknown)
 		return nil, argErr("unknown argument(s): %s", strings.Join(unknown, ", "))
 	}
 	out := map[string]any{}
@@ -378,14 +372,8 @@ func (s *Schema) normString(name, str string) (any, error) {
 	if s.MaxLength != nil && len([]rune(str)) > *s.MaxLength {
 		return nil, argErr("argument %q is too long", name)
 	}
-	if len(s.Enum) > 0 && str != "" {
-		ok := false
-		for _, e := range s.Enum {
-			ok = ok || e == str
-		}
-		if !ok {
-			return nil, argErr("argument %q must be one of: %s", name, strings.Join(s.Enum, ", "))
-		}
+	if len(s.Enum) > 0 && str != "" && !slices.Contains(s.Enum, str) {
+		return nil, argErr("argument %q must be one of: %s", name, strings.Join(s.Enum, ", "))
 	}
 	if str == "" {
 		return str, nil
@@ -439,12 +427,7 @@ func (s *Schema) check(path string, v any) error {
 		if !ok {
 			return bad("a string")
 		}
-		if len(s.Enum) > 0 {
-			for _, e := range s.Enum {
-				if e == str {
-					return nil
-				}
-			}
+		if len(s.Enum) > 0 && !slices.Contains(s.Enum, str) {
 			return bad("one of: " + strings.Join(s.Enum, ", "))
 		}
 	case TNumber, TInteger:

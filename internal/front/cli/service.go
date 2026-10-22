@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -33,10 +34,7 @@ func (e *Env) service(ctx context.Context, args []string) int {
 	case "install":
 		return e.serviceInstall(ctx, home, args)
 	case "uninstall":
-		files, notes, err := autostart.Uninstall(home, false)
-		if err != nil {
-			return e.fail(err)
-		}
+		files, notes := autostart.Uninstall(home, false)
 		for _, n := range notes {
 			e.say(n)
 		}
@@ -46,8 +44,8 @@ func (e *Env) service(ctx context.Context, args []string) int {
 	case "status":
 		res := autostart.State(home)
 		res["status"] = "ok"
-		// running здесь — daemon отвечает (как раньше); работает ли он
-		// службой автозапуска — service_running.
+		// running — daemon отвечает; работает ли он службой автозапуска —
+		// service_running.
 		if v, ok := res["running"]; ok {
 			res["service_running"] = v
 		}
@@ -148,13 +146,9 @@ func (e *Env) waitStarted(ctx context.Context, logPath string) error {
 // quiet — то же окружение без сообщений человеку и JSON-вывода.
 func (e *Env) quiet() *Env {
 	q := *e
-	q.Stdout, q.StderrTTY, q.ForceJSON = discard{}, false, true
+	q.Stdout, q.StderrTTY, q.ForceJSON = io.Discard, false, true
 	return &q
 }
-
-type discard struct{}
-
-func (discard) Write(p []byte) (int, error) { return len(p), nil }
 
 func trayNowHint(tray string) string {
 	if runtime.GOOS == "windows" {

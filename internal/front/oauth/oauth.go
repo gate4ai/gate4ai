@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -175,7 +176,6 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.asMetadata)
 	mux.HandleFunc("GET /.well-known/openid-configuration", s.asMetadata)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.prMetadata)
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", s.prMetadata)
 	mux.HandleFunc("POST /register", s.register)
 	mux.HandleFunc("GET /authorize", s.authorizeForm)
 	mux.HandleFunc("POST /authorize", s.authorizeSubmit)
@@ -212,8 +212,7 @@ func (s *Server) asMetadata(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) prMetadata(w http.ResponseWriter, r *http.Request) {
 	iss := s.issuer(r)
-	// Ресурс — сам адрес устройства (MCP по корню); клиенты сверяют адрес
-	// сервера с resource по префиксу, так что подходит и старый …/mcp.
+	// Ресурс — сам адрес устройства (MCP по корню).
 	writeJSON(w, 200, map[string]any{
 		"resource":                 iss,
 		"authorization_servers":    []string{iss},
@@ -330,11 +329,7 @@ func (s *Server) parseAuth(v url.Values) (authReq, *Client, string) {
 		return a, nil, "unknown client_id"
 	}
 	a.ClientName = c.ClientName
-	okURI := false
-	for _, u := range c.RedirectURIs {
-		okURI = okURI || u == a.RedirectURI
-	}
-	if !okURI {
+	if !slices.Contains(c.RedirectURIs, a.RedirectURI) {
 		return a, nil, "redirect_uri is not registered for this client"
 	}
 	if v.Get("response_type") != "code" {
@@ -346,10 +341,25 @@ func (s *Server) parseAuth(v url.Values) (authReq, *Client, string) {
 	return a, c, ""
 }
 
-func redirectErr(w http.ResponseWriter, r *http.Request, a authReq, e string) {
+// authRequest — запрос авторизации из v; false — ответ уже записан (ошибка).
+func (s *Server) authRequest(w http.ResponseWriter, r *http.Request, v url.Values) (authReq, bool) {
+	a, c, e := s.parseAuth(v)
+	if c == nil {
+		http.Error(w, "invalid authorization request: "+e, 400)
+		return a, false
+	}
+	if e != "" {
+		redirectBack(w, r, a, "error", strings.SplitN(e, ":", 2)[0])
+		return a, false
+	}
+	return a, true
+}
+
+// redirectBack — возврат клиенту на redirect_uri с параметром k=v (и state).
+func redirectBack(w http.ResponseWriter, r *http.Request, a authReq, k, v string) {
 	u, _ := url.Parse(a.RedirectURI)
 	q := u.Query()
-	q.Set("error", e)
+	q.Set(k, v)
 	if a.State != "" {
 		q.Set("state", a.State)
 	}
@@ -386,16 +396,17 @@ func secureHeaders(w http.ResponseWriter) {
 
 func (s *Server) authorizeForm(w http.ResponseWriter, r *http.Request) {
 	secureHeaders(w)
-	a, c, e := s.parseAuth(r.URL.Query())
-	if c == nil {
-		http.Error(w, "invalid authorization request: "+e, 400)
-		return
+	if a, ok := s.authRequest(w, r, r.URL.Query()); ok {
+		showPage(w, 0, a)
 	}
-	if e != "" {
-		redirectErr(w, r, a, strings.SplitN(e, ":", 2)[0])
-		return
-	}
+}
+
+// showPage — форма ввода кода; status 0 — 200.
+func showPage(w http.ResponseWriter, status int, a authReq) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if status != 0 {
+		w.WriteHeader(status)
+	}
 	_ = page.Execute(w, a)
 }
 
@@ -405,17 +416,12 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	a, c, e := s.parseAuth(r.PostForm)
-	if c == nil {
-		http.Error(w, "invalid authorization request: "+e, 400)
-		return
-	}
-	if e != "" {
-		redirectErr(w, r, a, strings.SplitN(e, ":", 2)[0])
+	a, ok := s.authRequest(w, r, r.PostForm)
+	if !ok {
 		return
 	}
 	if r.PostForm.Get("decision") == "deny" {
-		redirectErr(w, r, a, "access_denied")
+		redirectBack(w, r, a, "error", "access_denied")
 		return
 	}
 	code := strings.ToUpper(strings.TrimSpace(r.PostForm.Get("connect_code")))
@@ -431,10 +437,8 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	if s.failCount >= maxFailuresPerMinute {
 		s.mu.Unlock()
 		a.Error = "Слишком много неверных кодов. Попробуйте через минуту."
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Retry-After", "60")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_ = page.Execute(w, a)
+		showPage(w, http.StatusTooManyRequests, a)
 		return
 	}
 	cc, ok := s.connect[code]
@@ -449,9 +453,7 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 		s.mu.Unlock()
 		a.Error = "Неверный или просроченный код подключения."
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(400)
-		_ = page.Execute(w, a)
+		showPage(w, 400, a)
 		return
 	}
 	delete(s.connect, code) // одноразовый
@@ -459,14 +461,7 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	s.codes[ac] = &authCode{clientID: a.ClientID, redirectURI: a.RedirectURI, challenge: a.Challenge, agent: cc.agent,
 		resource: a.Resource, expires: s.Now().Add(2 * time.Minute)}
 	s.mu.Unlock()
-	u, _ := url.Parse(a.RedirectURI)
-	q := u.Query()
-	q.Set("code", ac)
-	if a.State != "" {
-		q.Set("state", a.State)
-	}
-	u.RawQuery = q.Encode()
-	http.Redirect(w, r, u.String(), http.StatusFound)
+	redirectBack(w, r, a, "code", ac)
 }
 
 func pkceOK(verifier, challenge string) bool {

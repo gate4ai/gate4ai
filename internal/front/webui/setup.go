@@ -5,6 +5,7 @@ package webui
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -285,7 +286,7 @@ func (u *UI) setupAccessPage(r *http.Request) (string, map[string]any, error) {
 		switch cn {
 		case "files":
 			roots := toStrings(cfg.Connectors["files"]["roots"])
-			if len(roots) == 0 || (len(roots) == 1 && (roots[0] == "~" || roots[0] == "~/")) {
+			if len(roots) == 0 {
 				roots = []string{"~/Documents"}
 			}
 			sc.Folders = strings.Join(roots, "\n")
@@ -370,13 +371,10 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 					return err
 				}
 				s := map[string]any{}
-				for k, v := range c.Connectors["files"] {
-					s[k] = v
-				}
+				maps.Copy(s, c.Connectors["files"])
 				roots := toStrings(s["roots"])
-				// Начальный корень («весь домашний каталог» прежних версий или ~/Documents)
-				// заменяется выбранными папками.
-				if len(roots) == 1 && (roots[0] == "~" || roots[0] == "~/" || roots[0] == "~/Documents") {
+				// Начальный корень ~/Documents заменяется выбранными папками.
+				if len(roots) == 1 && roots[0] == "~/Documents" {
 					roots = nil
 				}
 				for _, d := range folders {
@@ -389,9 +387,7 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 			case "browser":
 				if len(sites) > 0 {
 					s := map[string]any{}
-					for k, v := range c.Connectors["browser"] {
-						s[k] = v
-					}
+					maps.Copy(s, c.Connectors["browser"])
 					cur := toStrings(s["allowed_domains"])
 					for _, x := range sites {
 						if !slices.Contains(cur, x) {
@@ -443,7 +439,7 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 	}
 	to := "/setup/check?agent=" + url.QueryEscape(name) + "&client=" + url.QueryEscape(client)
 	if len(notes) > 0 {
-		return map[string]any{"redirect": to, "error": joinMsgs(notes), "detail": detail}
+		return map[string]any{"redirect": to, "error": msgs(notes), "detail": detail}
 	}
 	return redirectDetail(to, M("%s is connected to gate4.ai.", clientTitle(client)), detail)
 }
@@ -460,8 +456,6 @@ func (m msgs) in(l string) string {
 	}
 	return strings.Join(parts, "\n")
 }
-
-func joinMsgs(m []Msg) error { return msgs(m) }
 
 // connectDetail — где записана конфигурация клиента (для «Details»).
 func connectDetail(res agentsetup.Result) string {

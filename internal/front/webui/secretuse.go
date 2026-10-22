@@ -3,6 +3,8 @@
 package webui
 
 import (
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -62,9 +64,6 @@ func secretUses(cfg *config.Config, ms []manifest.Manifest) map[string][]SecretU
 		for _, sec := range cfg.Credentials[alias].Secrets() {
 			add(sec, SecretUse{Pre: "account ", Name: alias, Post: " (sign-in)", Link: "#" + AccountAnchor(alias)})
 		}
-	}
-	if k := cfg.Browser.ModelKey; k != "" { // раздел browser до v0.6, переносится в connectors.browser
-		add(k, SecretUse{Pre: "browser: ", Name: "model key"})
 	}
 	installed := map[string]manifest.Manifest{}
 	for _, m := range ms {
@@ -135,12 +134,7 @@ func AccountAnchor(alias string) string { return "acc-" + strings.TrimPrefix(ali
 func SecretAnchor(alias string) string { return "sec-" + strings.TrimPrefix(alias, "@") }
 
 func sortedAccounts(cfg *config.Config) []string {
-	out := make([]string, 0, len(cfg.Credentials))
-	for a := range cfg.Credentials {
-		out = append(out, a)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(cfg.Credentials))
 }
 
 // AccountView — учётка входа на сайт для страницы секретов (без значений).

@@ -113,7 +113,7 @@ func TestConnectorLogInResultAndAPI(t *testing.T) {
 	var out struct {
 		Lines []LogLine `json:"lines"`
 	}
-	// Лог владельца — и ошибка исполнения (раньше после падения в нём было только «installed»).
+	// Лог владельца — и ошибка исполнения после падения, не только «installed».
 	if code := owner.do(t, "GET", "/v1/connectors/logs?name=shop&since=1h", nil, &out); code != 200 || len(out.Lines) != 2 || !strings.Contains(out.Lines[1].Msg, "no debt on the page") {
 		t.Fatal(code, out)
 	}

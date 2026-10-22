@@ -61,8 +61,6 @@ func TestParseErrors(t *testing.T) {
 		{"bad duration", "profiles: {p: {connectors: [email]}}\napprovals: {timeout: soon}\n", "invalid duration"},
 		{"limit empty", "profiles: {p: {connectors: [email], limits: [{id: l, action: email.send}]}}\n", "set per_day or amount_per_day"},
 		{"yaml syntax", "agents: [\n", "yaml:"},
-		{"browser engine", "profiles: {p: {connectors: [email]}}\nbrowser: {engine: selenium}\n", "must be stagehand or cdp"},
-		{"browser key inline", "profiles: {p: {connectors: [email]}}\nbrowser: {model_key: sk-123}\n", "vault alias"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

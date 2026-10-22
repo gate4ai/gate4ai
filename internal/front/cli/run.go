@@ -178,9 +178,7 @@ func (e *Env) run(ctx context.Context, args []string) int {
 
 func (e *Env) doctor(ctx context.Context) int {
 	checks := sandbox.Doctor(sandbox.RealDoctorEnv(func() error {
-		var h map[string]any
-		err := NewSocketClientFrom(e).Do(ctx, "GET", "/v1/health", nil, &h)
-		if err != nil {
+		if _, err := e.health(ctx); err != nil {
 			p := Explain(err, false)
 			if p.Detail != "" {
 				return errors.New(p.Message + " (" + p.Detail + ")")
@@ -197,6 +195,3 @@ func (e *Env) doctor(ctx context.Context) int {
 	}
 	return ExitOK
 }
-
-// NewSocketClientFrom — клиент владельца из окружения.
-func NewSocketClientFrom(e *Env) *Client { return e.Connect("") }

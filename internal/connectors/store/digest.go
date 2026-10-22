@@ -13,14 +13,6 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
-// ManifestSHA256 — sha256 (hex) манифеста пакета плана: сверка с тем
-// манифестом, который показали человеку в запросе подтверждения.
-func (p *Plan) ManifestSHA256() string { return SHA256(p.pkg.ManifestYAML) }
-
-// Runtime — среда исполнения пакета плана (по собранному пакету, а не по
-// отдельному чтению манифеста).
-func (p *Plan) Runtime() string { return p.pkg.Manifest.Runtime }
-
 // PrepareDevWasm — своя сборка агента из папки (install_dev_connector):
 // манифест читается один раз и должен совпасть с manifestSHA256 (тем, что
 // одобрил человек); собирается только WASM — нативный код из папки агента не
@@ -66,8 +58,9 @@ func (o Options) PrepareDevWasm(ctx context.Context, dir, manifestSHA256 string)
 	if err != nil {
 		return nil, err
 	}
-	// Сверка по собранному пакету: тот же манифест, только WASM.
-	if p.ManifestSHA256() != manifestSHA256 || p.pkg.Native() || p.Runtime() != manifest.RuntimeWasm {
+	// Сверка по собранному пакету (а не по отдельному чтению манифеста): тот же
+	// манифест, что показали человеку, только WASM.
+	if SHA256(p.pkg.ManifestYAML) != manifestSHA256 || p.pkg.Native() || p.pkg.Manifest.Runtime != manifest.RuntimeWasm {
 		return nil, errors.New("the built package does not match the approved manifest")
 	}
 	p.Source = SourceDir + dir

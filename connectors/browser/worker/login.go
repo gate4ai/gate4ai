@@ -189,9 +189,6 @@ func (x *Executor) checkFields(ctx context.Context, fields []LoginField) error {
 
 // fill вводит значение поля: фокус, очистка, Input.insertText.
 func (x *Executor) fill(ctx context.Context, f LoginField) error {
-	if err := x.pace(ctx, "fill_secret"); err != nil {
-		return err
-	}
 	var ok bool
 	if err := x.Engine.Eval(ctx, call(fillFieldJS, f.Selector), &ok); err != nil {
 		return err
@@ -241,24 +238,28 @@ func (x *Executor) coveredScreenshot(ctx context.Context, selector string) ([]by
 // FillSecret вводит одно поле учётки на странице входа (без отправки):
 // origin страницы — из bind, поле проверено, документ помечен.
 func (x *Executor) FillSecret(ctx context.Context, bind []string, f LoginField) (LoginResult, error) {
-	u, err := x.onOrigin(ctx, bind)
+	res, err := x.CheckSecret(ctx, bind, f)
 	if err != nil {
+		return res, err
+	}
+	if err := x.enter(ctx, f); err != nil {
 		return LoginResult{}, err
 	}
-	if err := x.checkFields(ctx, []LoginField{f}); err != nil {
-		return LoginResult{}, err
-	}
-	// Документ уже помечен (второе поле секрета): повторная метка не встанет
-	// (свойство не изменить) и включила бы режим до перехода через Open.
+	return res, nil
+}
+
+// enter вводит поле; перед секретом помечает документ, если он ещё не помечен.
+// Документ уже помечен (второе поле секрета): повторная метка не встанет
+// (свойство не изменить) и включила бы режим до перехода через Open. Метка
+// прежнего документа (неверный пароль — новая страница входа) не в счёт:
+// SecretOnPage сверяет её с текущим документом.
+func (x *Executor) enter(ctx context.Context, f LoginField) error {
 	if f.Secret && !x.SecretOnPage(ctx) {
 		if err := x.mark(ctx); err != nil {
-			return LoginResult{}, err
+			return err
 		}
 	}
-	if err := x.fill(ctx, f); err != nil {
-		return LoginResult{}, err
-	}
-	return LoginResult{URL: u, Origin: domain.OriginOf(u)}, nil
+	return x.fill(ctx, f)
 }
 
 // CheckSecret — проверки FillSecret без ввода: страница на сайте входа и
@@ -294,14 +295,7 @@ func (x *Executor) Login(ctx context.Context, form LoginForm) (LoginResult, erro
 		return LoginResult{}, err
 	}
 	for _, f := range form.Fields {
-		// Метка прежнего документа (неверный пароль — новая страница входа) не
-		// в счёт: SecretOnPage сверяет её с текущим документом.
-		if f.Secret && !x.SecretOnPage(ctx) {
-			if err := x.mark(ctx); err != nil {
-				return LoginResult{}, err
-			}
-		}
-		if err := x.fill(ctx, f); err != nil {
+		if err := x.enter(ctx, f); err != nil {
 			return LoginResult{}, err
 		}
 	}
@@ -341,10 +335,8 @@ func (x *Executor) Login(ctx context.Context, form LoginForm) (LoginResult, erro
 		if time.Now().After(deadline) {
 			break
 		}
-		select {
-		case <-time.After(LoginPoll):
-		case <-ctx.Done():
-			return LoginResult{}, ctx.Err()
+		if err := wait(ctx, LoginPoll); err != nil {
+			return LoginResult{}, err
 		}
 	}
 	res := LoginResult{URL: u, Origin: domain.OriginOf(start), Status: Submitted}

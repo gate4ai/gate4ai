@@ -75,7 +75,7 @@ type Verification struct {
 
 // Canonical — каноническое представление RFC 8785.
 func (r *Receipt) Canonical() ([]byte, error) {
-	if r.RuleIDsNil() {
+	if r.Decision.RuleIDs == nil {
 		r.Decision.RuleIDs = []string{}
 	}
 	if r.Verification.EvidenceRefs == nil {
@@ -84,15 +84,8 @@ func (r *Receipt) Canonical() ([]byte, error) {
 	if r.Args == nil {
 		r.Args = map[string]any{}
 	}
-	b, err := json.Marshal(r)
-	if err != nil {
-		return nil, err
-	}
-	return jcs.Transform(b)
+	return Canonicalize(r)
 }
-
-// RuleIDsNil — rule_ids не задан.
-func (r *Receipt) RuleIDsNil() bool { return r.Decision.RuleIDs == nil }
 
 // Hash — sha256 канонического JSON в hex.
 func (r *Receipt) Hash() (string, error) {

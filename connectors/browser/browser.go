@@ -168,12 +168,17 @@ func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (
 		r.Args[viaArg] = r.Caller.Connector // шаг коннектора входа — с пометкой в записи
 		r.Caller = nil
 	}
+	if r.Caller != nil && str(r.Args, "session") != "" {
+		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "session is for agents; a connector's page lives for its root call")
+	}
+	if r.Action == "act" { // аргументы act — до страницы и сеанса
+		if err := worker.CheckAct(actRequest(r.Args)); err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
+		}
+	}
 	if r.Caller == nil {
 		res, err := b.agentPage(ctx, r)
 		return res, fail(b.busy(siteHint(err)))
-	}
-	if str(r.Args, "session") != "" {
-		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "session is for agents; a connector's page lives for its root call")
 	}
 	res, err := b.service(ctx, r)
 	return res, fail(b.busy(err))
@@ -291,11 +296,6 @@ func (b *Browser) session(ctx context.Context, r abi.ExecRequest) (*callSession,
 
 // service — действие для другого коннектора на странице его корневого действия.
 func (b *Browser) service(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
-	if r.Action == "act" {
-		if err := worker.CheckAct(actRequest(r.Args)); err != nil {
-			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
-		}
-	}
 	cs, err := b.session(ctx, r)
 	if err != nil {
 		return abi.ExecResult{}, err
@@ -475,11 +475,6 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 // тестов коннектора (hosttest.Replay).
 func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
 	id := str(r.Args, "session")
-	if r.Action == "act" {
-		if err := worker.CheckAct(actRequest(r.Args)); err != nil {
-			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
-		}
-	}
 	if all, _ := r.Args["all"].(bool); r.Action == "close" && all {
 		return b.closeAll(r.Agent), nil
 	}

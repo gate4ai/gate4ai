@@ -36,7 +36,7 @@ var defaultActions = map[string][]string{
 }
 
 var defaultManifests = map[string]string{
-	// Пакет files из магазина до v0.6: ядро его не ставит и удаляет установленный.
+	// Пакет files в магазине: ядро его не ставит (files встроен).
 	"files": `connector: files
 version: "4"
 runtime: wasm
@@ -139,7 +139,7 @@ func localRegistry(t *testing.T, dir string) (index, regPub string) {
 		file := name + "-" + p.Manifest.Version + ".g4c"
 		os.WriteFile(filepath.Join(dir, "packages", file), b, 0o644)
 		rel := registry.Release{Version: p.Manifest.Version, URL: "packages/" + file, SHA256: store.SHA256(b),
-			Digest: p.Sig.Digest, Capabilities: p.Manifest.Capabilities.Summary()}
+			Digest: p.Sig.Digest, Capabilities: p.Manifest.Summary()}
 		if p.Native() {
 			set := store.PlatformSet{Connector: name, Version: p.Manifest.Version,
 				Platforms: map[string]store.Artifact{store.HostPlatform(): {URL: file, SHA256: store.SHA256(b), Digest: p.Sig.Digest}}}
@@ -259,11 +259,11 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 
 	// Любой другой коннектор при установке — тоже в default, действия с подтверждения;
 	// правило владельца на действие остаётся.
-	plan, err := d.PrepareConnector(context.Background(), "bank")
+	plan, err := d.PrepareConnectorDev(context.Background(), "bank", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := d.InstallConnector(context.Background(), "bank", plan.Capabilities); err != nil {
+	if _, _, _, err := d.InstallConnectorDev(context.Background(), "bank", plan.Capabilities, false); err != nil {
 		t.Fatal(err)
 	}
 	for action, want := range map[string]string{"bank.balance": config.EffectDeny, "bank.pay": config.EffectAsk} {
@@ -285,41 +285,20 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 	}
 }
 
-// Пакет files из магазина (до v0.6) при запуске daemon заменяется встроенным
-// коннектором: правила и настройки остаются, поставить его снова нельзя.
-func TestStoreFilesReplacedByBuiltin(t *testing.T) {
+// Пакет files в магазине не ставится: files — встроенный коннектор ядра.
+func TestStoreFilesRefused(t *testing.T) {
 	dir := t.TempDir()
 	index, regPub := localRegistry(t, filepath.Join(dir, "registry"))
 	cfg := regexp.MustCompile(`registry: \S+`).ReplaceAllString(emptyConfig, "registry: "+index)
 	cfg = regexp.MustCompile(`registry_keys: .*`).ReplaceAllString(cfg, `registry_keys: ["`+regPub+`"]`)
-	home := filepath.Join(dir, "home")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	d, err := daemon.New(daemon.Options{Home: home, InitialConfig: []byte(cfg), Keys: keys.NewMemory(), Log: log})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.PrepareConnector(context.Background(), "files"); err == nil || !strings.Contains(err.Error(), "part of gate4ai") {
-		t.Fatal("store files must be refused:", err)
-	}
-	// Установка прежней версией ядра — пакет в каталоге коннекторов.
-	opts := d.StoreOptions()
-	opts.Builtin = nil
-	plan, err := opts.Prepare(context.Background(), "files", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := opts.Install(plan, plan.Capabilities); err != nil {
-		t.Fatal(err)
-	}
-	d.Close()
-
-	d, err = daemon.New(daemon.Options{Home: home, Keys: keys.NewMemory(), Log: log})
+	d, err := daemon.New(daemon.Options{Home: filepath.Join(dir, "home"), InitialConfig: []byte(cfg), Keys: keys.NewMemory(), Log: log})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if list, _ := store.List(d.ConnectorsDir); len(list) != 0 {
-		t.Fatal("store package left:", list)
+	if _, err := d.PrepareConnectorDev(context.Background(), "files", false); err == nil || !strings.Contains(err.Error(), "part of gate4ai") {
+		t.Fatal("store files must be refused:", err)
 	}
 	cli, ok := d.Registry.Get("files")
 	if !ok || cli.Manifest().Runtime != manifest.RuntimeBuiltin {
@@ -327,54 +306,5 @@ func TestStoreFilesReplacedByBuiltin(t *testing.T) {
 	}
 	if dec := d.Pipeline.Engine().Decide(policy.Request{Agent: "x", Action: "files.read", Class: "read"}, nil); dec.Effect == "" {
 		t.Fatal(dec)
-	}
-}
-
-// Установленный WASM-браузер (до v0.6, capabilities.browser) читается, а daemon
-// ставит вместо него нативный из магазина; остальные коннекторы загружаются.
-func TestWasmBrowserReplacedByNative(t *testing.T) {
-	dir := t.TempDir()
-	index, regPub := localRegistry(t, filepath.Join(dir, "registry"))
-	cfg := regexp.MustCompile(`registry: \S+`).ReplaceAllString(emptyConfig, "registry: "+index)
-	cfg = regexp.MustCompile(`registry_keys: .*`).ReplaceAllString(cfg, `registry_keys: ["`+regPub+`"]`)
-	home := filepath.Join(dir, "home")
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	d, err := daemon.New(daemon.Options{Home: home, InitialConfig: []byte(cfg), Keys: keys.NewMemory(), Log: log})
-	if err != nil {
-		t.Fatal(err)
-	}
-	opts := d.StoreOptions()
-	legacy := filepath.Join(dir, "browser-5.g4c")
-	b, err := store.Pack([]byte("connector: browser\nversion: \"5\"\nruntime: wasm\ncapabilities:\n  browser:\n    domains: [\"${setting:allowed_domains}\"]\nactions:\n  - { name: read, class: read }\n"),
-		[]byte("\x00asm\x01\x00\x00\x00"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.WriteFile(legacy, b, 0o644)
-	for _, src := range []string{legacy, "bank"} {
-		plan, err := opts.Prepare(context.Background(), src, true)
-		if err != nil {
-			t.Fatal(src, err)
-		}
-		if _, err := opts.Install(plan, plan.Capabilities); err != nil {
-			t.Fatal(err)
-		}
-	}
-	d.Close()
-
-	d, err = daemon.New(daemon.Options{Home: home, Keys: keys.NewMemory(), Log: log})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.Close()
-	if _, ok := d.Registry.Get("bank"); !ok {
-		t.Fatal("other connectors must load next to the legacy browser")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	d.InstallDefaults(ctx)
-	cancel()
-	c, ok := d.Registry.Get("browser")
-	if !ok || c.Manifest().Runtime != manifest.RuntimeNative || c.Manifest().Version != "6" {
-		t.Fatal("browser not replaced by the native package", ok)
 	}
 }

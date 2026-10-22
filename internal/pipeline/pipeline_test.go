@@ -252,7 +252,7 @@ func TestAskApproveRejectTimeout(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	r2 := e.p.wait(ctx, r.ID, 5*time.Second)
+	r2 := e.p.WaitFor(ctx, r.ID, 5*time.Second)
 	if r2.Status != StatusOK || r2.ID != r.ID || !*r2.Verified {
 		t.Fatalf("%+v", r2)
 	}

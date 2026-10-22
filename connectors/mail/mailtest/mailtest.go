@@ -10,7 +10,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"strconv"
 	"sync"
 	"time"
 
@@ -138,7 +137,7 @@ type session struct {
 
 func (ss *session) AuthMechanisms() []string { return []string{sasl.Plain} }
 
-func (ss *session) Auth(mech string) (sasl.Server, error) {
+func (ss *session) Auth(string) (sasl.Server, error) { // интерфейс smtp.AuthSession: механизм один
 	return sasl.NewPlainServer(func(identity, username, password string) error {
 		if username != User || password != Password {
 			return errors.New("invalid credentials")
@@ -182,6 +181,3 @@ func (ss *session) Data(r io.Reader) error {
 
 func (ss *session) Reset()        { ss.env = Envelope{} }
 func (ss *session) Logout() error { return nil }
-
-// Port — порт строкой (для логов).
-func Port(p int) string { return strconv.Itoa(p) }

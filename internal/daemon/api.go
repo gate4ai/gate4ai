@@ -92,28 +92,22 @@ func WithPrincipal(ctx context.Context, p auth.Principal) context.Context {
 // identify: на сокете владельца проверенный собеседник — владелец, если не
 // предъявил токен агента; на сокете агентов нужен токен, прав владельца нет.
 func (d *Daemon) identify(r *http.Request, ownerSock bool) (auth.Principal, error) {
-	tok := bearer(r)
-	if tok != "" {
-		agent, err := d.State.AgentByToken(tok)
-		if err != nil {
-			return auth.Principal{}, err
-		}
-		if _, ok := d.Config.Current().Agents[agent]; !ok {
-			return auth.Principal{}, fmt.Errorf("agent %q is not in the configuration", agent)
-		}
+	if bearer(r) != "" {
 		via := map[bool]string{true: "socket", false: "agent-socket"}[ownerSock]
 		// Клиент сообщает, кто он (gate4ai mcp — "mcp"); на права это не влияет.
 		seen := via
 		if c := r.Header.Get(ClientHeader); c == "mcp" || c == "cli" {
 			seen = c
 		}
-		d.State.Seen(agent, seen, tok)
+		agent, err := d.tokenAgent(r, seen)
+		if err != nil {
+			return auth.Principal{}, err
+		}
 		return auth.AgentVia(agent, via), nil
 	}
 	if ownerSock {
 		if _, ok := ipc.PeerFrom(r.Context()); ok {
-			p := auth.OwnerVia("socket")
-			return p, nil
+			return auth.OwnerVia("socket"), nil
 		}
 	}
 	return auth.Principal{}, errors.New("authentication required: pass an agent token (GATE4AI_TOKEN)")
@@ -137,7 +131,9 @@ type APIError struct {
 	Message string `json:"message"`
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
+// WriteJSON — ответ API (JSON с отступами); маршруты других пакетов
+// (AddRoutes) отвечают так же.
+func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
@@ -145,8 +141,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = enc.Encode(v)
 }
 
-func writeErr(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, map[string]APIError{"error": {Code: code, Message: msg}})
+// WriteError — ошибка API: {"error": {"code", "message"}}.
+func WriteError(w http.ResponseWriter, status int, code, msg string) {
+	WriteJSON(w, status, map[string]APIError{"error": {Code: code, Message: msg}})
 }
 
 func readJSON(r *http.Request, v any) error {
@@ -159,10 +156,7 @@ func readJSON(r *http.Request, v any) error {
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.UseNumber()
-	if err := dec.Decode(v); err != nil {
-		return err
-	}
-	return nil
+	return dec.Decode(v)
 }
 
 // numbersToFloat приводит json.Number к float64 (для аргументов действий).
@@ -190,7 +184,7 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		return func(w http.ResponseWriter, r *http.Request) {
 			p, err := d.identify(r, owner)
 			if err != nil {
-				writeErr(w, http.StatusUnauthorized, "unauthorized", err.Error())
+				WriteError(w, http.StatusUnauthorized, "unauthorized", err.Error())
 				return
 			}
 			h(w, r.WithContext(WithPrincipal(r.Context(), p)), p)
@@ -199,7 +193,7 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 	own := func(h func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
 		return anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 			if !p.IsOwner() {
-				writeErr(w, http.StatusForbidden, "owner_only", "this operation requires the owner (local socket without an agent token)")
+				WriteError(w, http.StatusForbidden, "owner_only", "this operation requires the owner (local socket without an agent token)")
 				return
 			}
 			h(w, r, p)
@@ -219,11 +213,11 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 				res["policy_warning"] = w
 			}
 		}
-		writeJSON(w, 200, res)
+		WriteJSON(w, 200, res)
 	})
 	// Остановка по просьбе владельца (`gate4ai daemon stop`): Serve завершается штатно.
 	mux.HandleFunc("POST /v1/shutdown", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-		writeJSON(w, 200, map[string]any{"ok": true})
+		WriteJSON(w, 200, map[string]any{"ok": true})
 		d.RequestStop()
 	}))
 	d.agentRoutes(mux, anyp)
@@ -251,7 +245,7 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		}
 		es, err := d.Journal.List(f)
 		if err != nil {
-			writeErr(w, 500, "journal", err.Error())
+			WriteError(w, 500, "journal", err.Error())
 			return
 		}
 		if parent != "" {
@@ -268,15 +262,15 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		if es == nil {
 			es = []audit.Entry{}
 		}
-		writeJSON(w, 200, es)
+		WriteJSON(w, 200, es)
 	}))
 	mux.HandleFunc("GET /v1/show/{key}", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		e, err := d.Journal.Find(r.PathValue("key"))
 		if err != nil {
-			writeErr(w, 404, "not_found", err.Error())
+			WriteError(w, 404, "not_found", err.Error())
 			return
 		}
-		writeJSON(w, 200, e)
+		WriteJSON(w, 200, e)
 	}))
 	mux.HandleFunc("POST /v1/export", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		var req struct {
@@ -285,7 +279,7 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		_ = readJSON(r, &req)
 		var buf bytes.Buffer
 		if err := d.Journal.Export(&buf, req.Passphrase); err != nil {
-			writeErr(w, 500, "export", err.Error())
+			WriteError(w, 500, "export", err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -295,7 +289,7 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 	// добавляет сайт одной командой, без правки YAML.
 	mux.HandleFunc("GET /v1/sites", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		c := d.Config.Current()
-		writeJSON(w, 200, map[string]any{"allowed_domains": orEmpty(c.SettingList("browser", "allowed_domains")),
+		WriteJSON(w, 200, map[string]any{"allowed_domains": orEmpty(c.SettingList("browser", "allowed_domains")),
 			"blocked": orEmpty(c.SettingList("browser", "blocked")), "mode": c.Connectors["browser"]["mode"]})
 	}))
 	mux.HandleFunc("POST /v1/sites", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -304,12 +298,12 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 			Remove []string `json:"remove"`
 		}
 		if err := readJSON(r, &req); err != nil || len(req.Add)+len(req.Remove) == 0 {
-			writeErr(w, 400, "bad_request", "add or remove sites: {\"add\": [\"login.example.org\"]}")
+			WriteError(w, 400, "bad_request", "add or remove sites: {\"add\": [\"login.example.org\"]}")
 			return
 		}
 		for _, s := range append(slices.Clone(req.Add), req.Remove...) {
 			if !siteRe.MatchString(s) {
-				writeErr(w, 400, "bad_request", fmt.Sprintf("%q is not a site: a host like login.example.org or *.example.org", s))
+				WriteError(w, 400, "bad_request", fmt.Sprintf("%q is not a site: a host like login.example.org or *.example.org", s))
 				return
 			}
 		}
@@ -320,22 +314,22 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 			return nil
 		})
 		if err != nil {
-			writeErr(w, 400, "policy", err.Error())
+			WriteError(w, 400, "policy", err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]any{"status": "ok", "version": v.N, "allowed_domains": orEmpty(d.Config.Current().SettingList("browser", "allowed_domains"))})
+		WriteJSON(w, 200, map[string]any{"status": "ok", "version": v.N, "allowed_domains": orEmpty(d.Config.Current().SettingList("browser", "allowed_domains"))})
 	}))
 	mux.HandleFunc("POST /v1/journal/verify", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		if err := d.Journal.VerifyChain(); err != nil {
-			writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+			WriteJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
 		seq, head, _ := d.Journal.Head()
-		writeJSON(w, 200, map[string]any{"ok": true, "receipts": seq, "head": head})
+		WriteJSON(w, 200, map[string]any{"ok": true, "receipts": seq, "head": head})
 	}))
 	mux.HandleFunc("GET /v1/policy", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		raw, n := d.Config.CurrentRaw()
-		writeJSON(w, 200, map[string]any{"version": n, "yaml": string(raw)})
+		WriteJSON(w, 200, map[string]any{"version": n, "yaml": string(raw)})
 	}))
 	mux.HandleFunc("PUT /v1/policy", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		var req struct {
@@ -344,44 +338,44 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 			Base    int    `json:"base,omitempty"` // версия, от которой сделана правка (0 — без проверки)
 		}
 		if err := readJSON(r, &req); err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
+			WriteError(w, 400, "bad_request", err.Error())
 			return
 		}
 		// base — версия, которую клиент правил: если с тех пор политику
 		// изменили (одобренный change_policy, Web UI), правка не затирает их.
 		v, err := d.Config.PutIf(p, []byte(req.YAML), req.Comment, req.Base)
 		if errors.Is(err, config.ErrConflict) {
-			writeErr(w, 409, "conflict", err.Error())
+			WriteError(w, 409, "conflict", err.Error())
 			return
 		}
 		if err != nil {
-			writeErr(w, 400, "invalid_policy", err.Error())
+			WriteError(w, 400, "invalid_policy", err.Error())
 			return
 		}
-		writeJSON(w, 200, v)
+		WriteJSON(w, 200, v)
 	}))
 	mux.HandleFunc("GET /v1/policy/versions", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		vs, err := d.Config.Versions()
 		if err != nil {
-			writeErr(w, 500, "config", err.Error())
+			WriteError(w, 500, "config", err.Error())
 			return
 		}
-		writeJSON(w, 200, vs)
+		WriteJSON(w, 200, vs)
 	}))
 	mux.HandleFunc("POST /v1/policy/rollback", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		var req struct {
 			Version int `json:"version"`
 		}
 		if err := readJSON(r, &req); err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
+			WriteError(w, 400, "bad_request", err.Error())
 			return
 		}
 		v, err := d.Config.Rollback(p, req.Version)
 		if err != nil {
-			writeErr(w, 400, "rollback", err.Error())
+			WriteError(w, 400, "rollback", err.Error())
 			return
 		}
-		writeJSON(w, 200, v)
+		WriteJSON(w, 200, v)
 	}))
 	mux.HandleFunc("POST /v1/policy/test", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		var req struct {
@@ -391,7 +385,7 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 			YAML   string         `json:"yaml"` // проверить черновик политики вместо текущей
 		}
 		if err := readJSON(r, &req); err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
+			WriteError(w, 400, "bad_request", err.Error())
 			return
 		}
 		d.policyTest(w, req.Agent, req.Action, numbersToFloat(map[string]any(req.Args)).(map[string]any), req.YAML)
@@ -401,12 +395,12 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		if toks == nil {
 			toks = []state.TokenInfo{}
 		}
-		writeJSON(w, 200, map[string]any{"agents": d.Config.Current().Agents, "tokens": toks})
+		WriteJSON(w, 200, map[string]any{"agents": d.Config.Current().Agents, "tokens": toks})
 	}))
 	mux.HandleFunc("POST /v1/agents/{name}/token", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		name := r.PathValue("name")
 		if _, ok := d.Config.Current().Agents[name]; !ok {
-			writeErr(w, 404, "not_found", fmt.Sprintf("agent %q is not in the configuration; add it to agents: first", name))
+			WriteError(w, 404, "not_found", fmt.Sprintf("agent %q is not in the configuration; add it to agents: first", name))
 			return
 		}
 		var req struct {
@@ -415,38 +409,38 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		_ = readJSON(r, &req)
 		tok, err := d.State.IssueToken(name, req.Label, "agent")
 		if err != nil {
-			writeErr(w, 500, "token", err.Error())
+			WriteError(w, 500, "token", err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]any{"agent": name, "token": tok})
+		WriteJSON(w, 200, map[string]any{"agent": name, "token": tok})
 	}))
 	mux.HandleFunc("POST /v1/agents/{name}/connect", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		code, exp, err := d.EnableOAuth(nil).NewConnectCode(r.PathValue("name"))
 		if err != nil {
-			writeErr(w, 404, "not_found", err.Error())
+			WriteError(w, 404, "not_found", err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]any{"agent": r.PathValue("name"), "code": code, "expires": exp,
+		WriteJSON(w, 200, map[string]any{"agent": r.PathValue("name"), "code": code, "expires": exp,
 			"hint": "add https://<device-id>.relay.gate4.ai as a custom connector and enter this code when asked"})
 	}))
 	mux.HandleFunc("POST /v1/agents/{name}/revoke", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		n, err := d.State.RevokeAgent(r.PathValue("name"))
 		if err != nil {
-			writeErr(w, 500, "revoke", err.Error())
+			WriteError(w, 500, "revoke", err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]any{"revoked": n})
+		WriteJSON(w, 200, map[string]any{"revoked": n})
 	}))
 	mux.HandleFunc("GET /v1/approvals", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		as, err := d.State.ListApprovals(r.URL.Query().Get("status"), 100)
 		if err != nil {
-			writeErr(w, 500, "approvals", err.Error())
+			WriteError(w, 500, "approvals", err.Error())
 			return
 		}
 		if as == nil {
 			as = []*state.Approval{}
 		}
-		writeJSON(w, 200, as)
+		WriteJSON(w, 200, as)
 	}))
 	mux.HandleFunc("POST /v1/approvals/{id}/decide", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		var req struct {
@@ -454,7 +448,7 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 			Channel string `json:"channel"`
 		}
 		if err := readJSON(r, &req); err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
+			WriteError(w, 400, "bad_request", err.Error())
 			return
 		}
 		ch := req.Channel
@@ -465,7 +459,7 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 			// Самонастройку трей одним нажатием не одобряет: правки видны
 			// целиком только в Web UI (code review E.5).
 			if a, err := d.State.GetApproval(r.PathValue("id")); err == nil && strings.HasPrefix(a.Action, SelfConnector+".") {
-				writeErr(w, 403, "web_only", "approve changes of gate4ai in the Web UI (gate4ai ui): all the changes are shown there")
+				WriteError(w, 403, "web_only", "approve changes of gate4ai in the Web UI (gate4ai ui): all the changes are shown there")
 				return
 			}
 		}
@@ -475,51 +469,51 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 			if errors.Is(err, state.ErrNoApproval) {
 				code = 404
 			}
-			writeErr(w, code, "decide", err.Error())
+			WriteError(w, code, "decide", err.Error())
 			return
 		}
-		writeJSON(w, 200, res)
+		WriteJSON(w, 200, res)
 	}))
 	mux.HandleFunc("GET /v1/questions", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-		writeJSON(w, 200, d.Questions())
+		WriteJSON(w, 200, d.Questions())
 	}))
 	mux.HandleFunc("POST /v1/questions/{id}/answer", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		var req struct {
 			Value string `json:"value"`
 		}
 		if err := readJSON(r, &req); err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
+			WriteError(w, 400, "bad_request", err.Error())
 			return
 		}
 		if err := d.Answer(r.PathValue("id"), req.Value); err != nil {
-			writeErr(w, 404, "question", err.Error())
+			WriteError(w, 404, "question", err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]any{"ok": true})
+		WriteJSON(w, 200, map[string]any{"ok": true})
 	}))
 	mux.HandleFunc("GET /v1/vault", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-		writeJSON(w, 200, d.Vault.Aliases())
+		WriteJSON(w, 200, d.Vault.Aliases())
 	}))
 	mux.HandleFunc("PUT /v1/vault/{alias}", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		var req struct {
 			Value string `json:"value"`
 		}
 		if err := readJSON(r, &req); err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
+			WriteError(w, 400, "bad_request", err.Error())
 			return
 		}
 		if err := d.Vault.Set(r.PathValue("alias"), req.Value); err != nil {
-			writeErr(w, 400, "vault", err.Error())
+			WriteError(w, 400, "vault", err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]any{"ok": true})
+		WriteJSON(w, 200, map[string]any{"ok": true})
 	}))
 	mux.HandleFunc("DELETE /v1/vault/{alias}", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		if err := d.Vault.Delete(r.PathValue("alias")); err != nil {
-			writeErr(w, 400, "vault", err.Error())
+			WriteError(w, 400, "vault", err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]any{"ok": true})
+		WriteJSON(w, 200, map[string]any{"ok": true})
 	}))
 	if owner && len(d.extra) > 0 {
 		// Маршруты подсистем (Web UI, трей, relay): с опознанием собеседника.
@@ -537,26 +531,26 @@ func (d *Daemon) policyTest(w http.ResponseWriter, agent, action string, args ma
 	if draft != "" {
 		cfg, err := d.Config.Validate([]byte(draft))
 		if err != nil {
-			writeErr(w, 400, "invalid_policy", err.Error())
+			WriteError(w, 400, "invalid_policy", err.Error())
 			return
 		}
 		if eng, err = policy.New(cfg, policy.Catalog(d.Registry.Catalog())); err != nil {
-			writeErr(w, 400, "invalid_policy", err.Error())
+			WriteError(w, 400, "invalid_policy", err.Error())
 			return
 		}
 	}
 	_, act, ok := d.Registry.Lookup(action)
 	if !ok {
-		writeErr(w, 404, "unknown_action", action)
+		WriteError(w, 404, "unknown_action", action)
 		return
 	}
 	nargs, err := act.Normalize(args)
 	if err != nil {
-		writeErr(w, 400, "invalid_arguments", err.Error())
+		WriteError(w, 400, "invalid_arguments", err.Error())
 		return
 	}
 	dec := eng.Decide(policy.Request{Agent: agent, Action: action, Class: act.Class, Args: nargs, Now: time.Now()}, d.State.Counters())
-	writeJSON(w, 200, dec)
+	WriteJSON(w, 200, dec)
 }
 
 // agentRoutes — API агента (каталог, вызов, статус): на сокетах и на публичном
@@ -564,13 +558,13 @@ func (d *Daemon) policyTest(w http.ResponseWriter, agent, action string, args ma
 // а на публичном адресе собеседник — всегда агент.
 func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc) {
 	mux.HandleFunc("GET /v1/whoami", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-		writeJSON(w, 200, map[string]any{"owner": p.IsOwner(), "agent": p.Agent, "via": p.Via})
+		WriteJSON(w, 200, map[string]any{"owner": p.IsOwner(), "agent": p.Agent, "via": p.Via})
 	}))
 	mux.HandleFunc("GET /v1/tools", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		if as := r.URL.Query().Get("agent"); as != "" && p.IsOwner() {
 			p = auth.AgentVia(as, "socket")
 		}
-		writeJSON(w, 200, d.Tools(p))
+		WriteJSON(w, 200, d.Tools(p))
 	}))
 	mux.HandleFunc("POST /v1/call", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		var req struct {
@@ -580,46 +574,46 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 			Agent  string         `json:"agent"` // только владелец: выполнить от имени агента (его профиль)
 		}
 		if err := readJSON(r, &req); err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
+			WriteError(w, 400, "bad_request", err.Error())
 			return
 		}
 		agent := p.Agent
 		if p.IsOwner() {
 			if req.Agent == "" {
-				writeErr(w, 400, "agent_required", "owner calls must name the agent whose profile applies (--as <agent>)")
+				WriteError(w, 400, "agent_required", "owner calls must name the agent whose profile applies (--as <agent>)")
 				return
 			}
 			agent = req.Agent
 		}
 		wait, err := config.ParseDuration(req.Wait)
 		if err != nil {
-			writeErr(w, 400, "bad_request", err.Error())
+			WriteError(w, 400, "bad_request", err.Error())
 			return
 		}
-		if p.Via == "https" && wait > maxPublicWait {
-			wait = maxPublicWait
+		if p.Via == "https" {
+			wait = min(wait, maxPublicWait)
 		}
 		args, _ := numbersToFloat(map[string]any(req.Args)).(map[string]any)
 		res := d.Pipeline.Execute(r.Context(), pipeline.Call{Agent: agent, Action: req.Action, Args: args, Wait: wait})
-		writeJSON(w, 200, res)
+		WriteJSON(w, 200, res)
 	}))
 	mux.HandleFunc("GET /v1/status/{id}", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		id := r.PathValue("id")
 		a, err := d.State.GetApproval(id)
 		if err != nil || (!p.IsOwner() && a.Agent != p.Agent) {
-			writeErr(w, 404, "not_found", "unknown id")
+			WriteError(w, 404, "not_found", "unknown id")
 			return
 		}
 		wait, _ := config.ParseDuration(r.URL.Query().Get("wait"))
-		if p.Via == "https" && wait > maxPublicWait {
-			wait = maxPublicWait // публичный адрес: соединение не держится дольше
+		if p.Via == "https" {
+			wait = min(wait, maxPublicWait) // публичный адрес: соединение не держится дольше
 		}
 		if wait > 0 {
-			writeJSON(w, 200, d.Pipeline.WaitFor(r.Context(), id, wait))
+			WriteJSON(w, 200, d.Pipeline.WaitFor(r.Context(), id, wait))
 			return
 		}
 		res, _ := d.Pipeline.Status(id)
-		writeJSON(w, 200, res)
+		WriteJSON(w, 200, res)
 	}))
 }
 

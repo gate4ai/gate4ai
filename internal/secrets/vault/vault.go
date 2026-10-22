@@ -9,8 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -93,12 +94,11 @@ func Norm(alias string) (string, error) {
 	return strings.TrimPrefix(alias, "@"), nil
 }
 
+// saveIndex пишет индекс: отсортированный JSON-массив имён, пустой — `[]`,
+// не `null` (slices.Sorted на пустом наборе дал бы nil).
 func (v *Vault) saveIndex() error {
-	names := make([]string, 0, len(v.names))
-	for n := range v.names {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names := slices.AppendSeq(make([]string, 0, len(v.names)), maps.Keys(v.names))
+	slices.Sort(names)
 	b, _ := json.Marshal(names)
 	return v.ks.Set(indexKey, string(b))
 }
@@ -175,6 +175,6 @@ func (v *Vault) Aliases() []string {
 	for n := range v.names {
 		out = append(out, "@"+n)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }

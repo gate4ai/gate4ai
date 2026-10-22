@@ -87,21 +87,13 @@ func (j *Journal) Purge(now time.Time, ret Retention) (PurgeReport, error) {
 	}
 	var seqs []int64
 	pick := func(where string, before time.Time) error {
-		rows, err := j.db.Query(`SELECT seq FROM receipts WHERE redacted=0 AND ts < ? AND action != ? `+where, before.UnixNano(), RedactAction)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var s int64
-			if err := rows.Scan(&s); err != nil {
-				return err
-			}
+		found, err := j.seqs(`SELECT seq FROM receipts WHERE redacted=0 AND ts < ? AND action != ? `+where, before.UnixNano(), RedactAction)
+		for _, s := range found {
 			if !slices.Contains(seqs, s) {
 				seqs = append(seqs, s)
 			}
 		}
-		return rows.Err()
+		return err
 	}
 	if ret.Denied > 0 {
 		// Отказы политики; отклонения и таймауты человека (есть approval —
@@ -115,39 +107,27 @@ func (j *Journal) Purge(now time.Time, ret Retention) (PurgeReport, error) {
 			return rep, err
 		}
 	}
-	n, err := j.redact(seqs, false)
+	n, err := j.redact(seqs)
 	rep.Redacted = n
 	return rep, err
 }
 
 // redact записывает квитанцию journal.redact со списком квитанций (хэш и хэш
 // заголовка), стирает их тела и ставит чекпоинт, покрывающий запись.
-// legacy — запись для квитанций, отредактированных до появления journal.redact.
-func (j *Journal) redact(seqs []int64, legacy bool) (int, error) {
+func (j *Journal) redact(seqs []int64) (int, error) {
 	if len(seqs) == 0 {
 		return 0, nil
 	}
 	slices.Sort(seqs)
 	var recs []redactRec
 	for _, s := range seqs {
-		var e Entry
-		var err error
-		row := j.db.QueryRow(`SELECT seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash FROM receipts WHERE seq=?`, s)
-		if legacy {
-			e, err = j.scanIndex(row)
-		} else {
-			e, err = j.scan(row)
-		}
+		e, err := j.scan(j.db.QueryRow(`SELECT `+entryCols+` FROM receipts WHERE seq=?`, s))
 		if err != nil {
 			return 0, err
 		}
 		recs = append(recs, redactRec{Seq: s, Hash: e.Hash, Header: HeaderHash(e.Receipt)})
 	}
-	args := map[string]any{"receipts": recs}
-	if legacy {
-		args["legacy"] = true
-	}
-	r := &Receipt{Agent: RedactAgent, Action: RedactAction, Class: "write", Args: args,
+	r := &Receipt{Agent: RedactAgent, Action: RedactAction, Class: "write", Args: map[string]any{"receipts": recs},
 		Decision:     Decision{Effect: "allow", RuleIDs: []string{"retention"}, Reason: "retention period expired"},
 		Execution:    Execution{Status: "ok"},
 		Verification: Verification{Status: "not_applicable"}}
@@ -155,54 +135,32 @@ func (j *Journal) redact(seqs []int64, legacy bool) (int, error) {
 		return 0, err
 	}
 	n := 0
-	if !legacy {
-		for _, s := range seqs {
-			res, err := j.db.Exec(`UPDATE receipts SET body=NULL, redacted=1 WHERE seq=? AND redacted=0`, s)
-			if err != nil {
-				return n, err
-			}
-			k, _ := res.RowsAffected()
-			n += int(k)
+	for _, s := range seqs {
+		res, err := j.db.Exec(`UPDATE receipts SET body=NULL, redacted=1 WHERE seq=? AND redacted=0`, s)
+		if err != nil {
+			return n, err
 		}
+		k, _ := res.RowsAffected()
+		n += int(k)
 	}
 	_, err := j.Checkpoint()
 	return n, err
 }
 
-// coverLegacyRedactions — квитанции, отредактированные прежней версией (до
-// journal.redact), один раз покрываются записью legacy; дальше любая
-// отредактированная квитанция без записи — подделка.
-func (j *Journal) coverLegacyRedactions() error {
-	var n int
-	if err := j.db.QueryRow(`SELECT COUNT(*) FROM receipts WHERE action=?`, RedactAction).Scan(&n); err != nil || n > 0 {
-		return err
-	}
-	rows, err := j.db.Query(`SELECT seq FROM receipts WHERE redacted=1`)
+// seqs — номера квитанций по запросу SELECT seq.
+func (j *Journal) seqs(q string, args ...any) ([]int64, error) {
+	rows, err := j.db.Query(q, args...)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var seqs []int64
+	defer rows.Close()
+	var out []int64
 	for rows.Next() {
 		var s int64
 		if err := rows.Scan(&s); err != nil {
-			rows.Close()
-			return err
+			return nil, err
 		}
-		seqs = append(seqs, s)
+		out = append(out, s)
 	}
-	rows.Close()
-	_, err = j.redact(seqs, true)
-	return err
-}
-
-func minPositive(a, b time.Duration) time.Duration {
-	switch {
-	case a <= 0:
-		return b
-	case b <= 0:
-		return a
-	case a < b:
-		return a
-	}
-	return b
+	return out, rows.Err()
 }

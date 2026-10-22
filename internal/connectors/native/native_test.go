@@ -194,7 +194,7 @@ func TestCancelReachesTheProcess(t *testing.T) {
 }
 
 // Нативный процесс получает только системные переменные окружения, а не токены
-// и ключи из окружения daemon (B.L9).
+// и ключи из окружения daemon.
 func TestMinimalEnv(t *testing.T) {
 	got := strings.Join(MinimalEnv([]string{"PATH=/bin", "HOME=/h", "LC_ALL=C", "XDG_RUNTIME_DIR=/run/u", "DISPLAY=:0",
 		"GATE4AI_TOKEN=t0k", "GITHUB_TOKEN=gh", "OPENAI_API_KEY=sk", "AWS_SECRET_ACCESS_KEY=x", "LocalAppData=C:\\u"}), " ")
