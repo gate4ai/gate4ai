@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
 	"runtime"
 	"sort"
 	"strconv"
@@ -97,7 +96,7 @@ Agent commands (token in GATE4AI_TOKEN; daemon on another computer: GATE4AI_URL=
 
 Daemon:
   gate4ai daemon [flags]                  run in this terminal (flags: gate4ai daemon --help)
-  gate4ai daemon start [flags] | stop | status
+  gate4ai daemon start [flags] | stop | restart | status
   gate4ai service install [--no-tray] [-- daemon flags] | uninstall | status   autostart at login
 
 Owner commands (local socket):
@@ -129,7 +128,7 @@ Exit codes: 0 ok, 1 error, 2 denied by policy, 3 pending approval, 4 verificatio
 
 // commands — встроенные команды (остальное первое слово — имя коннектора).
 var commands = []string{"help", "version", "tools", "status", "skill", "mcp", "daemon", "service", "log", "show", "export",
-	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "relay", "connectors", "registry", "ui", "run", "doctor", "egress"}
+	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "relay", "connectors", "registry", "contract", "fixture", "ui", "run", "doctor", "egress"}
 
 // Run — точка входа CLI.
 func Run(ctx context.Context, e *Env, args []string) int {
@@ -1129,20 +1128,6 @@ func (e *Env) relay(ctx context.Context, args []string) int {
 	return ExitOK
 }
 
-// OpenURL открывает ссылку в браузере (подменяется в тестах).
-var OpenURL = func(u string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", u)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", u)
-	default:
-		cmd = exec.Command("xdg-open", u)
-	}
-	return cmd.Start()
-}
-
 func (e *Env) ui(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("gate4ai ui", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
@@ -1175,7 +1160,7 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 	if !*printOnly && !*remote {
 		if headless() {
 			fmt.Fprintln(e.Stderr, "gate4ai: no graphical session here, so no browser was opened. Open the link in a browser on this computer, or forward the port: "+sshHint(res.URL)+"; from another device: gate4ai ui --remote (needs relay or --public)")
-		} else if err := OpenURL(res.URL); err != nil {
+		} else if err := OpenLoginURL(res.URL); err != nil {
 			fmt.Fprintln(e.Stderr, "gate4ai: could not open a browser ("+err.Error()+"): open the link yourself")
 		}
 	}

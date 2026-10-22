@@ -9,7 +9,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -181,18 +180,28 @@ func (x *Executor) Extract(ctx context.Context, instruction string) (any, error)
 // ActPoll — шаг ожидания элемента в Act.
 var ActPoll = 200 * time.Millisecond
 
-// actJS ищет видимый элемент по селектору, чей текст (value, placeholder,
-// aria-label, подписи) содержит нужный текст без учёта регистра и «ё»; из
+// actJS ищет видимый элемент по селектору, чей текст (подписи, placeholder,
+// aria-label, value) содержит нужный текст без учёта регистра и «ё»; из
 // нескольких берёт элемент с самой короткой подписью. Готовит его к методу
 // (click — клик, fill — фокус и выделение содержимого, press — фокус) и
 // возвращает его текст.
-var actJS = `((sel, text, method) => {
+//
+// Значение поля пароля не читается никогда: ни в подписи (по ней подбирают
+// текст и expect_text / wait_for_text), ни в ответе. Пока на странице введён
+// секрет (secret), не читаются значения никаких полей ввода (у кнопок value —
+// их надпись), текст редактируемых элементов (contenteditable) и тех, что их
+// содержат, а ответ — пустой: секрет мог попасть в поле type: text.
+var actJS = `((sel, text, method, secret) => {
   const vt = ` + visibleTextJS + `;
   const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase().replace(/ё/g, 'е');
   const vis = e => { const r = e.getBoundingClientRect(), st = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'; };
-  const label = e => [vt(e), e.value, e.placeholder, e.getAttribute('aria-label'), e.getAttribute('title'),
-    e.labels ? [...e.labels].map(l => vt(l)).join(' ') : ''].filter(Boolean).join(' ');
+  const pwd = e => e.localName === 'input' && e.type === 'password';
+  const btn = e => e.localName === 'input' && ['submit', 'button', 'reset'].includes(e.type);
+  const val = e => typeof e.value !== 'string' || pwd(e) || (secret && !btn(e)) ? '' : e.value;
+  const txt = e => secret && (e.isContentEditable || e.querySelector('[contenteditable]:not([contenteditable=false])')) ? '' : vt(e);
+  const label = e => [txt(e), val(e), e.placeholder, e.getAttribute('aria-label'), e.getAttribute('title'),
+    e.labels ? [...e.labels].map(l => txt(l)).join(' ') : ''].filter(Boolean).join(' ');
   const want = norm(text);
   // из подходящих — с самой короткой подписью: кнопка, а не её контейнер
   const e = [...document.querySelectorAll(sel)].filter(e => vis(e) && (!want || norm(label(e)).includes(want)))
@@ -207,8 +216,14 @@ var actJS = `((sel, text, method) => {
       else { const r = document.createRange(); r.selectNodeContents(e); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
     }
   }
-  return {text: (vt(e) || e.value || '').slice(0, 2000)};
+  return {text: secret ? '' : (txt(e) || val(e) || '').slice(0, 2000)};
 })`
+
+// actExpr — вызов actJS; secret — на странице введён секрет (SecretOnPage).
+func (x *Executor) actExpr(ctx context.Context, sel, text, method string) (expr string, secret bool) {
+	secret = x.SecretOnPage(ctx)
+	return call(actJS, sel, text, method, secret), secret
+}
 
 // Act — click / fill / press / wait по селектору: ждёт элемент (до TimeoutMS),
 // выполняет метод; итоговый адрес проверяется по списку доменов.
@@ -229,8 +244,7 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	args, _ := json.Marshal([]string{r.Selector, r.Text, r.Method})
-	expr := actJS + "(..." + string(args) + ")"
+	expr, secret := x.actExpr(ctx, r.Selector, r.Text, r.Method)
 	deadline := time.Now().Add(timeout)
 	var found *struct {
 		Text string `json:"text"`
@@ -283,6 +297,11 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 		return ActResponse{}, fmt.Errorf("action led off the allowlist: %w", err)
 	}
 	x.HookNetwork(ctx) // действие могло перейти на новую страницу
+	if secret || x.SecretOnPage(ctx) {
+		// Текст элемента на странице с секретом не отдаётся и здесь (не
+		// только в actJS): это могло быть значение поля.
+		found.Text = ""
+	}
 	return ActResponse{URL: u, Text: found.Text}, nil
 }
 
@@ -344,11 +363,11 @@ func (x *Executor) expect(ctx context.Context, r ActRequest, before string) erro
 
 // present — на странице есть видимый элемент по селектору с текстом.
 func (x *Executor) present(ctx context.Context, sel, text string) (bool, error) {
-	args, _ := json.Marshal([]string{sel, text, ActWait})
+	expr, _ := x.actExpr(ctx, sel, text, ActWait)
 	var found *struct {
 		Text string `json:"text"`
 	}
-	if err := x.Engine.Eval(ctx, actJS+"(..."+string(args)+")", &found); err != nil {
+	if err := x.Engine.Eval(ctx, expr, &found); err != nil {
 		return false, err
 	}
 	return found != nil, nil

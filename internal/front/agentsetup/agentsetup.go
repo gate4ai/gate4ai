@@ -169,7 +169,7 @@ func (e Env) Connected(id string) bool {
 		return false
 	}
 	if c.Format == FormatTOML {
-		return tomlSection.Match(b)
+		return tomlSection.Match(b) || tomlSet(string(b), "") != string(b)
 	}
 	var m map[string]any
 	if json.Unmarshal(b, &m) != nil {
@@ -223,18 +223,15 @@ func (e Env) Connect(id, bin, token, skillMD string) (Result, error) {
 	}
 	p := e.ConfigPath(id)
 	res := Result{Path: p}
-	old, err := os.ReadFile(p)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return res, err
-	}
-	var out []byte
-	if c.Format == FormatTOML {
-		out = []byte(tomlSet(string(old), tomlBlock(bin, token)))
-	} else {
+	var err error
+	res.Backup, err = rewrite(p, func(old []byte) ([]byte, error) {
+		if c.Format == FormatTOML {
+			return []byte(tomlSet(string(old), tomlBlock(bin, token))), nil
+		}
 		m := map[string]any{}
 		if len(strings.TrimSpace(string(old))) > 0 {
-			if err := json.Unmarshal(old, &m); err != nil {
-				return res, fmt.Errorf("%s is not valid JSON (%v): fix it or add the server by hand", p, err)
+			if err := decodeJSON(old, &m); err != nil {
+				return nil, fmt.Errorf("%s is not valid JSON (%v): fix it or add the server by hand", p, err)
 			}
 		}
 		key := serversKey(c.Format)
@@ -244,12 +241,9 @@ func (e Env) Connect(id, bin, token, skillMD string) (Result, error) {
 		}
 		servers[ServerName] = entry(c.Format, bin, token)
 		m[key] = servers
-		out = marshal(m)
-	}
-	if res.Backup, err = backup(p, old); err != nil {
-		return res, err
-	}
-	if err := writePrivate(p, out); err != nil {
+		return marshal(m), nil
+	})
+	if err != nil {
 		return res, err
 	}
 	if c.Skill && skillMD != "" {
@@ -269,32 +263,63 @@ func (e Env) Disconnect(id string) (Result, error) {
 	}
 	p := e.ConfigPath(id)
 	res := Result{Path: p}
-	old, err := os.ReadFile(p)
-	if errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(p); errors.Is(err, os.ErrNotExist) {
 		return res, nil
-	} else if err != nil {
-		return res, err
 	}
-	var out []byte
-	if c.Format == FormatTOML {
-		out = []byte(tomlSet(string(old), ""))
-	} else {
+	var err error
+	res.Backup, err = rewrite(p, func(old []byte) ([]byte, error) {
+		if c.Format == FormatTOML {
+			return []byte(tomlSet(string(old), "")), nil
+		}
 		m := map[string]any{}
-		if err := json.Unmarshal(old, &m); err != nil {
-			return res, fmt.Errorf("%s is not valid JSON: %v", p, err)
+		if err := decodeJSON(old, &m); err != nil {
+			return nil, fmt.Errorf("%s is not valid JSON: %v", p, err)
 		}
 		if servers, _ := m[serversKey(c.Format)].(map[string]any); servers != nil {
 			delete(servers, ServerName)
 		}
-		out = marshal(m)
-	}
-	if res.Backup, err = backup(p, old); err != nil {
+		return marshal(m), nil
+	})
+	if err != nil {
 		return res, err
 	}
 	if c.Skill {
 		_ = os.RemoveAll(e.skillDir())
 	}
-	return res, writePrivate(p, out)
+	return res, nil
+}
+
+// decodeJSON — разбор конфигурации клиента без потери точности чисел
+// (целые больше 2^53 остаются как есть).
+func decodeJSON(b []byte, v any) error {
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.UseNumber()
+	return d.Decode(v)
+}
+
+// rewrite — read-modify-write файла клиента. Клиент (Claude Code —
+// ~/.claude.json) переписывает свой файл сам: если файл изменился, пока мы
+// готовили новую версию, правка повторяется по свежему содержимому, чтобы не
+// откатить изменения клиента. Возвращает путь резервной копии.
+func rewrite(p string, f func(old []byte) ([]byte, error)) (string, error) {
+	for try := 0; ; try++ {
+		old, err := os.ReadFile(p)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		out, err := f(old)
+		if err != nil {
+			return "", err
+		}
+		if now, _ := os.ReadFile(p); !bytes.Equal(now, old) && try < 3 {
+			continue
+		}
+		bak, err := backup(p, old)
+		if err != nil {
+			return "", err
+		}
+		return bak, writePrivate(p, out)
+	}
 }
 
 // skillDir — каталог skill gate4ai для Claude Code.
@@ -315,13 +340,26 @@ func marshal(v any) []byte {
 	return b.Bytes()
 }
 
-// backup сохраняет прежнее содержимое рядом (<файл>.gate4ai.bak).
+// backup сохраняет исходное содержимое рядом (<файл>.gate4ai.bak) один раз:
+// уже существующую копию не затирает, иначе после второго подключения
+// исходный файл был бы потерян.
 func backup(p string, old []byte) (string, error) {
 	if old == nil {
 		return "", nil
 	}
 	b := p + ".gate4ai.bak"
-	return b, os.WriteFile(b, old, 0o600)
+	f, err := os.OpenFile(b, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return b, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	_, err = f.Write(old)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return b, err
 }
 
 // writePrivate пишет файл атомарно; токен внутри — права 0600.
@@ -336,11 +374,25 @@ func writePrivate(p string, b []byte) error {
 			mode = 0o600
 		}
 	}
-	tmp := p + ".gate4ai.tmp"
-	if err := os.WriteFile(tmp, b, mode); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(p), "."+filepath.Base(p)+".gate4ai-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, p)
+	tmp := f.Name()
+	_, err = f.Write(b)
+	if err == nil {
+		err = f.Chmod(mode) // CreateTemp даёт 0600; режим прежнего файла — не шире
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, p)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
 }
 
 // ---- TOML (Codex): секция [mcp_servers.gate4ai] ----
@@ -356,19 +408,38 @@ func tomlBlock(bin, token string) string {
 	return "[mcp_servers." + ServerName + "]\ncommand = " + tomlQuote(bin) + "\nargs = [\"mcp\"]\nenv = { GATE4AI_TOKEN = " + tomlQuote(token) + " }\n"
 }
 
-// tomlSet заменяет секцию gate4ai (и её подтаблицы) на block ("" — удаляет).
+// Ключ gate4ai вне секции [mcp_servers.gate4ai]: в таблице [mcp_servers]
+// (gate4ai = {…}, gate4ai.command = …) и в корне документа
+// (mcp_servers.gate4ai = {…}). Такие строки tomlSet тоже убирает — иначе
+// новая секция дала бы дубликат ключа.
+var (
+	tomlKeyInServers = regexp.MustCompile(`^\s*(` + ServerName + `|"` + ServerName + `"|'` + ServerName + `')\s*[=.]`)
+	tomlKeyInRoot    = regexp.MustCompile(`^\s*(mcp_servers|"mcp_servers")\s*\.\s*(` + ServerName + `|"` + ServerName + `"|'` + ServerName + `')\s*[=.]`)
+	tomlHeader       = regexp.MustCompile(`^\[\s*([^\[\]]*?)\s*\]\s*(#.*)?$`)
+)
+
+// tomlSet заменяет секцию gate4ai (и её подтаблицы, и ключ gate4ai в других
+// формах записи) на block ("" — удаляет).
 func tomlSet(doc, block string) string {
 	lines := strings.SplitAfter(doc, "\n")
 	var out []string
 	skip := false
+	table := "" // текущая таблица ("" — корень документа)
 	for _, l := range lines {
 		t := strings.TrimSpace(l)
-		if strings.HasPrefix(t, "[") {
-			skip = t == "[mcp_servers."+ServerName+"]" || strings.HasPrefix(t, "[mcp_servers."+ServerName+".")
+		if m := tomlHeader.FindStringSubmatch(t); m != nil {
+			table = strings.ReplaceAll(strings.ReplaceAll(m[1], " ", ""), `"`, "")
+			skip = table == "mcp_servers."+ServerName || strings.HasPrefix(table, "mcp_servers."+ServerName+".")
+		} else if strings.HasPrefix(t, "[[") {
+			table, skip = "", false
 		}
-		if !skip {
-			out = append(out, l)
+		if skip {
+			continue
 		}
+		if (table == "mcp_servers" && tomlKeyInServers.MatchString(l)) || (table == "" && tomlKeyInRoot.MatchString(l)) {
+			continue
+		}
+		out = append(out, l)
 	}
 	s := strings.Join(out, "")
 	if block == "" {

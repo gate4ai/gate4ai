@@ -88,8 +88,12 @@ func (e *Env) serviceInstall(ctx context.Context, home string, args []string) in
 			bin = r
 		}
 	}
-	spec := autostart.Spec{Bin: bin, Args: daemonArgs, Log: paths.DaemonLog(), Home: home}
 	var notes []string
+	if kept := withoutOneShot(daemonArgs); len(kept) != len(daemonArgs) {
+		daemonArgs = kept
+		notes = append(notes, "--reset-ui-login is a one-time flag: it is not saved in the autostart (run it once: gate4ai daemon stop && gate4ai daemon --reset-ui-login)")
+	}
+	spec := autostart.Spec{Bin: bin, Args: daemonArgs, Log: paths.DaemonLog(), Home: home}
 	if !noTray {
 		if spec.Tray = autostart.FindTray(bin); spec.Tray == "" {
 			notes = append(notes, "gate4ai-tray not found next to gate4ai: only the daemon starts at login")

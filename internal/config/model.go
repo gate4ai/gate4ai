@@ -143,13 +143,20 @@ type Egress struct {
 	Secrets []EgressSecret `yaml:"secrets,omitempty" json:"secrets,omitempty"`
 }
 
-// EgressSecret — заглушку Placeholder в заголовке Header запроса к Domain
-// заменить значением алиаса Secret.
+// EgressSecret — заглушку в заголовке Header запроса к Domain заменить
+// значением алиаса Secret. С Env заглушка одноразовая: каждый запуск получает
+// свою (<Placeholder или gate4ai>-<случайная>) в переменной окружения Env, и
+// прокси принимает только заглушку этого запуска. Без Env — постоянная
+// Placeholder из конфигурации (совместимость; daemon предупреждает).
 type EgressSecret struct {
 	Domain      string `yaml:"domain" json:"domain"`
 	Header      string `yaml:"header" json:"header"`
-	Placeholder string `yaml:"placeholder" json:"placeholder"`
+	Placeholder string `yaml:"placeholder,omitempty" json:"placeholder,omitempty"`
+	Env         string `yaml:"env,omitempty" json:"env,omitempty"`
 	Secret      string `yaml:"secret" json:"secret"`
+	// Agents — агенты (запуски), которым доступна подстановка; пусто — всем
+	// агентам, у которых домен в sandbox.allow_domains / ask_domains профиля.
+	Agents []string `yaml:"agents,omitempty" json:"agents,omitempty"`
 }
 
 // Duration — time.Duration в YAML как "30m", "90d" (d — сутки).

@@ -372,6 +372,78 @@ func TestAgentCloseAllAndCleanSteps(t *testing.T) {
 	}
 }
 
+// agentAs — действие агента agent (ExecRequest.Agent ставит хост).
+func agentAs(b *Browser, agent, action string, args map[string]any) (map[string]any, error) {
+	res, err := b.Execute(context.Background(), nil, abi.ExecRequest{Action: action, Args: args, Agent: agent,
+		Settings: map[string]any{"cdp_url": "http://127.0.0.1:1", "allowed_domains": []any{"*.example.com"}}})
+	m, _ := res.Structured.(map[string]any)
+	return m, err
+}
+
+// Сеанс привязан к агенту: другой агент его не видит и close --all его не закрывает.
+func TestAgentSessionsPerAgent(t *testing.T) {
+	_, b, _ := setup(t, nil)
+	res, err := agentAs(b, "alice", "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	for _, a := range []string{"observe", "act", "close"} {
+		args := map[string]any{"session": id}
+		if a == "act" {
+			args["selector"], args["method"] = "#pay", "click"
+		}
+		if _, err := agentAs(b, "mallory", a, args); err == nil || !strings.Contains(err.Error(), "closed or unknown") {
+			t.Fatalf("%s on another agent's session: %v", a, err)
+		}
+	}
+	if res, err := agentAs(b, "mallory", "close", map[string]any{"all": true}); err != nil || res["closed"] != 0 {
+		t.Fatal("close --all of another agent:", res, err)
+	}
+	if _, err := agentAs(b, "alice", "observe", map[string]any{"session": id}); err != nil {
+		t.Fatal("the owner's session survives:", err)
+	}
+	if res, err := agentAs(b, "alice", "close", map[string]any{"all": true}); err != nil || res["closed"] != 1 {
+		t.Fatal(res, err)
+	}
+}
+
+// close --all отменяет идущее действие сеанса и освобождает страницу только
+// после его завершения: следующий сеанс не получает её посреди действия.
+func TestCloseAllWaitsForAction(t *testing.T) {
+	_, b, _ := setup(t, nil)
+	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	done := make(chan error, 1)
+	go func() {
+		// элемента нет: act ждёт его до timeout_ms
+		_, err := agentExec(t, b, "act", map[string]any{"session": id, "selector": "#missing", "method": "click", "timeout_ms": 30000.0})
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	start := time.Now()
+	if res, err := agentExec(t, b, "close", map[string]any{"all": true}); err != nil || res["closed"] != 1 {
+		t.Fatal(res, err)
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), abi.CodeCancelled) {
+			t.Fatal("the running action is cancelled:", err)
+		}
+	default:
+		t.Fatal("close --all released the page while an action was running")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("close --all waited for the action's timeout")
+	}
+	if _, err := agentExec(t, b, "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed or unknown") {
+		t.Fatal(err)
+	}
+}
+
 func TestMain(m *testing.M) {
 	worker.SettleTimeout = 200 * time.Millisecond // страницы вне списка в тестах не возвращаются
 	os.Exit(m.Run())

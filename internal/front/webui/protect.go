@@ -316,7 +316,7 @@ func (u *UI) passwordAllowed(m mount) (time.Duration, bool) {
 func (u *UI) passwordResult(m mount, ok bool) {
 	l := u.limiter(m)
 	if ok {
-		l.failures = 0
+		l.failures, l.until = 0, time.Time{}
 		return
 	}
 	l.failures++
@@ -326,21 +326,39 @@ func (u *UI) passwordResult(m mount, ok bool) {
 	}
 }
 
-// verifyPassword — пароль с учётом задержки после неверных попыток.
+// pwSlots — одновременных проверок пароля (argon2id — 64 МиБ на проверку):
+// сотни параллельных запросов из интернета не съедят память daemon.
+var pwSlots = make(chan struct{}, 2)
+
+// pwSlotWait — сколько запрос ждёт свободного слота проверки пароля.
+var pwSlotWait = 3 * time.Second
+
+// verifyPassword — пароль с учётом задержки после неверных попыток. Проверка
+// и учёт атомарны: попытка заранее считается неверной (до argon2id), верный
+// пароль это откатывает. Так параллельные запросы не проходят задержку все
+// сразу — за окно задержки проверяется не больше одного пароля.
 func (u *UI) verifyPassword(m mount, enc, pw string) error {
+	select {
+	case pwSlots <- struct{}{}:
+		defer func() { <-pwSlots }()
+	case <-time.After(pwSlotWait):
+		return errors.New("Too many login attempts at once: wait and try again")
+	}
 	u.mu.Lock()
 	wait, ok := u.passwordAllowed(m)
+	if ok {
+		u.passwordResult(m, false) // резерв: неверный, пока не доказано обратное
+	}
 	u.mu.Unlock()
 	if !ok {
 		return M("Too many wrong passwords: wait %d s", int(wait.Seconds())+1)
 	}
-	good := checkPassword(enc, pw)
-	u.mu.Lock()
-	u.passwordResult(m, good)
-	u.mu.Unlock()
-	if !good {
+	if !checkPassword(enc, pw) {
 		return errWrongPassword
 	}
+	u.mu.Lock()
+	u.passwordResult(m, true)
+	u.mu.Unlock()
 	return nil
 }
 

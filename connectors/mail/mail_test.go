@@ -168,6 +168,101 @@ func TestPasswordNeverReachesConnector(t *testing.T) {
 	}
 }
 
+// in_reply_to — только Message-ID: CR/LF не добавляют заголовков и не
+// начинают тело раньше (H7); письмо не уходит и не сохраняется.
+func TestHeaderInjection(t *testing.T) {
+	srv, h, _ := setup(t)
+	for _, irt := range []string{
+		"<x@y>\r\nBcc: evil@attacker.test\r\n\r\nДругой текст",
+		"<x@y>\nReply-To: evil@attacker.test",
+		"x@y", "<x y@z>", "<a@b><c@d>",
+	} {
+		for _, action := range []string{"send", "draft"} {
+			_, err := h.Execute(c, action, map[string]any{"to": []any{"a@b.example"}, "subject": "s", "body": "b", "in_reply_to": irt})
+			if err == nil || !strings.Contains(err.Error(), abi.CodeBadRequest) {
+				t.Errorf("%s %q: %v", action, irt, err)
+			}
+		}
+	}
+	if len(srv.Received) != 0 || srv.Count("Drafts") != 0 {
+		t.Fatal("nothing is sent or saved")
+	}
+	// Общий страж заголовков: любое значение с переводом строки — ошибка.
+	if _, _, err := c.compose(Settings{Address: "me@example.com\r\nBcc: x@y"}, map[string]any{}); err == nil {
+		t.Fatal("CRLF in From")
+	}
+	res, err := h.Execute(c, "send", map[string]any{"to": []any{"a@b.example"}, "subject": "Re: s", "body": "b", "in_reply_to": "<inj-1@attacker.test>"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(srv.Received[0].Data)
+	if !strings.Contains(raw, "\r\nIn-Reply-To: <inj-1@attacker.test>\r\nReferences: <inj-1@attacker.test>\r\n") || res.ResultRef == "" {
+		t.Fatal(raw)
+	}
+}
+
+// Письма и темы в windows-1251 / koi8-r читаются (M5).
+func TestCharsets(t *testing.T) {
+	srv, h, _ := setup(t)
+	// «Счёт за газ» в windows-1251 (тема — encoded-word) и тело в koi8-r.
+	subj := "=?windows-1251?B?0fe48iDn4CDj4Oc=?="
+	body := string([]byte{0xf3, 0xd7, 0xc5, 0xd4}) // «Свет» в koi8-r
+	srv.Deliver("From: =?koi8-r?B?78/P?= <bill@example.com>\r\nTo: me@example.com\r\nSubject: " + subj + "\r\n" +
+		"Date: Mon, 12 Oct 2026 10:00:00 +0000\r\nMessage-ID: <cp-1@example.com>\r\nContent-Type: text/plain; charset=koi8-r\r\n\r\n" + body)
+	res, err := h.Execute(c, "list", map[string]any{"folder": "INBOX"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := res.Structured.(map[string]any)["messages"].([]any)[0].(map[string]any)
+	if first["subject"] != "Счёт за газ" {
+		t.Fatalf("list subject: %q", first["subject"])
+	}
+	res, err = h.Execute(c, "read", map[string]any{"uid": first["uid"]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := res.Structured.(map[string]any)
+	if m["subject"] != "Счёт за газ" || m["body"] != "Свет" {
+		t.Fatalf("read: %q %q", m["subject"], m["body"])
+	}
+}
+
+func TestStripTags(t *testing.T) {
+	in := `<html><head><title>T</title><style>p{color:red}</style></head><body><script>var x="<b>";</script>` +
+		`<!-- c --><p>Итого:&nbsp;10&amp;nbsp; &lt;руб&gt;</p><SCRIPT type="x">y()</SCRIPT><br/>конец</body></html>`
+	if got := stripTags(in); got != "Итого: 10&nbsp; <руб> конец" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// Папка черновиков «Draft» без SPECIAL-USE: черновик сохраняется и проверяется (L3).
+func TestDraftFolderNames(t *testing.T) {
+	srv, h, _ := setup(t)
+	if err := srv.Rename("Drafts", "Draft"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := h.Execute(c, "draft", map[string]any{"to": []any{"a@b.example"}, "subject": "s", "body": "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, err := h.Verify(c, "draft", nil, res); err != nil || v.Status != abi.Verified {
+		t.Fatalf("%+v %v", v, err)
+	}
+}
+
+// sent_copy: client — ошибка сохранения копии видна в ответе (L4).
+func TestClientCopyError(t *testing.T) {
+	_, h, set := setup(t)
+	set["sent_copy"], set["sent_folder"] = "client", "Nope"
+	res, err := h.Execute(c, "send", map[string]any{"to": []any{"a@b.example"}, "subject": "s", "body": "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := res.Structured.(map[string]any)["client_copy_error"].(string); !strings.Contains(e, "Nope") {
+		t.Fatalf("%+v", res.Structured)
+	}
+}
+
 func TestDotStuff(t *testing.T) {
 	got := string(dotStuff([]byte("a\r\n.b\r\n..\r\nc")))
 	if got != "a\r\n..b\r\n...\r\nc\r\n" {

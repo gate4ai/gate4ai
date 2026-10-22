@@ -124,6 +124,17 @@ func TestDaemonThroughRelay(t *testing.T) {
 	if meta["issuer"] != "https://"+id+".relay.test" {
 		t.Fatal(meta)
 	}
+	// Подменённый Host не меняет issuer: он строится от адреса устройства.
+	req, _ := http.NewRequest("GET", "https://"+id+".relay.test/.well-known/oauth-authorization-server", nil)
+	req.Host = "evil.example"
+	if resp, err = cl.Do(req); err != nil {
+		t.Fatal(err)
+	}
+	meta = nil
+	json.NewDecoder(resp.Body).Decode(&meta)
+	if meta["issuer"] != "https://"+id+".relay.test" {
+		t.Fatal("issuer from the Host header:", meta)
+	}
 	// Свидетель: чекпоинт журнала уходит на relay.
 	d.Journal.Append(sampleReceipt())
 	d.Journal.Append(sampleReceipt())

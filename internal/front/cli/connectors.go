@@ -630,7 +630,7 @@ func (e *Env) verifyPackage(ctx context.Context, args []string) int {
 		}
 	}
 	res := map[string]any{"status": "ok", "reproducible": true, "connector": p.Manifest.Connector, "version": p.Manifest.Version,
-		"digest": p.Sig.Digest, "sha256": store.SHA256(raw), "signed_by": p.Sig.PublicKey, "go": tc}
+		"digest": p.Sig.Digest, "sha256": store.SHA256(raw), "signed_by": p.SignedBy(), "go": tc}
 	if set != nil {
 		res["digest"], res["platforms"] = store.SetDigest(*set), len(items)
 	}

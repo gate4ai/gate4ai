@@ -313,7 +313,9 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		items := []map[string]any{}
 		for _, a := range pend {
 			items = append(items, map[string]any{"id": a.ID, "agent": a.Agent, "action": a.Action, "hash": audit.Short(a.PreviewHash),
-				"summary": strings.SplitN(a.Preview, "\n", 2)[0], "reason": a.Decision.Reason, "expires": a.Expires})
+				"summary": strings.SplitN(a.Preview, "\n", 2)[0], "reason": a.Decision.Reason, "expires": a.Expires,
+				// web_only — трей не даёт «Разрешить» одним нажатием (код-ревью E.5).
+				"web_only": approval.WebOnly(a.Action)})
 		}
 		_, n := u.D.Config.CurrentRaw()
 		seq, _, _ := u.D.Journal.Head()
@@ -493,7 +495,10 @@ func (u *UI) originOK(m mount, r *http.Request) bool {
 	if m.remote {
 		return o == "https://"+r.Host
 	}
-	return o == "http://"+u.Addr || strings.HasPrefix(o, "http://localhost:")
+	// Точно свой адрес: страница чужого сервера на localhost:<другой порт>
+	// проходила бы проверку (SameSite порт не различает).
+	_, port, _ := net.SplitHostPort(u.Addr)
+	return o == "http://"+u.Addr || (port != "" && o == "http://localhost:"+port)
 }
 
 // guard — проверка Host (защита от DNS rebinding) и заголовки безопасности.
@@ -633,8 +638,9 @@ func (u *UI) render(w http.ResponseWriter, r *http.Request, name string, v view,
 	}
 }
 
-// fill — сообщения страницы: из сессии (после действия), иначе из адреса
-// (?flash=, ?error= — старые ссылки).
+// fill — сообщения страницы: только из сессии (после действия). Из адреса
+// (?flash=, ?error=) текст не берётся: по ссылке владельцу нельзя показать
+// произвольный «системный» текст (код-ревью E.20).
 func (u *UI) fill(v *view, r *http.Request, sid string) {
 	l := u.lang(r)
 	if n, ok := u.popNote(sid); ok {
@@ -642,12 +648,6 @@ func (u *UI) fill(v *view, r *http.Request, sid string) {
 		if n.err != nil {
 			v.Error = say(l, n.err)
 		}
-	}
-	if v.Flash == "" {
-		v.Flash = tr(l, r.URL.Query().Get("flash"))
-	}
-	if e := r.URL.Query().Get("error"); e != "" && v.Error == "" {
-		v.Error = tr(l, e)
 	}
 }
 
@@ -702,7 +702,7 @@ func (u *UI) post(m mount, f func(w http.ResponseWriter, r *http.Request) map[st
 		detail, _ := res["detail"].(string)
 		if red, ok := res["redirect"].(string); ok {
 			u.putNote(sid, note{flash: res["flash"], err: res["error"], detail: detail})
-			http.Redirect(w, r, m.base+red, http.StatusSeeOther)
+			http.Redirect(w, r, m.base+localPath(red), http.StatusSeeOther)
 			return
 		}
 		name, _ := res["page"].(string)
@@ -733,6 +733,15 @@ func (u *UI) setLang(m mount) http.HandlerFunc {
 		}
 		http.Redirect(w, r, back, http.StatusSeeOther)
 	}
+}
+
+// localPath — адрес перехода внутри Web UI: путь от корня, без «//host» и
+// «\» (back приходит из формы — открытый редирект недопустим).
+func localPath(to string) string {
+	if !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") || strings.ContainsAny(to, "\\\r\n") {
+		return "/"
+	}
+	return to
 }
 
 var owner = auth.OwnerVia("webui")

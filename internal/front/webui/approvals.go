@@ -178,8 +178,11 @@ func (u *UI) approvalView(l string, a *state.Approval) approvalView {
 		}
 	}
 	if strings.HasSuffix(a.Action, ".change_policy") {
-		// Самонастройка: что именно изменится — правки словами, аргументы не нужны.
-		v.Preview = strings.Join(changeLines(l, a.Args), "\n")
+		// Самонастройка: текст запроса из ядра как есть — правки так, как их понял
+		// gate4ai (замена правила, закреплённые дайджесты сборок, предупреждения),
+		// а слова агента — после них с пометкой (код-ревью E.3, E.4, K2). Его
+		// хэш показан в карточке; перевод не делается, чтобы не разойтись с ним.
+		v.Preview = a.Preview
 		for k := range a.Args {
 			used[k] = true
 		}
@@ -609,58 +612,6 @@ func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any
 
 // pathBase — последняя часть пути для коротких подписей.
 func pathBase(p string) string { return path.Base(strings.ReplaceAll(p, `\`, "/")) }
-
-// changeLines — правки gate4ai.change_policy словами на языке l (то же, что
-// config.Change.Describe, но с переводом).
-func changeLines(l string, args map[string]any) []string {
-	var out []string
-	if s, ok := args["summary"].(string); ok && s != "" {
-		out = append(out, s)
-	}
-	raw, _ := json.Marshal(args["changes"])
-	var chs []config.Change
-	_ = json.Unmarshal(raw, &chs)
-	for _, ch := range chs {
-		items := strings.Join(ch.Items, ", ")
-		var m Msg
-		switch ch.Op {
-		case config.OpAddRule:
-			m = M("Rule: %s %s", Word(effectWords[ch.Effect]), ch.Action)
-			if ch.When != "" {
-				w, _ := describeWhen(l, ch.When)
-				m = M("Rule: %s %s if %s", Word(effectWords[ch.Effect]), ch.Action, w)
-			}
-		case config.OpRemoveRule:
-			m = M("Remove rule %s", ch.RuleID)
-		case config.OpAddListItems:
-			m = M("Add to list %s: %s", ch.List, items)
-		case config.OpRemoveListItems:
-			m = M("Remove from list %s: %s", ch.List, items)
-		case config.OpAddConnector:
-			m = M("Give access to connector %s", ch.Connector)
-		case config.OpInstallConnector:
-			m = M("Install connector %s from the store and give access to it", ch.Connector)
-		case config.OpInstallDev:
-			m = M("Build and install an own build from %s and give access to it", ch.Folder)
-		case config.OpConnectorSetting:
-			m = M("Settings of connector %s: %s", ch.Connector, ch.SettingsJSON)
-		case config.OpAddSettingItems:
-			m = M("Add to setting %s.%s: %s", ch.Connector, ch.Key, items)
-		case config.OpRemoveSettingItems:
-			m = M("Remove from setting %s.%s: %s", ch.Connector, ch.Key, items)
-		case config.OpAddCredential:
-			m = M("Account %s (secret values stay in the vault, you set them)", ch.Account)
-		default:
-			m = M("%s", ch.Op)
-		}
-		line := "• " + m.In(l)
-		if ch.Profile != "" {
-			line += " " + M("(permissions %s)", ch.Profile).In(l)
-		}
-		out = append(out, line)
-	}
-	return out
-}
 
 // lowerFirst — «Append to a file» → «append to a file» (внутри фразы).
 func lowerFirst(s string) string {

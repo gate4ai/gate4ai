@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -61,14 +62,31 @@ func TestBuildModes(t *testing.T) {
 		t.Fatal("skill/mcp not prepared")
 	}
 
+	defer func(g string) { runtimeGOOS = g }(runtimeGOOS)
+	runtimeGOOS = "linux"
 	o.Mode, o.Command = ModeContainer, []string{"bash"}
 	s, _ = Build(r, o)
 	argv := strings.Join(s.Argv, " ")
-	for _, want := range []string{"docker run --rm -it", "--cap-drop ALL", "-v /home/u/projects/policy:/workspace", "-v " + r.Socket + ":/run/gate4ai.sock",
-		"GATE4AI_AGENT_SOCKET=/run/gate4ai.sock", "HTTPS_PROXY=http://run-abc123:pw@host.docker.internal:4321", "node:22-bookworm bash"} {
+	for _, want := range []string{"docker run --rm -it", "--network none", "--cap-drop ALL", "-v /home/u/projects/policy:/workspace", "-v " + r.Socket + ":/run/gate4ai.sock",
+		"-v /tmp/run/egress.sock:/run/gate4ai-proxy.sock", "--env-file /tmp/run/container.env", "--entrypoint /usr/local/bin/gate4ai",
+		"node:22-bookworm _egress-shim --listen 127.0.0.1:3128 --socket /run/gate4ai-proxy.sock -- bash"} {
 		if !strings.Contains(argv, want) {
 			t.Errorf("container argv lacks %q: %s", want, argv)
 		}
+	}
+	// Прямого выхода в сеть нет: ни сети по умолчанию, ни адреса хоста; токен
+	// и пароль прокси — не в argv (видны в ps), а в файле окружения.
+	if strings.Contains(argv, "host.docker.internal") || strings.Contains(argv, "host-gateway") || strings.Contains(argv, r.Token) || strings.Contains(argv, ":pw@") {
+		t.Fatal("container argv:", argv)
+	}
+	envFile := s.Files["/tmp/run/container.env"]
+	for _, want := range []string{"GATE4AI_TOKEN=g4a_TOKEN\n", "GATE4AI_AGENT_SOCKET=/run/gate4ai.sock\n", "HTTPS_PROXY=http://run-abc123:pw@127.0.0.1:3128\n"} {
+		if !strings.Contains(envFile, want) {
+			t.Errorf("container env lacks %q: %s", want, envFile)
+		}
+	}
+	if s.Bridge == nil || s.Bridge.Socket != "/tmp/run/egress.sock" || s.Bridge.Target != "127.0.0.1:4321" {
+		t.Fatal("bridge:", s.Bridge)
 	}
 	if strings.Contains(argv, "docker.sock") || strings.Contains(argv, ".ssh") {
 		t.Fatal("container gets host secrets")
@@ -231,8 +249,12 @@ func TestRunsAndEgress(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
-	// allow_domains + подстановка секрета (обычный HTTP: прокси видит заголовки).
-	if code, body := get("http://api.anthropic.test/v1", map[string]string{"X-Api-Key": "GATE4AI_PLACEHOLDER"}); code != 200 || body != "key=sk-real" {
+	// allow_domains; в обычный HTTP секрет не подставляется (только HTTPS через
+	// расшифровку), заглушка там — отказ secret_denied.
+	if code, body := get("http://api.anthropic.test/v1", nil); code != 200 || body != "key=" {
+		t.Fatal(code, body)
+	}
+	if code, body := get("http://api.anthropic.test/v1", map[string]string{"X-Api-Key": "GATE4AI_PLACEHOLDER"}); code != 403 || !strings.Contains(body, "secret_denied") {
 		t.Fatal(code, body)
 	}
 	// Не в списке — отказ.
@@ -272,5 +294,93 @@ func TestRunsAndEgress(t *testing.T) {
 	}
 	if code, _ := get("http://api.anthropic.test/v1", nil); code != http.StatusProxyAuthRequired {
 		t.Fatal("proxy creds survive the run", code)
+	}
+}
+
+// Прокси в контейнере без сети: 127.0.0.1:порт контейнера → сокет → прокси на
+// хосте (B.H3). Проверяется сама пересылка: shim и мост на хосте.
+func TestProxyBridgeAndShim(t *testing.T) {
+	proxy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proxy.Close()
+	go func() {
+		for {
+			c, err := proxy.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				b := make([]byte, 5)
+				io.ReadFull(c, b)
+				c.Write(append([]byte("echo:"), b...))
+			}()
+		}
+	}()
+	dir, _ := os.MkdirTemp("", "g4ab")
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "egress.sock")
+	stop, err := StartBridge(context.Background(), Bridge{Socket: sock, Target: proxy.Addr().String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	l, err := ShimListen("127.0.0.1:0", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	c, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte("hello"))
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	got := make([]byte, 10)
+	if _, err := io.ReadFull(c, got); err != nil || string(got) != "echo:hello" {
+		t.Fatal(string(got), err)
+	}
+}
+
+// Shim запускает команду агента и возвращает её код выхода.
+func TestShimRunsCommand(t *testing.T) {
+	if runtimeGOOS == "windows" {
+		t.Skip("sh")
+	}
+	dir, _ := os.MkdirTemp("", "g4as")
+	defer os.RemoveAll(dir)
+	var out strings.Builder
+	code := Shim(context.Background(), []string{"--listen", "127.0.0.1:0", "--socket", filepath.Join(dir, "none.sock"), "--", "sh", "-c", "echo hi; exit 3"},
+		strings.NewReader(""), &out, io.Discard)
+	if code != 3 || strings.TrimSpace(out.String()) != "hi" {
+		t.Fatal(code, out.String())
+	}
+}
+
+// Каталог данных daemon закрыт для чтения в srt и при нестандартном
+// расположении (GATE4AI_HOME, XDG_STATE_HOME); сокет запуска внутри него
+// остаётся доступным (B.M7).
+func TestSRTDeniesDataHome(t *testing.T) {
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, "run"), 0o700)
+	os.WriteFile(filepath.Join(home, "keys.json"), []byte("{}"), 0o600)
+	os.WriteFile(filepath.Join(home, "vault.enc"), []byte("x"), 0o600)
+	t.Setenv("GATE4AI_HOME", home)
+	r := sampleRun()
+	r.Socket = filepath.Join(home, "run", "agent-abc123.sock")
+	set := SRTSettings(r, Options{Workspace: "/w", Home: "/home/u"})
+	deny := set["filesystem"].(map[string]any)["denyRead"].([]string)
+	j := strings.Join(deny, "\n")
+	if !strings.Contains(j, filepath.Join(home, "keys.json")) || !strings.Contains(j, filepath.Join(home, "vault.enc")) || strings.Contains(j, filepath.Join(home, "run")) {
+		t.Fatal(deny)
+	}
+	other := t.TempDir()
+	r.Home = other
+	deny = SRTSettings(r, Options{Workspace: "/w", Home: "/home/u"})["filesystem"].(map[string]any)["denyRead"].([]string)
+	if !slices.Contains(deny, other) {
+		t.Fatal("daemon home from the run is not denied:", deny)
 	}
 }

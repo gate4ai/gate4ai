@@ -29,6 +29,10 @@ type Vault struct {
 	mu sync.RWMutex
 	// значения в памяти нужны фильтру маскирования
 	values map[string]string
+	// names — алиасы индекса; значение алиаса может быть не загружено, если
+	// keychain временно не отдал его (тогда Get пробует снова). Индекс пишется
+	// из names, а не из values: временная ошибка не выкидывает алиас навсегда.
+	names map[string]bool
 	// transient — значения не из хранилища (код, который человек ввёл для
 	// входа), которые маскируются до срока.
 	transient map[string]time.Time
@@ -54,9 +58,10 @@ func (v *Vault) MaskAlso(value string, ttl time.Duration) {
 	v.transient[value] = now.Add(ttl)
 }
 
-// Open загружает индекс алиасов из keychain.
+// Open загружает индекс алиасов из keychain. Значение, которое не прочиталось
+// (кроме «нет такого»), остаётся в индексе и читается позже, при Get.
 func Open(ks keys.Store) (*Vault, error) {
-	v := &Vault{ks: ks, values: map[string]string{}}
+	v := &Vault{ks: ks, values: map[string]string{}, names: map[string]bool{}}
 	idx, err := ks.Get(indexKey)
 	if errors.Is(err, keys.ErrNotFound) {
 		return v, nil
@@ -70,8 +75,11 @@ func Open(ks keys.Store) (*Vault, error) {
 	}
 	for _, n := range names {
 		val, err := ks.Get(prefix + n)
-		if err == nil {
-			v.values[n] = val
+		switch {
+		case err == nil:
+			v.values[n], v.names[n] = val, true
+		case !errors.Is(err, keys.ErrNotFound):
+			v.names[n] = true
 		}
 	}
 	return v, nil
@@ -86,8 +94,8 @@ func Norm(alias string) (string, error) {
 }
 
 func (v *Vault) saveIndex() error {
-	names := make([]string, 0, len(v.values))
-	for n := range v.values {
+	names := make([]string, 0, len(v.names))
+	for n := range v.names {
 		names = append(names, n)
 	}
 	sort.Strings(names)
@@ -109,7 +117,7 @@ func (v *Vault) Set(alias, value string) error {
 	if err := v.ks.Set(prefix+n, value); err != nil {
 		return err
 	}
-	v.values[n] = value
+	v.values[n], v.names[n] = value, true
 	return v.saveIndex()
 }
 
@@ -125,6 +133,7 @@ func (v *Vault) Delete(alias string) error {
 		return err
 	}
 	delete(v.values, n)
+	delete(v.names, n)
 	return v.saveIndex()
 }
 
@@ -138,20 +147,32 @@ func (v *Vault) Get(alias string) (string, error) {
 		return "", err
 	}
 	v.mu.RLock()
-	defer v.mu.RUnlock()
 	val, ok := v.values[n]
-	if !ok {
-		return "", fmt.Errorf("%w: @%s (set it in Web UI or with `gate4ai vault set %s`)", ErrNoSecret, n, n)
+	indexed := v.names[n]
+	v.mu.RUnlock()
+	if ok {
+		return val, nil
 	}
-	return val, nil
+	if indexed {
+		// Не прочиталось при открытии: keychain мог быть временно недоступен.
+		val, err := v.ks.Get(prefix + n)
+		if err != nil {
+			return "", fmt.Errorf("secret @%s: keychain: %w", n, err)
+		}
+		v.mu.Lock()
+		v.values[n] = val
+		v.mu.Unlock()
+		return val, nil
+	}
+	return "", fmt.Errorf("%w: @%s (set it in Web UI or with `gate4ai vault set %s`)", ErrNoSecret, n, n)
 }
 
 // Aliases — имена алиасов (без значений).
 func (v *Vault) Aliases() []string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	out := make([]string, 0, len(v.values))
-	for n := range v.values {
+	out := make([]string, 0, len(v.names))
+	for n := range v.names {
 		out = append(out, "@"+n)
 	}
 	sort.Strings(out)

@@ -3,10 +3,14 @@
 package policy
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
 )
@@ -35,16 +39,107 @@ func normPath(p string) string {
 	return path.Clean(p)
 }
 
+// foldCase — файловая система по умолчанию нечувствительна к регистру
+// (macOS, Windows): "~/Documents/Obsidian/Private/x" — тот же файл, что
+// "~/Documents/obsidian/private/x", и правило обязано это видеть.
+var foldCase = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+
 // Glob сопоставляет путь с шаблоном: "*" и "?" — внутри сегмента, "**" — любое
 // число сегментов. "~" раскрывается в обоих аргументах, ".." в пути схлопывается
 // до сравнения, поэтому "~/Documents/obsidian/../.ssh/id" под "~/Documents/obsidian/**" не попадает.
+// Решение принимается по настоящему пути — тому, что откроет хост: симлинки
+// в пути и в постоянной части шаблона раскрываются, на macOS и Windows
+// регистр не различается. Неверный шаблон — false (в правиле — ошибка
+// вычисления, см. GlobErr).
 func Glob(p, pattern string) bool {
+	ok, _ := GlobErr(p, pattern)
+	return ok
+}
+
+// GlobErr — Glob с ошибкой неверного шаблона ("[abc").
+func GlobErr(p, pattern string) (bool, error) {
+	if err := CheckGlob(pattern); err != nil {
+		return false, err
+	}
 	np := normPath(p)
 	pat := filepath.ToSlash(expandHome(pattern))
 	if np == "" || pat == "" {
-		return false
+		return false, nil
 	}
-	return globSegs(strings.Split(np, "/"), strings.Split(pat, "/"))
+	np = resolvePath(np)
+	pat = resolvePattern(pat)
+	if foldCase {
+		np, pat = strings.ToLower(np), strings.ToLower(pat)
+	}
+	return globSegs(strings.Split(np, "/"), strings.Split(pat, "/")), nil
+}
+
+// CheckGlob проверяет синтаксис шаблона glob.
+func CheckGlob(pattern string) error {
+	for _, seg := range strings.Split(filepath.ToSlash(pattern), "/") {
+		if seg == "**" {
+			continue
+		}
+		if _, err := path.Match(seg, ""); err != nil {
+			return fmt.Errorf("glob: bad pattern %q", pattern)
+		}
+	}
+	return nil
+}
+
+// resolvePath — путь после раскрытия симлинков существующей части (как у
+// capability.Path); относительный путь не трогается.
+func resolvePath(p string) string {
+	if !filepath.IsAbs(filepath.FromSlash(p)) {
+		return p
+	}
+	return filepath.ToSlash(realPath(filepath.FromSlash(p)))
+}
+
+// resolvePattern раскрывает симлинки в постоянной части шаблона (до первого
+// сегмента с метасимволами): "~/Docs/**" при ~ → /private/home/u.
+func resolvePattern(pat string) string {
+	segs := strings.Split(pat, "/")
+	i := 0
+	for i < len(segs) && !strings.ContainsAny(segs[i], "*?[\\") {
+		i++
+	}
+	if i == 0 {
+		return pat
+	}
+	prefix := strings.Join(segs[:i], "/")
+	if prefix == "" || !filepath.IsAbs(filepath.FromSlash(prefix)) {
+		return pat
+	}
+	r := resolvePath(path.Clean(prefix))
+	if i == len(segs) {
+		return r
+	}
+	return strings.TrimSuffix(r, "/") + "/" + strings.Join(segs[i:], "/")
+}
+
+// realPath — путь с раскрытыми симлинками существующего префикса; ошибка — путь как есть.
+func realPath(p string) string {
+	cur := p
+	var tail []string
+	for {
+		r, err := filepath.EvalSymlinks(cur)
+		if err == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				r = filepath.Join(r, tail[i])
+			}
+			return r
+		}
+		if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+			return p
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p
+		}
+		tail = append(tail, filepath.Base(cur))
+		cur = parent
+	}
 }
 
 func globSegs(ps, pats []string) bool {

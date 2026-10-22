@@ -1,19 +1,10 @@
 # Выпуск и публикация на github.com/gate4ai
 
-С 2026-10-21 код продукта — один репозиторий `gate4ai/gate4ai` и один Go-модуль `github.com/gate4ai/gate4ai`. Прежние отдельные репозитории (`sdk-go`, `relay`, `gate4ai-mail`, `gate4ai-browser`, `gate4ai-files`, `e2e`) перенесены сюда без истории и удалены; обратной совместимости с их путями модулей и релизами нет.
+С 2026-10-21 код продукта — один репозиторий `gate4ai/gate4ai` и один Go-модуль `github.com/gate4ai/gate4ai`. Прежние отдельные репозитории (`sdk-go`, `relay`, `gate4ai-mail`, `gate4ai-browser`, `gate4ai-files`, `e2e`) перенесены сюда без истории и удалены на GitHub; обратной совместимости с их путями модулей и релизами нет. Их локальные клоны, если остались в каталоге проекта, — архив: не выпускаются, не деплоятся и не тестируются ([repo-structure.md](repo-structure.md#архив-прежние-отдельные-репозитории)).
 
 ## Репозитории
 
-| Локальный каталог (в общем каталоге проекта, сам он не git) | Репозиторий | Видимость | Что |
-|---|---|---|---|
-| `gate4ai/` | `gate4ai/gate4ai` | публичный | ядро и трей, `sdk-go/`, `relay/`, `connectors/`, `e2e/` |
-| `registry/` | `gate4ai/registry` | публичный | индекс магазина (CC0) и его подпись |
-| `www/` | `gate4ai/www` | приватный | сайт gate4.ai; CI собирает образ `ghcr.io/gate4ai/www:<sha>` и выкладывает его на сервер relay |
-| `dev/` | `gate4ai/dev` | приватный | скрипты процессов pitwall: `deploy.sh`, стенд, тесты |
-| `.github/` | `gate4ai/.github` | публичный | профиль организации, CONTRIBUTING, SECURITY.md |
-| `.secrets/keys/` | — | вне git | ключ издателя и ключ registry |
-
-Лицензии — по каталогам (SPDX в каждом файле проверяет `scripts/spdx.sh`): `sdk-go/` — Apache-2.0 (свой `LICENSE`), остальное — AGPL-3.0-only (`LICENSE` в корне); индекс registry — CC0. Внешний вклад — с CLA и DCO (`Signed-off-by` в каждом коммите).
+Репозитории проекта (`gate4ai`, `registry`, `www`, `dev`, `.github`), их видимость, лицензии и зависимости — [repo-structure.md](repo-structure.md). Лицензии — по каталогам (SPDX в каждом файле проверяет `scripts/spdx.sh`): `sdk-go/` — Apache-2.0 (свой `LICENSE`), остальное — AGPL-3.0-only (`LICENSE` в корне); индекс registry — CC0. Внешний вклад — с CLA и DCO (`Signed-off-by` в каждом коммите).
 
 ## Версии
 
@@ -28,11 +19,13 @@
 3. Трей под macOS (cgo, macOS-раннер) — в тот же черновик.
 4. Пакеты коннекторов: `gate4ai connectors pack` из этого же коммита, подпись ключом издателя (`GATE4AI_PUBLISHER_KEY`); в релиз — `.g4c`, `.platforms.json` нативных и `<коннектор>.pack.json`. Сборка воспроизводимая (Go из `go.mod`, без сведений о git): нативный пакет — по `.g4c` на платформу из `manifest.platforms` (`CGO_ENABLED=0 -trimpath`) и список платформ, на который ссылается запись индекса.
 5. Публикация черновика (`--latest`): только теперь его видят `https://gate4.ai/latest` и установщики.
-6. `gate4ai-relay` из релиза — на сервер relay.gate4.ai (окружение `production`: `vars.DEPLOY_HOST`, `secrets.DEPLOY_SSH_KEY`, `secrets.DEPLOY_KNOWN_HOSTS`; без них шаг пропускается). Скрипт на сервере (`relay/deploy/remote-install.sh`) меняет только бинарник и откатывает его, если API relay не ответил.
+6. `gate4ai-relay` из релиза — на сервер relay.gate4.ai (окружение `production`: `vars.DEPLOY_HOST`, `secrets.DEPLOY_SSH_KEY`, `secrets.DEPLOY_KNOWN_HOSTS`; без них шаг пропускается). Бинарник загружается в каталог, созданный `mktemp -d` на сервере (не в предсказуемый путь `/tmp`); скрипт на сервере (`relay/deploy/remote-install.sh <путь>`) меняет только бинарник и откатывает его, если API relay не ответил.
+
+Сторонние actions во всех workflow закреплены по полному SHA (тег — в комментарии), обновления предлагает Dependabot (`.github/dependabot.yml`): в job'ах релиза есть `contents: write`, `id-token: write` (cosign) и ключ издателя. Подпись `checksums.txt` установщик проверяет по идентичности именно этого workflow на теге (`…/.github/workflows/release.yml@refs/tags/v…`).
 
 ## Запись в registry
 
-После релиза `dev/scripts/deploy.sh registry` скачивает все `*.pack.json` релиза, добавляет версии в `index.json` (`gate4ai registry add … --publisher gate4ai`; у нового коннектора `--repo https://github.com/gate4ai/gate4ai --path connectors/<каталог>`), подписывает индекс ключом registry (`gate4ai registry sign`, ключ — вне GitHub) и открывает один pull request на релиз. CI registry скачивает и сверяет каждый пакет, а новые версии пересобирает из тега в каталоге `path` и сравнивает с релизом. После зелёного CI — слияние. Сторонние издатели проходят тот же путь без подписи индекса: [CONTRIBUTING.md registry](https://github.com/gate4ai/registry/blob/main/CONTRIBUTING.md).
+После релиза `dev/scripts/deploy.sh registry` скачивает все `*.pack.json` релиза, добавляет версии в `index.json` (`gate4ai registry add … --publisher gate4ai`; у нового коннектора `--repo https://github.com/gate4ai/gate4ai --path connectors/<каталог>`) gate4ai, собранным из исходников этого тега, записывает тег в `.github/gate4ai-version` registry, подписывает индекс ключом registry (`gate4ai registry sign`, ключ — вне GitHub) и открывает один pull request на релиз. CI registry ставит gate4ai версии из `.github/gate4ai-version` (не `@latest`), скачивает и сверяет каждый пакет, новые версии пересобирает из тега в каталоге `path` и сравнивает с релизом, а ещё проверяет, что официальные `email` и `browser` есть в индексе с этой версией (иначе CI красный: пустой магазин — не работают `connectors install email` и автоустановка browser; вышедший, но не записанный релиз — предупреждение). После зелёного CI — слияние. Релиз не закончен, пока `dev/scripts/deploy.sh in-registry` не проходит. Сторонние издатели проходят тот же путь без подписи индекса: [CONTRIBUTING.md registry](https://github.com/gate4ai/registry/blob/main/CONTRIBUTING.md).
 
 ## Настройки организации
 

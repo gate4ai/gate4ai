@@ -106,3 +106,30 @@ func cmdErr(cmd string, out []byte, err error) error {
 	}
 	return fmt.Errorf("%s: %v", cmd, err)
 }
+
+// winQuote — аргумент командной строки Windows в кавычках по правилам
+// CommandLineToArgvW (как syscall.EscapeArg, но всегда в кавычках): обратные
+// косые перед кавычкой и в конце удваиваются, кавычка экранируется. Иначе
+// `--home C:\data\` даёт `"C:\data\"`, кавычка экранируется и аргументы
+// склеиваются.
+func winQuote(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	slashes := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '\\':
+			slashes++
+		case '"':
+			b.WriteString(strings.Repeat(`\`, slashes+1))
+			slashes = 0
+		default:
+			slashes = 0
+		}
+		b.WriteByte(c)
+	}
+	b.WriteString(strings.Repeat(`\`, slashes))
+	b.WriteByte('"')
+	return b.String()
+}

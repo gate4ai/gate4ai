@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Ключ registry gate4ai; testdata — настоящий индекс с его подписью.
@@ -132,5 +133,34 @@ func TestLatestResolveRevoked(t *testing.T) {
 	}
 	if !(Release{URL: "https://x/browser-6.platforms.json"}).Native() || (Release{URL: "x.g4c"}).Native() {
 		t.Fatal("Native")
+	}
+}
+
+// Откат индекса (старее виденного, пропал отзыв при той же отметке) и
+// просроченный индекс не принимаются (B.M8).
+func TestCheckNewer(t *testing.T) {
+	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	prev := &Index{Updated: "2026-10-21", Revoked: []Revocation{{Connector: "a", Version: "1", Reason: "x"}}}
+	cases := []struct {
+		ix Index
+		ok bool
+	}{
+		{Index{Updated: "2026-10-22"}, true},
+		{Index{Updated: "2026-10-21T10:00:00Z"}, true},
+		{Index{Updated: "2026-10-20"}, false},
+		{Index{}, false},
+		{Index{Updated: "2026-10-21"}, false},
+		{Index{Updated: "2026-10-21", Revoked: prev.Revoked}, true},
+		{Index{Updated: "2026-10-23", Expires: "2026-10-22"}, true},
+		{Index{Updated: "2026-10-23", Expires: "2026-10-21"}, false},
+		{Index{Updated: "2026-10-23", Expires: "soon"}, false},
+	}
+	for i, c := range cases {
+		if err := c.ix.CheckNewer(prev, now); (err == nil) != c.ok {
+			t.Errorf("case %d: %v", i, err)
+		}
+	}
+	if err := (&Index{}).CheckNewer(nil, now); err != nil {
+		t.Fatal("first index:", err)
 	}
 }

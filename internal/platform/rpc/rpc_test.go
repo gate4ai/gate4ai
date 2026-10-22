@@ -6,7 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -58,5 +61,64 @@ func TestRoundTrip(t *testing.T) {
 	<-c.Done()
 	if err := c.Call(ctx, "echo", nil, nil); err != ErrClosed {
 		t.Fatal(err)
+	}
+}
+
+// Не больше MaxInFlight обработчиков одновременно.
+func TestServeLimitsInFlight(t *testing.T) {
+	var mu sync.Mutex
+	cur, peak := 0, 0
+	release := make(chan struct{})
+	var in strings.Builder
+	for i := 0; i < MaxInFlight+20; i++ {
+		fmt.Fprintf(&in, `{"jsonrpc":"2.0","id":%d,"method":"block"}`+"\n", i+1)
+	}
+	errc := make(chan error, 1)
+	go func() {
+		errc <- Serve(context.Background(), strings.NewReader(in.String()), io.Discard, func(ctx context.Context, _ string, _ json.RawMessage) (any, error) {
+			mu.Lock()
+			cur++
+			peak = max(peak, cur)
+			mu.Unlock()
+			<-release
+			mu.Lock()
+			cur--
+			mu.Unlock()
+			return nil, nil
+		})
+	}()
+	time.Sleep(200 * time.Millisecond)
+	mu.Lock()
+	p := peak
+	mu.Unlock()
+	close(release)
+	if err := <-errc; err != nil {
+		t.Fatal(err)
+	}
+	if p != MaxInFlight {
+		t.Fatalf("peak in-flight = %d, want %d", p, MaxInFlight)
+	}
+}
+
+// После EOF долгий обработчик получает отмену контекста через DrainTimeout.
+func TestServeCancelsAfterEOF(t *testing.T) {
+	old := DrainTimeout
+	DrainTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { DrainTimeout = old })
+	errc := make(chan error, 1)
+	go func() {
+		errc <- Serve(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"wait"}`+"\n"), io.Discard,
+			func(ctx context.Context, _ string, _ json.RawMessage) (any, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			})
+	}()
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return after EOF")
 	}
 }

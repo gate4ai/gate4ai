@@ -114,6 +114,9 @@ func (s *Server) Deliver(raw string) error {
 	return err
 }
 
+// Rename переименовывает папку (сервер с другими именами папок).
+func (s *Server) Rename(old, name string) error { return s.user.Rename(old, name, nil) }
+
 // Count — число писем в папке.
 func (s *Server) Count(folder string) int {
 	st, err := s.user.Status(folder, &imap.StatusOptions{NumMessages: true})

@@ -35,6 +35,9 @@ type relayProc struct {
 	pool *x509.CertPool
 }
 
+// freePort — свободный сейчас адрес 127.0.0.1:<порт>. Между закрытием и
+// запуском relay порт может занять параллельный тест: startRelay тогда
+// запускает relay заново на других портах.
 func freePort(t *testing.T, network string) string {
 	t.Helper()
 	if network == "udp" {
@@ -53,58 +56,83 @@ func freePort(t *testing.T, network string) string {
 	return l.Addr().String()
 }
 
+// relayAttempts — сколько раз запускать relay, если порт успели занять.
+const relayAttempts = 5
+
 func startRelay(t *testing.T) *relayProc {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("e2e builds binaries")
 	}
-	tmp := t.TempDir()
-	bin := filepath.Join(tmp, "gate4ai-relay")
-	b := exec.Command("go", "build", "-o", bin, "./cmd/gate4ai-relay")
-	b.Dir = src(t, "relay")
-	b.Env = workEnv(t)
-	if out, err := b.CombinedOutput(); err != nil {
-		t.Fatalf("build relay: %v\n%s", err, out)
-	}
+	bin := binary(t, "relay", "./cmd/gate4ai-relay")
 	cert, leaf, err := relay.SelfSigned("localhost")
 	if err != nil {
 		t.Fatal(err)
 	}
 	key, _ := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
-	r := &relayProc{addr: freePort(t, "tcp"), dns: freePort(t, "udp"), ca: filepath.Join(tmp, "relay.pem"), pool: x509.NewCertPool()}
-	r.url = "https://localhost:" + r.addr[strings.LastIndex(r.addr, ":")+1:]
-	r.pool.AddCert(leaf)
-	os.WriteFile(r.ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leaf.Raw}), 0o600)
-	os.WriteFile(filepath.Join(tmp, "relay.key"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0o600)
+	for attempt := 1; ; attempt++ {
+		tmp := t.TempDir()
+		r := &relayProc{addr: freePort(t, "tcp"), dns: freePort(t, "udp"), ca: filepath.Join(tmp, "relay.pem"), pool: x509.NewCertPool()}
+		r.url = "https://localhost:" + r.addr[strings.LastIndex(r.addr, ":")+1:]
+		r.pool.AddCert(leaf)
+		os.WriteFile(r.ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leaf.Raw}), 0o600)
+		os.WriteFile(filepath.Join(tmp, "relay.key"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0o600)
+		if r.start(t, bin, tmp, attempt == relayAttempts) {
+			return r
+		}
+		t.Logf("relay did not start on %s / %s (attempt %d): retrying on other ports", r.addr, r.dns, attempt)
+	}
+}
 
-	var rlog strings.Builder
+// start запускает relay; false — процесс сразу завершился (порт занят), last —
+// последняя попытка: тогда ошибка теста.
+func (r *relayProc) start(t *testing.T, bin, tmp string, last bool) bool {
+	t.Helper()
+	rlog := &lockedBuf{}
 	cmd := exec.Command(bin, "--domain", "localhost", "--listen", r.addr, "--dns", r.dns, "--ipv4", "127.0.0.1",
 		"--cert", r.ca, "--key", filepath.Join(tmp, "relay.key"), "--state", filepath.Join(tmp, "state.json"))
-	cmd.Stdout, cmd.Stderr = &rlog, &rlog
+	cmd.Stdout, cmd.Stderr = rlog, rlog
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	exited := make(chan struct{})
+	go func() { cmd.Wait(); close(exited) }()
+	c := &http.Client{Timeout: time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: r.pool}}}
+	ready := func() bool {
+		resp, err := c.Get(r.url + "/api/health")
+		if err != nil {
+			return false
+		}
+		resp.Body.Close()
+		return resp.StatusCode == 200
+	}
+	if !last {
+		// Ранний выход (address already in use) — повтор на других портах.
+		deadline := time.Now().Add(StartTimeout)
+		for !ready() {
+			select {
+			case <-exited:
+				return false
+			case <-time.After(50 * time.Millisecond):
+			}
+			if time.Now().After(deadline) {
+				cmd.Process.Kill()
+				<-exited
+				t.Fatalf("relay did not start in %s:\n%s", StartTimeout, rlog.String())
+			}
+		}
+	}
 	t.Cleanup(func() {
 		cmd.Process.Signal(os.Interrupt)
-		cmd.Wait()
+		<-exited
 		if t.Failed() {
 			t.Log("relay log:\n" + rlog.String())
 		}
 	})
-	c := &http.Client{Timeout: time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: r.pool}}}
-	for i := 0; ; i++ {
-		if resp, err := c.Get(r.url + "/api/health"); err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				break
-			}
-		}
-		if i > 100 {
-			t.Fatal("relay did not start")
-		}
-		time.Sleep(50 * time.Millisecond)
+	if last {
+		waitReady(t, "relay", exited, ready)
 	}
-	return r
+	return true
 }
 
 // browser — «телефон»: ходит на https://<id>.localhost/… через relay (как браузер по
@@ -167,12 +195,12 @@ func TestRemoteLinkThroughRelay(t *testing.T) {
 	if res := g.run("", "", "relay", "register", "--url", r.url, "--ca-file", r.ca, "--self-signed"); res.code != 0 {
 		t.Fatal(res.out)
 	}
-	for i := 0; ; i++ {
+	for start := time.Now(); ; {
 		st := g.run("", "", "relay", "status").json(t)
 		if st["online"] == true {
 			break
 		}
-		if i > 100 {
+		if time.Since(start) > StartTimeout {
 			t.Fatalf("device did not connect to the relay: %v", st)
 		}
 		time.Sleep(100 * time.Millisecond)

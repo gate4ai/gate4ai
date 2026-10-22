@@ -229,7 +229,7 @@ func TestChangePolicyApproval(t *testing.T) {
 	if res.Status != pipeline.StatusPending {
 		t.Fatalf("%+v", res)
 	}
-	if p := get("/approvals"); !strings.Contains(p, "Правило: разрешать notes.append") || !strings.Contains(p, "append without asking") {
+	if p := get("/approvals"); !strings.Contains(p, "Rule: allow notes.append") || !strings.Contains(p, "append without asking") {
 		t.Fatal(p)
 	}
 	post("/approvals/"+res.ID, url.Values{"decision": {"approve"}})

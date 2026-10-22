@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 )
 
 // Message — запрос, ответ или уведомление JSON-RPC 2.0.
@@ -51,6 +52,14 @@ const MaxLine = 64 << 20
 // Handler обрабатывает метод; возвращённая *Error передаётся как есть.
 type Handler func(ctx context.Context, method string, params json.RawMessage) (any, error)
 
+// MaxInFlight — сколько запросов обрабатывается одновременно; следующие ждут
+// в очереди чтения (собеседник не может завести неограниченно горутин).
+const MaxInFlight = 64
+
+// DrainTimeout — сколько после EOF ждать начатые обработчики, прежде чем
+// отменить их контекст (долгие ожидания вроде status --wait не держат выход).
+var DrainTimeout = 10 * time.Second
+
 // Serve читает запросы из r и пишет ответы в w до EOF.
 func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
 	return ServeWith(ctx, r, w, h, nil)
@@ -64,6 +73,9 @@ type Notify func(method string, params any)
 func ServeWith(ctx context.Context, r io.Reader, w io.Writer, h Handler, start func(Notify)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), MaxLine)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sem := make(chan struct{}, MaxInFlight)
 	var wmu sync.Mutex
 	var wg sync.WaitGroup
 	enc := json.NewEncoder(w)
@@ -87,9 +99,16 @@ func ServeWith(ctx context.Context, r io.Reader, w io.Writer, h Handler, start f
 			send(Message{JSONRPC: "2.0", Error: &Error{Code: CodeParse, Message: err.Error()}})
 			continue
 		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return ctx.Err()
+		}
 		wg.Add(1)
 		go func(m Message) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			res, err := h(ctx, m.Method, m.Params)
 			if m.ID == nil {
 				return
@@ -112,7 +131,18 @@ func ServeWith(ctx context.Context, r io.Reader, w io.Writer, h Handler, start f
 			send(out)
 		}(m)
 	}
-	wg.Wait()
+	// EOF: начатые вызовы получают DrainTimeout на завершение, затем их
+	// контекст отменяется.
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	t := time.NewTimer(DrainTimeout)
+	defer t.Stop()
+	select {
+	case <-done:
+	case <-t.C:
+		cancel()
+		<-done
+	}
 	return sc.Err()
 }
 

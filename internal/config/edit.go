@@ -33,20 +33,30 @@ func Decode(raw []byte) (*Config, error) {
 }
 
 // Edit применяет правку f к текущей конфигурации и сохраняет новую версию.
+// Правки через Edit идут по одной, а запись — только поверх прочитанной версии:
+// если её сменил Put в обход Edit, правка применяется заново к новой версии.
 func (s *Store) Edit(p auth.Principal, comment string, f func(c *Config) error) (Version, error) {
-	raw, _ := s.CurrentRaw()
-	c, err := Decode(raw)
-	if err != nil {
-		return Version{}, err
+	s.editMu.Lock()
+	defer s.editMu.Unlock()
+	for try := 0; ; try++ {
+		raw, n := s.CurrentRaw()
+		c, err := Decode(raw)
+		if err != nil {
+			return Version{}, err
+		}
+		if err := f(c); err != nil {
+			return Version{}, err
+		}
+		out, err := Marshal(c)
+		if err != nil {
+			return Version{}, err
+		}
+		v, err := s.PutIf(p, out, comment, n)
+		if errors.Is(err, ErrConflict) && try < 3 {
+			continue
+		}
+		return v, err
 	}
-	if err := f(c); err != nil {
-		return Version{}, err
-	}
-	out, err := Marshal(c)
-	if err != nil {
-		return Version{}, err
-	}
-	return s.Put(p, out, comment)
 }
 
 // Preview — YAML конфигурации после правки f (без сохранения) и ошибка проверки.

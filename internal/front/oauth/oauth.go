@@ -17,8 +17,10 @@ import (
 	"errors"
 	"html/template"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -30,16 +32,38 @@ import (
 type Server struct {
 	State      *state.Store
 	AgentKnown func(agent string) bool
-	// Issuer — базовый URL устройства (https://<device-id>.relay.gate4.ai); nil — из запроса.
+	// Issuer — базовый URL устройства (https://<device-id>.relay.gate4.ai,
+	// внешний адрес слушателя). Пусто — из Host запроса, только если Host —
+	// корректное имя (локальный слушатель без настроенного адреса).
 	Issuer     func(r *http.Request) string
 	Now        func() time.Time
 	AccessTTL  time.Duration
 	RefreshTTL time.Duration
+	// MaxClients — предел зарегистрированных клиентов (регистрация публична):
+	// при достижении удаляются старые клиенты без токенов, затем — отказ.
+	MaxClients int
+	// RegisterPerHour — предел регистраций клиентов в час (на всё устройство).
+	RegisterPerHour int
 
 	mu      sync.Mutex
 	codes   map[string]*authCode
 	connect map[string]*connectCode
+	// окно частоты регистраций
+	regStart time.Time
+	regCount int
+	// неудачные вводы кода подключения за последнюю минуту (на всё устройство)
+	failStart time.Time
+	failCount int
 }
+
+// Пределы перебора кода подключения: после maxConnectFailures неверных вводов
+// выданные коды аннулируются (владелец выдаёт новый); не больше
+// maxFailuresPerMinute неверных вводов в минуту на устройство.
+const (
+	maxConnectFailures   = 10
+	maxFailuresPerMinute = 20
+	unusedClientTTL      = 24 * time.Hour
+)
 
 type authCode struct {
 	clientID, redirectURI, challenge, agent, resource string
@@ -63,6 +87,7 @@ type Client struct {
 // New создаёт сервер.
 func New(st *state.Store, known func(string) bool) *Server {
 	return &Server{State: st, AgentKnown: known, Now: time.Now, AccessTTL: time.Hour, RefreshTTL: 30 * 24 * time.Hour,
+		MaxClients: 1000, RegisterPerHour: 60,
 		codes: map[string]*authCode{}, connect: map[string]*connectCode{}}
 }
 
@@ -91,22 +116,53 @@ func (s *Server) NewConnectCode(agent string) (string, time.Time, error) {
 	code := randomCode(4) + "-" + randomCode(4)
 	exp := s.Now().Add(10 * time.Minute)
 	s.mu.Lock()
+	s.sweepLocked()
 	s.connect[code] = &connectCode{agent: agent, expires: exp}
 	s.mu.Unlock()
 	return code, exp, nil
 }
 
+// sweepLocked удаляет просроченные коды авторизации и подключения.
+func (s *Server) sweepLocked() {
+	now := s.Now()
+	for k, c := range s.codes {
+		if now.After(c.expires) {
+			delete(s.codes, k)
+		}
+	}
+	for k, c := range s.connect {
+		if now.After(c.expires) {
+			delete(s.connect, k)
+		}
+	}
+}
+
+// hostRe — Host, из которого можно строить issuer: имя или IP и порт.
+var hostRe = regexp.MustCompile(`^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9.-]+)(:[0-9]{1,5})?$`)
+
+// issuer — настроенный публичный адрес (Issuer); без него — Host запроса
+// (локальный слушатель), если это корректное имя: issuer и адреса в
+// метаданных не строятся из произвольного заголовка клиента.
 func (s *Server) issuer(r *http.Request) string {
 	if s.Issuer != nil {
 		if v := s.Issuer(r); v != "" {
 			return strings.TrimSuffix(v, "/")
 		}
 	}
+	host := r.Host
+	if !hostRe.MatchString(host) {
+		host = "localhost"
+		if r.TLS == nil {
+			if a, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok {
+				host = a.String()
+			}
+		}
+	}
 	scheme := "https"
 	if r.TLS == nil {
 		scheme = "http"
 	}
-	return scheme + "://" + r.Host
+	return scheme + "://" + host
 }
 
 // ResourceMetadataURL — для заголовка WWW-Authenticate ресурса MCP.
@@ -201,6 +257,11 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if len(req.ClientName) > 100 {
 		req.ClientName = req.ClientName[:100]
 	}
+	if code, msg := s.admitClient(); code != 0 {
+		w.Header().Set("Retry-After", "3600")
+		oauthErr(w, code, "temporarily_unavailable", msg)
+		return
+	}
 	c := Client{ClientID: "c_" + randomToken()[:22], ClientName: req.ClientName, RedirectURIs: req.RedirectURIs, CreatedAt: s.Now().Unix()}
 	b, _ := json.Marshal(c)
 	if err := s.State.Set("oauth.client."+c.ClientID, string(b)); err != nil {
@@ -210,6 +271,36 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{"client_id": c.ClientID, "client_name": c.ClientName, "redirect_uris": c.RedirectURIs,
 		"client_id_issued_at": c.CreatedAt, "token_endpoint_auth_method": "none",
 		"grant_types": []string{"authorization_code", "refresh_token"}, "response_types": []string{"code"}})
+}
+
+// admitClient — можно ли зарегистрировать ещё одного клиента: частота
+// регистраций и общее число (старые клиенты без токенов удаляются).
+func (s *Server) admitClient() (int, string) {
+	s.mu.Lock()
+	now := s.Now()
+	if now.Sub(s.regStart) >= time.Hour {
+		s.regStart, s.regCount = now, 0
+	}
+	if s.RegisterPerHour > 0 && s.regCount >= s.RegisterPerHour {
+		s.mu.Unlock()
+		return http.StatusTooManyRequests, "too many client registrations, try later"
+	}
+	s.regCount++
+	s.mu.Unlock()
+	if s.MaxClients <= 0 {
+		return 0, ""
+	}
+	n, err := s.State.CountKV("oauth.client.")
+	if err != nil {
+		return http.StatusServiceUnavailable, "client registry unavailable"
+	}
+	if n >= s.MaxClients {
+		_, _ = s.State.PruneOAuthClients(now.Add(-unusedClientTTL))
+		if n, err = s.State.CountKV("oauth.client."); err != nil || n >= s.MaxClients {
+			return http.StatusServiceUnavailable, "too many registered clients"
+		}
+	}
+	return 0, ""
 }
 
 func (s *Server) client(id string) (*Client, bool) {
@@ -332,12 +423,30 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		code = code[:4] + "-" + code[4:]
 	}
 	s.mu.Lock()
-	cc, ok := s.connect[code]
-	if ok && s.Now().After(cc.expires) {
-		delete(s.connect, code)
-		ok = false
+	s.sweepLocked()
+	now := s.Now()
+	if now.Sub(s.failStart) >= time.Minute {
+		s.failStart, s.failCount = now, 0
 	}
+	if s.failCount >= maxFailuresPerMinute {
+		s.mu.Unlock()
+		a.Error = "Слишком много неверных кодов. Попробуйте через минуту."
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = page.Execute(w, a)
+		return
+	}
+	cc, ok := s.connect[code]
 	if !ok {
+		// Перебор: каждый неверный ввод считается против всех выданных кодов;
+		// после maxConnectFailures они аннулируются.
+		s.failCount++
+		for k, c := range s.connect {
+			if c.failures++; c.failures >= maxConnectFailures {
+				delete(s.connect, k)
+			}
+		}
 		s.mu.Unlock()
 		a.Error = "Неверный или просроченный код подключения."
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -393,6 +502,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	switch f.Get("grant_type") {
 	case "authorization_code":
 		s.mu.Lock()
+		s.sweepLocked()
 		ac, ok := s.codes[f.Get("code")]
 		delete(s.codes, f.Get("code")) // одноразовый в любом случае
 		s.mu.Unlock()
@@ -415,12 +525,17 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		s.issue(w, ac.agent, ac.clientID)
 	case "refresh_token":
 		rt := f.Get("refresh_token")
-		agent, clientID, err := s.State.RefreshToken(rt)
+		// Ротация атомарна: токен гасится одним запросом до выпуска новой пары,
+		// из параллельных запросов проходит один. Повторное использование
+		// погашенного токена — признак кражи: отзываются все токены клиента.
+		agent, clientID, err := s.State.ConsumeRefreshToken(rt)
+		if errors.Is(err, state.ErrTokenReused) {
+			_, _ = s.State.RevokeLabel(agent, clientID)
+		}
 		if err != nil || (f.Get("client_id") != "" && f.Get("client_id") != clientID) || !s.AgentKnown(agent) {
 			oauthErr(w, 400, "invalid_grant", "invalid refresh token")
 			return
 		}
-		_ = s.State.RevokeToken(rt) // ротация
 		s.issue(w, agent, clientID)
 	default:
 		oauthErr(w, 400, "unsupported_grant_type", "use authorization_code or refresh_token")

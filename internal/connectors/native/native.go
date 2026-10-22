@@ -132,7 +132,7 @@ func (p *Process) crash(err error) {
 
 func (p *Process) start(ctx context.Context) (*running, error) {
 	cmd := exec.Command(p.bin)
-	cmd.Env = append(os.Environ(), "GATE4AI_NATIVE=1")
+	cmd.Env = append(MinimalEnv(os.Environ()), "GATE4AI_NATIVE=1")
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -187,8 +187,14 @@ func (p *Process) kill(r *running) {
 func (p *Process) stderr(r io.Reader) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 4096), 64<<10)
+	// Пакет получает значения (Revealed, коды от человека): отладочная строка
+	// или паника со значением не должна лечь в лог открытым текстом.
+	mask := func(s string) string { return s }
+	if m, ok := p.hosts.(interface{ MaskString(string) string }); ok {
+		mask = m.MaskString
+	}
 	for sc.Scan() {
-		p.log.Info(sc.Text(), "connector", p.man.Connector, "stream", "stderr")
+		p.log.Info(mask(sc.Text()), "connector", p.man.Connector, "stream", "stderr")
 	}
 }
 
@@ -240,7 +246,9 @@ func (p *Process) call(ctx context.Context, method string, settings map[string]a
 		if ctx.Err() != nil {
 			// Ответа больше не ждём: процесс должен прервать вызов, иначе он
 			// доделает его без хозяина (страница браузера останется занятой).
-			_ = peer.Notify(sdknative.MethodCancel, sdknative.CancelParams{Call: id})
+			// Асинхронно и со сроком: процесс, который не читает stdin, не
+			// задерживает ответ.
+			go notify(peer, sdknative.MethodCancel, sdknative.CancelParams{Call: id})
 		}
 		switch {
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
@@ -325,8 +333,49 @@ func (p *Process) EndCall(call string) {
 	r := p.run
 	p.mu.Unlock()
 	if r != nil {
-		_ = r.peer.Notify(sdknative.MethodEndCall, sdknative.EndCallParams{Call: call})
+		go notify(r.peer, sdknative.MethodEndCall, sdknative.EndCallParams{Call: call})
 	}
+}
+
+// notify — уведомление процессу со сроком stopTimeout (процесс мог перестать
+// читать stdin: запись в полный pipe не должна держать хост).
+func notify(peer *sdknative.Peer, method string, params any) {
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	_ = peer.NotifyContext(ctx, method, params)
+}
+
+// envAllow — переменные окружения хоста, которые получает нативный процесс:
+// системные (пути, язык, дисплей, временные каталоги, профиль пользователя
+// Windows), но не токены и ключи из окружения daemon.
+var envAllow = map[string]bool{
+	"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true, "LANG": true, "LANGUAGE": true, "TZ": true,
+	"TMPDIR": true, "TEMP": true, "TMP": true, "DISPLAY": true, "WAYLAND_DISPLAY": true, "XAUTHORITY": true,
+	"DBUS_SESSION_BUS_ADDRESS": true, "__CF_USER_TEXT_ENCODING": true,
+	"SYSTEMROOT": true, "SYSTEMDRIVE": true, "WINDIR": true, "COMSPEC": true, "PATHEXT": true, "USERPROFILE": true,
+	"USERNAME": true, "USERDOMAIN": true, "APPDATA": true, "LOCALAPPDATA": true, "PROGRAMDATA": true, "PROGRAMFILES": true,
+	"PROGRAMFILES(X86)": true, "PROGRAMW6432": true, "COMMONPROGRAMFILES": true, "COMMONPROGRAMFILES(X86)": true,
+	"HOMEDRIVE": true, "HOMEPATH": true, "PUBLIC": true, "NUMBER_OF_PROCESSORS": true, "PROCESSOR_ARCHITECTURE": true, "OS": true,
+}
+
+// testEnvPrefix — переменные тестов пакета (процесс коннектора — бинарник теста).
+var testEnvPrefix string
+
+// MinimalEnv — окружение нативного процесса из окружения хоста: только
+// envAllow и LC_* / XDG_* (без GATE4AI_* и прочих переменных daemon).
+func MinimalEnv(environ []string) []string {
+	var out []string
+	for _, kv := range environ {
+		k, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		u := strings.ToUpper(k)
+		if envAllow[u] || strings.HasPrefix(u, "LC_") || strings.HasPrefix(u, "XDG_") || testEnvPrefix != "" && strings.HasPrefix(k, testEnvPrefix) {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // Close останавливает процесс: shutdown, затем kill по сроку.
@@ -342,7 +391,9 @@ func (p *Process) Close() error {
 	if r == nil {
 		return nil
 	}
-	_ = r.peer.Notify(sdknative.MethodShutdown, struct{}{})
+	// Уведомление — асинхронно: процесс, переставший читать stdin, не
+	// задерживает остановку дольше stopTimeout (дальше — kill).
+	go notify(r.peer, sdknative.MethodShutdown, struct{}{})
 	select {
 	case <-r.done:
 	case <-time.After(stopTimeout):

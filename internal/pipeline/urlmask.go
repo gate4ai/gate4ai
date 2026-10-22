@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
 )
 
 // mask — известные секреты (Vault) и одноразовые коды и токены в адресах:
@@ -22,7 +24,7 @@ var urlInText = regexp.MustCompile(`https?://[^\s"'<>]+`)
 func maskURLs(v any) any {
 	switch t := v.(type) {
 	case string:
-		if !strings.Contains(t, "?") {
+		if !strings.ContainsAny(t, "?#") {
 			return t
 		}
 		return urlInText.ReplaceAllStringFunc(t, maskURL)
@@ -38,13 +40,26 @@ func maskURLs(v any) any {
 	return v
 }
 
-// maskURL — адрес с *** вместо значений секретных параметров.
+// maskURL — адрес с *** вместо значений секретных параметров в query и во
+// фрагменте (implicit flow и response_mode=fragment: #access_token=…).
 func maskURL(u string) string {
-	base, query, ok := strings.Cut(u, "?")
-	if !ok {
-		return u
+	rest, frag, hasFrag := strings.Cut(u, "#")
+	base, query, hasQuery := strings.Cut(rest, "?")
+	out := base
+	if hasQuery {
+		out += "?" + maskParams(query)
 	}
-	query, frag, hasFrag := strings.Cut(query, "#")
+	if hasFrag {
+		if strings.Contains(frag, "=") {
+			frag = maskParams(frag)
+		}
+		out += "#" + frag
+	}
+	return out
+}
+
+// maskParams — k=v&… с *** вместо значений секретных параметров.
+func maskParams(query string) string {
 	parts := strings.Split(query, "&")
 	for i, part := range parts {
 		k, _, hasVal := strings.Cut(part, "=")
@@ -56,9 +71,16 @@ func maskURL(u string) string {
 			parts[i] = k + "=***"
 		}
 	}
-	out := base + "?" + strings.Join(parts, "&")
-	if hasFrag {
-		out += "#" + frag
+	return strings.Join(parts, "&")
+}
+
+// evidenceData — данные доказательства для хранения: текстовые (text/*, JSON,
+// XML, HTML, пустой MIME) проходят маскирование секретов и адресов, как ответы;
+// изображения и прочие двоичные — как есть (снимки уже с закрашенными полями).
+func (p *Pipeline) evidenceData(e abi.EvidenceItem) []byte {
+	m := strings.ToLower(e.MIME)
+	if m == "" || strings.HasPrefix(m, "text/") || strings.Contains(m, "json") || strings.Contains(m, "xml") {
+		return []byte(p.maskString(string(e.Data)))
 	}
-	return out
+	return e.Data
 }

@@ -105,15 +105,22 @@ func (u *UI) yamlData(y string) map[string]any {
 	}
 	vs, _ := u.D.Config.Versions()
 	slices.Reverse(vs)
-	return map[string]any{"YAML": y, "Version": n, "Versions": vs, "page": "policy_yaml"}
+	return map[string]any{"YAML": y, "Version": n, "Base": n, "Versions": vs, "page": "policy_yaml"}
 }
 
 func (u *UI) savePolicy(w http.ResponseWriter, r *http.Request) map[string]any {
 	y := r.PostForm.Get("yaml")
-	v, err := u.D.Config.Put(owner, []byte(y), r.PostForm.Get("comment"))
+	// base — версия, открытая в редакторе: если её сменили (одобренный
+	// change_policy, другая вкладка), сохранение не откатывает чужую правку.
+	base, _ := strconv.Atoi(r.PostForm.Get("base"))
+	v, err := u.D.Config.PutIf(owner, []byte(y), r.PostForm.Get("comment"), base)
 	if err != nil {
 		d := u.yamlData(y)
 		d["error"] = err
+		if errors.Is(err, config.ErrConflict) {
+			d["error"] = M("The policy was changed while you were editing it (it is version %d now). Your text below is not saved: move your edit into the current version (open the page again) and save.", d["Version"].(int))
+			d["Base"] = base
+		}
 		return d
 	}
 	return redirect("/policy/yaml", M("Saved as version %d", v.N))

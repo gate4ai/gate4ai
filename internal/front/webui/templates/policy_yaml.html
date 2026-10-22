@@ -3,7 +3,7 @@
 {{template "access_tabs" (dict "V" . "On" "rules")}}
 <div class="row between"><h2>{{T "YAML configuration"}} <span class="muted">{{T "version %d" $d.Version}}</span></h2><a href="{{.Base}}/policy">← {{T "Rules"}}</a></div>
 <p class="muted">{{T "The whole configuration as one file — for technical users. Changes made in the Web UI keep the model but not the YAML comments."}}</p>
-<form method="post" action="{{.Base}}/policy" class="card"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<form method="post" action="{{.Base}}/policy" class="card"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="base" value="{{$d.Base}}">
 <label for="yaml" class="skip">YAML</label><textarea id="yaml" class="code" name="yaml" rows="30" spellcheck="false">{{$d.YAML}}</textarea>
 <div class="row" style="margin-top:.5rem"><label class="inline" for="y-c">{{T "Comment"}}</label><input id="y-c" name="comment" size="40"><button class="primary">{{T "Save a new version"}}</button></div></form>
 <h3>{{T "Versions"}}</h3>

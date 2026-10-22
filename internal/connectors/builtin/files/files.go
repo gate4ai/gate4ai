@@ -181,23 +181,29 @@ func (Files) Verify(ctx context.Context, h *abi.Host, r abi.VerifyRequest) (abi.
 	if _, err := settings(r.Settings); err != nil {
 		return abi.VerifyResult{}, err
 	}
-	var want func([]byte) bool
+	p, _ := r.Args["path"].(string)
+	var f abi.FSReadResponse
+	var err error
+	var ok bool
 	switch r.Action {
 	case "append":
+		// Только хвост длиной в добавленный текст: файл (лог) может быть
+		// больше предела fs_read, а проверять нужно лишь его конец.
 		text, _ := r.Args["text"].(string)
-		want = func(b []byte) bool { return bytes.HasSuffix(b, []byte(text)) }
+		n := int64(len(text))
+		f, err = h.FSReadAt(p, -n, n)
+		ok = err == nil && f.Size >= n && bytes.Equal(f.Data, []byte(text))
 	case "write":
 		content, _ := r.Args["content"].(string)
-		want = func(b []byte) bool { return bytes.Equal(b, []byte(content)) }
+		f, err = h.FSRead(p, int64(len(content))+1)
+		ok = err == nil && !f.Truncated && bytes.Equal(f.Data, []byte(content))
 	default:
 		return abi.VerifyResult{}, abi.Errorf(abi.CodeBadRequest, "action %s has no verification", r.Action)
 	}
-	p, _ := r.Args["path"].(string)
-	f, err := h.FSRead(p, 64<<20)
 	if err != nil {
 		return abi.VerifyResult{}, err
 	}
-	if f.Truncated || !want(f.Data) {
+	if !ok {
 		return abi.VerifyResult{Status: abi.NotConfirmed, Method: "read_back", Detail: "file content does not match"}, nil
 	}
 	return abi.VerifyResult{Status: abi.Verified, Method: "read_back", Detail: "sha256 " + sum(f.Data)}, nil

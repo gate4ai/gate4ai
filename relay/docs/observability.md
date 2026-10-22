@@ -32,12 +32,12 @@
 | `gate4ai_relay_devices`, `gate4ai_relay_devices_online` | зарегистрировано устройств / с открытым туннелем |
 | `gate4ai_relay_connections_total{kind}` | входящие TLS-соединения: `api` (сам relay), `device`, `route` (`--route`, сайт и Grafana) |
 | `gate4ai_relay_active_connections{kind}` | открытые сейчас |
-| `gate4ai_relay_rejected_connections_total{reason}` | сброшенные: `bad_hello`, `unknown_host`, `unknown_device`, `device_offline`, `stream`, `backend` |
+| `gate4ai_relay_rejected_connections_total{reason}` | сброшенные: `conn_limit` (предел соединений), `bad_hello`, `unknown_host`, `unknown_device`, `device_offline` (в том числе сверх 32 ждущих одно устройство), `stream`, `backend` |
 | `gate4ai_relay_passthrough_bytes_total{kind,direction}` | байты passthrough (`in` — от клиента) |
 | `gate4ai_relay_tunnel_connects_total` | подключения туннелей устройств |
 | `gate4ai_relay_device_wait_seconds` | сколько входящее соединение ждало туннель устройства |
 | `gate4ai_relay_http_requests_total{route,code}`, `gate4ai_relay_http_request_duration_seconds{route}` | запросы API по шаблону маршрута (`/tunnel` в длительность не входит) |
-| `gate4ai_relay_dns_queries_total{rcode}` | запросы авторитетного DNS |
+| `gate4ai_relay_dns_queries_total{rcode}` | запросы авторитетного DNS; `RATELIMITED` — UDP сверх лимита на адрес, без ответа |
 | `gate4ai_relay_build_info{version}` | версия; плюс стандартные `go_*` и `process_*` |
 
 **Регистрации и сертификаты за 7 дней.** Сертификат устройство выпускает само (ACME DNS-01), relay его не видит; зато выпуск на `<id>.relay.gate4.ai` возможен только через TXT `_acme-challenge`, который устройство ставит через `POST /api/acme/txt`. Поэтому заказ сертификата — это постановка TXT; TXT одного устройства в пределах 10 минут (несколько авторизаций, повторы) считаются одним заказом. Время событий и накопленные счётчики хранятся в state-файле relay (`stats`), так что значения переживают перезапуск relay и не зависят от ретенции Prometheus; времена старше 8 дней удаляются. Устройства, зарегистрированные до появления учёта, в окно не попадают.

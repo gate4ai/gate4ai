@@ -65,6 +65,10 @@ func Open(dbPath, evDir string, ks keys.Store, opt Options) (*Journal, error) {
 		db.Close()
 		return nil, fmt.Errorf("journal schema: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("journal schema: %w", err)
+	}
 	key, err := keys.RandomBytes(ks, "audit.aead", chacha20poly1305.KeySize)
 	if err != nil {
 		return nil, err
@@ -89,6 +93,10 @@ func Open(dbPath, evDir string, ks keys.Store, opt Options) (*Journal, error) {
 	_ = db.QueryRow(`SELECT MAX(ts) FROM checkpoints`).Scan(&ts)
 	if ts.Valid {
 		j.lastCPAt = time.Unix(0, ts.Int64)
+	}
+	if err := j.coverLegacyRedactions(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("journal: %w", err)
 	}
 	return j, nil
 }
@@ -119,6 +127,32 @@ CREATE TABLE IF NOT EXISTS checkpoints(
   sig TEXT NOT NULL,
   witnessed INTEGER NOT NULL DEFAULT 0
 );`
+
+// migrate добавляет колонки, появившиеся после первой версии схемы:
+// receipts.kind ('intent' — квитанция-намерение), receipts.intent (ссылка
+// итоговой квитанции на намерение), checkpoints.prev (цепочка чекпоинтов).
+func migrate(db *sql.DB) error {
+	for _, c := range []struct{ table, col, def string }{
+		{"receipts", "kind", "TEXT NOT NULL DEFAULT ''"},
+		{"receipts", "intent", "TEXT NOT NULL DEFAULT ''"},
+		{"checkpoints", "prev", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, c.table, c.col).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := db.Exec(`ALTER TABLE ` + c.table + ` ADD COLUMN ` + c.col + ` ` + c.def); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := db.Exec(`CREATE INDEX IF NOT EXISTS receipts_kind ON receipts(kind)`)
+	return err
+}
+
+// kindIntent — квитанция-намерение (execution.status "started").
+const kindIntent = "intent"
 
 // Close закрывает базу.
 func (j *Journal) Close() error { return j.db.Close() }
@@ -172,7 +206,8 @@ func (j *Journal) open(id string, box []byte) ([]byte, error) {
 	return a.Open(nil, box[:a.NonceSize()], box[a.NonceSize():], []byte("gate4ai-receipt:"+id))
 }
 
-// Append дописывает квитанцию в цепочку и возвращает её хэш.
+// Append дописывает квитанцию в цепочку и возвращает её хэш. Непустой хэш —
+// квитанция записана (ошибка тогда — только чекпоинта); пустой — не записана.
 func (j *Journal) Append(r *Receipt) (string, error) {
 	j.mu.Lock()
 	var prev string
@@ -210,22 +245,50 @@ func (j *Journal) Append(r *Receipt) (string, error) {
 	if r.Approval != nil {
 		preview = r.Approval.PreviewHash
 	}
-	_, err = j.db.Exec(`INSERT INTO receipts(seq,id,ts,agent,action,class,effect,hash,prev_hash,preview_hash,evidence,body) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-		r.Seq, r.ID, r.TS.UnixNano(), r.Agent, r.Action, r.Class, r.Decision.Effect, hash, prev, preview, string(ev), box)
+	kind := ""
+	if r.Execution.Status == ExecStarted {
+		kind = kindIntent
+	}
+	_, err = j.db.Exec(`INSERT INTO receipts(seq,id,ts,agent,action,class,effect,hash,prev_hash,preview_hash,evidence,body,kind,intent) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.Seq, r.ID, r.TS.UnixNano(), r.Agent, r.Action, r.Class, r.Decision.Effect, hash, prev, preview, string(ev), box, kind, r.Intent)
 	if err != nil {
 		j.mu.Unlock()
 		return "", err
 	}
 	var cpErr error
+	var cp *Checkpoint
 	if r.Seq%int64(j.every) == 0 {
-		_, cpErr = j.checkpointLocked()
+		cp, cpErr = j.checkpointLocked()
 	}
 	subs := append([]func(Entry){}, j.onReceipt...)
+	w := j.witness
 	j.mu.Unlock()
+	// Свидетель (HTTP к relay) — вне мьютекса: запись журнала его не ждёт.
+	j.witnessCP(w, cp)
 	for _, f := range subs {
 		f(Entry{Receipt: *r, Hash: hash})
 	}
 	return hash, cpErr
+}
+
+// OpenIntents — квитанции-намерения без итоговой квитанции: исполнение
+// прервала остановка daemon (восстановление при старте).
+func (j *Journal) OpenIntents() ([]Entry, error) {
+	rows, err := j.db.Query(`SELECT seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash FROM receipts r
+		WHERE kind=? AND NOT EXISTS (SELECT 1 FROM receipts f WHERE f.intent=r.id) ORDER BY seq`, kindIntent)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Entry
+	for rows.Next() {
+		e, err := j.scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // Filter — выборка из журнала.
@@ -234,12 +297,18 @@ type Filter struct {
 	Since, Until          time.Time
 	Limit                 int
 	Desc                  bool
+	// All — и квитанции-намерения (для проверки цепочки и экспорта); без него
+	// в выборке только итоговые квитанции.
+	All bool
 }
 
 // List возвращает квитанции по фильтру.
 func (j *Journal) List(f Filter) ([]Entry, error) {
 	q := `SELECT seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash FROM receipts WHERE 1=1`
 	var args []any
+	if !f.All {
+		q += ` AND kind != 'intent'`
+	}
 	if f.Agent != "" {
 		q += ` AND agent=?`
 		args = append(args, f.Agent)
@@ -313,6 +382,22 @@ func (j *Journal) scan(s scanner) (Entry, error) {
 	return e, nil
 }
 
+// scanIndex — квитанция только по колонкам индекса (без расшифровки тела).
+func (j *Journal) scanIndex(s scanner) (Entry, error) {
+	var (
+		seq, ts                                int64
+		id, hash, agent, action, class, effect string
+		prev                                   string
+		body                                   []byte
+		red                                    int
+	)
+	if err := s.Scan(&seq, &id, &hash, &body, &red, &ts, &agent, &action, &class, &effect, &prev); err != nil {
+		return Entry{}, err
+	}
+	return Entry{Hash: hash, Redacted: red != 0, Receipt: Receipt{Seq: seq, ID: id, TS: time.Unix(0, ts).UTC(), Agent: agent, Action: action,
+		Class: class, Decision: Decision{Effect: effect}, PrevHash: prev}}, nil
+}
+
 // ErrNotFound — квитанция не найдена.
 var ErrNotFound = errors.New("receipt not found")
 
@@ -332,7 +417,8 @@ func (j *Journal) Find(key string) (Entry, error) {
 			return Entry{}, fmt.Errorf("hash prefix must be at least 6 hex characters")
 		}
 		k := strings.ToLower(key) + "%"
-		rows, err = j.db.Query(cols+`WHERE hash LIKE ? OR preview_hash LIKE ? LIMIT 2`, k, k)
+		// По хэшу превью находится итоговая квитанция, не намерение того же действия.
+		rows, err = j.db.Query(cols+`WHERE hash LIKE ? OR (preview_hash LIKE ? AND kind != 'intent') LIMIT 2`, k, k)
 	}
 	if err != nil {
 		return Entry{}, err

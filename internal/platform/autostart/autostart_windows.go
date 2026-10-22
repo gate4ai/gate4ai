@@ -14,8 +14,6 @@ const (
 	runTray   = "gate4ai-tray"
 )
 
-func winQuote(s string) string { return `"` + s + `"` }
-
 func Install(s Spec) (Result, error) {
 	var r Result
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)

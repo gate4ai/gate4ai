@@ -41,7 +41,7 @@ func newMetrics(s *Server) *Metrics {
 		active: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "gate4ai_relay_active_connections",
 			Help: "Open connections by kind (api, device, route)."}, []string{"kind"}),
 		rejected: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "gate4ai_relay_rejected_connections_total",
-			Help: "Dropped connections by reason (bad_hello, unknown_host, unknown_device, device_offline, stream, backend)."}, []string{"reason"}),
+			Help: "Dropped connections by reason (conn_limit, bad_hello, unknown_host, unknown_device, device_offline, stream, backend)."}, []string{"reason"}),
 		bytes: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "gate4ai_relay_passthrough_bytes_total",
 			Help: "Bytes passed through without decryption; direction in = from client, out = to client."}, []string{"kind", "direction"}),
 		tunnels: prometheus.NewCounter(prometheus.CounterOpts{Name: "gate4ai_relay_tunnel_connects_total",
@@ -53,7 +53,7 @@ func newMetrics(s *Server) *Metrics {
 		latency: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "gate4ai_relay_http_request_duration_seconds",
 			Help: "Relay API request duration (without the long-lived /tunnel).", Buckets: prometheus.DefBuckets}, []string{"route"}),
 		dns: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "gate4ai_relay_dns_queries_total",
-			Help: "Authoritative DNS queries by response code."}, []string{"rcode"}),
+			Help: "Authoritative DNS queries by response code (RATELIMITED — UDP over the per-IP limit, not answered)."}, []string{"rcode"}),
 	}
 	snap := func() StatsSnapshot { return s.Store.Snapshot(RecentWindow) }
 	m.reg.MustRegister(m.conns, m.active, m.rejected, m.bytes, m.tunnels, m.wait, m.requests, m.latency, m.dns,

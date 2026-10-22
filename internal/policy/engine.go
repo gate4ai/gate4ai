@@ -61,6 +61,9 @@ type Request struct {
 	// родительскому действию. Явные правила deny на действие действуют, ask —
 	// нет: подвызов уже показан в подтверждении родительского действия.
 	Nested bool
+	// StateError — ошибка State Store при обогащении (метки происхождения):
+	// решение — deny (state-unavailable), а не «меток нет».
+	StateError error
 }
 
 // Connector — имя коннектора из действия.
@@ -78,6 +81,15 @@ type Counters interface {
 	// AmountToday — сумма amount действий агента по шаблону за сегодня.
 	AmountToday(agent, actionPattern string) float64
 }
+
+// CountersErr — счётчики, которые сообщают об ошибке чтения: при ошибке
+// лимиты неизвестны, и решение — deny (state-unavailable).
+type CountersErr interface {
+	Err() error
+}
+
+// RuleStateUnavailable — rule_id отказа из-за недоступного State Store.
+const RuleStateUnavailable = "state-unavailable"
 
 // NoCounters — нулевые счётчики.
 type NoCounters struct{}
@@ -171,7 +183,12 @@ var baseEnvOpts = []cel.EnvOption{
 	cel.Function("glob",
 		cel.Overload("glob_string_string", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 			cel.BinaryBinding(func(a, b ref.Val) ref.Val {
-				return types.Bool(Glob(string(a.(types.String)), string(b.(types.String))))
+				ok, err := GlobErr(string(a.(types.String)), string(b.(types.String)))
+				if err != nil {
+					// Неверный шаблон — ошибка вычисления (fail-closed), а не молчаливое false.
+					return types.WrapErr(err)
+				}
+				return types.Bool(ok)
 			}))),
 	cel.Function("domain_matches",
 		cel.Overload("domain_matches_string_list", []*cel.Type{cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
@@ -239,6 +256,9 @@ func compile(r config.Rule, cfg *config.Config, cat Catalog) (cel.Program, error
 	if checked.OutputType() != cel.BoolType && checked.OutputType() != cel.DynType {
 		return nil, fmt.Errorf("condition must be boolean, got %s", checked.OutputType())
 	}
+	if err := checkGlobLiterals(parsed); err != nil {
+		return nil, err
+	}
 	for _, name := range listRefs(r.When) {
 		if _, ok := cfg.Lists[name]; !ok {
 			return nil, fmt.Errorf("unknown list %q", name)
@@ -272,6 +292,25 @@ func freeIdents(a *cel.Ast) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// checkGlobLiterals проверяет шаблоны glob(…, "литерал") при компиляции:
+// опечатка в шаблоне не должна молча выключать правило.
+func checkGlobLiterals(a *cel.Ast) error {
+	var err error
+	celast.PreOrderVisit(a.NativeRep().Expr(), celast.NewExprVisitor(func(e celast.Expr) {
+		if err != nil || e.Kind() != celast.CallKind {
+			return
+		}
+		c := e.AsCall()
+		if c.FunctionName() != "glob" || len(c.Args()) != 2 || c.Args()[1].Kind() != celast.LiteralKind {
+			return
+		}
+		if s, ok := c.Args()[1].AsLiteral().Value().(string); ok {
+			err = CheckGlob(s)
+		}
+	}))
+	return err
 }
 
 // listRefs — имена списков в "lists.name".

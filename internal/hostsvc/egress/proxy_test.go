@@ -12,13 +12,16 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestProxy(t *testing.T) {
 	// «Настоящие» серверы: API модели (HTTPS) и прочие.
+	var gotKey atomic.Value
 	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey.Store(r.Header.Get("X-Api-Key"))
 		io.WriteString(w, "host="+r.Host+" auth="+r.Header.Get("X-Api-Key"))
 	}))
 	realCA, _ := NewCA("public CA")
@@ -36,7 +39,7 @@ func TestProxy(t *testing.T) {
 	var mu sync.Mutex
 	var log []Record
 	p := &Proxy{
-		Auth: func(u, pw string) (string, bool) { return "claude-code", u == "run-1" && pw == "pw" },
+		Auth: func(u, pw string) (string, string, bool) { return "claude-code", "1", u == "run-1" && pw == "pw" },
 		Decide: func(_ context.Context, agent, host string, port int) (bool, string) {
 			switch host {
 			case "api.anthropic.test", "registry.npmjs.test", "127.0.0.1":
@@ -44,8 +47,8 @@ func TestProxy(t *testing.T) {
 			}
 			return false, "not in allowlist"
 		},
-		Secrets: func(agent, host string) []Injection {
-			if host == "api.anthropic.test" {
+		Secrets: func(run, host string, port int) []Injection {
+			if host == "api.anthropic.test" && port == 443 {
 				return []Injection{{Header: "X-Api-Key", Placeholder: "GATE4AI_PLACEHOLDER", Value: "sk-real-secret"}}
 			}
 			return nil
@@ -80,8 +83,9 @@ func TestProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(b), "auth=sk-real-secret") {
-		t.Fatal(string(b))
+	// Сервер получил реальный ключ, а его эхо в ответе агенту замаскировано.
+	if gotKey.Load() != "sk-real-secret" || strings.Contains(string(b), "sk-real-secret") || !strings.Contains(string(b), "auth=*****") {
+		t.Fatal(gotKey.Load(), string(b))
 	}
 	// Агент не видит реальный ключ, только ответ сервера; сертификат подписан CA запуска.
 	if resp.TLS.PeerCertificates[0].Issuer.CommonName != "gate4ai run test" {

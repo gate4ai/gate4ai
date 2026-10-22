@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 )
 
@@ -33,16 +34,55 @@ func (f *File) load() (map[string]string, error) {
 	return m, json.Unmarshal(b, &m)
 }
 
+// save пишет файл атомарно: новый временный файл 0600 в том же каталоге,
+// fsync, rename. Права каталога (0700) и файла (0600) исправляются, даже если
+// каталог или файл уже были с более широкими правами.
 func (f *File) save(m map[string]string) error {
-	if err := os.MkdirAll(filepath.Dir(f.path), 0o700); err != nil {
+	dir := filepath.Dir(f.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := tighten(dir, 0o700); err != nil {
 		return err
 	}
 	b, _ := json.MarshalIndent(m, "", "  ")
-	tmp := f.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	tmp, err := os.CreateTemp(dir, filepath.Base(f.path)+".tmp-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, f.path)
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil && runtime.GOOS != "windows" {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), f.path)
+}
+
+// tighten убирает у каталога права группы и остальных (кроме Windows, где
+// права задаются иначе).
+func tighten(path string, perm os.FileMode) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if fi.Mode().Perm()&^perm != 0 {
+		return os.Chmod(path, fi.Mode().Perm()&perm)
+	}
+	return nil
 }
 
 func (f *File) Get(name string) (string, error) {

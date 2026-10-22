@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/state"
 )
 
@@ -198,17 +199,21 @@ type loginReq struct {
 // ConfirmLogin просит владельца подтвердить вход в Web UI (id — случайный
 // идентификатор попытки входа, text — где и с каким кодом). done вызывается один
 // раз — по нажатию «Разрешить вход» или «Отклонить».
+// Сам id (значение cookie попытки входа — по нему после подтверждения
+// выдаётся сессия) в Telegram не уходит: в callback_data — отдельный случайный
+// ключ, сопоставление ключ → запрос хранится только здесь.
 func (t *Telegram) ConfirmLogin(id, text string, done func(ok bool)) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	kb := [][]Button{{{Text: "Разрешить вход", Data: "la:" + id}, {Text: "Отклонить", Data: "lr:" + id}}}
+	key := randomSecret()[:32]
+	kb := [][]Button{{{Text: "Разрешить вход", Data: "la:" + key}, {Text: "Отклонить", Data: "lr:" + key}}}
 	msg, err := t.API.SendMessage(ctx, t.OwnerID, text, kb)
 	if err != nil {
 		t.Log.Warn("telegram login confirmation", "err", err)
 		return err
 	}
 	t.mu.Lock()
-	t.logins[id] = loginReq{msg: msg, text: text, done: done}
+	t.logins[key] = loginReq{msg: msg, text: text, done: done}
 	t.mu.Unlock()
 	return nil
 }
@@ -245,6 +250,11 @@ func (t *Telegram) Notify(a *state.Approval) {
 		{Text: "Отклонить", Data: "n:" + a.ID + ":" + sig(a)},
 		{Text: "Показать текст", Data: "s:" + a.ID + ":" + sig(a)},
 	}}
+	if WebOnly(a.Action) {
+		// Самонастройка: одобрение — только в Web UI, где видны все правки (E.5).
+		kb[0] = kb[0][1:]
+		text += "\n" + WebOnlyHint
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	id, err := t.API.SendMessage(ctx, t.OwnerID, text, kb)
@@ -478,6 +488,23 @@ func (t *Telegram) Handle(ctx context.Context, u Update) {
 	}
 }
 
+// AsyncDecider — решение без ожидания исполнения (pipeline.Pipeline).
+type AsyncDecider interface {
+	DecideAsync(ctx context.Context, id string, approve bool, channel, who string) error
+}
+
+// tgMaxText — предел текста сообщения Telegram (4096) с запасом на пометку.
+const tgMaxText = 3900
+
+// previewText — превью для «Показать текст» в пределах сообщения Telegram.
+func previewText(a *state.Approval) string {
+	r := []rune(a.Preview)
+	if len(r) <= tgMaxText {
+		return a.Preview
+	}
+	return string(r[:tgMaxText]) + "…\n\n(текст обрезан; полностью — в Web UI или: gate4ai show " + audit.Short(a.PreviewHash) + ")"
+}
+
 func (t *Telegram) callback(ctx context.Context, cbID, data string) {
 	if strings.HasPrefix(data, "la:") || strings.HasPrefix(data, "lr:") {
 		t.loginCallback(ctx, cbID, data)
@@ -495,13 +522,30 @@ func (t *Telegram) callback(ctx context.Context, cbID, data string) {
 	}
 	switch parts[0] {
 	case "s":
+		if _, err := t.API.SendMessage(ctx, t.OwnerID, previewText(a), nil); err != nil {
+			_ = t.API.AnswerCallback(ctx, cbID, "Не удалось показать текст: откройте Web UI или gate4ai show "+audit.Short(a.PreviewHash))
+			return
+		}
 		_ = t.API.AnswerCallback(ctx, cbID, "")
-		_, _ = t.API.SendMessage(ctx, t.OwnerID, a.Preview, nil)
 	case "y", "n":
-		_, err := t.Decider.Decide(ctx, a.ID, parts[0] == "y", "telegram", "tg:"+strconv.FormatInt(t.OwnerID, 10))
+		if parts[0] == "y" && WebOnly(a.Action) {
+			_ = t.API.AnswerCallback(ctx, cbID, WebOnlyHint)
+			return
+		}
+		who := "tg:" + strconv.FormatInt(t.OwnerID, 10)
+		var err error
+		if ad, ok := t.Decider.(AsyncDecider); ok {
+			// Действие исполняется в фоне: цикл опроса не ждёт его и успевает
+			// принять другие нажатия и ответы (код для входа на сайт).
+			err = ad.DecideAsync(ctx, a.ID, parts[0] == "y", "telegram", who)
+		} else {
+			_, err = t.Decider.Decide(ctx, a.ID, parts[0] == "y", "telegram", who)
+		}
 		switch {
 		case errors.Is(err, state.ErrAlreadyDecided):
 			_ = t.API.AnswerCallback(ctx, cbID, "Решение уже принято")
+		case errors.Is(err, state.ErrExpired):
+			_ = t.API.AnswerCallback(ctx, cbID, "Срок запроса истёк")
 		case err != nil:
 			_ = t.API.AnswerCallback(ctx, cbID, "Ошибка: "+err.Error())
 		default:

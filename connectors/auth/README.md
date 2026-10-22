@@ -13,4 +13,4 @@ Auth-модуль реализует только протокол входа и
 
 Auth-модуль — это не коннектор в обычном смысле: агенту он не виден и действий не имеет. Его вызывает ядро для слота учётки.
 
-Подробности — в [secret-architecture.md](../../gate4ai/docs/secret-architecture.md).
+Подробности — в [secret-architecture.md](../../docs/secret-architecture.md).

@@ -9,7 +9,13 @@
 # если каждое ребро разрешено, запрещённого пути нет и транзитивно.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Только этот модуль: с go.work (dev/scripts/test-set.sh) go list -m печатает все модули
+# workspace, и ни один импорт не совпал бы с «$mod» — проверка молча прошла бы пустой.
+export GOWORK=off
 mod=$(go list -m)
+case $mod in *[[:space:]]* | "") echo "deps-check: go list -m gave '$mod', not one module" >&2; exit 1 ;; esac
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
 
 # part <путь пакета> — к какой части репозитория он относится.
 part() {
@@ -41,6 +47,19 @@ bad=0
 for goos in linux darwin windows wasip1; do
   goarch=amd64
   [ "$goos" = wasip1 ] && goarch=wasm
+  # Ошибка go list (пакеты не грузятся) — провал, а не пустой список и «ok».
+  if ! GOOS=$goos GOARCH=$goarch go list -e -f '{{if .Error}}{{.ImportPath}}: {{.Error}}
+{{end}}' ./... >"$tmp" || [ -s "$tmp" ]; then
+    echo "deps-check ($goos): go list failed:" >&2
+    cat "$tmp" >&2
+    exit 1
+  fi
+  GOOS=$goos GOARCH=$goarch go list -e -f '{{.ImportPath}} prod {{join .Imports " "}}
+{{.ImportPath}} test {{join .TestImports " "}} {{join .XTestImports " "}}' ./... >"$tmp" || {
+    echo "deps-check ($goos): go list failed" >&2
+    exit 1
+  }
+  [ -s "$tmp" ] || { echo "deps-check ($goos): no packages" >&2; exit 1; }
   while read -r pkg kind imports; do
     from=$(part "$pkg")
     for imp in $imports; do
@@ -51,8 +70,7 @@ for goos in linux darwin windows wasip1; do
         bad=1
       fi
     done
-  done < <(GOOS=$goos GOARCH=$goarch go list -e -f '{{.ImportPath}} prod {{join .Imports " "}}
-{{.ImportPath}} test {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>/dev/null)
+  done <"$tmp"
 done
 [ "$bad" = 0 ] && echo "deps-check: ok"
 exit $bad

@@ -20,6 +20,14 @@ type Channels struct {
 	Push         *WebPush // nil — нет ключа VAPID
 	TelegramBase string
 	tg           *switchable
+	queues       []*switchable
+}
+
+// Flush дожидается доставки уже поставленных уведомлений во все каналы.
+func (c *Channels) Flush() {
+	for _, q := range c.queues {
+		q.wait()
+	}
 }
 
 // Канал и его состояние.

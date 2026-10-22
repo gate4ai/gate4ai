@@ -88,7 +88,7 @@ func TestHTTPSecretsBindAndMask(t *testing.T) {
 `, nil)
 	var resp abi.HTTPResponse
 	err := call(t, d, abi.FnHTTPRequest, abi.HTTPRequest{Method: "POST", URL: srv.URL + "/x",
-		Headers: map[string]string{"Authorization": "Bearer {{secret:@api}}"}, Body: []byte("k={{secret:@api}}")}, &resp)
+		Headers: map[string]string{"Authorization": "Bearer {{secret:@api}}"}, Body: []byte("k=v")}, &resp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,14 +106,14 @@ func TestHTTPSecretsBindAndMask(t *testing.T) {
 	if err := call(t, d, abi.FnHTTPRequest, abi.HTTPRequest{URL: srv.URL + "/?k={{secret:@api}}"}, &resp); code(err) != abi.CodeBadRequest {
 		t.Fatal("secret in URL:", err)
 	}
-	if err := call(t, d, abi.FnHTTPRequest, abi.HTTPRequest{URL: srv.URL, Headers: map[string]string{"X": "{{secret:@mail}}"}}, &resp); code(err) != abi.CodeCapabilityDenied {
+	if err := call(t, d, abi.FnHTTPRequest, abi.HTTPRequest{URL: srv.URL, Headers: map[string]string{"X-Api-Key": "{{secret:@mail}}"}}, &resp); code(err) != abi.CodeCapabilityDenied {
 		t.Fatal("undeclared secret:", err)
 	}
 	d2 := dispatcher(t, `capabilities:
   network: [ { host: 127.0.0.1, scheme: http }, { host: localhost, scheme: http } ]
   secrets: [ { alias: "@api", bind: [localhost] } ]
 `, nil)
-	if err := call(t, d2, abi.FnHTTPRequest, abi.HTTPRequest{URL: srv.URL, Headers: map[string]string{"X": "{{secret:@api}}"}}, &resp); code(err) != abi.CodeCapabilityDenied {
+	if err := call(t, d2, abi.FnHTTPRequest, abi.HTTPRequest{URL: srv.URL, Headers: map[string]string{"X-Api-Key": "{{secret:@api}}"}}, &resp); code(err) != abi.CodeCapabilityDenied {
 		t.Fatal("secret sent to an unbound address:", err)
 	}
 	if err := call(t, d, abi.FnHTTPRequest, abi.HTTPRequest{URL: "https://example.com/"}, &resp); code(err) != abi.CodeCapabilityDenied {

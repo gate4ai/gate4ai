@@ -53,6 +53,8 @@ type FormField struct {
 	Value    string `yaml:"value,omitempty" json:"value,omitempty"`
 	Secret   string `yaml:"secret,omitempty" json:"secret,omitempty"`
 	Type     string `yaml:"type,omitempty" json:"type,omitempty"` // text — секрет в текстовое поле
+	// Без value и secret — поле кода, который вводит человек (fill_secret с
+	// source: human и field: <name>); browser.login его пропускает.
 }
 
 // FormSubmit — отправка: клик по Selector или клавиша Press (Enter) в последнем поле.
@@ -148,8 +150,12 @@ func (c *Config) validateCredentials(add func(path, format string, a ...any)) {
 					add(fp+".selector", "selector is required")
 				}
 				switch {
-				case (fl.Value == "") == (fl.Secret == ""):
+				case fl.Value != "" && fl.Secret != "":
+					add(fp, "set one of value (a constant) and secret (a vault alias), or neither for a code field the user types (source: human)")
+				case fl.Value == "" && fl.Secret == "" && !needSelector:
 					add(fp, "set exactly one of value (a constant) and secret (a vault alias)")
+				case fl.Value == "" && fl.Secret == "" && fl.Name == "":
+					add(fp+".name", "a code field (no value, no secret) needs a name: fill_secret with source human asks for it by name")
 				case fl.Secret != "" && !credAliasRe.MatchString(fl.Secret):
 					add(fp+".secret", "secret must be a vault alias like @emias.password")
 				}

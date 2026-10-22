@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs/mask"
 )
 
 var (
@@ -19,7 +21,8 @@ var sensitiveKeys = map[string]bool{
 	"cvv": true, "cvc": true, "pin": true, "card_number": true, "passport": true, "authorization": true,
 }
 
-// Mask маскирует известные секреты, номера карт (с проверкой Луна, видны
+// Mask маскирует известные секреты (за один проход, вместе с производными
+// формами — base64, URL-, JSON- и HTML-экранированием), номера карт (с проверкой Луна, видны
 // последние 4 цифры), серии и номера паспортов, поля с чувствительными именами.
 func (v *Vault) Mask(x any) any {
 	v.mu.RLock()
@@ -36,13 +39,13 @@ func (v *Vault) Mask(x any) any {
 		}
 	}
 	v.mu.RUnlock()
-	return mask(x, secrets)
+	return maskAny(x, mask.New(secrets...))
 }
 
 // MaskString — Mask для строки.
 func (v *Vault) MaskString(s string) string { return v.Mask(s).(string) }
 
-func mask(x any, secrets []string) any {
+func maskAny(x any, secrets *mask.Set) any {
 	switch t := x.(type) {
 	case string:
 		return maskString(t, secrets)
@@ -55,23 +58,21 @@ func mask(x any, secrets []string) any {
 					continue
 				}
 			}
-			out[k] = mask(val, secrets)
+			out[k] = maskAny(val, secrets)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, val := range t {
-			out[i] = mask(val, secrets)
+			out[i] = maskAny(val, secrets)
 		}
 		return out
 	}
 	return x
 }
 
-func maskString(s string, secrets []string) string {
-	for _, sec := range secrets {
-		s = strings.ReplaceAll(s, sec, "***")
-	}
+func maskString(s string, secrets *mask.Set) string {
+	s = secrets.String(s, "***")
 	s = cardRe.ReplaceAllStringFunc(s, func(m string) string {
 		digits := strings.Map(func(r rune) rune {
 			if r >= '0' && r <= '9' {

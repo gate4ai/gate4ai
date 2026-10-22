@@ -3,6 +3,7 @@
 package native
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -66,6 +67,7 @@ func TestMain(m *testing.M) {
 		sdknative.Serve([]byte(testManifest), echo{})
 		os.Exit(0)
 	}
+	testEnvPrefix = "GATE4AI_TEST_"
 	os.Exit(m.Run())
 }
 
@@ -189,4 +191,34 @@ func TestCancelReachesTheProcess(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("the process did not learn that the call was cancelled")
+}
+
+// Нативный процесс получает только системные переменные окружения, а не токены
+// и ключи из окружения daemon (B.L9).
+func TestMinimalEnv(t *testing.T) {
+	got := strings.Join(MinimalEnv([]string{"PATH=/bin", "HOME=/h", "LC_ALL=C", "XDG_RUNTIME_DIR=/run/u", "DISPLAY=:0",
+		"GATE4AI_TOKEN=t0k", "GITHUB_TOKEN=gh", "OPENAI_API_KEY=sk", "AWS_SECRET_ACCESS_KEY=x", "LocalAppData=C:\\u"}), " ")
+	if got != "PATH=/bin HOME=/h LC_ALL=C XDG_RUNTIME_DIR=/run/u DISPLAY=:0 LocalAppData=C:\\u" {
+		t.Fatal(got)
+	}
+}
+
+// Строки stderr нативного процесса маскируются перед записью в лог daemon.
+func TestStderrMasked(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	e, err := wasm.NewEngine("", wasm.Services{Log: log, Mask: func(s string) string { return strings.ReplaceAll(s, "fake-secret-123", "***") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	m, _ := manifest.Parse([]byte(testManifest))
+	p, err := New(os.Args[0], m, e, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.stderr(strings.NewReader("debug: password fake-secret-123\n"))
+	if strings.Contains(buf.String(), "fake-secret-123") || !strings.Contains(buf.String(), "***") {
+		t.Fatal(buf.String())
+	}
 }

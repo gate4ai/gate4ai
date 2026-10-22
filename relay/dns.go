@@ -5,6 +5,8 @@ package relay
 import (
 	"net"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/miekg/dns"
 )
@@ -14,6 +16,12 @@ import (
 // SOA и NS — только у вершины зоны: по ним ACME-клиент (certmagic) ищет зону
 // и её авторитетные серверы, проверяя TXT; SOA у каждого имени делал зоной
 // само имя _acme-challenge.<id>, у которого нет NS, и выпуск сертификата падал.
+//
+// Против отражённых атак (поддельный адрес источника по UDP): ответ не больше
+// буфера клиента (512 байт или размер EDNS0) — лишнее отрезается с битом TC,
+// клиент повторит по TCP; запросы с одного адреса по UDP ограничены
+// (UDPPerSec, UDPBurst), сверх — без ответа. TXT ограничены store: не больше
+// MaxTXT значений по 255 байт на имя.
 type DNS struct {
 	Zone  string // relay.gate4.ai
 	IPv4  net.IP
@@ -22,10 +30,33 @@ type DNS struct {
 	TTL   uint32
 	// Metrics — счётчик запросов (nil — без учёта).
 	Metrics *Metrics
+	// CAA — удостоверяющие центры, которым разрешён выпуск в зоне (issue);
+	// nil — DefaultCAA, пустой срез ([]string{}) — записей CAA нет (любой CA).
+	CAA []string
+	// UDPPerSec и UDPBurst — лимит запросов по UDP с одного адреса (IPv6 — /64);
+	// 0 — 50 в секунду, запас 100.
+	UDPPerSec, UDPBurst int
+
+	once sync.Once
+	rl   *rateLimiter
 }
+
+// DefaultCAA — CAA зоны по умолчанию.
+var DefaultCAA = []string{"letsencrypt.org"}
+
+// maxUDPSize — больше этого по UDP не отвечаем даже при большом буфере EDNS0
+// (рекомендация DNS Flag Day 2020): дальше — TCP.
+const maxUDPSize = 1232
 
 // ServeDNS отвечает на запросы.
 func (d *DNS) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	_, udp := w.RemoteAddr().(*net.UDPAddr)
+	if udp && !d.allow(w.RemoteAddr()) {
+		if d.Metrics != nil {
+			d.Metrics.dns.WithLabelValues("RATELIMITED").Inc()
+		}
+		return // без ответа: усиливать нечего
+	}
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Authoritative = true
@@ -70,7 +101,13 @@ func (d *DNS) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 			}
 		case dns.TypeCAA:
 			hdr.Rrtype = dns.TypeCAA
-			m.Answer = append(m.Answer, &dns.CAA{Hdr: hdr, Flag: 0, Tag: "issue", Value: "letsencrypt.org"})
+			cas := d.CAA
+			if cas == nil {
+				cas = DefaultCAA
+			}
+			for _, ca := range cas {
+				m.Answer = append(m.Answer, &dns.CAA{Hdr: hdr, Flag: 0, Tag: "issue", Value: ca})
+			}
 		}
 	}
 	// Нет ответа у имени зоны — NODATA: SOA зоны в authority (RFC 2308).
@@ -80,7 +117,33 @@ func (d *DNS) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	if d.Metrics != nil {
 		d.Metrics.dns.WithLabelValues(dns.RcodeToString[m.Rcode]).Inc()
 	}
+	size := dns.MaxMsgSize // TCP
+	if udp {
+		size = dns.MinMsgSize
+		if opt := r.IsEdns0(); opt != nil {
+			size = min(max(int(opt.UDPSize()), dns.MinMsgSize), maxUDPSize)
+		}
+	}
+	if opt := r.IsEdns0(); opt != nil {
+		m.SetEdns0(uint16(min(size, maxUDPSize)), false)
+	}
+	m.Truncate(size) // не влезло — TC, клиент повторит по TCP
 	_ = w.WriteMsg(m)
+}
+
+// allow — лимит запросов по UDP с адреса a.
+func (d *DNS) allow(a net.Addr) bool {
+	d.once.Do(func() {
+		per, burst := d.UDPPerSec, d.UDPBurst
+		if per <= 0 {
+			per = 50
+		}
+		if burst <= 0 {
+			burst = 2 * per
+		}
+		d.rl = newRateLimiter(time.Second/time.Duration(per), burst)
+	})
+	return d.rl.Allow(ipKey(a))
 }
 
 func (d *DNS) soa(zone string, ttl uint32) *dns.SOA {

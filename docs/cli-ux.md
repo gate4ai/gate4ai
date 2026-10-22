@@ -12,7 +12,7 @@
 - Сокет владельца — `paths.OwnerSocket()`:
   - Linux: `$XDG_RUNTIME_DIR/gate4ai/gate4ai.sock` (обычно `/run/user/<uid>/gate4ai/gate4ai.sock`), без `XDG_RUNTIME_DIR` — `~/.local/state/gate4ai/run/gate4ai.sock`;
   - macOS: `~/Library/Application Support/gate4ai/run/gate4ai.sock`;
-  - Windows: named pipe `\\.\pipe\gate4ai-<user>`.
+  - Windows: named pipe `\\.\pipe\gate4ai-<SID>` (агентский — `gate4ai-agent-<SID>`: SID пользователя, а не короткое имя, иначе у `PC\alex` и `CORP\alex` канал общий).
   
   Если задан `GATE4AI_HOME`, сокет лежит в `$GATE4AI_HOME/run/`. Явный путь задают `GATE4AI_SOCKET` и `GATE4AI_AGENT_SOCKET`.
 - Токен агента в `GATE4AI_TOKEN` переключает клиента на сокет агентов, а вместе с `GATE4AI_URL` — на HTTPS к публичному адресу устройства.
@@ -23,7 +23,7 @@
   ```
   Next steps:
     gate4ai daemon        # start the guard (keep it running)
-    gate4ai-tray &        # tray icon: status, Allow / Deny, Web UI
+    gate4ai-tray &        # tray icon: status, Allow / Deny (gate4ai.* — only in the Web UI), Web UI
     gate4ai ui            # open the Web UI
   ```
   В выводе не сказано, что `gate4ai daemon` занимает терминал и что `gate4ai ui` нужно запускать в другом.
@@ -197,7 +197,7 @@ Start it in another terminal: gate4ai daemon   — or run it at login: gate4ai s
 ## 8. Отличия на macOS и Windows (по коду)
 
 - **macOS:** сокет в `~/Library/Application Support/gate4ai/run/` — путь с пробелом и до предела в 104 байта остаётся мало места, поэтому случай `EINVAL` из пункта A на macOS вероятнее. Браузер открывается через `open`. Трей собирается только с cgo, иначе заглушка `built without cgo`. Автозапуск — launchd.
-- **Windows:** named pipe `\\.\pipe\gate4ai-<user>`. Ошибка без daemon — «The system cannot find the file specified», её тоже надо относить к «not running». `install.ps1` печатает те же «Next steps». Браузер открывается через `rundll32 url.dll`. Трей собран с `-H windowsgui`. Автозапуск — `HKCU\…\Run` или Планировщик.
+- **Windows:** named pipe `\\.\pipe\gate4ai-<SID>` (агентский — `gate4ai-agent-<SID>`: SID пользователя, а не короткое имя, иначе у `PC\alex` и `CORP\alex` канал общий). Ошибка без daemon — «The system cannot find the file specified», её тоже надо относить к «not running». `install.ps1` печатает те же «Next steps». Браузер открывается через `rundll32 url.dll`. Трей собран с `-H windowsgui`. Автозапуск — `HKCU\…\Run` или Планировщик.
 - **Linux:** без `XDG_RUNTIME_DIR` сокет лежит в `~/.local/state/gate4ai/run/` (см. F2). Уведомления трея идут через D-Bus.
 
 ## 9. Улучшения по приоритету и что сделано
