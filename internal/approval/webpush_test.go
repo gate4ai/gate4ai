@@ -3,13 +3,18 @@
 package approval
 
 import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hkdf"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"math/big"
 	"net/http"
@@ -106,4 +111,33 @@ func TestWebPush(t *testing.T) {
 	if err := w.Test(); err == nil {
 		t.Fatal("no subscribers must fail")
 	}
+}
+
+// decrypt — обратная операция (для тестов: так расшифровывает браузер).
+func decrypt(uaPriv *ecdh.PrivateKey, authSecret, body []byte) ([]byte, error) {
+	if len(body) < 21 {
+		return nil, errors.New("short body")
+	}
+	salt, idlen := body[:16], int(body[20])
+	asPub, ct := body[21:21+idlen], body[21+idlen:]
+	as, err := ecdh.P256().NewPublicKey(asPub)
+	if err != nil {
+		return nil, err
+	}
+	shared, err := uaPriv.ECDH(as)
+	if err != nil {
+		return nil, err
+	}
+	keyInfo := append(append([]byte("WebPush: info\x00"), uaPriv.PublicKey().Bytes()...), asPub...)
+	ikm, _ := hkdf.Key(sha256.New, shared, authSecret, string(keyInfo), 32)
+	prk, _ := hkdf.Extract(sha256.New, ikm, salt)
+	cek, _ := hkdf.Expand(sha256.New, prk, "Content-Encoding: aes128gcm\x00", 16)
+	nonce, _ := hkdf.Expand(sha256.New, prk, "Content-Encoding: nonce\x00", 12)
+	block, _ := aes.NewCipher(cek)
+	gcm, _ := cipher.NewGCM(block)
+	pt, err := gcm.Open(nil, nonce, ct, nil)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(pt, "\x02"), nil
 }

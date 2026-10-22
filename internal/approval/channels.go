@@ -23,13 +23,6 @@ type Channels struct {
 	queues       []*switchable
 }
 
-// Flush дожидается доставки уже поставленных уведомлений во все каналы.
-func (c *Channels) Flush() {
-	for _, q := range c.queues {
-		q.wait()
-	}
-}
-
 // Канал и его состояние.
 const (
 	StateOK            = "ok"             // включён и работает

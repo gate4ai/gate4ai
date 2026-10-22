@@ -65,14 +65,6 @@ func (s *switchable) async(f func()) {
 	}
 }
 
-// wait — дождаться доставки поставленных событий (тесты).
-func (s *switchable) wait() { s.wg.Wait() }
-
-func (s *switchable) Notify(a *state.Approval) {
-	if n := s.get(); n != nil {
-		s.async(func() { n.Notify(a) })
-	}
-}
 func (s *switchable) Resolved(a *state.Approval) {
 	if n := s.get(); n != nil {
 		s.async(func() { n.Resolved(a) })

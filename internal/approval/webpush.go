@@ -87,7 +87,7 @@ type Message struct {
 
 // Notify — новый запрос подтверждения.
 func (w *WebPush) Notify(a *state.Approval) {
-	w.sendAll(Message{Title: "gate4.ai: нужно подтверждение", Body: fmt.Sprintf("%s → %s #%s", a.Agent, a.Action, audit.Short(a.PreviewHash)),
+	w.sendAll(Message{Title: "gate4.ai: нужно подтверждение", Body: fmt.Sprintf("%s → %s %s", a.Agent, a.Action, audit.Short(a.PreviewHash)),
 		URL: "/approvals", Tag: a.ID})
 }
 
@@ -260,33 +260,4 @@ func encrypt(s state.PushSub, plaintext []byte) ([]byte, error) {
 	out = append(out, byte(len(asPub)))
 	out = append(out, asPub...)
 	return append(out, ct...), nil
-}
-
-// decrypt — обратная операция (для тестов: так расшифровывает браузер).
-func decrypt(uaPriv *ecdh.PrivateKey, authSecret, body []byte) ([]byte, error) {
-	if len(body) < 21 {
-		return nil, errors.New("short body")
-	}
-	salt, idlen := body[:16], int(body[20])
-	asPub, ct := body[21:21+idlen], body[21+idlen:]
-	as, err := ecdh.P256().NewPublicKey(asPub)
-	if err != nil {
-		return nil, err
-	}
-	shared, err := uaPriv.ECDH(as)
-	if err != nil {
-		return nil, err
-	}
-	keyInfo := append(append([]byte("WebPush: info\x00"), uaPriv.PublicKey().Bytes()...), asPub...)
-	ikm, _ := hkdf.Key(sha256.New, shared, authSecret, string(keyInfo), 32)
-	prk, _ := hkdf.Extract(sha256.New, ikm, salt)
-	cek, _ := hkdf.Expand(sha256.New, prk, "Content-Encoding: aes128gcm\x00", 16)
-	nonce, _ := hkdf.Expand(sha256.New, prk, "Content-Encoding: nonce\x00", 12)
-	block, _ := aes.NewCipher(cek)
-	gcm, _ := cipher.NewGCM(block)
-	pt, err := gcm.Open(nil, nonce, ct, nil)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.TrimRight(pt, "\x02"), nil
 }

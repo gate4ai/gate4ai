@@ -301,3 +301,9 @@ func TestActionMatches(t *testing.T) {
 		t.Fatal()
 	}
 }
+
+// Glob — GlobErr без ошибки (неверный шаблон — false).
+func Glob(p, pattern string) bool {
+	ok, _ := GlobErr(p, pattern)
+	return ok
+}

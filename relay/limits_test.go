@@ -253,8 +253,10 @@ func TestAuthNotBlockedByDisk(t *testing.T) {
 	id, tok, _ := st.Register()
 	block, entered := make(chan struct{}), make(chan struct{})
 	writeFile = func(p string, b []byte) error { close(entered); <-block; return writeFileAtomic(p, b) }
-	defer func() { writeFile = writeFileAtomic }()
-	go func() { _, _, _ = st.Register() }()
+	regDone := make(chan struct{})
+	go func() { defer close(regDone); _, _, _ = st.Register() }()
+	// Запись дописывается до конца теста: иначе она идёт в уже удаляемый TempDir.
+	defer func() { close(block); <-regDone; writeFile = writeFileAtomic }()
 	<-entered
 	done := make(chan bool)
 	go func() { done <- st.Auth(id, tok) && st.Exists(id) && !st.Auth(id, "dev_wrong") }()
@@ -266,7 +268,6 @@ func TestAuthNotBlockedByDisk(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Auth blocked by a disk write")
 	}
-	close(block)
 }
 
 // TestWaitersDropped: соединения к офлайн-устройству не копят каналы ожидания,
@@ -398,4 +399,11 @@ func clientHello(t *testing.T, host string) []byte {
 		t.Fatal(err)
 	}
 	return append(hdr, body...)
+}
+
+// waiting — сколько соединений ждут туннель устройства (тесты).
+func (s *Server) waiting(id string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.waiters[id])
 }

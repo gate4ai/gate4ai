@@ -402,3 +402,19 @@ func TestTelegramQuestion(t *testing.T) {
 		t.Fatal("cancel:", got)
 	}
 }
+
+// Flush дожидается доставки уже поставленных уведомлений во все каналы.
+func (c *Channels) Flush() {
+	for _, q := range c.queues {
+		q.wait()
+	}
+}
+
+// wait — дождаться доставки поставленных событий (тесты).
+func (s *switchable) wait() { s.wg.Wait() }
+
+func (s *switchable) Notify(a *state.Approval) {
+	if n := s.get(); n != nil {
+		s.async(func() { n.Notify(a) })
+	}
+}

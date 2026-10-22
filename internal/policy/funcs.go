@@ -44,19 +44,13 @@ func normPath(p string) string {
 // "~/Documents/obsidian/private/x", и правило обязано это видеть.
 var foldCase = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
 
-// Glob сопоставляет путь с шаблоном: "*" и "?" — внутри сегмента, "**" — любое
+// GlobErr сопоставляет путь с шаблоном: "*" и "?" — внутри сегмента, "**" — любое
 // число сегментов. "~" раскрывается в обоих аргументах, ".." в пути схлопывается
 // до сравнения, поэтому "~/Documents/obsidian/../.ssh/id" под "~/Documents/obsidian/**" не попадает.
 // Решение принимается по настоящему пути — тому, что откроет хост: симлинки
 // в пути и в постоянной части шаблона раскрываются, на macOS и Windows
-// регистр не различается. Неверный шаблон — false (в правиле — ошибка
-// вычисления, см. GlobErr).
-func Glob(p, pattern string) bool {
-	ok, _ := GlobErr(p, pattern)
-	return ok
-}
-
-// GlobErr — Glob с ошибкой неверного шаблона ("[abc").
+// регистр не различается. Неверный шаблон ("[abc") —
+// ошибка (в правиле — ошибка вычисления).
 func GlobErr(p, pattern string) (bool, error) {
 	if err := CheckGlob(pattern); err != nil {
 		return false, err

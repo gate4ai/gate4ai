@@ -367,13 +367,6 @@ func (s *Server) dropWaiter(id string, ch chan struct{}) {
 	}
 }
 
-// waiting — сколько соединений ждут туннель устройства (тесты).
-func (s *Server) waiting(id string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.waiters[id])
-}
-
 // apiConnState считает открытые соединения API; туннели после Hijack
 // учитываются в gate4ai_relay_devices_online.
 func (s *Server) apiConnState(_ net.Conn, st http.ConnState) {
