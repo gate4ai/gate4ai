@@ -18,7 +18,7 @@ type Checkpoint struct {
 	TS   time.Time `json:"ts"`
 	// Prev — хэш подписанных байтов предыдущего чекпоинта: чекпоинты связаны
 	// цепочкой, удалить или переставить один из середины незаметно нельзя.
-	// Пусто — только у первого чекпоинта.
+	// Пусто — у первого чекпоинта и у записанных до появления цепочки (v0.7.2 и раньше).
 	Prev string `json:"prev,omitempty"`
 	Sig  string `json:"sig"` // Ed25519, hex
 }
@@ -248,9 +248,12 @@ func verifyChain(entries []Entry, cps []Checkpoint, pub ed25519.PublicKey) error
 				return fmt.Errorf("%w: seq %d redacted metadata changed", ErrChainBroken, r.Seq)
 			}
 		} else {
-			h, err := r.Hash()
+			if e.Body == nil {
+				return fmt.Errorf("%w: seq %d has no receipt document", ErrChainBroken, r.Seq)
+			}
+			h, err := formatHash(e.Format, e.Body)
 			if err != nil {
-				return err
+				return fmt.Errorf("seq %d: %w", r.Seq, err)
 			}
 			if h != e.Hash {
 				return fmt.Errorf("%w: seq %d content hash mismatch", ErrChainBroken, r.Seq)
@@ -259,6 +262,9 @@ func verifyChain(entries []Entry, cps []Checkpoint, pub ed25519.PublicKey) error
 		prev = e.Hash
 		hashes[r.Seq] = e.Hash
 	}
+	// Чекпоинты журналов v0.7.2 и раньше не связаны prev: несвязанным может
+	// быть только начало списка; после первого связанного — все связаны.
+	chained := false
 	for i, cp := range cps {
 		if !cp.VerifySig(pub) {
 			return fmt.Errorf("%w: checkpoint %d bad signature", ErrChainBroken, cp.Seq)
@@ -267,12 +273,13 @@ func verifyChain(entries []Entry, cps []Checkpoint, pub ed25519.PublicKey) error
 			return fmt.Errorf("%w: checkpoint %d head mismatch", ErrChainBroken, cp.Seq)
 		}
 		switch {
-		case i == 0 && cp.Prev != "":
-			return fmt.Errorf("%w: checkpoint %d does not follow the previous one (checkpoint removed)", ErrChainBroken, cp.Seq)
-		case i > 0 && cp.Prev == "":
+		case cp.Prev != "":
+			if i == 0 || HashBytes(cps[i-1].SignedBytes()) != cp.Prev {
+				return fmt.Errorf("%w: checkpoint %d does not follow the previous one (checkpoint removed)", ErrChainBroken, cp.Seq)
+			}
+			chained = true
+		case chained:
 			return fmt.Errorf("%w: checkpoint %d is not linked to the previous one", ErrChainBroken, cp.Seq)
-		case i > 0 && HashBytes(cps[i-1].SignedBytes()) != cp.Prev:
-			return fmt.Errorf("%w: checkpoint %d does not follow the previous one (checkpoint removed)", ErrChainBroken, cp.Seq)
 		}
 	}
 	return nil
