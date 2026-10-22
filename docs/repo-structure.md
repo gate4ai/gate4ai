@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | `gate4ai/` | `gate4ai/gate4ai` | публичный | AGPL-3.0-only, `sdk-go/` — Apache-2.0 | ядро и трей, `sdk-go/`, `relay/`, `connectors/`, `e2e/` (каталоги — ниже) |
 | `registry/` | `gate4ai/registry` | публичный | CC0 1.0 (индекс); у коннекторов — свои, поле `license` | индекс магазина `index.json` и его подпись; версия gate4ai для CI — `.github/gate4ai-version` |
-| `www/` | `gate4ai/www` | приватный | — (не публикуется) | сайт gate4.ai и установщики `install.sh`/`install.ps1`; CI собирает образ `ghcr.io/gate4ai/www:<sha>` и выкладывает его на сервер relay |
+| `www/` | `gate4ai/www` | публичный | — (без лицензии) | сайт gate4.ai и установщики `install.sh`/`install.ps1`; CI собирает образ `ghcr.io/gate4ai/www:<sha>` и выкладывает его на сервер relay |
 | `dev/` | `gate4ai/dev` | приватный | — (не публикуется) | скрипты процессов pitwall: `deploy.sh`, стенд, тесты набора |
 | `.github/` | `gate4ai/.github` | публичный | — | профиль организации, CONTRIBUTING, SECURITY.md |
 | `.secrets/keys/` | — | вне git | — | ключ издателя и ключ registry |
