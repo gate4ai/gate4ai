@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/gowebpki/jcs"
@@ -85,6 +86,28 @@ func (r *Receipt) Canonical() ([]byte, error) {
 		r.Args = map[string]any{}
 	}
 	return Canonicalize(r)
+}
+
+// ReceiptFormat — формат новых квитанций: правила, по которым считается хэш.
+// Формат 1 — sha256 канонического JSON (RFC 8785) записанного документа
+// квитанции. Правила выпущенного формата не меняются: другой способ хэширования
+// или сериализации — новый номер формата, а записи прежних форматов
+// проверяются по своим правилам (formatHash).
+const ReceiptFormat = 1
+
+// formatHash — хэш записанного документа квитанции по правилам её формата.
+// Проверка идёт по самому документу, а не по его пересборке из Receipt:
+// новые поля структуры не меняют хэш старых записей.
+func formatHash(format int, doc []byte) (string, error) {
+	switch format {
+	case 1:
+		b, err := jcs.Transform(doc)
+		if err != nil {
+			return "", err
+		}
+		return HashBytes(b), nil
+	}
+	return "", fmt.Errorf("receipt format %d is not supported by this gate4ai; update gate4ai", format)
 }
 
 // Hash — sha256 канонического JSON в hex.

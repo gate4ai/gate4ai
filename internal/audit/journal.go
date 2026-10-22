@@ -43,6 +43,10 @@ type Entry struct {
 	Receipt  Receipt `json:"receipt"`
 	Hash     string  `json:"hash"`
 	Redacted bool    `json:"redacted,omitempty"`
+	// Format — формат квитанции: по каким правилам считается её хэш.
+	Format int `json:"-"`
+	// Body — канонический JSON квитанции, как он записан (по нему проверяется хэш).
+	Body []byte `json:"-"`
 }
 
 // Options — настройки журнала.
@@ -59,21 +63,26 @@ func Open(dbPath, evDir string, ks keys.Store, opt Options) (*Journal, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	from, err := migrate(db, dbPath)
+	if err != nil {
 		db.Close()
-		return nil, fmt.Errorf("journal schema: %w", err)
+		return nil, fmt.Errorf("journal %s: %w", dbPath, err)
+	}
+	fail := func(err error) (*Journal, error) {
+		db.Close()
+		return nil, err
 	}
 	aead, err := keys.OpenAEAD(ks, "audit.aead")
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	seed, err := keys.RandomBytes(ks, "device.ed25519", ed25519.SeedSize)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	ev, err := OpenEvidence(evDir, ks)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	j := &Journal{db: db, aead: aead, priv: ed25519.NewKeyFromSeed(seed), Evidence: ev,
 		every: opt.CheckpointEach, witness: opt.Witness, now: opt.Now}
@@ -88,39 +97,13 @@ func Open(dbPath, evDir string, ks keys.Store, opt Options) (*Journal, error) {
 	if ts.Valid {
 		j.lastCPAt = time.Unix(0, ts.Int64)
 	}
+	if from == 0 {
+		if err := j.coverLegacyRedactions(); err != nil {
+			return fail(fmt.Errorf("journal: %w", err))
+		}
+	}
 	return j, nil
 }
-
-const schema = `
-CREATE TABLE IF NOT EXISTS receipts(
-  seq INTEGER PRIMARY KEY,
-  id TEXT NOT NULL UNIQUE,
-  ts INTEGER NOT NULL,
-  agent TEXT NOT NULL,
-  action TEXT NOT NULL,
-  class TEXT NOT NULL,
-  effect TEXT NOT NULL,
-  hash TEXT NOT NULL UNIQUE,
-  prev_hash TEXT NOT NULL,
-  preview_hash TEXT NOT NULL DEFAULT '',
-  evidence TEXT NOT NULL DEFAULT '[]',
-  body BLOB,
-  redacted INTEGER NOT NULL DEFAULT 0,
-  kind TEXT NOT NULL DEFAULT '',
-  intent TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS receipts_ts ON receipts(ts);
-CREATE INDEX IF NOT EXISTS receipts_agent ON receipts(agent, ts);
-CREATE INDEX IF NOT EXISTS receipts_action ON receipts(action, ts);
-CREATE INDEX IF NOT EXISTS receipts_kind ON receipts(kind);
-CREATE TABLE IF NOT EXISTS checkpoints(
-  seq INTEGER PRIMARY KEY,
-  head TEXT NOT NULL,
-  ts INTEGER NOT NULL,
-  sig TEXT NOT NULL,
-  witnessed INTEGER NOT NULL DEFAULT 0,
-  prev TEXT NOT NULL DEFAULT ''
-);`
 
 // kindIntent — квитанция-намерение (execution.status "started").
 const kindIntent = "intent"
@@ -193,8 +176,8 @@ func (j *Journal) Append(r *Receipt) (string, error) {
 	if r.Execution.Status == ExecStarted {
 		kind = kindIntent
 	}
-	_, err = j.db.Exec(`INSERT INTO receipts(seq,id,ts,agent,action,class,effect,hash,prev_hash,preview_hash,evidence,body,kind,intent) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		r.Seq, r.ID, r.TS.UnixNano(), r.Agent, r.Action, r.Class, r.Decision.Effect, hash, prev, preview, string(ev), box, kind, r.Intent)
+	_, err = j.db.Exec(`INSERT INTO receipts(seq,id,ts,agent,action,class,effect,hash,prev_hash,preview_hash,evidence,body,kind,intent,format) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.Seq, r.ID, r.TS.UnixNano(), r.Agent, r.Action, r.Class, r.Decision.Effect, hash, prev, preview, string(ev), box, kind, r.Intent, ReceiptFormat)
 	if err != nil {
 		j.mu.Unlock()
 		return "", err
@@ -288,7 +271,7 @@ func (j *Journal) query(q string, args ...any) ([]Entry, error) {
 type scanner interface{ Scan(...any) error }
 
 // entryCols — колонки квитанции для scan.
-const entryCols = `seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash`
+const entryCols = `seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash,format`
 
 // scan — квитанция с расшифрованным телом (отредактированная — только индекс).
 func (j *Journal) scan(s scanner) (Entry, error) {
@@ -305,6 +288,7 @@ func (j *Journal) scan(s scanner) (Entry, error) {
 	if err := json.Unmarshal(plain, &e.Receipt); err != nil {
 		return Entry{}, err
 	}
+	e.Body = plain
 	return e, nil
 }
 
@@ -315,12 +299,12 @@ func scanIndex(s scanner) (Entry, []byte, error) {
 		seq, ts                                      int64
 		id, hash, agent, action, class, effect, prev string
 		body                                         []byte
-		red                                          int
+		red, format                                  int
 	)
-	if err := s.Scan(&seq, &id, &hash, &body, &red, &ts, &agent, &action, &class, &effect, &prev); err != nil {
+	if err := s.Scan(&seq, &id, &hash, &body, &red, &ts, &agent, &action, &class, &effect, &prev, &format); err != nil {
 		return Entry{}, nil, err
 	}
-	return Entry{Hash: hash, Redacted: red != 0, Receipt: Receipt{Seq: seq, ID: id, TS: time.Unix(0, ts).UTC(), Agent: agent, Action: action,
+	return Entry{Hash: hash, Redacted: red != 0, Format: format, Receipt: Receipt{Seq: seq, ID: id, TS: time.Unix(0, ts).UTC(), Agent: agent, Action: action,
 		Class: class, Decision: Decision{Effect: effect}, PrevHash: prev}}, body, nil
 }
 

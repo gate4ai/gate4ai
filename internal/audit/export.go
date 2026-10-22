@@ -43,7 +43,10 @@ func (j *Journal) Export(w io.Writer, passphrase string) error {
 	files := map[string][]byte{}
 	var rb bytes.Buffer
 	for _, e := range entries {
-		b, _ := json.Marshal(e)
+		b, err := json.Marshal(exportEntryOf(e))
+		if err != nil {
+			return err
+		}
 		rb.Write(b)
 		rb.WriteByte('\n')
 		for _, ref := range e.Receipt.Verification.EvidenceRefs {
@@ -110,6 +113,38 @@ func (j *Journal) Export(w io.Writer, passphrase string) error {
 		return aw.Close()
 	}
 	return nil
+}
+
+// exportEntry — строка receipts.jsonl: документ квитанции как он записан в
+// журнал (его хэш проверяется без пересборки) и формат квитанции. Архивы
+// прежних версий — без format (это формат 1).
+type exportEntry struct {
+	Receipt  json.RawMessage `json:"receipt"`
+	Hash     string          `json:"hash"`
+	Redacted bool            `json:"redacted,omitempty"`
+	Format   int             `json:"format,omitempty"`
+}
+
+func exportEntryOf(e Entry) exportEntry {
+	x := exportEntry{Receipt: e.Body, Hash: e.Hash, Redacted: e.Redacted, Format: e.Format}
+	if e.Redacted {
+		x.Receipt, _ = json.Marshal(e.Receipt)
+	}
+	return x
+}
+
+func (x exportEntry) entry() (Entry, error) {
+	e := Entry{Hash: x.Hash, Redacted: x.Redacted, Format: x.Format}
+	if e.Format == 0 {
+		e.Format = 1
+	}
+	if err := json.Unmarshal(x.Receipt, &e.Receipt); err != nil {
+		return e, err
+	}
+	if !e.Redacted {
+		e.Body = x.Receipt
+	}
+	return e, nil
 }
 
 // VerifyReport — результат проверки архива.
@@ -198,8 +233,13 @@ func VerifyArchive(r io.Reader, passphrase, expectPub string) (VerifyReport, err
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		var e Entry
-		if err := json.Unmarshal(line, &e); err != nil {
+		var x exportEntry
+		if err := json.Unmarshal(line, &x); err != nil {
+			fail("receipt parse: %v", err)
+			continue
+		}
+		e, err := x.entry()
+		if err != nil {
 			fail("receipt parse: %v", err)
 			continue
 		}
