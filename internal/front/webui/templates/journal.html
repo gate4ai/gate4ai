@@ -1,13 +1,15 @@
 {{template "head" .}}
-<h2>Журнал</h2>
-<p>Каждое действие агента — квитанция в цепочке хэшей. Цепочка: {{if eq .Data.Chain "ok"}}<span class="allow">цела</span>{{else}}<span class="deny">{{.Data.Chain}}</span>{{end}}. Архив с проверкой: <code>gate4ai export -o journal.tar</code>.</p>
+<h2>{{T "Journal"}}</h2>
+<p>{{T "Every agent action is a signed entry in a hash chain."}} {{if eq .Data.Chain "ok"}}<span class="allow">✓ {{T "The journal is not modified."}}</span>{{else}}<span class="deny">{{T "The journal is broken:"}} {{.Data.Chain}}</span>{{end}}
+{{TH "An archive with proof: <code>gate4ai export -o journal.tar</code>."}}</p>
 <form class="row" method="get" action="{{$.Base}}/journal">
-<input name="agent" placeholder="агент" value="{{.Data.Q.Get "agent"}}"><input name="action" placeholder="действие" value="{{.Data.Q.Get "action"}}">
-<select name="effect"><option value="">все решения</option><option value="allow" {{if eq (.Data.Q.Get "effect") "allow"}}selected{{end}}>разрешено</option><option value="ask" {{if eq (.Data.Q.Get "effect") "ask"}}selected{{end}}>с подтверждением</option><option value="deny" {{if eq (.Data.Q.Get "effect") "deny"}}selected{{end}}>запрещено</option></select>
-<button>Показать</button></form>
-<table><tr><th>Квитанция</th><th>Время</th><th>Агент</th><th>Действие</th><th>Решение</th><th>Исполнение</th><th>Проверка</th></tr>
-{{range .Data.Entries}}<tr><td><a href="{{$.Base}}/journal/{{.Hash}}"><code>{{short .Hash}}</code></a></td><td>{{ts .Receipt.TS}}</td><td>{{.Receipt.Agent}}</td><td><code>{{.Receipt.Action}}</code></td>
-<td class="{{.Receipt.Decision.Effect}}">{{.Receipt.Decision.Effect}}{{if .Receipt.Decision.RuleIDs}} <span class="muted">{{join .Receipt.Decision.RuleIDs ", "}}</span>{{end}}</td>
-<td>{{.Receipt.Execution.Status}}</td><td>{{.Receipt.Verification.Status}}</td></tr>{{else}}<tr><td colspan="7" class="muted">Пусто — агенты ещё ничего не делали.</td></tr>{{end}}
+<label class="inline" for="j-agent">{{T "Agent"}}</label><input id="j-agent" name="agent" value="{{.Data.Q.Get "agent"}}" size="14">
+<label class="inline" for="j-action">{{T "Action"}}</label><input id="j-action" name="action" value="{{.Data.Q.Get "action"}}" size="16" placeholder="files.read">
+<label class="inline" for="j-effect">{{T "Decision"}}</label><select id="j-effect" name="effect"><option value="">{{T "all"}}</option><option value="allow" {{if eq (.Data.Q.Get "effect") "allow"}}selected{{end}}>{{effect "allow"}}</option><option value="ask" {{if eq (.Data.Q.Get "effect") "ask"}}selected{{end}}>{{effect "ask"}}</option><option value="deny" {{if eq (.Data.Q.Get "effect") "deny"}}selected{{end}}>{{effect "deny"}}</option></select>
+<button>{{T "Show"}}</button></form>
+<table><tr><th>{{T "When"}}</th><th>{{T "Agent"}}</th><th>{{T "Action"}}</th><th>{{T "Decision"}}</th><th>{{T "Result"}}</th><th>{{T "Check"}}</th></tr>
+{{range .Data.Entries}}<tr><td><a href="{{$.Base}}/journal/{{.Hash}}" title="#{{short .Hash}}">{{ts .Receipt.TS}}</a></td><td>{{.Receipt.Agent}}</td><td>{{template "entry_line" .}}<div class="help"><code>{{.Receipt.Action}}</code></div></td>
+<td class="{{.Receipt.Decision.Effect}}">{{effect .Receipt.Decision.Effect}}{{if .Receipt.Approval}} <span class="muted">({{T "you decided"}})</span>{{end}}</td>
+<td>{{T .Receipt.Execution.Status}}</td><td>{{with .Receipt.Verification.Status}}{{T .}}{{end}}</td></tr>{{else}}<tr><td colspan="6" class="muted">{{T "Empty — agents have done nothing yet."}}</td></tr>{{end}}
 </table>
 {{template "foot"}}

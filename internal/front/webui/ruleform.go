@@ -20,17 +20,17 @@ type RuleChip struct {
 	Drop string // значение кнопки «×»: w<i> — часть when, c<i> — блок условия
 }
 
-// condText — блок условия человеческим языком: «path внутри папки ~/notes».
-func condText(c Cond) string {
-	yes := map[string]string{"in_list": "из списка", "eq": "равно", "contains": "содержит", "in_folder": "внутри папки", "domain": "— сайт из",
-		"lte": "не больше", "gte": "не меньше", "untrusted": "взят из входящего письма или страницы"}
-	no := map[string]string{"in_list": "не из списка", "eq": "не равно", "contains": "не содержит", "in_folder": "вне папки", "domain": "— сайт не из",
-		"lte": "больше", "gte": "меньше", "untrusted": "не из входящего письма или страницы"}
+// condText — блок условия человеческим языком на языке l: «path is inside the folder ~/notes».
+func condText(l string, c Cond) string {
+	yes := map[string]string{"in_list": "is in the list", "eq": "equals", "contains": "contains", "in_folder": "is inside the folder", "domain": "is a site from",
+		"lte": "is at most", "gte": "is at least", "untrusted": "came from an incoming email or a web page"}
+	no := map[string]string{"in_list": "is not in the list", "eq": "does not equal", "contains": "does not contain", "in_folder": "is outside the folder", "domain": "is a site not from",
+		"lte": "is more than", "gte": "is less than", "untrusted": "did not come from an incoming email or a web page"}
 	op := yes[c.Kind]
 	if c.Not {
 		op = no[c.Kind]
 	}
-	return strings.TrimSpace(c.Arg + " " + or(op, c.Kind) + " " + strings.TrimSpace(c.Value))
+	return strings.TrimSpace(c.Arg + " " + tr(l, or(op, c.Kind)) + " " + strings.TrimSpace(c.Value))
 }
 
 // splitAnd делит выражение CEL по «&&» верхнего уровня (вне скобок и строк).
@@ -144,17 +144,17 @@ func editRuleForm(form *ruleForm, f url.Values, args []argInfo) error {
 }
 
 // ruleChips — условия формы чипами.
-func ruleChips(form ruleForm) []RuleChip {
+func ruleChips(l string, form ruleForm) []RuleChip {
 	var out []RuleChip
 	for i, p := range form.WhenParts {
-		text, ok := DescribeWhen(p)
+		text, ok := describeWhen(l, p)
 		if !ok {
 			text = p
 		}
 		out = append(out, RuleChip{Text: text, Code: !ok, Drop: fmt.Sprintf("w%d", i)})
 	}
 	for i, c := range form.Conds {
-		out = append(out, RuleChip{Text: condText(c), Drop: fmt.Sprintf("c%d", i)})
+		out = append(out, RuleChip{Text: condText(l, c), Drop: fmt.Sprintf("c%d", i)})
 	}
 	return out
 }

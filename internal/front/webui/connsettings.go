@@ -5,6 +5,7 @@ package webui
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,8 @@ const (
 	fieldNumber = "number"
 	fieldList   = "list"   // строки через запятую / с новой строки
 	fieldSecret = "secret" // значение → Vault, в конфигурации — @алиас
+	fieldBool   = "bool"   // галочка
+	fieldChoice = "choice" // выбор из Choices
 )
 
 // SettingField — поле формы настроек.
@@ -31,44 +34,56 @@ type SettingField struct {
 	Value                               string // текущее значение для формы
 	Alias                               string // секрет: алиас из конфигурации
 	HasSecret                           bool   // секрет: значение в Vault есть
+	// Advanced — поле в «Расширенных настройках»: работает с умолчанием, нужно редко.
+	Advanced bool
+	Choices  []string // fieldChoice: значения (подписи — перевод значения)
 }
 
-type fieldHint struct{ Label, Kind, Help, Placeholder string }
+type fieldHint struct {
+	Label, Kind, Help, Placeholder string
+	Advanced                       bool
+	Choices                        []string
+}
 
+// settingHints — подписи и виды полей официальных коннекторов (английские
+// исходники; перевод — каталог ru).
 var settingHints = map[string]map[string]fieldHint{
 	"files": {
-		"roots": {"Разрешённые папки", fieldList, "Коннектор видит только эти папки (и всё внутри). По одной на строку.", "~/Documents/notes"},
+		"roots":        {Label: "Allowed folders", Kind: fieldList, Help: "Agents see only these folders and what is inside. One per line.", Placeholder: "~/Documents/notes"},
+		"allow_hidden": {Label: "Open hidden files and folders", Kind: fieldBool, Help: "Hidden files and folders inside the allowed folders (.ssh, .aws, .config…) are closed unless this is on. Keys and passwords stay closed anyway.", Advanced: true},
+		"allow_paths":  {Label: "Open these protected paths", Kind: fieldList, Help: "Exact paths inside the allowed folders that are opened despite the protection (keys, hidden folders). One per line.", Placeholder: "~/Documents/notes/.obsidian", Advanced: true},
+		"max_bytes":    {Label: "Largest file to read, bytes", Kind: fieldNumber, Help: "1 MiB by default.", Placeholder: "1048576", Advanced: true},
 	},
 	"browser": {
-		"allowed_domains": {"Разрешённые сайты", fieldList, "Браузер открывает только эти сайты; *.example.com — все поддомены.", "*.example.com"},
-		"mode":            {"Режим списка сайтов", fieldText, "allowlist — только разрешённые сайты (по умолчанию), blocklist — все, кроме запрещённых.", "allowlist"},
-		"blocked":         {"Запрещённые сайты", fieldList, "Для режима blocklist. Адреса этого компьютера и локальной сети закрыты всегда.", "*.example.org"},
-		"model":           {"Модель для extract", fieldText, "Провайдер и модель, например openai/gpt-5.4-mini.", "openai/gpt-5.4-mini"},
-		"model_key":       {"Ключ модели", fieldSecret, "Хранится в Vault; передаётся только браузерному пакету (reveal).", ""},
-		"profile_dir":     {"Профиль Chrome", fieldText, "Выделенный профиль; по умолчанию ~/.gate4ai-chrome.", "~/.gate4ai-chrome"},
-		"chrome_path":     {"Путь к Chrome", fieldText, "Пусто — найти установленный Chrome.", ""},
-		"cdp_url":         {"Адрес CDP", fieldText, "Уже запущенный Chrome; пусто — пакет запускает его сам.", ""},
-		"engine":          {"Движок", fieldText, "stagehand (по умолчанию) или cdp.", "stagehand"},
+		"allowed_domains": {Label: "Allowed sites", Kind: fieldList, Help: "The browser opens only these sites; *.example.com means all subdomains.", Placeholder: "*.example.com"},
+		"mode":            {Label: "Site list mode", Kind: fieldChoice, Choices: []string{"allowlist", "blocklist"}, Help: "allowlist — only the allowed sites (default); blocklist — every site except the blocked ones.", Advanced: true},
+		"blocked":         {Label: "Blocked sites", Kind: fieldList, Help: "For the blocklist mode. Addresses of this computer and the local network are always closed.", Placeholder: "*.example.org", Advanced: true},
+		"model":           {Label: "Model for data extraction", Kind: fieldText, Help: "Provider and model, e.g. openai/gpt-5.4-mini.", Placeholder: "openai/gpt-5.4-mini", Advanced: true},
+		"model_key":       {Label: "Model key", Kind: fieldSecret, Help: "Kept in gate4.ai passwords; given only to the browser package.", Advanced: true},
+		"profile_dir":     {Label: "Chrome profile", Kind: fieldText, Help: "A dedicated profile; ~/.gate4ai-chrome by default.", Placeholder: "~/.gate4ai-chrome", Advanced: true},
+		"chrome_path":     {Label: "Path to Chrome", Kind: fieldText, Help: "Empty — find the installed Chrome.", Advanced: true},
+		"cdp_url":         {Label: "CDP address", Kind: fieldText, Help: "An already running Chrome; empty — the package starts it.", Advanced: true},
+		"engine":          {Label: "Engine", Kind: fieldChoice, Choices: []string{"stagehand", "cdp"}, Help: "stagehand (default) or cdp.", Advanced: true},
 	},
 	"email": {
-		"address":       {"Адрес почты", fieldText, "", "me@example.com"},
-		"imap.host":     {"Сервер IMAP", fieldText, "", "imap.gmail.com"},
-		"imap.port":     {"Порт IMAP", fieldNumber, "Обычно 993.", "993"},
-		"imap.username": {"Логин", fieldText, "Обычно совпадает с адресом.", "me@example.com"},
-		"imap.password": {"Пароль приложения", fieldSecret, "Не основной пароль, а пароль приложения из настроек почты. Хранится в Vault, коннектор его не видит.", ""},
-		"smtp.host":     {"Сервер SMTP", fieldText, "", "smtp.gmail.com"},
-		"smtp.port":     {"Порт SMTP", fieldNumber, "Обычно 465.", "465"},
-		"smtp.password": {"Пароль SMTP", fieldSecret, "Пусто — тот же, что для IMAP.", ""},
+		"address":       {Label: "Email address", Kind: fieldText, Placeholder: "me@example.com"},
+		"imap.password": {Label: "App password", Kind: fieldSecret, Help: "Not your main password but an app password from the mail settings. gate4.ai keeps it; the connector never sees it."},
+		"imap.host":     {Label: "IMAP server", Kind: fieldText, Placeholder: "imap.gmail.com", Help: "Filled in for the chosen mail service.", Advanced: true},
+		"imap.port":     {Label: "IMAP port", Kind: fieldNumber, Help: "Usually 993.", Placeholder: "993", Advanced: true},
+		"imap.username": {Label: "Login", Kind: fieldText, Help: "Usually the same as the address.", Placeholder: "me@example.com", Advanced: true},
+		"smtp.host":     {Label: "SMTP server", Kind: fieldText, Placeholder: "smtp.gmail.com", Help: "Filled in for the chosen mail service.", Advanced: true},
+		"smtp.port":     {Label: "SMTP port", Kind: fieldNumber, Help: "Usually 465.", Placeholder: "465", Advanced: true},
+		"smtp.password": {Label: "SMTP password", Kind: fieldSecret, Help: "Empty — the same as for IMAP.", Advanced: true},
 	},
 }
 
 // mailProviders — серверы популярных почтовых сервисов (спецификация: Gmail,
 // Яндекс, Mail.ru, iCloud, Fastmail).
 var mailProviders = []struct{ ID, Title, IMAP, SMTP, Help string }{
-	{"gmail", "Gmail", "imap.gmail.com", "smtp.gmail.com", "Пароль приложения: myaccount.google.com → Безопасность → Пароли приложений (нужна двухэтапная проверка)."},
-	{"yandex", "Яндекс", "imap.yandex.ru", "smtp.yandex.ru", "Пароль приложения: id.yandex.ru → Безопасность → Пароли приложений → Почта."},
-	{"mailru", "Mail.ru", "imap.mail.ru", "smtp.mail.ru", "Пароль для внешнего приложения: настройки Mail ID → Безопасность."},
-	{"icloud", "iCloud", "imap.mail.me.com", "smtp.mail.me.com", "Пароль приложения: account.apple.com → Вход и безопасность → Пароли приложений."},
+	{"gmail", "Gmail", "imap.gmail.com", "smtp.gmail.com", "App password: myaccount.google.com → Security → App passwords (2-Step Verification is required)."},
+	{"yandex", "Yandex", "imap.yandex.ru", "smtp.yandex.ru", "App password: id.yandex.ru → Security → App passwords → Mail."},
+	{"mailru", "Mail.ru", "imap.mail.ru", "smtp.mail.ru", "Password for an external app: Mail ID settings → Security."},
+	{"icloud", "iCloud", "imap.mail.me.com", "smtp.mail.me.com", "App password: account.apple.com → Sign-In and Security → App-Specific Passwords."},
 	{"fastmail", "Fastmail", "imap.fastmail.com", "smtp.fastmail.com", "App password: Settings → Privacy & Security → App passwords."},
 }
 
@@ -156,7 +171,7 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 	for _, k := range keys {
 		f := SettingField{Key: k, Label: k, Kind: kinds[k]}
 		if h, ok := hints[k]; ok {
-			f.Label, f.Help, f.Placeholder = h.Label, h.Help, h.Placeholder
+			f.Label, f.Help, f.Placeholder, f.Advanced, f.Choices = h.Label, h.Help, h.Placeholder, h.Advanced, h.Choices
 			if h.Kind != "" {
 				f.Kind = h.Kind
 			}
@@ -178,8 +193,9 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 }
 
 var hintOrder = map[string][]string{
+	"files":   {"roots", "allow_hidden", "allow_paths", "max_bytes"},
 	"browser": {"allowed_domains", "mode", "blocked", "model", "model_key", "profile_dir", "chrome_path", "cdp_url", "engine"},
-	"email":   {"address", "imap.host", "imap.port", "imap.username", "imap.password", "smtp.host", "smtp.port", "smtp.password"},
+	"email":   {"address", "imap.password", "imap.host", "imap.port", "imap.username", "smtp.host", "smtp.port", "smtp.password"},
 }
 
 // getPath — значение по ключу с точками (imap.host → settings["imap"]["host"]).
@@ -227,29 +243,42 @@ func fieldValue(f SettingField, raw string) (any, error) {
 	case fieldNumber:
 		n, err := strconv.Atoi(raw)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %q is not a number", f.Label, raw)
+			return nil, M("%s: %q is not a number", Word(f.Label), raw)
 		}
 		return n, nil
+	case fieldBool:
+		if raw == "1" || raw == "on" || raw == "true" {
+			return true, nil
+		}
+		return nil, nil
+	case fieldChoice:
+		if len(f.Choices) > 0 && !slices.Contains(f.Choices, raw) {
+			return nil, M("%s: choose one of %s", Word(f.Label), strings.Join(f.Choices, ", "))
+		}
 	}
 	return raw, nil
 }
 
-// humanCapability — возможность коннектора человеческим языком.
-func humanCapability(s string) string {
+// humanCapability — возможность коннектора человеческим языком на языке l.
+func humanCapability(l, s string) string {
 	s = settingRe.ReplaceAllStringFunc(s, func(m string) string {
-		return "«" + settingRe.FindStringSubmatch(m)[1] + "»"
+		return "“" + settingRe.FindStringSubmatch(m)[1] + "”"
 	})
+	var m Msg
 	switch {
 	case strings.HasPrefix(s, "files "):
-		return "файлы: " + strings.TrimPrefix(s, "files ") + " — только в папках из настройки"
+		m = M("files: %s — only in the folders from the settings", strings.TrimPrefix(s, "files "))
 	case strings.HasPrefix(s, "browser on "):
-		return "браузер: только сайты " + strings.TrimPrefix(s, "browser on ")
+		m = M("browser: only the sites %s", strings.TrimPrefix(s, "browser on "))
 	case strings.HasPrefix(s, "network "):
-		return "сеть: соединения с " + strings.TrimPrefix(s, "network ")
+		m = M("network: connections to %s", strings.TrimPrefix(s, "network "))
 	case strings.HasPrefix(s, "secret "):
-		return "секрет " + strings.Replace(strings.TrimPrefix(s, "secret "), " for ", " — подставляет gate4ai, только для ", 1) + " (коннектор значения не видит)"
+		alias, host, _ := strings.Cut(strings.TrimPrefix(s, "secret "), " for ")
+		m = M("password %s — gate4.ai enters it, only for %s (the connector never sees it)", alias, host)
 	case strings.HasPrefix(s, "storage "):
-		return "своё хранилище: " + strings.TrimPrefix(s, "storage ")
+		m = M("own storage: %s", strings.TrimPrefix(s, "storage "))
+	default:
+		return s
 	}
-	return s
+	return m.In(l)
 }

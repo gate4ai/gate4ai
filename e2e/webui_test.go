@@ -17,7 +17,7 @@ import (
 	"github.com/makiuchi-d/gozxing/qrcode"
 )
 
-// Вход с телефона в настоящем браузере: «Настройки → Показать ссылку и QR-код»
+// Вход с телефона в настоящем браузере: «Settings → Internet access → Show the link and the QR code»
 // показывает картинку, которая загрузилась, и QR в ней — та же ссылка, что на странице.
 func TestRemoteLoginQR(t *testing.T) {
 	t.Parallel()
@@ -46,16 +46,16 @@ func TestRemoteLoginQR(t *testing.T) {
 	var width int
 	err = chromedp.Run(ctx,
 		chromedp.Navigate(login),
-		chromedp.Navigate(base+"/settings#remote"),
-		chromedp.Click(`//button[text()="Показать ссылку и QR-код"]`),
+		chromedp.Navigate(base+"/lang?l=en&back=/settings/internet#remote"),
+		chromedp.Click(`//button[text()="Show the link and the QR code"]`),
 		chromedp.WaitVisible(`#rlink`),
 		chromedp.Text(`#rlink`, &link),
-		chromedp.Poll(`(() => { const i = document.querySelector('img[alt="QR-код ссылки входа"]'); return i && i.complete })()`, nil),
-		chromedp.Evaluate(`document.querySelector('img[alt="QR-код ссылки входа"]').getAttribute('src')`, &src),
-		chromedp.Evaluate(`document.querySelector('img[alt="QR-код ссылки входа"]').naturalWidth`, &width),
+		chromedp.Poll(`(() => { const i = document.querySelector('img[alt="QR code of the sign-in link"]'); return i && i.complete })()`, nil),
+		chromedp.Evaluate(`document.querySelector('img[alt="QR code of the sign-in link"]').getAttribute('src')`, &src),
+		chromedp.Evaluate(`document.querySelector('img[alt="QR code of the sign-in link"]').naturalWidth`, &width),
 		// то, что показал браузер, а не то, что прислал сервер
 		chromedp.Evaluate(`(() => {
-			const i = document.querySelector('img[alt="QR-код ссылки входа"]'), c = document.createElement('canvas');
+			const i = document.querySelector('img[alt="QR code of the sign-in link"]'), c = document.createElement('canvas');
 			c.width = i.naturalWidth; c.height = i.naturalHeight;
 			c.getContext('2d').drawImage(i, 0, 0);
 			return c.toDataURL('image/png');

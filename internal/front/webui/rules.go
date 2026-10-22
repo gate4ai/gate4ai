@@ -17,11 +17,16 @@ import (
 // Конструктор правил: условия из блоков → CEL (спецификация, «Как
 // редактируются»), описание правил человеческим языком и готовые шаблоны.
 
-// Названия классов эффекта и решений.
+// Названия классов эффекта, решений, способов обращения и каналов (английские
+// исходники; перевод — каталог ru).
 var (
-	classRu  = map[string]string{"read": "чтение", "write": "изменение", "external": "отправка наружу", "money": "деньги"}
-	effectRu = map[string]string{"allow": "разрешать", "ask": "спрашивать", "deny": "запрещать"}
-	viaRu    = map[string]string{"mcp": "MCP (stdio)", "cli": "CLI", "mcp-http": "remote MCP", "https": "удалённый CLI", "agent-socket": "сокет агентов", "socket": "сокет"}
+	classWords = map[string]string{"read": "read", "write": "change", "external": "send out", "money": "money"}
+	// classVerbs — группа действий класса в мастере и на странице коннектора.
+	classVerbs   = map[string]string{"read": "Read", "write": "Create and change", "external": "Send", "money": "Pay"}
+	effectWords  = map[string]string{"allow": "allow", "ask": "ask me", "deny": "deny"}
+	viaWords     = map[string]string{"mcp": "MCP (stdio)", "cli": "CLI", "mcp-http": "remote MCP", "https": "remote CLI", "agent-socket": "agent socket", "socket": "socket"}
+	channelWords = map[string]string{"telegram": "Telegram", "tray": "tray", "webui": "Web UI", "webui-remote": "Web UI on the phone", "cli": "CLI",
+		"desktop": "notification on this computer", "webpush": "browser push"}
 )
 
 // defaultEffect — решение без правил по классу (спецификация).
@@ -56,24 +61,24 @@ func actionArgs(t daemon.Tool) []argInfo {
 
 // Виды блоков условия.
 var condKinds = []struct{ ID, Title string }{
-	{"in_list", "из списка"},
-	{"eq", "равно"},
-	{"contains", "содержит текст"},
-	{"in_folder", "внутри папки"},
-	{"domain", "сайт из списка"},
-	{"lte", "не больше"},
-	{"gte", "не меньше"},
-	{"untrusted", "взято из входящего письма или страницы"},
+	{"in_list", "is in the list"},
+	{"eq", "equals"},
+	{"contains", "contains text"},
+	{"in_folder", "is inside the folder"},
+	{"domain", "is a site from the list"},
+	{"lte", "is at most"},
+	{"gte", "is at least"},
+	{"untrusted", "came from an incoming email or a web page"},
 }
 
-// kindTitle — название вида условия для сообщений.
-func kindTitle(id string) string {
+// kindTitle — название вида условия для сообщений (переводится как Word).
+func kindTitle(id string) Word {
 	for _, k := range condKinds {
 		if k.ID == id {
-			return k.Title
+			return Word(k.Title)
 		}
 	}
-	return id
+	return Word(id)
 }
 
 // Cond — один блок условия формы.
@@ -103,12 +108,12 @@ func splitItems(s string) []string {
 // CEL — выражение блока; arr — аргумент-массив.
 func (c Cond) CEL(arr bool) (string, error) {
 	if !identRe.MatchString(c.Arg) {
-		return "", fmt.Errorf("выберите аргумент для проверки «%s»", kindTitle(c.Kind))
+		return "", M("Choose the argument for the check “%s”", kindTitle(c.Kind))
 	}
 	v := strings.TrimSpace(c.Value)
 	need := func() error {
 		if v == "" {
-			return fmt.Errorf("условию на %s нужно значение", c.Arg)
+			return M("The condition on %s needs a value", c.Arg)
 		}
 		return nil
 	}
@@ -122,7 +127,7 @@ func (c Cond) CEL(arr bool) (string, error) {
 	switch c.Kind {
 	case "in_list":
 		if !identRe.MatchString(v) {
-			return "", fmt.Errorf("имя списка %q: только строчные латинские буквы, цифры и _", v)
+			return "", M("List name %q: only lowercase Latin letters, digits and _", v)
 		}
 		e = each("§ in lists." + v)
 	case "eq":
@@ -147,7 +152,7 @@ func (c Cond) CEL(arr bool) (string, error) {
 	case "domain":
 		items := splitItems(v)
 		if len(items) == 0 {
-			return "", fmt.Errorf("перечислите сайты для %s", c.Arg)
+			return "", M("List the sites for %s", c.Arg)
 		}
 		q := make([]string, len(items))
 		for i, it := range items {
@@ -156,14 +161,14 @@ func (c Cond) CEL(arr bool) (string, error) {
 		e = each("domain_matches(§, [" + strings.Join(q, ", ") + "])")
 	case "lte", "gte":
 		if _, err := strconv.ParseFloat(v, 64); err != nil {
-			return "", fmt.Errorf("%s: %q — не число", c.Arg, v)
+			return "", M("%s: %q is not a number", c.Arg, v)
 		}
 		op := map[string]string{"lte": " <= ", "gte": " >= "}[c.Kind]
 		e = c.Arg + op + v
 	case "untrusted":
 		e = celString(c.Arg) + " in provenance && 'untrusted_content' in provenance[" + celString(c.Arg) + "]"
 	default:
-		return "", fmt.Errorf("неизвестная проверка %q", c.Kind)
+		return "", M("Unknown check %q", c.Kind)
 	}
 	if c.Not {
 		return "!(" + e + ")", nil
@@ -202,21 +207,23 @@ func BuildWhen(conds []Cond, args []argInfo) (string, error) {
 
 var describers = []struct {
 	re *regexp.Regexp
-	f  func(m []string) string
+	f  func(m []string) Msg
 }{
-	{regexp.MustCompile(`^(\w+)\.all\(\w+, \w+ in lists\.(\w+)\)$`), func(m []string) string { return "все " + m[1] + " — из списка «" + m[2] + "»" }},
-	{regexp.MustCompile(`^(\w+) in lists\.(\w+)$`), func(m []string) string { return m[1] + " — из списка «" + m[2] + "»" }},
-	{regexp.MustCompile(`^glob\((\w+), "([^"]+)/\*\*"\)$`), func(m []string) string { return m[1] + " внутри папки " + m[2] }},
-	{regexp.MustCompile(`^!glob\((\w+), "([^"]+)/\*\*"\)$`), func(m []string) string { return m[1] + " вне папки " + m[2] }},
-	{regexp.MustCompile(`^!\(glob\((\w+), "([^"]+)/\*\*"\)\)$`), func(m []string) string { return m[1] + " вне папки " + m[2] }},
-	{regexp.MustCompile(`^domain_matches\((\w+), \[(.+)\]\)$`), func(m []string) string { return m[1] + " — сайт из " + strings.ReplaceAll(m[2], `"`, "") }},
-	{regexp.MustCompile(`^!\(?domain_matches\((\w+), \[(.+)\]\)\)?$`), func(m []string) string { return m[1] + " — сайт не из " + strings.ReplaceAll(m[2], `"`, "") }},
-	{regexp.MustCompile(`^(?:"(\w+)" in provenance && )?'untrusted_content' in provenance(?:\.(\w+)|\["(\w+)"\])$`), func(m []string) string {
-		return firstNonEmpty(m[2], m[3], m[1]) + " взят из входящего письма или страницы"
+	{regexp.MustCompile(`^(\w+)\.all\(\w+, \w+ in lists\.(\w+)\)$`), func(m []string) Msg { return M("every %s is in the list “%s”", m[1], m[2]) }},
+	{regexp.MustCompile(`^(\w+) in lists\.(\w+)$`), func(m []string) Msg { return M("%s is in the list “%s”", m[1], m[2]) }},
+	{regexp.MustCompile(`^glob\((\w+), "([^"]+)/\*\*"\)$`), func(m []string) Msg { return M("%s is inside the folder %s", m[1], m[2]) }},
+	{regexp.MustCompile(`^!glob\((\w+), "([^"]+)/\*\*"\)$`), func(m []string) Msg { return M("%s is outside the folder %s", m[1], m[2]) }},
+	{regexp.MustCompile(`^!\(glob\((\w+), "([^"]+)/\*\*"\)\)$`), func(m []string) Msg { return M("%s is outside the folder %s", m[1], m[2]) }},
+	{regexp.MustCompile(`^domain_matches\((\w+), \[(.+)\]\)$`), func(m []string) Msg { return M("%s is a site from %s", m[1], strings.ReplaceAll(m[2], `"`, "")) }},
+	{regexp.MustCompile(`^!\(?domain_matches\((\w+), \[(.+)\]\)\)?$`), func(m []string) Msg {
+		return M("%s is a site not from %s", m[1], strings.ReplaceAll(m[2], `"`, ""))
 	}},
-	{regexp.MustCompile(`^(\w+) <= ([\d.]+)$`), func(m []string) string { return m[1] + " не больше " + m[2] }},
-	{regexp.MustCompile(`^(\w+) >= ([\d.]+)$`), func(m []string) string { return m[1] + " не меньше " + m[2] }},
-	{regexp.MustCompile(`^counters\.spent_today \+ amount > ([\d.]+)$`), func(m []string) string { return "сумма за день превысит " + m[1] }},
+	{regexp.MustCompile(`^(?:"(\w+)" in provenance && )?'untrusted_content' in provenance(?:\.(\w+)|\["(\w+)"\])$`), func(m []string) Msg {
+		return M("%s came from an incoming email or a web page", firstNonEmpty(m[2], m[3], m[1]))
+	}},
+	{regexp.MustCompile(`^(\w+) <= ([\d.]+)$`), func(m []string) Msg { return M("%s is at most %s", m[1], m[2]) }},
+	{regexp.MustCompile(`^(\w+) >= ([\d.]+)$`), func(m []string) Msg { return M("%s is at least %s", m[1], m[2]) }},
+	{regexp.MustCompile(`^counters\.spent_today \+ amount > ([\d.]+)$`), func(m []string) Msg { return M("the day's total would exceed %s", m[1]) }},
 }
 
 var provGuard = regexp.MustCompile(`"\w+" in provenance && `)
@@ -230,11 +237,14 @@ func firstNonEmpty(s ...string) string {
 	return ""
 }
 
-// DescribeWhen — условие словами; ok=false — показать как код.
-func DescribeWhen(when string) (string, bool) {
+// DescribeWhen — условие словами по-английски; ok=false — показать как код.
+func DescribeWhen(when string) (string, bool) { return describeWhen(langEN, when) }
+
+// describeWhen — условие словами на языке l.
+func describeWhen(l, when string) (string, bool) {
 	when = strings.TrimSpace(when)
 	if when == "" {
-		return "всегда", true
+		return tr(l, "always"), true
 	}
 	// Проверка наличия ключа перед provenance["x"] — часть того же блока.
 	when = provGuard.ReplaceAllString(when, "")
@@ -244,7 +254,7 @@ func DescribeWhen(when string) (string, bool) {
 		found := false
 		for _, d := range describers {
 			if m := d.re.FindStringSubmatch(part); m != nil {
-				out = append(out, d.f(m))
+				out = append(out, d.f(m).In(l))
 				found = true
 				break
 			}
@@ -253,7 +263,7 @@ func DescribeWhen(when string) (string, bool) {
 			return when, false
 		}
 	}
-	return strings.Join(out, " и "), true
+	return strings.Join(out, tr(l, " and ")), true
 }
 
 // ---- Шаблоны ----
@@ -294,34 +304,34 @@ func putRule(c *config.Config, profile string, r config.Rule) error {
 
 // Templates — набор шаблонов.
 var Templates = []Template{
-	{ID: "read-only", Title: "Только чтение", Description: "Агент читает, но ничего не меняет и не отправляет: все действия, кроме чтения, запрещены.",
+	{ID: "read-only", Title: "Read only", Description: "The agent reads but changes and sends nothing: every action except reading is denied.",
 		Apply: func(c *config.Config, profile string, _ map[string]string, tools []daemon.Tool) error {
 			acts := actionsOf(c, profile, tools, func(t daemon.Tool) bool { return t.Class != "read" })
 			if len(acts) == 0 {
-				return fmt.Errorf("profile %s has no actions besides reading", profile)
+				return M("The agent has no actions besides reading")
 			}
 			for _, t := range acts {
-				if err := putRule(c, profile, config.Rule{ID: "read-only-" + strings.ReplaceAll(t.Name, ".", "-"), Action: t.Name, Effect: config.EffectDeny, Reason: "Только чтение"}); err != nil {
+				if err := putRule(c, profile, config.Rule{ID: "read-only-" + strings.ReplaceAll(t.Name, ".", "-"), Action: t.Name, Effect: config.EffectDeny, Reason: "Read only"}); err != nil {
 					return err
 				}
 			}
 			return nil
 		}},
-	{ID: "ask-all", Title: "Спрашивать обо всём", Description: "Каждое действие агента, включая чтение, — только с вашего подтверждения.",
+	{ID: "ask-all", Title: "Ask about everything", Description: "Every action of the agent, reading included, needs your approval.",
 		Apply: func(c *config.Config, profile string, _ map[string]string, tools []daemon.Tool) error {
 			for _, conn := range c.Profiles[profile].Connectors {
-				if err := putRule(c, profile, config.Rule{ID: "ask-all-" + conn, Action: conn + ".*", Effect: config.EffectAsk, Reason: "Подтверждать каждое действие"}); err != nil {
+				if err := putRule(c, profile, config.Rule{ID: "ask-all-" + conn, Action: conn + ".*", Effect: config.EffectAsk, Reason: "Approve every action"}); err != nil {
 					return err
 				}
 			}
 			if len(c.Profiles[profile].Connectors) == 0 {
-				return fmt.Errorf("profile %s has no connectors", profile)
+				return M("The agent has no connectors")
 			}
 			return nil
 		}},
-	{ID: "safe-mail", Title: "Безопасная почта", Needs: []string{"email.send"},
-		Description: "Письма доверенным адресатам уходят без вопроса, адресаты из входящих писем запрещены, остальное — с подтверждением.",
-		Params:      []TemplateParam{{Name: "trusted", Label: "Доверенные адресаты", Placeholder: "landlord@example.com, accountant@example.com", Multiline: true}},
+	{ID: "safe-mail", Title: "Safe email", Needs: []string{"email.send"},
+		Description: "Emails to trusted recipients go without asking, recipients taken from incoming emails are denied, everything else asks you.",
+		Params:      []TemplateParam{{Name: "trusted", Label: "Trusted recipients", Placeholder: "landlord@example.com, accountant@example.com", Multiline: true}},
 		Apply: func(c *config.Config, profile string, p map[string]string, _ []daemon.Tool) error {
 			if items := splitItems(p["trusted"]); len(items) > 0 {
 				if err := c.SetList("contacts_trusted", items); err != nil {
@@ -332,20 +342,20 @@ var Templates = []Template{
 				}
 			}
 			return putRule(c, profile, config.Rule{ID: "email-no-untrusted-recipients", Action: "email.send",
-				When: `"to" in provenance && 'untrusted_content' in provenance["to"]`, Effect: config.EffectDeny, Reason: "Адресат взят из входящего письма"})
+				When: `"to" in provenance && 'untrusted_content' in provenance["to"]`, Effect: config.EffectDeny, Reason: "The recipient was taken from an incoming email"})
 		}},
-	{ID: "drafts-only", Title: "Только черновики", Needs: []string{"email.send"},
-		Description: "Агент готовит черновики писем, но отправить не может.",
+	{ID: "drafts-only", Title: "Drafts only", Needs: []string{"email.send"},
+		Description: "The agent prepares email drafts but cannot send them.",
 		Apply: func(c *config.Config, profile string, _ map[string]string, _ []daemon.Tool) error {
-			return putRule(c, profile, config.Rule{ID: "no-send", Action: "email.send", Effect: config.EffectDeny, Reason: "Только черновики"})
+			return putRule(c, profile, config.Rule{ID: "no-send", Action: "email.send", Effect: config.EffectDeny, Reason: "Drafts only"})
 		}},
-	{ID: "notes-folder", Title: "Заметки в папке", Needs: []string{"files.read"},
-		Description: "Чтение и дописывание в папке — без вопроса, перезапись — с подтверждением, всё вне папки — запрещено. Папка добавляется в настройки коннектора «Файлы».",
-		Params:      []TemplateParam{{Name: "folder", Label: "Папка", Placeholder: "~/Documents/notes"}},
+	{ID: "notes-folder", Title: "Notes in a folder", Needs: []string{"files.read"},
+		Description: "Reading and appending in the folder go without asking, overwriting asks you, everything outside the folder is denied. The folder is added to the Files settings.",
+		Params:      []TemplateParam{{Name: "folder", Label: "Folder", Placeholder: "~/Documents/notes"}},
 		Apply: func(c *config.Config, profile string, p map[string]string, tools []daemon.Tool) error {
 			dir := strings.TrimSuffix(strings.TrimSpace(p["folder"]), "/")
 			if dir == "" {
-				return fmt.Errorf("choose a folder")
+				return M("Choose a folder")
 			}
 			g := celString(dir + "/**")
 			has := func(a string) bool {
@@ -358,7 +368,7 @@ var Templates = []Template{
 					}
 				}
 			}
-			if err := putRule(c, profile, config.Rule{ID: "notes-only", Action: "files.*", When: "!glob(path, " + g + ")", Effect: config.EffectDeny, Reason: "Только папка " + dir}); err != nil {
+			if err := putRule(c, profile, config.Rule{ID: "notes-only", Action: "files.*", When: "!glob(path, " + g + ")", Effect: config.EffectDeny, Reason: "Only the folder " + dir}); err != nil {
 				return err
 			}
 			s := map[string]any{}
@@ -373,19 +383,19 @@ var Templates = []Template{
 			c.SetConnectorSettings("files", s)
 			return c.SetProfileConnector(profile, "files", true)
 		}},
-	{ID: "sites-list", Title: "Сайты по списку", Needs: []string{"browser.read"},
-		Description: "Браузер открывает только сайты из списка. Список попадает и в настройки коннектора «Браузер».",
-		Params:      []TemplateParam{{Name: "sites", Label: "Сайты", Placeholder: "*.example.com, app.example.org", Multiline: true}},
+	{ID: "sites-list", Title: "Sites from a list", Needs: []string{"browser.read"},
+		Description: "The browser opens only the sites from the list. The list also goes to the Browser settings.",
+		Params:      []TemplateParam{{Name: "sites", Label: "Sites", Placeholder: "*.example.com, app.example.org", Multiline: true}},
 		Apply: func(c *config.Config, profile string, p map[string]string, _ []daemon.Tool) error {
 			items := splitItems(p["sites"])
 			if len(items) == 0 {
-				return fmt.Errorf("list the sites")
+				return M("List the sites")
 			}
 			q := make([]string, len(items))
 			for i, it := range items {
 				q[i] = celString(it)
 			}
-			if err := putRule(c, profile, config.Rule{ID: "sites-only", Action: "browser.*", When: "!domain_matches(url, [" + strings.Join(q, ", ") + "])", Effect: config.EffectDeny, Reason: "Сайт не из списка"}); err != nil {
+			if err := putRule(c, profile, config.Rule{ID: "sites-only", Action: "browser.*", When: "!domain_matches(url, [" + strings.Join(q, ", ") + "])", Effect: config.EffectDeny, Reason: "The site is not in the list"}); err != nil {
 				return err
 			}
 			s := map[string]any{}
@@ -396,37 +406,37 @@ var Templates = []Template{
 			c.SetConnectorSettings("browser", s)
 			return nil
 		}},
-	{ID: "daily-limit", Title: "Не больше N действий в день", Description: "Ограничить число изменений и отправок за сутки по каждому коннектору профиля.",
-		Params: []TemplateParam{{Name: "n", Label: "Действий в день", Placeholder: "20"}},
+	{ID: "daily-limit", Title: "At most N actions a day", Description: "Limit changes and sends per day for each connector of the agent.",
+		Params: []TemplateParam{{Name: "n", Label: "Actions a day", Placeholder: "20"}},
 		Apply: func(c *config.Config, profile string, p map[string]string, tools []daemon.Tool) error {
 			n, err := strconv.Atoi(strings.TrimSpace(p["n"]))
 			if err != nil || n <= 0 {
-				return fmt.Errorf("enter a positive number")
+				return M("Enter a positive number")
 			}
 			acts := actionsOf(c, profile, tools, func(t daemon.Tool) bool { return t.Class != "read" })
 			if len(acts) == 0 {
-				return fmt.Errorf("profile %s has no actions besides reading", profile)
+				return M("The agent has no actions besides reading")
 			}
 			for _, t := range acts {
 				if err := c.PutLimit(profile, config.Limit{ID: "per-day-" + strings.ReplaceAll(t.Name, ".", "-"), Action: t.Name, PerDay: n,
-					Reason: fmt.Sprintf("Не больше %d в день", n)}); err != nil {
+					Reason: fmt.Sprintf("At most %d a day", n)}); err != nil {
 					return err
 				}
 			}
 			return nil
 		}},
-	{ID: "no-self-config", Title: "Агентам нельзя менять настройки gate4.ai", Description: "Запретить действие gate4ai.change_policy: агент не сможет менять правила, списки и коннекторы даже с вашего подтверждения.",
+	{ID: "no-self-config", Title: "Agents may not change gate4.ai settings", Description: "Deny gate4ai.change_policy: the agent cannot change rules, lists and connectors even with your approval.",
 		Apply: func(c *config.Config, profile string, _ map[string]string, _ []daemon.Tool) error {
-			return putRule(c, profile, config.Rule{ID: "no-self-config", Action: daemon.SelfConnector + ".change_policy", Effect: config.EffectDeny, Reason: "Настройки gate4.ai меняет только владелец"})
+			return putRule(c, profile, config.Rule{ID: "no-self-config", Action: daemon.SelfConnector + ".change_policy", Effect: config.EffectDeny, Reason: "Only the owner changes gate4.ai settings"})
 		}},
-	{ID: "money-ask", Title: "Деньги — всегда с подтверждением", Description: "Любое действие класса «деньги» требует подтверждения, даже если другое правило его разрешает.",
+	{ID: "money-ask", Title: "Money always asks", Description: "Every money action needs your approval, even if another rule allows it.",
 		Apply: func(c *config.Config, profile string, _ map[string]string, tools []daemon.Tool) error {
 			acts := actionsOf(c, profile, tools, func(t daemon.Tool) bool { return t.Class == "money" })
 			if len(acts) == 0 {
-				return fmt.Errorf("no payment connectors in profile %s yet: install one first", profile)
+				return M("The agent has no payment connectors yet: install one first")
 			}
 			for _, t := range acts {
-				if err := putRule(c, profile, config.Rule{ID: "money-ask-" + strings.ReplaceAll(t.Name, ".", "-"), Action: t.Name, Effect: config.EffectAsk, Reason: "Деньги — с подтверждением"}); err != nil {
+				if err := putRule(c, profile, config.Rule{ID: "money-ask-" + strings.ReplaceAll(t.Name, ".", "-"), Action: t.Name, Effect: config.EffectAsk, Reason: "Money needs approval"}); err != nil {
 					return err
 				}
 			}

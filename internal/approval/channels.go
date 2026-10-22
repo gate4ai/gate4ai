@@ -65,7 +65,7 @@ func (c *Channels) Status() []ChannelStatus {
 	decided, _ := c.d.State.DecidedByChannel()
 	out := []ChannelStatus{}
 
-	desk := ChannelStatus{Name: "desktop", Title: "Уведомления на этом компьютере", On: cfg.ChannelOn("desktop"), Stat: stats["desktop"], Decided: decided["tray"]}
+	desk := ChannelStatus{Name: "desktop", Title: "Notifications on this computer", On: cfg.ChannelOn("desktop"), Stat: stats["desktop"], Decided: decided["tray"]}
 	switch {
 	case !desk.On:
 		desk.State = StateOff
@@ -103,7 +103,7 @@ func (c *Channels) Status() []ChannelStatus {
 	}
 	out = append(out, tg)
 
-	push := ChannelStatus{Name: "webpush", Title: "Браузерный push", On: cfg.ChannelOn("webpush"), Stat: stats["webpush"]}
+	push := ChannelStatus{Name: "webpush", Title: "Browser push", On: cfg.ChannelOn("webpush"), Stat: stats["webpush"]}
 	subs, _ := c.d.State.PushSubs()
 	switch {
 	case !push.On:
@@ -119,7 +119,7 @@ func (c *Channels) Status() []ChannelStatus {
 	}
 	out = append(out, push)
 
-	web := ChannelStatus{Name: "webui", Title: "Web UI (эта страница, удалённо — /ui/)", On: true, State: StateOK,
+	web := ChannelStatus{Name: "webui", Title: "Web UI (this page; remotely — /ui/)", On: true, State: StateOK,
 		Decided: decided["webui"] + decided["webui-remote"]}
 	out = append(out, web)
 	return out

@@ -3,6 +3,12 @@
 // Package autostart — запуск daemon (и трея) при входе пользователя в систему:
 // systemd --user или XDG autostart (Linux), LaunchAgent (macOS), ключ Run в
 // реестре пользователя (Windows). Используется `gate4ai service` и Web UI.
+//
+// State(home) на каждой платформе отдаёт: installed — есть файлы или ключи
+// автозапуска (daemon или трей), files — они сами, enabled — daemon запустится
+// при входе, running — служба автозапуска сейчас держит daemon (systemd
+// is-active, launchctl print; где неизвестно — ключа нет). Linux с systemd
+// добавляет systemd (is-active) и systemd_enabled (is-enabled) как есть.
 package autostart
 
 import (

@@ -16,6 +16,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/internal/connectors"
 	"github.com/gate4ai/gate4ai/internal/daemon"
+	"github.com/gate4ai/gate4ai/internal/front/skill"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
@@ -249,5 +250,51 @@ func TestDaemonUnavailable(t *testing.T) {
 		Connect: func(string) *Client { return NewSocketClient(filepath.Join(t.TempDir(), "none.sock"), "") }}
 	if code := Run(context.Background(), env, []string{"tools"}); code != ExitUnavailable {
 		t.Fatal(code)
+	}
+}
+
+// --json, --wait и --as — опции вызова в любом месте команды действия, если у
+// действия нет аргумента с таким именем; --json без значения — вывод JSON.
+func TestCallOptsAnywhere(t *testing.T) {
+	tool := skill.Tool{Name: "files.list", Connector: "files", Action: "list",
+		Schema: manifest.MustSchema(`{ type: object, properties: { path: { type: string }, as: { type: string } } }`)}
+	vals, o, err := parseArgs(tool, []string{"--path", "/x", "--json", "--wait", "1m"})
+	if err != nil || vals["path"] != "/x" || !o.json || o.wait != "1m" {
+		t.Fatal(vals, o, err)
+	}
+	vals, o, err = parseArgs(tool, []string{"--json", "--path", "/x"})
+	if err != nil || vals["path"] != "/x" || !o.json {
+		t.Fatal(vals, o, err)
+	}
+	// --json со значением — по-прежнему все аргументы объектом.
+	vals, o, err = parseArgs(tool, []string{"--json", `{"path":"/y"}`})
+	if err != nil || vals["path"] != "/y" || o.json {
+		t.Fatal(vals, o, err)
+	}
+	// Аргумент действия с именем опции остаётся аргументом.
+	vals, o, err = parseArgs(tool, []string{"--as", "pdf"})
+	if err != nil || vals["as"] != "pdf" || o.as != "" {
+		t.Fatal(vals, o, err)
+	}
+	if _, _, err := parseArgs(tool, []string{"--wait"}); err == nil || !strings.Contains(err.Error(), "10m") {
+		t.Fatal(err)
+	}
+	rest, pre := hoistCallOpts([]string{"--json", "--wait", "5m", "--as=bot", "list", "--path", "/x"})
+	if strings.Join(rest, " ") != "list --path /x" || strings.Join(pre, " ") != "--json --wait 5m --as=bot" {
+		t.Fatal(rest, pre)
+	}
+
+	h := start(t)
+	_, out := h.run(t, "", "agents", "token", "claude-ai")
+	tok := jsonOf(t, out)["token"].(string)
+	for _, args := range [][]string{
+		{"email", "read", "--limit", "2", "--json"},
+		{"email", "--json", "read", "--limit", "2"},
+		{"--json", "email", "read", "--limit", "2"},
+	} {
+		code, out := h.run(t, tok, args...)
+		if code != ExitOK || jsonOf(t, out)["status"] != "ok" {
+			t.Fatal(args, code, out)
+		}
 	}
 }

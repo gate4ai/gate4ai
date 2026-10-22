@@ -48,7 +48,7 @@ func TestSelfConfigIsAnOrdinaryAction(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	a, _ := d.State.GetApproval(r.ID)
-	if !strings.Contains(a.Preview, "Правило: разрешать notes.append") || !strings.Contains(a.Preview, "(профиль other)") {
+	if !strings.Contains(a.Preview, "Rule: allow notes.append") || !strings.Contains(a.Preview, "(profile other)") {
 		t.Fatal(a.Preview)
 	}
 	if len(d.Config.Current().Profiles["p"].Rules) != 1 {

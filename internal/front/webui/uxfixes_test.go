@@ -14,7 +14,7 @@ import (
 func TestLoginProtectionButtons(t *testing.T) {
 	u, _, _, base := setup(t)
 	_, _, post, get := loginAs(t, u, base)
-	p := get("/settings")
+	p := get("/settings/login")
 	if strings.Contains(p, "argon2id") || !strings.Contains(p, `href="#m-pw-set">Задать`) || !strings.Contains(p, `id="m-pw-set"`) {
 		t.Fatal("password row: no «Задать» window")
 	}
@@ -50,11 +50,11 @@ func TestTelegramWizardEnablesLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := get("/approvals/telegram?for=login")
-	if !strings.Contains(p, "Включить подтверждение входа в Web UI через Telegram") || !strings.Contains(p, "← Настройки: защита входа") ||
+	if !strings.Contains(p, "Включить подтверждение входа в Telegram") || !strings.Contains(p, "← Вход") ||
 		!strings.Contains(p, `name="from" value="telegram"`) {
 		t.Fatal("no login confirmation button at the end of the wizard", p)
 	}
-	if p := get("/approvals/telegram"); !strings.Contains(p, "Включить подтверждение входа в Web UI через Telegram") || !strings.Contains(p, "← Каналы уведомлений") {
+	if p := get("/approvals/telegram"); !strings.Contains(p, "Включить подтверждение входа в Telegram") || !strings.Contains(p, "← Уведомления") {
 		t.Fatal("the button must be there when opened from the channels too")
 	}
 	p = post("/settings/login/telegram", url.Values{"on": {"1"}, "from": {"telegram"}})
@@ -68,14 +68,14 @@ func TestVaultEditAndUses(t *testing.T) {
 	_, _, post, get := loginAs(t, u, base)
 	post("/vault", url.Values{"alias": {"@site.password"}, "value": {"one"}})
 	p := post("/vault", url.Values{"alias": {"@site.password"}, "value": {"two"}, "edit": {"1"}})
-	if !strings.Contains(p, "Значение @site.password изменено") {
+	if !strings.Contains(p, "@site.password заменён") {
 		t.Fatal("edit flash", p)
 	}
 	if v, _ := u.D.Vault.Get("@site.password"); v != "two" {
 		t.Fatal("value not changed")
 	}
 	p = get("/vault")
-	if !strings.Contains(p, `href="#m-sec-site.password">Изменить`) || !strings.Contains(p, "Применяется на") || strings.Contains(p, "Изменить учётки") {
+	if !strings.Contains(p, `href="#m-sec-site.password">Заменить`) || !strings.Contains(p, "Учётки для входа на сайты") || strings.Contains(p, "Изменить учётки") {
 		t.Fatal("vault page", p)
 	}
 }
@@ -84,7 +84,7 @@ func TestVaultEditAndUses(t *testing.T) {
 func TestConnectorActionDecision(t *testing.T) {
 	u, d, _, base := setup(t)
 	_, _, post, get := loginAs(t, u, base)
-	if p := get("/connectors/notes"); !strings.Contains(p, `<option value="" selected>без правил: спрашивать</option>`) {
+	if p := get("/connectors/notes"); !strings.Contains(p, `<option value="" selected>без правила: спрашивать</option>`) {
 		t.Fatal("default decision", p)
 	}
 	post("/connectors/notes/decision", url.Values{"profile": {"p"}, "action": {"append"}, "effect": {"allow"}})
@@ -124,14 +124,14 @@ func TestInstallNotFromStore(t *testing.T) {
 }
 
 func TestErrView(t *testing.T) {
-	e := errView(`relay https://relay.gate4.ai: Post "https://relay.gate4.ai/api/devices": dial tcp: lookup relay.gate4.ai on 127.0.0.53:53: read udp 127.0.0.1:43524->127.0.0.53:53: i/o timeout`)
+	e := errView("ru", `relay https://relay.gate4.ai: Post "https://relay.gate4.ai/api/devices": dial tcp: lookup relay.gate4.ai on 127.0.0.53:53: read udp 127.0.0.1:43524->127.0.0.53:53: i/o timeout`)
 	if !strings.HasPrefix(e.Text, "Нет связи с relay.gate4.ai") || !strings.Contains(e.Detail, "i/o timeout") {
 		t.Fatal(e)
 	}
-	if e := errView("пароли не совпадают"); e.Text != "пароли не совпадают" || e.Detail != "" {
+	if e := errView("en", "пароли не совпадают"); e.Text != "пароли не совпадают" || e.Detail != "" {
 		t.Fatal(e)
 	}
-	if e := errView(`Get "https://x.example/a": dial tcp 1.2.3.4:443: connect: connection refused`); !strings.Contains(e.Text, "x.example") || !strings.Contains(e.Text, "отклонено") {
+	if e := errView("ru", `Get "https://x.example/a": dial tcp 1.2.3.4:443: connect: connection refused`); !strings.Contains(e.Text, "x.example") || !strings.Contains(e.Text, "отклонено") {
 		t.Fatal(e)
 	}
 }
@@ -170,7 +170,7 @@ func TestRuleSentenceForm(t *testing.T) {
 	if !strings.Contains(p, "если text содержит hello") || !strings.Contains(p, `name="cond_kind" value="contains"`) || len(d.Config.Current().Profiles["p"].Rules) != 0 {
 		t.Fatal("condition not added (or rule saved early)", p)
 	}
-	if p := post("/policy/rule", add(form, "add_cond", "1", "new_kind", "lte")); !strings.Contains(p, "выберите аргумент") || !strings.Contains(p, `value="lte" selected`) {
+	if p := post("/policy/rule", add(form, "add_cond", "1", "new_kind", "lte")); !strings.Contains(p, "Выберите аргумент") || !strings.Contains(p, `value="lte" selected`) {
 		t.Fatal("bad condition must keep the new-condition fields with an error", p)
 	}
 	withCond := add(form, "cond_kind", "contains", "cond_arg", "text", "cond_value", "hello")

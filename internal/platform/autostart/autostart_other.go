@@ -15,7 +15,7 @@ func Install(Spec) (Result, error) {
 
 func Uninstall(string, bool) ([]string, []string, error) { return nil, nil, nil }
 
-func State(string) map[string]any { return map[string]any{"installed": false} }
+func State(string) map[string]any { return map[string]any{"installed": false, "enabled": false} }
 
 // Restart — служба автозапуска здесь daemon не перезапускает: это делает вызывающий.
 func Restart() (bool, error) { return false, nil }

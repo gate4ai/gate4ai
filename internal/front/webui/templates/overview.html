@@ -1,38 +1,44 @@
 {{template "head" .}}
 {{$d := .Data}}
-{{if not .Remote}}
-<div class="status">
-  <span>Daemon: <b class="ok">работает</b></span>
-  <span>Relay: {{if $d.Relay.Online}}<b class="ok">онлайн</b>{{else if $d.Relay.Configured}}<b class="warn">нет связи</b>{{else if $d.PublicURL}}<b class="ok">свой адрес</b>{{else}}<a href="{{.Base}}/settings#relay" class="muted">не включён</a>{{end}}</span>
-  {{range $d.Channels}}{{if and .On (ne .Name "webui")}}<span>{{.Title}}: {{if eq .State "ok"}}<b class="ok">работает</b>{{else}}<b class="bad" title="{{.Detail}}">ошибка</b>{{end}}</span>{{end}}{{end}}
-  <span>Политика: версия {{$d.ConfigVersion}}</span>
-  <span>Журнал: {{if $d.Chain}}<b class="ok">цел</b>{{else}}<b class="bad">нарушен</b>{{end}}</span>
-</div>
-{{if $d.StepsLeft}}
-<div class="card">
-<h3>Начало работы <span class="muted">— осталось шагов: {{$d.StepsLeft}}</span></h3>
-<ol class="steps">
-{{range $i, $s := $d.Steps}}<li class="{{if $s.Done}}done{{end}}"><span class="mark">{{if $s.Done}}✓{{else}}{{inc $i}}{{end}}</span>
-<div style="flex:1"><b>{{$s.Title}}</b><div class="muted">{{$s.Text}}</div></div>
-{{if not $s.Done}}<a class="btn small" href="{{$.Base}}{{$s.Link}}">{{$s.Button}}</a>{{end}}</li>{{end}}
-</ol></div>
-{{end}}
-{{end}}
-<h2>Ждут решения</h2>
+<h2>{{T "Waiting for your decision"}}</h2>
 <div data-live-pending data-back="/">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/")}}</div>
 
-{{if not .Remote}}{{if $d.Agents}}
-<h2>Агенты</h2>
-<table><tr><th>Агент</th><th>Профиль</th><th>Последнее обращение</th></tr>
-{{range $name, $a := $d.Agents}}{{$s := index $d.Seen $name}}<tr><td><a href="{{$.Base}}/agents/{{$name}}">{{$name}}</a></td><td>{{$a.Profile}}</td>
-<td>{{if $s.TS.IsZero}}<span class="warn">ещё не обращался</span>{{else}}{{ago $s.TS}} <span class="muted">· {{viaRu $s.Via}}</span>{{end}}</td></tr>{{end}}
-</table>{{end}}{{end}}
+{{if not .Remote}}
+{{if $d.StepsLeft}}
+<div class="card">
+<h3>{{T "Getting started"}} <span class="muted">— {{T "steps left: %d" $d.StepsLeft}}</span></h3>
+<ol class="steps">
+{{range $i, $s := $d.Steps}}<li class="{{if $s.Done}}done{{end}}"><span class="mark" aria-hidden="true">{{if $s.Done}}✓{{else}}{{inc $i}}{{end}}</span>
+<div style="flex:1"><b>{{T $s.Title}}</b>{{if $s.Done}} <span class="ok">— {{T "done"}}</span>{{else if $s.Optional}} <span class="muted">— {{T "optional"}}</span>{{end}}<div class="muted">{{T $s.Text}}</div></div>
+{{if not $s.Done}}<a class="btn small" href="{{$.Base}}{{$s.Link}}">{{T $s.Button}}</a>{{end}}</li>{{end}}
+</ol></div>
+{{end}}
 
-<h2>Последние действия</h2>
-<table><tr><th>Когда</th><th>Агент</th><th>Действие</th><th>Решение</th><th>Итог</th></tr>
-{{range $d.Recent}}<tr><td><a href="{{$.Base}}/journal/{{.Hash}}">{{ago .Receipt.TS}}</a></td><td>{{.Receipt.Agent}}</td><td><code>{{.Receipt.Action}}</code></td>
-<td class="{{.Receipt.Decision.Effect}}">{{effectRu .Receipt.Decision.Effect}}</td><td>{{.Receipt.Execution.Status}}</td></tr>
-{{else}}<tr><td colspan="5" class="muted">Агенты ещё ничего не делали.</td></tr>{{end}}
-</table>
-<p><a href="{{.Base}}/journal">Весь журнал →</a></p>
+<div class="row between"><h2>{{T "Agents"}}</h2><a class="btn small" href="{{.Base}}/setup">+ {{T "Connect another assistant"}}</a></div>
+{{if $d.Agents}}<div class="card" style="padding:.3rem 1rem"><table>
+<tr><th>{{T "Agent"}}</th><th>{{T "Last request"}}</th><th>{{T "Access"}}</th><th>{{T "Today"}}</th><th></th></tr>
+{{range $d.Agents}}<tr><td><b>{{.Name}}</b></td>
+<td>{{if .Seen.TS.IsZero}}<span class="dot warn" aria-hidden="true"></span><span class="warn">{{T "not yet"}}</span>{{else}}<span class="dot" aria-hidden="true"></span>{{ago .Seen.TS}} <span class="muted">· {{via .Seen.Via}}</span>{{end}}</td>
+<td class="muted">{{range $i, $c := .Conns}}{{if $i}}, {{end}}{{$c.Title}}{{else}}<span class="warn">{{T "nothing yet"}}</span>{{end}}</td>
+<td class="muted">{{T "%d actions" .Today}}</td>
+<td style="text-align:right"><a href="{{$.Base}}/agents/{{.Name}}">{{T "Open"}}</a></td></tr>{{end}}
+</table></div>
+{{else}}<div class="card"><p>{{T "No assistants are connected yet."}}</p><a class="btn primary" href="{{.Base}}/setup">{{T "Connect an AI assistant"}}</a></div>{{end}}
+{{end}}
+
+<h2>{{T "Recently"}}</h2>
+<div class="card" style="padding:.3rem 1rem"><table>
+{{range $d.Recent}}<tr><td class="muted" style="white-space:nowrap"><a href="{{$.Base}}/journal/{{.Hash}}">{{ago .Receipt.TS}}</a></td><td><b>{{.Receipt.Agent}}</b> · {{template "entry_line" .}}</td>
+<td class="{{.Receipt.Decision.Effect}}">{{effect .Receipt.Decision.Effect}}{{if and (eq .Receipt.Decision.Effect "deny") (not $.Remote)}} · <a href="{{$.Base}}/policy/rule?receipt={{.Hash}}&amp;effect=allow">{{T "allow?"}}</a>{{end}}</td></tr>
+{{else}}<tr><td class="muted">{{T "Agents have done nothing yet."}}</td></tr>{{end}}
+</table><p style="margin:.6rem 0"><a href="{{.Base}}/journal">{{T "The whole journal →"}}</a></p></div>
+
+{{if not .Remote}}
+<p class="hstate">
+<span><span class="dot" aria-hidden="true"></span>{{T "gate4.ai is running"}}</span> ·
+<span>{{if $d.Chain}}<span class="dot" aria-hidden="true"></span>{{T "the journal is not modified"}}{{else}}<span class="dot bad" aria-hidden="true"></span><span class="bad">{{T "the journal is broken"}}</span>{{end}}</span> ·
+{{range $d.Channels}}{{if and .On (ne .Name "webui")}}<span>{{if eq .State "ok"}}<span class="dot" aria-hidden="true"></span>{{else}}<span class="dot bad" aria-hidden="true"></span>{{end}}{{T .Title}}{{if ne .State "ok"}}: <span class="bad">{{T "error"}}</span>{{end}}</span> · {{end}}{{end}}
+<span>{{if $d.Relay.Online}}<span class="dot" aria-hidden="true"></span>{{T "internet access is on"}}{{else if $d.Relay.Configured}}<span class="dot warn" aria-hidden="true"></span>{{T "no connection to the relay"}}{{else if $d.PublicURL}}<span class="dot" aria-hidden="true"></span>{{T "own internet address"}}{{else}}<span class="dot off" aria-hidden="true"></span><a href="{{.Base}}/settings/internet" class="muted">{{T "internet access is off"}}</a>{{end}}</span>
+</p>
+{{end}}
 {{template "foot"}}

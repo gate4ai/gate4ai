@@ -3,6 +3,8 @@
 // Package files — встроенный коннектор ядра «Файлы» (runtime: builtin): чтение,
 // список, добавление и запись в разрешённых папках (connectors.files.roots)
 // поверх функций хоста fs_* с той же проверкой возможностей, что у WASM.
+// Скрытые файлы ниже корня, ключи и каталоги секретов закрыты всегда
+// (guard.go), открыть — allow_hidden и allow_paths.
 // До v0.6 ядра — отдельный WASM-коннектор gate4ai-files из магазина.
 package files
 
@@ -17,6 +19,7 @@ import (
 	"fmt"
 	"mime"
 	"path"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -43,6 +46,11 @@ func Manifest() manifest.Manifest {
 type Settings struct {
 	Roots    []string `json:"roots"`
 	MaxBytes int64    `json:"max_bytes"`
+	// AllowHidden открывает скрытые файлы и папки ниже корня (.ssh, .config…).
+	AllowHidden bool `json:"allow_hidden"`
+	// AllowPaths — пути (файлы или папки целиком), открытые несмотря на
+	// защиту: скрытые, ключи, каталоги секретов и браузеров.
+	AllowPaths []string `json:"allow_paths"`
 }
 
 func settings(m map[string]any) (Settings, error) {
@@ -80,10 +88,21 @@ func (Files) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 		return abi.ExecResult{}, err
 	}
 	p, _ := r.Args["path"].(string)
+	g, err := newGuard(h, s)
+	if err != nil {
+		return abi.ExecResult{}, err
+	}
+	if _, err := g.stat(h, p); err != nil {
+		return abi.ExecResult{}, err
+	}
 	switch r.Action {
 	case "read":
 		f, err := h.FSRead(p, s.MaxBytes)
 		if err != nil {
+			return abi.ExecResult{}, err
+		}
+		// Путь могли подменить симлинком между проверкой и чтением.
+		if err := g.check(p, f.RealPath); err != nil {
 			return abi.ExecResult{}, err
 		}
 		return readResult(p, f)
@@ -92,8 +111,15 @@ func (Files) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
+		if err := g.check(p, l.RealPath); err != nil {
+			return abi.ExecResult{}, err
+		}
 		out := []any{}
 		for _, e := range l.Entries {
+			// Закрытые элементы в списке не показываются.
+			if g.why(filepath.Join(l.RealPath, e.Name)) != "" {
+				continue
+			}
 			item := map[string]any{"name": e.Name, "dir": e.Dir}
 			if !e.Dir {
 				item["size"] = e.Size

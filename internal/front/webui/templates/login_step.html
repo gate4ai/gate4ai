@@ -1,26 +1,26 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>gate4.ai — вход</title>
+<!doctype html><html lang="{{Lang}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>gate4.ai — {{T "sign in"}}</title>
 {{if .Data.Refresh}}<meta http-equiv="refresh" content="3">{{end}}
-<style>body{font:15px/1.5 system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1rem}.code{font:600 1.6rem/1 ui-monospace,monospace;letter-spacing:.15em}.err{color:#b3261e}.ok{color:#1b7f3b}input{font:inherit;padding:.35rem}button{font:inherit;padding:.35rem .8rem}</style></head>
-<body><h1>gate4.ai — вход</h1>
-{{with .Data.Code}}<p>Код этого входа: <span class="code" id="code">{{.}}</span></p>{{end}}
+<style>body{font:15px/1.5 system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1rem}.code{font:600 1.6rem/1 ui-monospace,monospace;letter-spacing:.15em}.err{color:#b3261e}.ok{color:#1b7f3b}input{font:inherit;padding:.35rem}button{font:inherit;padding:.35rem .8rem}.lang a{color:#777;margin-right:.5rem}</style></head>
+<body><p class="lang">{{range langs}}<a href="{{$.Base}}/lang?l={{.Code}}&amp;back={{$.Base}}/login" lang="{{.Code}}">{{.Title}}</a>{{end}}</p><h1>gate4.ai — {{T "sign in"}}</h1>
+{{with .Data.Code}}<p>{{T "Code of this sign-in:"}} <span class="code" id="code">{{.}}</span></p>{{end}}
 {{with .Error}}<p class="err" role="alert">{{.}}</p>{{end}}
 {{if .Data.Start}}
 <form method="post" action="{{.Base}}/login"><input type="hidden" name="start" value="1">
-{{if .Data.Password}}<p><label>Пароль Web UI<br><input type="password" name="password" autocomplete="current-password" autofocus required></label></p>{{end}}
-<button>{{if .Data.Password}}Войти{{else}}Войти — подтвердить в Telegram{{end}}</button></form>
-{{if .Data.Telegram}}<p>Вход нужно будет подтвердить в Telegram-боте{{if .Data.Password}} после пароля{{end}}.</p>{{end}}
+{{if .Data.Password}}<p><label>{{T "Web UI password"}}<br><input type="password" name="password" autocomplete="current-password" autofocus required></label></p>{{end}}
+<button>{{if .Data.Password}}{{T "Sign in"}}{{else}}{{T "Sign in — confirm in Telegram"}}{{end}}</button></form>
+{{if .Data.Telegram}}<p>{{if .Data.Password}}{{T "After the password, confirm the sign-in in your Telegram bot."}}{{else}}{{T "Confirm the sign-in in your Telegram bot."}}{{end}}</p>{{end}}
 {{else if .Data.Password}}
 <form method="post" action="{{.Base}}/login"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<p><label>Пароль Web UI<br><input type="password" name="password" autocomplete="current-password" autofocus required></label></p>
-<button>Войти</button></form>
-{{if .Data.Telegram}}<p>После пароля вход нужно будет подтвердить в Telegram-боте.</p>{{end}}
+<p><label>{{T "Web UI password"}}<br><input type="password" name="password" autocomplete="current-password" autofocus required></label></p>
+<button>{{T "Sign in"}}</button></form>
+{{if .Data.Telegram}}<p>{{T "After the password, confirm the sign-in in your Telegram bot."}}</p>{{end}}
 {{else if eq .Data.Telegram "sent"}}
-<p>Подтвердите вход в своём Telegram-боте: нажмите «Разрешить вход» в сообщении с кодом <b>{{.Data.Code}}</b>. Страница обновится сама.</p>
-<form method="get" action="{{.Base}}/login"><button>Проверить</button></form>
+<p>{{TH "Confirm the sign-in in your Telegram bot: press “Allow sign-in” in the message with the code <b>%s</b>. The page updates itself." .Data.Code}}</p>
+<form method="get" action="{{.Base}}/login"><button>{{T "Check"}}</button></form>
 {{else if eq .Data.Telegram "rejected"}}
-<p class="err">Вход отклонён в Telegram. Если входили вы — получите новую ссылку (<code>gate4ai ui</code>).</p>
+<p class="err">{{T "The sign-in was declined in Telegram. If it was you, get a new link (gate4ai ui)."}}</p>
 {{else if eq .Data.Telegram "error"}}
-<p class="err">Не удалось отправить подтверждение в Telegram: {{.Data.TelegramError}}</p>
-<form method="post" action="{{.Base}}/login"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="retry" value="1"><button>Отправить ещё раз</button></form>
+<p class="err">{{T "Could not send the confirmation to Telegram:"}} {{.Data.TelegramError}}</p>
+<form method="post" action="{{.Base}}/login"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="retry" value="1"><button>{{T "Send again"}}</button></form>
 {{end}}
-<p style="color:#666">Способы входа выбираются в Настройках → Защита входа.{{if not .Data.Start}} Попытка входа действует 5 минут.{{end}}</p></body></html>
+<p style="color:#666">{{T "The ways to sign in are chosen in Settings → Signing in."}}{{if not .Data.Start}} {{T "A sign-in attempt is valid for 5 minutes."}}{{end}}</p></body></html>

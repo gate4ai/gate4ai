@@ -132,6 +132,124 @@ func TestManifest(t *testing.T) {
 	}
 }
 
+// Закрытые пути: скрытое ниже корня, ключи, каталоги секретов — даже при корне ~.
+func TestProtected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	mk := func(rel, data string) {
+		p := filepath.Join(home, filepath.FromSlash(rel))
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte(data), 0o600)
+	}
+	mk(".ssh/id_ed25519", "PRIVATE")
+	mk(".aws/credentials", "AWS")
+	mk(".claude.json", "{}")
+	mk(".config/app/conf.toml", "x=1")
+	mk("Documents/notes.md", "notes")
+	mk("Documents/.git/config", "git")
+	mk("Documents/server.pem", "PEM")
+	mk("Documents/backup/id_rsa.pub", "PUB")
+	mk("Documents/Vault.KDBX", "KDBX")
+	mk("Library/Keychains/login.keychain-db", "KC")
+	mk("Library/Keychains/notes.txt", "KC")
+	mk("Library/Application Support/Google/Chrome/Default/Cookies", "C")
+	os.Symlink(filepath.Join(home, ".ssh"), filepath.Join(home, "Documents", "keys"))
+	m, c := Manifest(), connector.Connector(Files{})
+	h := hosttest.New(m, map[string]any{"roots": []any{"~"}}, nil)
+	h.Home = home
+	denied := func(p string, actions ...string) {
+		t.Helper()
+		for _, action := range actions {
+			args := map[string]any{"path": p}
+			switch action {
+			case "append":
+				args["text"] = "x"
+			case "write":
+				args["content"] = "x"
+			}
+			_, err := h.Execute(c, action, args)
+			if err == nil || !strings.Contains(err.Error(), abi.CodeCapabilityDenied) || !strings.Contains(err.Error(), "protected") {
+				t.Errorf("%s %s: %v", action, p, err)
+			}
+		}
+	}
+	allowed := func(p string) {
+		t.Helper()
+		if _, err := h.Execute(c, "read", map[string]any{"path": p}); err != nil {
+			t.Errorf("read %s: %v", p, err)
+		}
+	}
+	all := []string{"read", "append", "write"}
+	denied("~/.ssh/id_ed25519", all...)
+	denied("~/.ssh", "list")
+	denied("~/.aws/credentials", all...)
+	denied("~/.claude.json", all...)
+	denied("~/.ssh/new_key", "write") // новый файл в скрытой папке
+	denied("~/Documents/.git/config", "read")
+	denied("~/Documents/server.pem", all...)
+	denied("~/Documents/backup/id_rsa.pub", "read")
+	denied("~/Documents/Vault.KDBX", "read")
+	denied("~/Library/Keychains/login.keychain-db", "read")
+	denied("~/Library/Keychains/notes.txt", "read")
+	denied("~/Library/Keychains", "list")
+	denied("~/Library/Application Support/Google/Chrome/Default/Cookies", "read")
+	denied("~/Documents/keys/id_ed25519", "read") // симлинк в ~/.ssh
+	allowed("~/Documents/notes.md")
+	if b, _ := os.ReadFile(filepath.Join(home, ".ssh/id_ed25519")); string(b) != "PRIVATE" {
+		t.Fatal("key modified")
+	}
+
+	// Список не падает, а молча пропускает закрытое.
+	names := func(p string) []string {
+		t.Helper()
+		res, err := h.Execute(c, "list", map[string]any{"path": p})
+		if err != nil {
+			t.Fatal(p, err)
+		}
+		var out []string
+		for _, e := range res.Structured.(map[string]any)["entries"].([]any) {
+			out = append(out, e.(map[string]any)["name"].(string))
+		}
+		return out
+	}
+	if got := strings.Join(names("~"), ","); got != "Documents,Library" {
+		t.Fatal(got)
+	}
+	if got := strings.Join(names("~/Documents"), ","); got != "backup,keys,notes.md" {
+		t.Fatal(got)
+	}
+	if got := strings.Join(names("~/Library"), ","); got != "Application Support" {
+		t.Fatal(got)
+	}
+
+	// Скрытый корень, заданный владельцем, открыт; скрытое ниже него — нет.
+	h.Settings = map[string]any{"roots": []any{"~/.config/app"}}
+	allowed("~/.config/app/conf.toml")
+	mk(".config/app/.cache/x", "x")
+	denied("~/.config/app/.cache/x", "read")
+
+	// allow_hidden открывает только скрытое: ключи и каталоги секретов закрыты.
+	h.Settings = map[string]any{"roots": []any{"~"}, "allow_hidden": true}
+	allowed("~/.aws/credentials")
+	allowed("~/Documents/.git/config")
+	denied("~/.ssh/id_ed25519", "read")
+	denied("~/Library/Keychains/notes.txt", "read")
+	if got := strings.Join(names("~"), ","); got != ".aws,.claude.json,.config,.ssh,Documents,Library" {
+		t.Fatal(got)
+	}
+
+	// allow_paths открывает путь или папку целиком, остальное — по-прежнему.
+	h.Settings = map[string]any{"roots": []any{"~"}, "allow_paths": []any{"~/.ssh/id_ed25519", "~/Library/Keychains"}}
+	allowed("~/.ssh/id_ed25519")
+	allowed("~/Library/Keychains/login.keychain-db")
+	denied("~/.aws/credentials", "read")
+	denied("~/Documents/server.pem", "read")
+	if got := strings.Join(names("~/Library/Keychains"), ","); got != "login.keychain-db,notes.txt" {
+		t.Fatal(got)
+	}
+}
+
 // Дописывание в файл больше предела fs_read (16 МиБ) подтверждается по хвосту,
 // а не даёт ложное not_confirmed (B.L3).
 func TestAppendToLargeFileVerified(t *testing.T) {

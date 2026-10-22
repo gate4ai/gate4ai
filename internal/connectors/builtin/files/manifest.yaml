@@ -1,14 +1,22 @@
 connector: files
-description: Files in allowed folders
-version: "5"
+title: Files
+description: Files in the folders you allow. Hidden files, keys and app data stay closed.
+i18n:
+  ru:
+    title: Файлы
+    description: Файлы в разрешённых папках. Скрытые файлы, ключи и данные приложений закрыты всегда.
+version: "6"
 runtime: builtin
 capabilities:
   files: ["${setting:roots}/**"]
 limits: { memory_mb: 64, timeout_s: 30 }
 actions:
   - name: read
+    title: Read a file
     class: read
-    description: Read a file (text as text, images as images, other files as binary resources)
+    description: Read a file (text as text, images as images, other files as binary resources); protected files are denied
+    i18n:
+      ru: { title: Прочитать файл, description: "Прочитать файл (текст — текстом, изображения — изображением, прочее — двоичными данными); защищённые файлы закрыты" }
     input_schema:
       type: object
       properties: &path
@@ -24,8 +32,11 @@ actions:
       required: [path, mime_type, size]
     example: gate4ai files read --path ~/Documents/obsidian/inbox.md
   - name: list
+    title: List a folder
     class: read
-    description: List a directory
+    description: List a directory (hidden and protected entries are not shown)
+    i18n:
+      ru: { title: Посмотреть список файлов, description: Список файлов и папок (скрытые и защищённые не показываются) }
     input_schema:
       type: object
       properties: *path
@@ -48,7 +59,10 @@ actions:
     class: write
     verify: read_back
     evidence: json
+    title: Append to a file
     description: Append text to the end of a file (never overwrites)
+    i18n:
+      ru: { title: Дописать в файл, description: Дописать текст в конец файла (не перезаписывает) }
     input_schema:
       type: object
       properties:
@@ -66,7 +80,10 @@ actions:
     class: write
     verify: read_back
     evidence: json
+    title: Create or overwrite a file
     description: Create or overwrite a file (needs approval by default)
+    i18n:
+      ru: { title: Создать или перезаписать файл, description: Создать или перезаписать файл (по умолчанию — с подтверждением) }
     input_schema:
       type: object
       properties:

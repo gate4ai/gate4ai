@@ -3,6 +3,7 @@
 package webui
 
 import (
+	"errors"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -541,7 +542,7 @@ func TestPasswordLimiterParallel(t *testing.T) {
 			switch err := u.verifyPassword(remote, enc, "guess"); {
 			case err == nil:
 				t.Error("wrong password accepted")
-			case err.Error() == "неверный пароль":
+			case errors.Is(err, errWrongPassword):
 				wrong.Add(1)
 			default:
 				delayed.Add(1)
@@ -565,7 +566,7 @@ func TestPasswordLimiterParallel(t *testing.T) {
 	old := pwSlotWait
 	pwSlotWait = 20 * time.Millisecond
 	defer func() { pwSlotWait = old }()
-	if err := u.verifyPassword(local, enc, "correct horse"); err == nil || !strings.Contains(err.Error(), "одновременных") {
+	if err := u.verifyPassword(local, enc, "correct horse"); err == nil || !strings.Contains(err.Error(), "at once") {
 		t.Fatal("no semaphore on password checks:", err)
 	}
 }

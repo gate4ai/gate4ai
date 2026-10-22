@@ -1,64 +1,22 @@
 {{template "head" .}}
 {{$d := .Data}}
-<h2>Ждут решения</h2>
+<h2>{{T "Waiting for your decision"}}</h2>
 <div data-live-pending data-back="/approvals">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/approvals")}}</div>
+<p class="help">{{T "Unanswered requests are denied after %s." (dur $d.Timeout)}}{{if not .Remote}} {{if not $d.PhoneOK}}<a href="{{.Base}}/settings/notifications">{{T "Get these requests on your phone →"}}</a>{{else}}<a href="{{.Base}}/settings/notifications">{{T "Notifications →"}}</a>{{end}}{{end}}</p>
 
-{{if $d.Questions}}<h2 id="questions">Нужен код</h2>
-{{range $d.Questions}}<div class="card"><p><b>{{if .Caller}}{{.Caller}} ({{.Agent}}){{else}}{{.Agent}}{{end}}</b> входит на {{range $i, $b := .Bind}}{{if $i}}, {{end}}{{$b}}{{end}} с учёткой <code>{{.Account}}</code> и спрашивает: {{.Text}}</p>
-<p class="help">Ответ сразу вводится в поле страницы входа; агенту и коннектору он не показывается.</p>
+{{if $d.Questions}}<h2 id="questions">{{T "A code is needed"}}</h2>
+{{range $d.Questions}}<div class="card"><p>{{TH "<b>%s</b> signs in to %s with the account <code>%s</code> and asks: %s" (or .Caller .Agent) (join .Bind ", ") .Account .Text}}</p>
+<p class="help">{{T "The answer goes straight into the sign-in page field; neither the agent nor the connector sees it."}}</p>
 <form method="post" action="{{$.Base}}/questions/{{.ID}}" class="row" autocomplete="off"><input type="hidden" name="csrf" value="{{$.CSRF}}">
-<input name="value" type="password" placeholder="код" autocomplete="one-time-code"><button class="primary" name="decision" value="answer">Ввести</button><button name="decision" value="decline">Отказать</button></form></div>
+<label class="inline" for="q-{{.ID}}">{{T "Code"}}</label><input id="q-{{.ID}}" name="value" type="password" autocomplete="one-time-code"><button class="primary" name="decision" value="answer">{{T "Enter"}}</button><button name="decision" value="decline">{{T "Decline"}}</button></form></div>
 {{end}}{{end}}
-<h2 id="channels">Каналы уведомлений</h2>
-<p class="muted">Куда gate4.ai сообщает о запросах подтверждения. Решение принимается кнопкой в канале или здесь; если никто не ответил за {{$d.Timeout}}, действие отклоняется.</p>
-<table>
-<tr><th>Канал</th><th>Состояние</th><th>Отправлено</th><th>Решено здесь</th><th>Последнее</th><th></th></tr>
-{{range $d.Channels}}
-<tr><td><b>{{.Title}}</b></td>
-<td>{{if eq .State "ok"}}<span class="badge ok">работает</span>{{else if eq .State "off"}}<span class="badge">выключен</span>{{else if eq .State "not_configured"}}<span class="badge warn">не настроен</span>{{else}}<span class="badge bad">ошибка</span>{{end}}
-{{if .Detail}}<div class="help">{{.Detail}}</div>{{end}}</td>
-<td>{{if eq .Name "webui"}}—{{else}}{{.Stat.Sent}}{{if .Stat.Failed}} <span class="bad">· ошибок {{.Stat.Failed}}</span>{{end}}{{end}}</td>
-<td>{{.Decided}}</td>
-<td class="muted">{{if not .Stat.LastOK.IsZero}}{{ago .Stat.LastOK}}{{else}}—{{end}}</td>
-<td>{{if and (not $.Remote) (ne .Name "webui")}}<div class="row">
-{{if .On}}<form method="post" action="{{$.Base}}/channels/{{.Name}}/test" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="small">Тест</button></form>
-<form method="post" action="{{$.Base}}/channels/{{.Name}}/toggle" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="on" value="0"><button class="small">Выключить</button></form>
-{{else}}<form method="post" action="{{$.Base}}/channels/{{.Name}}/toggle" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="on" value="1"><button class="small primary">Включить</button></form>{{end}}
-{{if eq .Name "telegram"}}<a class="btn small" href="{{$.Base}}/approvals/telegram">Настроить</a>{{end}}
-</div>{{end}}</td></tr>
-{{end}}
-</table>
 
-<div class="grid" style="margin-top:1rem">
-<div class="card"><h3>Telegram</h3>
-{{if $d.TelegramSet}}<p><span class="badge ok">Telegram подключён</span></p>
-<p>Бот уже настроен — подключать повторно не нужно. Запросы приходят в личный чат с кнопками «Разрешить / Отклонить»; состояние канала — в таблице выше.</p>
-{{if not .Remote}}<a class="btn small" href="{{.Base}}/approvals/telegram">Настроить</a>{{end}}</div>
-{{else}}<p>Подтверждения в личном боте: кнопки «Разрешить / Отклонить» прямо в чате. Бот ваш — содержимое запросов не проходит через серверы gate4.ai.</p>
-<ol class="help"><li>В Telegram откройте <b>@BotFather</b>, команда <code>/newbot</code>, придумайте имя.</li><li>Скопируйте токен бота.</li><li>Мастер ниже проверит токен и найдёт ваш Telegram ID.</li></ol>
-{{if not .Remote}}<a class="btn primary" href="{{.Base}}/approvals/telegram">Подключить Telegram</a>{{end}}</div>{{end}}
-
-<div class="card"><h3>Браузерный push</h3>
-<p>Уведомление в браузере — на этом компьютере или на телефоне. С телефона откройте Web UI по ссылке из <a href="{{.Base}}/settings#remote">Настройки → Вход с телефона</a> (нужен relay) и нажмите кнопку там.</p>
-{{if $d.PushKey}}<button class="primary" data-push-key="{{$d.PushKey}}">Включить в этом браузере</button>
-<div class="help" data-push-status>{{if not $d.PushOn}}Канал выключен — подписка включит его.{{end}}</div>{{else}}<p class="muted">Недоступно: нет ключа VAPID.</p>{{end}}</div>
-
-<div class="card"><h3>Уведомления на этом компьютере</h3>
-<p>Системное уведомление (notify-send, Центр уведомлений macOS, Windows). Подтвердить можно в трее gate4.ai — значок → «Разрешить / Отклонить», — или здесь.</p>
-<p class="help">Если уведомлений нет: Linux — установите <code>libnotify</code> (notify-send); macOS — разрешите уведомления для «Редактор скриптов»; Windows — включите уведомления в «Параметры → Система».</p></div>
-</div>
-
-{{if not .Remote}}
-<form method="post" action="{{.Base}}/settings/approvals" class="row card"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<label class="inline">Ждать решения <input name="timeout" value="{{$d.Timeout}}" size="6"></label><span class="help">затем — отказ (30m, 2h, 1d)</span>
-<button>Сохранить</button></form>{{end}}
-
-<h2>История</h2>
-<form method="get" action="{{.Base}}/approvals" class="row"><select name="status" data-autosubmit>
-<option value="">все</option>{{range (list "approved" "rejected" "timeout" "done")}}<option {{if eq . $d.Status}}selected{{end}}>{{.}}</option>{{end}}</select><noscript><button>Показать</button></noscript></form>
-<table><tr><th>Когда</th><th>Агент</th><th>Действие</th><th>Итог</th><th>Где решено</th></tr>
-{{range $d.Recent}}<tr><td>{{ts .Created}}</td><td>{{.Agent}}</td><td><code>{{.Action}}</code> <span class="muted">#{{short .PreviewHash}}</span><div class="help">{{first .Preview}}</div></td>
-<td class="{{if or (eq .Status "approved") (eq .Status "done")}}allow{{else}}deny{{end}}">{{.Status}}</td><td>{{.Channel}}</td></tr>
-{{else}}<tr><td colspan="5" class="muted">Пусто</td></tr>{{end}}
+<h2>{{T "History"}}</h2>
+<form method="get" action="{{.Base}}/approvals" class="row"><label class="inline" for="h-status">{{T "Show"}}</label><select id="h-status" name="status" data-autosubmit>
+<option value="">{{T "all"}}</option>{{range (list "approved" "rejected" "timeout" "done")}}<option value="{{.}}" {{if eq . $d.Status}}selected{{end}}>{{T .}}</option>{{end}}</select><noscript><button>{{T "Show"}}</button></noscript></form>
+<table><tr><th>{{T "When"}}</th><th>{{T "Agent"}}</th><th>{{T "Action"}}</th><th>{{T "Result"}}</th><th>{{T "Where"}}</th></tr>
+{{range $d.Recent}}<tr><td>{{ago .Created}}</td><td>{{.Agent}}</td><td>{{.Title}}{{with .Target}} · <code>{{.}}</code>{{end}}</td>
+<td class="{{if or (eq .Status "approved") (eq .Status "done")}}allow{{else}}deny{{end}}">{{T .Status}}</td><td>{{with .Channel}}{{channel .}}{{end}}</td></tr>
+{{else}}<tr><td colspan="5" class="muted">{{T "Empty"}}</td></tr>{{end}}
 </table>
 {{template "foot"}}

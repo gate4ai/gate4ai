@@ -17,7 +17,7 @@ func TestInstallDevChange(t *testing.T) {
 	if err := CheckChange(Change{Op: OpInstallDev, Folder: "/home/a/lk"}); err != nil {
 		t.Fatal(err)
 	}
-	if d := (Change{Op: OpInstallDev, Folder: "/home/a/lk", Connector: "lk"}).Describe(); d != "Собрать и поставить свою сборку из /home/a/lk (коннектор lk) и дать к ней доступ" {
+	if d := (Change{Op: OpInstallDev, Folder: "/home/a/lk", Connector: "lk"}).Describe(); d != "Build and install an own build from /home/a/lk (connector lk) and give access to it" {
 		t.Fatal(d)
 	}
 }
@@ -59,7 +59,7 @@ func TestAgentCredentialAndSecretKeys(t *testing.T) {
 func TestDescribeRuleReplacement(t *testing.T) {
 	c := &Config{Profiles: map[string]Profile{"p": {Rules: []Rule{{ID: "deny-mail", Action: "email.send", Effect: EffectDeny}}}}}
 	d := (Change{Op: OpAddRule, RuleID: "deny-mail", Action: "email.send", Effect: EffectAllow}).DescribeIn(c, "p")
-	if !strings.Contains(d, "ЗАМЕНИТЬ правило deny-mail") || !strings.Contains(d, "запрещать email.send") || !strings.Contains(d, "разрешать email.send") {
+	if !strings.Contains(d, "REPLACE rule deny-mail") || !strings.Contains(d, "deny email.send") || !strings.Contains(d, "allow email.send") {
 		t.Fatal(d)
 	}
 	if d := (Change{Op: OpAddRule, RuleID: "new", Action: "a.b", Effect: EffectAllow}).DescribeIn(c, "p"); !strings.Contains(d, "[id new]") {

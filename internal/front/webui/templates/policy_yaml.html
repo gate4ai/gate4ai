@@ -1,13 +1,14 @@
 {{template "head" .}}
 {{$d := .Data}}
-<div class="row between"><h2>Конфигурация YAML <span class="muted">версия {{$d.Version}}</span></h2><a href="{{.Base}}/policy">← Правила</a></div>
-<p class="muted">Вся конфигурация одним файлом — для технических пользователей. Изменения в разделах Web UI сохраняют модель, но не комментарии YAML.</p>
+{{template "access_tabs" (dict "V" . "On" "rules")}}
+<div class="row between"><h2>{{T "YAML configuration"}} <span class="muted">{{T "version %d" $d.Version}}</span></h2><a href="{{.Base}}/policy">← {{T "Rules"}}</a></div>
+<p class="muted">{{T "The whole configuration as one file — for technical users. Changes made in the Web UI keep the model but not the YAML comments."}}</p>
 <form method="post" action="{{.Base}}/policy" class="card"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="base" value="{{$d.Base}}">
-<textarea class="code" name="yaml" rows="30" spellcheck="false">{{$d.YAML}}</textarea>
-<div class="row" style="margin-top:.5rem"><input name="comment" placeholder="комментарий к версии" size="40"><button class="primary">Сохранить новую версию</button></div></form>
-<h3>Версии</h3>
-<table><tr><th>№</th><th>Когда</th><th>Кто</th><th>Что</th><th></th></tr>
-{{range $d.Versions}}<tr><td>{{.N}}</td><td>{{ts .At}}</td><td>{{.Author}}</td><td>{{.Comment}}</td>
-<td>{{if ne .N $d.Version}}<form method="post" action="{{$.Base}}/policy/rollback"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.N}}"><input type="hidden" name="back" value="/policy/yaml"><button class="small">Вернуть</button></form>{{else}}<span class="muted">текущая</span>{{end}}</td></tr>{{end}}
+<label for="yaml" class="skip">YAML</label><textarea id="yaml" class="code" name="yaml" rows="30" spellcheck="false">{{$d.YAML}}</textarea>
+<div class="row" style="margin-top:.5rem"><label class="inline" for="y-c">{{T "Comment"}}</label><input id="y-c" name="comment" size="40"><button class="primary">{{T "Save a new version"}}</button></div></form>
+<h3>{{T "Versions"}}</h3>
+<table><tr><th>№</th><th>{{T "When"}}</th><th>{{T "Who"}}</th><th>{{T "What"}}</th><th></th></tr>
+{{range $d.Versions}}<tr><td>{{.N}}</td><td>{{ts .At}}</td><td>{{.Author}}</td><td>{{version .Comment}}</td>
+<td>{{if ne .N $d.Version}}<form method="post" action="{{$.Base}}/policy/rollback"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.N}}"><input type="hidden" name="back" value="/policy/yaml"><button class="small">{{T "Bring back"}}</button></form>{{else}}<span class="muted">{{T "current"}}</span>{{end}}</td></tr>{{end}}
 </table>
 {{template "foot"}}

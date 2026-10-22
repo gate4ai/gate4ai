@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Настройки</title><link rel="stylesheet" href="base.css">
+<style>
+.set{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:.85rem 0;border-bottom:1px solid var(--line);flex-wrap:wrap}.set:last-child{border:0}
+.set .d div{color:var(--muted);font-size:.86rem;max-width:34rem}
+.layout{display:grid;grid-template-columns:12rem 1fr;gap:1.4rem}
+.side a{display:block;padding:.4rem .6rem;border-radius:8px;color:var(--fg);text-decoration:none}.side a.on{background:var(--soft);font-weight:600}
+.side .sep{margin:.8rem .6rem .3rem;color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
+@media (max-width:700px){.layout{grid-template-columns:1fr}}
+</style></head><body>
+<header><b>gate4.ai</b><a href="#">Главная</a><a href="#">Агенты</a><a href="#">Доступ</a><a href="#">Журнал</a><a class="on" href="#">Настройки</a></header>
+<main style="max-width:66rem"><div class="layout">
+<nav class="side"><a class="on" href="#">Основные</a><a href="#">Уведомления</a><a href="#">Пароли и учётки</a><a href="#">Вход в gate4.ai</a>
+<div class="sep">Расширенные</div><a href="#">Адрес в интернете</a><a href="#">Магазин коннекторов</a><a href="#">Хранение журнала</a><a href="#">Правила в YAML</a><a href="#">Версии политики</a><a href="#">О программе и логи</a></nav>
+<div>
+<h1>Основные</h1><p class="lead">То, что стоит проверить один раз. Остальное разумно настроено по умолчанию.</p>
+<div class="card">
+  <div class="set"><div class="d"><b>Запускать при входе в систему</b><div>Иначе после перезагрузки агенты не смогут работать, пока вы не откроете gate4.ai.</div></div><span class="seg"><span class="on allow">вкл</span><span>выкл</span></span></div>
+  <div class="set"><div class="d"><b>Сколько ждать ответа</b><div>Если никто не ответил — действие отклоняется.</div></div><select><option>30 минут</option><option>2 часа</option><option>сутки</option></select></div>
+  <div class="set"><div class="d"><b>Агенты могут менять настройки gate4.ai</b><div>Только с вашего подтверждения, пароли — никогда.</div></div><span class="seg"><span class="on ask">спрашивать</span><span>нельзя</span></span></div>
+  <div class="set"><div class="d"><b>Доступ с телефона и для Claude.ai / ChatGPT</b><div>Адрес вида <code>xxxx.relay.gate4.ai</code>; порты открывать не нужно, relay видит только шифротекст.</div></div><a class="btn" href="#">Включить</a></div>
+</div>
+<div class="card row between"><span><b>Вход в gate4.ai</b><br><span class="muted small">сейчас: ссылка из трея или <code>gate4ai ui</code>. Агент на этом компьютере тоже может её получить.</span></span><a class="btn primary" href="#">Добавить пароль</a></div>
+</div></div></main><span class="mock-tag">Макет M5</span></body></html>

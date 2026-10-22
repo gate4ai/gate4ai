@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Мастер: агент</title><link rel="stylesheet" href="base.css">
+<style>
+.wiz{max-width:46rem}
+.tile small{display:block;color:var(--muted);margin-top:.15rem}
+.tile .found{color:var(--ok);font-size:.82rem;font-weight:600}
+</style></head><body>
+<header><b>gate4.ai</b><span class="muted">Первый запуск</span><span class="sp"></span><a href="#">Пропустить, настрою сам</a></header>
+<main class="wiz">
+<ol class="stepper"><li class="on">Агент</li><li>Доступ</li><li>Проверка</li></ol>
+<h1>Какой AI-ассистент будет работать через gate4.ai?</h1>
+<p class="lead">gate4.ai сам впишет себя в его настройки — копировать токены не нужно. Можно выбрать несколько.</p>
+<div class="grid">
+  <a class="tile on" href="#"><span class="found">● найден</span><b>Claude Code</b><small>в терминале</small></a>
+  <a class="tile" href="#"><span class="found">● найден</span><b>Claude Desktop</b><small>приложение</small></a>
+  <a class="tile" href="#"><span class="found">● найден</span><b>Cursor</b><small>редактор кода</small></a>
+  <a class="tile" href="#"><b>Claude.ai или ChatGPT</b><small>в браузере — понадобится адрес в интернете</small></a>
+</div>
+<details class="adv"><summary>Другие: VS Code, Codex, Gemini CLI, свой скрипт</summary>
+  <div class="grid" style="margin-top:.7rem">
+    <a class="tile" href="#"><b>VS Code / Copilot</b></a><a class="tile" href="#"><b>Codex CLI</b></a>
+    <a class="tile" href="#"><b>Gemini CLI</b></a><a class="tile" href="#"><b>Скрипт или другой агент</b><small>токен и команда</small></a>
+  </div>
+</details>
+<div class="row between" style="margin-top:1.6rem">
+  <span class="muted small">Имя агента в журнале: <b>claude-code</b> <a href="#">изменить</a></span>
+  <a class="btn primary big" href="#">Дальше: что ему можно →</a>
+</div>
+</main><span class="mock-tag">Макет M1·1</span></body></html>

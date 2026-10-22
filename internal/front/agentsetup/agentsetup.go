@@ -43,17 +43,17 @@ type Client struct {
 // Clients — клиенты с автоподключением, в порядке показа.
 var Clients = []Client{
 	{ID: "claude-code", Title: "Claude Code", Agent: "claude-code", Format: FormatJSON, Skill: true,
-		Restart: "Перезапустите Claude Code (или выполните /mcp в открытой сессии).", Docs: "https://code.claude.com/docs/en/mcp"},
+		Restart: "Restart Claude Code (or run /mcp in an open session).", Docs: "https://code.claude.com/docs/en/mcp"},
 	{ID: "claude-desktop", Title: "Claude Desktop", Agent: "claude-desktop", Format: FormatJSON,
-		Restart: "Полностью закройте Claude Desktop (из трея / меню) и откройте снова.", Docs: "https://modelcontextprotocol.io/quickstart/user"},
+		Restart: "Quit Claude Desktop completely (from the tray / menu) and open it again.", Docs: "https://modelcontextprotocol.io/quickstart/user"},
 	{ID: "cursor", Title: "Cursor", Agent: "cursor", Format: FormatJSON,
-		Restart: "Cursor подхватит сервер сам; если нет — Settings → MCP → обновить.", Docs: "https://docs.cursor.com/context/mcp"},
+		Restart: "Cursor picks the server up itself; if not — Settings → MCP → refresh.", Docs: "https://docs.cursor.com/context/mcp"},
 	{ID: "vscode", Title: "VS Code / Copilot", Agent: "vscode", Format: FormatVSCode,
-		Restart: "В VS Code: Command Palette → «MCP: List Servers» → gate4ai → Start; в чате Copilot выберите режим Agent.", Docs: "https://code.visualstudio.com/docs/copilot/chat/mcp-servers"},
+		Restart: "In VS Code: Command Palette → “MCP: List Servers” → gate4ai → Start; in Copilot chat choose the Agent mode.", Docs: "https://code.visualstudio.com/docs/copilot/chat/mcp-servers"},
 	{ID: "codex", Title: "Codex CLI", Agent: "codex", Format: FormatTOML,
-		Restart: "Запустите codex заново — сервер появится в /mcp.", Docs: "https://github.com/openai/codex/blob/main/docs/config.md"},
+		Restart: "Start codex again — the server shows up in /mcp.", Docs: "https://github.com/openai/codex/blob/main/docs/config.md"},
 	{ID: "gemini", Title: "Gemini CLI", Agent: "gemini", Format: FormatJSON,
-		Restart: "Запустите gemini заново — сервер появится в /mcp.", Docs: "https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md"},
+		Restart: "Start gemini again — the server shows up in /mcp.", Docs: "https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md"},
 }
 
 // Find — клиент по id.

@@ -1,50 +1,62 @@
 {{template "head" .}}
 {{$d := .Data}}
+{{template "access_tabs" (dict "V" . "On" "connectors")}}
 {{with $d.Plan}}
 <div class="card" style="border-color:var(--accent)">
-<h3>Установить {{.Connector}} {{.Version}}?</h3>
-<p>Издатель: <b>{{or .Publisher "—"}}</b> · доверие: {{if eq .Trust "verified"}}<span class="badge ok">проверен gate4.ai</span>{{else if eq .Trust "publisher"}}<span class="badge ok">проверенный издатель</span>{{else if eq .Trust "community"}}<span class="badge warn">сообщество — только чтение</span>{{else}}<span class="badge">{{.Trust}}</span>{{end}}{{if .Repo}} · <a href="{{.Repo}}" target="_blank" rel="noopener">исходный код</a>{{end}}</p>
-<p>Коннектор получит только эти возможности — gate4.ai не даст ему большего:</p>
-<ul>{{range .Capabilities}}<li>{{capRu .}} <span class="muted"><code>{{.}}</code></span></li>{{else}}<li>никаких: только вычисления</li>{{end}}</ul>
-<p>Действия: {{range .Classes}}<span class="badge">{{classRu .}}</span> {{end}} — каждое проходит ваши правила; без правил чтение разрешено, остальное спрашивается.</p>
+<h3>{{T "Install %s %s?" $d.PlanTitle .Version}}</h3>
+<p>{{T "Publisher:"}} <b>{{or .Publisher "—"}}</b> · {{if eq .Trust "verified"}}<span class="badge ok">{{T "verified by gate4.ai"}}</span>{{else if eq .Trust "publisher"}}<span class="badge ok">{{T "verified publisher"}}</span>{{else if eq .Trust "community"}}<span class="badge warn">{{T "community — read only"}}</span>{{else}}<span class="badge">{{.Trust}}</span>{{end}}{{if .Repo}} · <a href="{{.Repo}}" target="_blank" rel="noopener">{{T "source code"}}</a>{{end}}</p>
+<p>{{T "The connector gets only this — gate4.ai gives it nothing more:"}}</p>
+<ul>{{range $d.PlanCaps}}<li>{{.Text}}</li>{{else}}<li>{{T "nothing: computation only"}}</li>{{end}}</ul>
+<details><summary>{{T "Technical"}}</summary><ul class="help">{{range .Capabilities}}<li><code>{{.}}</code></li>{{end}}</ul></details>
+<p>{{T "Its actions:"}} {{range .Classes}}<span class="badge">{{class .}}</span> {{end}} — {{T "each goes through your rules; without a rule reading is allowed and everything else asks you."}}</p>
 {{range .Warnings}}<p class="warn">{{.}}</p>{{end}}
-{{if $d.Local}}<p class="help">Не из магазина: <code>{{$d.Src}}</code>{{if $d.Dev}} · своя сборка без подписи{{end}}</p>{{end}}
+{{if $d.Local}}<p class="help">{{T "Not from the store:"}} <code>{{$d.Src}}</code>{{if $d.Dev}} · {{T "own build without a signature"}}{{end}}</p>{{end}}
 <form method="post" action="{{$.Base}}/connectors/install"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="source" value="{{if $d.Local}}{{$d.Src}}{{else}}{{.Connector}}{{end}}">
 {{if $d.Local}}<input type="hidden" name="local" value="1">{{if $d.Dev}}<input type="hidden" name="dev" value="1">{{end}}{{end}}
 {{range .Capabilities}}<input type="hidden" name="consent" value="{{.}}">{{end}}
-{{if $d.Profiles}}<label>Сразу дать доступ профилям</label>{{range $d.Profiles}}<label class="inline"><input type="checkbox" name="profiles" value="{{.}}" checked> {{.}}</label>{{end}}{{end}}
-<p class="row"><button class="primary">Согласен, установить</button> <a href="{{$.Base}}/connectors">Отмена</a></p></form>
+<input type="hidden" name="grants" value="1">
+{{if $d.Grants}}<fieldset style="border:0;padding:0"><legend><b>{{T "Give access to"}}</b></legend>
+{{range $d.Grants}}{{if .Agents}}<label class="inline"><input type="checkbox" name="profiles" value="{{.Profile}}" {{if .Checked}}checked{{end}}> {{join .Agents ", "}}</label>{{end}}{{end}}
+{{range $d.Grants}}{{if not .Agents}}<label class="inline muted"><input type="checkbox" name="profiles" value="{{.Profile}}"> {{T "permissions %s (no agents)" .Profile}}</label>{{end}}{{end}}
+</fieldset>{{end}}
+<p class="row"><button class="primary">{{T "I agree, install"}}</button> <a href="{{$.Base}}/connectors">{{T "Cancel"}}</a></p></form>
 </div>{{end}}
 
-<div class="row between"><h2>Коннекторы</h2>
-<div class="row"><a class="btn small" href="#m-local">Поставить не из магазина…</a>
-<form method="post" action="{{.Base}}/connectors/refresh"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">Обновить каталог</button></form></div></div>
-<div class="modal" id="m-local" role="dialog" aria-modal="true" aria-labelledby="m-local-h"><div class="box"><h3 id="m-local-h">Поставить не из магазина</h3>
-<form method="get" action="{{.Base}}/connectors"><input type="hidden" name="local" value="1">
-<label>Папка, файл или адрес сборки</label><input name="install" required placeholder="~/projects/lk_emias  ·  ~/bin/mail.g4c  ·  https://…/mail.g4c" value="{{if $d.Local}}{{$d.Src}}{{end}}">
-<ul class="help" style="padding-left:1.1rem"><li><b>Папка с исходниками</b> (где лежит <code>manifest.yaml</code>) — gate4.ai соберёт коннектор сам; нужен Go.</li>
-<li><b>Файл</b> <code>.g4c</code> на этом компьютере или <b>адрес</b> <code>https://…/*.g4c</code>.</li>
-<li>Путь вводится текстом: браузер не сообщает сайту, где лежит выбранная папка, а gate4.ai работает на этом же компьютере.</li></ul>
-<label class="inline"><input type="checkbox" name="dev" value="1" {{if or $d.Dev (not $d.Local)}}checked{{end}}> своя сборка: поставить без подписи доверенного издателя</label>
-<p class="help">Без галочки ставится только пакет, подписанный издателем магазина или ключом из <code>store.trusted_keys</code>. Сборку из папки ставят только с галочкой.</p>
-<div class="actions"><a class="btn" href="#" data-close>Отмена</a><button class="primary">Дальше — проверить возможности</button></div></form></div></div>
-<p class="muted">Коннектор — модуль, через который агент работает с почтой, файлами или сайтами. Он видит только то, что вы разрешили, и не знает ваших паролей.</p>
-{{if $d.IndexError}}<div class="note">Каталог магазина недоступен: {{$d.IndexError}}. {{if not $d.Registry}}<a href="{{.Base}}/settings#store">Настроить магазин</a>.{{end}} Коннектор из файла или папки — <a href="#m-local">«Поставить не из магазина»</a>.</div>{{end}}
+<p class="muted">{{T "A connector is how an agent works with email, files or sites. It sees only what you allowed and never knows your passwords."}}</p>
+{{if $d.IndexError}}<div class="note">{{T "The connector store is not available:"}} {{$d.IndexError}}. <a href="#m-local">{{T "Install not from the store"}}</a>.</div>{{end}}
 <div class="grid">
 {{range $d.Items}}
 <div class="card" style="margin:0">
-<div class="row between"><b style="font-size:1.1rem">{{.Name}}</b>
-{{if .Builtin}}<span class="badge ok">встроен в gate4.ai</span>{{else if .Installed}}{{if .Revoked}}<span class="badge bad">версия отозвана</span>{{else if .Loaded}}<span class="badge ok">установлен {{.Installed}}</span>{{else}}<span class="badge warn">не загружен</span>{{end}}{{else}}<span class="badge">{{.Version}}</span>{{end}}</div>
+<div class="row between"><div><b style="font-size:1.1rem">{{.Title}}</b> <code class="muted">{{.Name}}</code></div>
+{{if .Builtin}}<span class="badge ok">{{T "built in"}}</span>{{else if .Installed}}{{if .Revoked}}<span class="badge bad">{{T "version revoked"}}</span>{{else if .Loaded}}<span class="badge ok">{{T "installed"}}</span>{{else}}<span class="badge warn">{{T "not loaded"}}</span>{{end}}{{end}}</div>
 <p>{{.Description}}</p>
-{{if .State}}<p class="help">Нативный пакет (без песочницы) · процесс: {{if eq .State "running"}}запущен{{else if eq .State "disabled"}}<span class="bad">отключён после частых падений — обновите коннектор или перезапустите gate4ai</span>{{else}}запустится при первом вызове{{end}}</p>{{end}}
-<p class="help">{{or .Publisher "—"}}{{if eq .Trust "verified"}} · проверен gate4.ai{{else if .Trust}} · {{.Trust}}{{end}}{{if .License}} · {{.License}}{{end}}</p>
-{{if .Profiles}}<p class="help">Доступ: {{join .Profiles ", "}}</p>{{end}}
+{{if eq .State "disabled"}}<p class="bad">{{T "Stopped after frequent crashes — update the connector or restart gate4.ai."}}</p>{{end}}
+{{if .Installed}}<p class="help">{{T "Used by:"}} {{if .Agents}}{{join .Agents ", "}}{{else}}{{T "no agents yet"}}{{end}}</p>{{end}}
 <div class="row">
-{{if .Installed}}<a class="btn primary" href="{{$.Base}}/connectors/{{.Name}}">Настроить</a>
-{{if .Update}}<a class="btn" href="{{$.Base}}/connectors?install={{.Name}}">Обновить до {{.Version}}</a>{{end}}
-{{else}}<a class="btn primary" href="{{$.Base}}/connectors?install={{.Name}}">Установить</a>{{end}}
-{{if .Repo}}<a class="btn small" href="{{.Repo}}" target="_blank" rel="noopener">Исходник</a>{{end}}
+{{if .Installed}}<a class="btn primary" href="{{$.Base}}/connectors/{{.Name}}">{{T "Set up"}}</a>
+{{if .Update}}<a class="btn" href="{{$.Base}}/connectors?install={{.Name}}">{{T "Update to %s" .Version}}</a>{{end}}
+{{else}}<a class="btn primary" href="{{$.Base}}/connectors?install={{.Name}}">{{T "Install"}}</a>{{end}}
 </div></div>
-{{else}}<p class="muted">Каталог пуст.</p>{{end}}
+{{else}}<p class="muted">{{T "The catalog is empty."}}</p>{{end}}
 </div>
+
+<details class="adv"><summary>{{T "Advanced"}}</summary>
+<div class="row" style="margin-top:.6rem"><a class="btn small" href="#m-local">{{T "Install not from the store…"}}</a>
+<form method="post" action="{{.Base}}/connectors/refresh"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">{{T "Update the catalog"}}</button></form></div>
+<p class="help">{{T "Publishers, licenses and versions are on each connector page under “About the connector”."}}</p>
+</details>
+<div class="modal" id="m-local" role="dialog" aria-modal="true" aria-labelledby="m-local-h"><div class="box"><h3 id="m-local-h">{{T "Install not from the store"}}</h3>
+<form method="get" action="{{.Base}}/connectors"><input type="hidden" name="local" value="1">
+<label for="m-local-src">{{T "Folder, file or build address"}}</label><input id="m-local-src" name="install" required placeholder="~/projects/lk_emias  ·  ~/bin/mail.g4c  ·  https://…/mail.g4c" value="{{if $d.Local}}{{$d.Src}}{{end}}">
+<ul class="help" style="padding-left:1.1rem"><li>{{TH "<b>A source folder</b> (with <code>manifest.yaml</code>) — gate4.ai builds the connector itself; Go is needed."}}</li>
+<li>{{TH "<b>A file</b> <code>.g4c</code> on this computer or <b>an address</b> <code>https://…/*.g4c</code>."}}</li>
+<li>{{T "The path is typed: the browser does not tell a site where a chosen folder is, and gate4.ai runs on this same computer."}}</li></ul>
+<label class="inline"><input type="checkbox" name="dev" value="1" {{if or $d.Dev (not $d.Local)}}checked{{end}}> {{T "own build: install without a trusted publisher's signature"}}</label>
+<p class="help">{{TH "Without the box only a package signed by the store publisher or by a key from <code>store.trusted_keys</code> is installed. A build from a folder needs the box."}}</p>
+<div class="actions"><a class="btn" href="#" data-close>{{T "Cancel"}}</a><button class="primary">{{T "Next — check what it may access"}}</button></div></form></div></div>
 {{template "foot"}}
+
+{{define "access_tabs"}}{{$v := .V}}<div class="row between"><h2>{{T "Access"}}</h2></div>
+<nav class="tabs" aria-label="{{T "Access"}}"><a href="{{$v.Base}}/connectors" class="{{if eq .On "connectors"}}on{{end}}"{{if eq .On "connectors"}} aria-current="page"{{end}}>{{T "Connectors"}}</a>
+<a href="{{$v.Base}}/policy" class="{{if eq .On "rules"}}on{{end}}"{{if eq .On "rules"}} aria-current="page"{{end}}>{{T "Rules"}}</a>
+<a href="{{$v.Base}}/policy/templates" class="{{if eq .On "templates"}}on{{end}}"{{if eq .On "templates"}} aria-current="page"{{end}}>{{T "Ready-made rules"}}</a></nav>{{end}}
