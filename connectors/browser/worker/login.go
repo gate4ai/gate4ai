@@ -189,9 +189,6 @@ func (x *Executor) checkFields(ctx context.Context, fields []LoginField) error {
 
 // fill вводит значение поля: фокус, очистка, Input.insertText.
 func (x *Executor) fill(ctx context.Context, f LoginField) error {
-	if err := x.pace(ctx, "fill_secret"); err != nil {
-		return err
-	}
 	var ok bool
 	if err := x.Engine.Eval(ctx, call(fillFieldJS, f.Selector), &ok); err != nil {
 		return err

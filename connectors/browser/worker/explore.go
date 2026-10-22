@@ -75,9 +75,6 @@ var elementsJS = `((max, root) => {
 
 // Elements — интерактивные элементы текущей страницы (до MaxElements).
 func (x *Executor) Elements(ctx context.Context, root string) ([]Element, error) {
-	if err := x.pace(ctx, "elements"); err != nil {
-		return nil, err
-	}
 	return evalIn[Element](ctx, x, elementsJS, MaxElements, root)
 }
 
@@ -265,9 +262,6 @@ type netEngine interface {
 // Network — запросы страницы к серверу; contains — фильтр по адресу; all —
 // и к сайтам вне списка (иначе только к разрешённым).
 func (x *Executor) Network(ctx context.Context, contains string, all bool) ([]Request, error) {
-	if err := x.pace(ctx, "network"); err != nil {
-		return nil, err
-	}
 	u, err := x.Engine.URL(ctx)
 	if err != nil {
 		return nil, err
