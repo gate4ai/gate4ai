@@ -47,9 +47,9 @@ type ActResponse struct {
 // FieldValue — что записалось в поле: длина и начало (и конец, если длинное).
 // Значение пароля и полей на странице с введённым секретом не отдаётся.
 type FieldValue struct {
-	Length int    `json:"length"`          // символов
-	Start  string `json:"start"`           // первые ValueStart символов
-	End    string `json:"end,omitempty"`   // последние ValueEnd символов, если значение длиннее
+	Length int    `json:"length"`           // символов
+	Start  string `json:"start"`            // первые ValueStart символов
+	End    string `json:"end,omitempty"`    // последние ValueEnd символов, если значение длиннее
 	Hidden bool   `json:"hidden,omitempty"` // пароль или секрет на странице: значение не показывается
 }
 

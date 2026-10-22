@@ -366,7 +366,10 @@ func TestAgentEditReloadHandoff(t *testing.T) {
 	old := worker.HandoffPoll
 	worker.HandoffPoll = 10 * time.Millisecond
 	defer func() { worker.HandoffPoll = old }()
-	go func() { time.Sleep(50 * time.Millisecond); eng.Navigate(context.Background(), "https://a.example.com/home") }()
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		eng.Navigate(context.Background(), "https://a.example.com/home")
+	}()
 	if res, err = agentExec(t, b, "handoff", map[string]any{"session": id, "message": "Войдите", "timeout_ms": 5000.0}); err != nil ||
 		res["status"] != "done" || res["url"] != "https://a.example.com/home" {
 		t.Fatal(res, err)
