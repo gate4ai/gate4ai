@@ -25,7 +25,7 @@ func (f *fakeBackend) Call(_ context.Context, action string, args map[string]any
 	f.calls = append(f.calls, action)
 	switch action {
 	case "email.send":
-		return map[string]any{"status": "denied", "code": "denied_by_policy", "message": "denied_by_policy: recipient not in allowlist; user notified"}, nil
+		return map[string]any{"status": "denied", "error": map[string]any{"code": "denied_by_policy", "message": "denied_by_policy: recipient not in allowlist; user notified"}}, nil
 	case "@status":
 		return map[string]any{"status": "pending", "id": args["id"]}, nil
 	}

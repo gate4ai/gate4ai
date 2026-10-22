@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
 )
@@ -30,7 +31,8 @@ type Engine interface {
 	Eval(ctx context.Context, expr string, out any) error
 	// InsertText — ввод текста в элемент в фокусе (как с клавиатуры).
 	InsertText(ctx context.Context, text string) error
-	// Key — нажатие клавиши (Enter, Tab, Escape, Backspace, ArrowDown, ArrowUp) в фокусе.
+	// Key — нажатие клавиши или сочетания в фокусе: запись Key.String
+	// ("Enter", "Control+Enter", "Shift+Tab").
 	Key(ctx context.Context, key string) error
 	Close() error
 }
@@ -165,7 +167,7 @@ var ActPoll = 200 * time.Millisecond
 // aria-label, value) содержит нужный текст без учёта регистра и «ё»; из
 // нескольких берёт элемент с самой короткой подписью. Готовит его к методу
 // (click — клик, fill — фокус и выделение содержимого, press — фокус) и
-// возвращает его текст.
+// возвращает его текст; append — фокус и курсор в конец значения, paste — как fill.
 //
 // Значение поля пароля не читается никогда: ни в подписи (по ней подбирают
 // текст и expect_text / wait_for_text), ни в ответе. Пока на странице введён
@@ -190,11 +192,16 @@ var actJS = `((sel, text, method, secret) => {
   if (!e) return null;
   e.scrollIntoView({block: 'center'});
   if (method === 'click') e.click();
-  if (method === 'fill' || method === 'press') {
+  if (['fill', 'paste', 'append', 'press'].includes(method)) {
     e.focus();
-    if (method === 'fill') {
+    const edit = typeof e.setSelectionRange === 'function' && typeof e.value === 'string';
+    if (method === 'fill' || method === 'paste') {
       if (typeof e.select === 'function') e.select();
       else { const r = document.createRange(); r.selectNodeContents(e); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+    }
+    if (method === 'append') {
+      if (edit) { try { e.setSelectionRange(e.value.length, e.value.length); } catch (_) {} }
+      else { const r = document.createRange(); r.selectNodeContents(e); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
     }
   }
   return {text: secret ? '' : (txt(e) || val(e) || '').slice(0, 2000)};
@@ -213,7 +220,7 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 	if err != nil {
 		return ActResponse{}, err
 	}
-	if r.Method == ActFill {
+	if writes(r.Method) {
 		if err := x.readable(ctx); err != nil {
 			return ActResponse{}, err
 		}
@@ -245,19 +252,17 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 			return ActResponse{}, err
 		}
 	}
-	switch r.Method {
-	case ActFill:
-		var err error
-		if r.Value == "" {
-			err = x.Engine.Key(ctx, "Backspace")
-		} else {
-			err = x.Engine.InsertText(ctx, r.Value)
-		}
-		if err != nil {
+	var value *FieldValue
+	switch {
+	case writes(r.Method):
+		if err := x.write(ctx, r.Method, r.Value); err != nil {
 			return ActResponse{}, err
 		}
-	case ActPress:
-		if err := x.Engine.Key(ctx, r.Value); err != nil {
+		if value, err = x.fieldValue(ctx, secret); err != nil {
+			return ActResponse{}, err
+		}
+	case r.Method == ActPress:
+		if err := x.press(ctx, r.Value); err != nil {
 			return ActResponse{}, err
 		}
 	}
@@ -278,7 +283,103 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 		// только в actJS): это могло быть значение поля.
 		found.Text = ""
 	}
-	return ActResponse{URL: u, Text: found.Text}, nil
+	return ActResponse{URL: u, Text: found.Text, Value: value}, nil
+}
+
+// TypedMax — до стольких символов fill / append вводятся как с клавиатуры
+// (Engine.InsertText); длиннее — командой вставки страницы одним шагом
+// (insertJS): Stagehand печатает посимвольно, и 24 КБ шли бы минуты.
+const TypedMax = 256
+
+// insertJS вставляет текст в элемент в фокусе вместо выделения: командой
+// insertText (событие input, отмена Ctrl+Z), иначе — setRangeText у полей.
+var insertJS = `((v) => {
+  const e = document.activeElement;
+  if (!e) return false;
+  if (document.execCommand('insertText', false, v)) return true;
+  if (typeof e.setRangeText === 'function') {
+    e.setRangeText(v, e.selectionStart, e.selectionEnd, 'end');
+    e.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: v}));
+    return true;
+  }
+  return false;
+})`
+
+// pasteJS — вставка как из буфера обмена: событие paste с text/plain (без
+// системного буфера); если страница его не обработала — insertText.
+var pasteJS = `((v) => {
+  const e = document.activeElement;
+  if (!e) return false;
+  const dt = new DataTransfer();
+  dt.setData('text/plain', v);
+  const ev = new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true});
+  if (!e.dispatchEvent(ev)) return true;
+  return document.execCommand('insertText', false, v) || (typeof e.setRangeText === 'function' &&
+    (e.setRangeText(v, e.selectionStart, e.selectionEnd, 'end'), e.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertFromPaste'})), true));
+})`
+
+// write — ввод Value в элемент в фокусе (actJS выделил содержимое или
+// поставил курсор в конец): fill с пустым value стирает выделенное.
+func (x *Executor) write(ctx context.Context, method, v string) error {
+	switch {
+	case method == ActPaste:
+		return x.evalTrue(ctx, call(pasteJS, v), "paste")
+	case v == "":
+		return x.Engine.Key(ctx, "Backspace")
+	case utf8.RuneCountInString(v) <= TypedMax:
+		return x.Engine.InsertText(ctx, v)
+	}
+	return x.evalTrue(ctx, call(insertJS, v), "insert text")
+}
+
+// evalTrue — выражение страницы, которое должно вернуть true.
+func (x *Executor) evalTrue(ctx context.Context, expr, what string) error {
+	var ok bool
+	if err := x.Engine.Eval(ctx, expr, &ok); err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%s: the element did not accept the text (not an editable field?)", what)
+	}
+	return nil
+}
+
+// commandJS — команда редактирования (selectAll, undo, redo) в элементе в фокусе.
+var commandJS = `((c) => document.execCommand(c))`
+
+// press — клавиша или сочетание; сочетания редактирования — командой страницы.
+func (x *Executor) press(ctx context.Context, name string) error {
+	k, err := ParseKey(name)
+	if err != nil {
+		return err
+	}
+	if c := k.command(); c != "" {
+		var ok bool
+		return x.Engine.Eval(ctx, call(commandJS, c), &ok)
+	}
+	return x.Engine.Key(ctx, k.String())
+}
+
+// valueJS — итоговое значение элемента в фокусе: длина, начало и конец.
+// Пароль и любое поле страницы с введённым секретом — hidden, без значения и длины.
+var valueJS = `((start, end, secret) => {
+  const e = document.activeElement;
+  if (!e || e === document.body) return null;
+  if ((e.localName === 'input' && e.type === 'password') || secret) return {length: 0, start: '', hidden: true};
+  const v = typeof e.value === 'string' ? e.value : (e.isContentEditable ? e.innerText : '');
+  const cs = [...v];
+  const out = {length: cs.length, start: cs.slice(0, start).join('')};
+  if (cs.length > start) out.end = cs.slice(Math.max(start, cs.length - end)).join('');
+  return out;
+})`
+
+// fieldValue — что записалось в поле после fill / append / paste.
+func (x *Executor) fieldValue(ctx context.Context, secret bool) (*FieldValue, error) {
+	var v *FieldValue
+	if err := x.Engine.Eval(ctx, call(valueJS, ValueStart, ValueEnd, secret || x.SecretOnPage(ctx)), &v); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 // ErrNoEffect — у действия не было ожидаемого результата (клик не открыл то,

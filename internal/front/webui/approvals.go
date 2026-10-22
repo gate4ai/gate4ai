@@ -206,7 +206,7 @@ func (u *UI) approvalsPage(r *http.Request) (string, map[string]any, error) {
 	status := r.URL.Query().Get("status")
 	recent, _ := u.D.State.ListApprovals(status, 50)
 	recent = slices.DeleteFunc(recent, func(a *state.Approval) bool { return a.Status == state.Pending })
-	data := map[string]any{"Pending": u.approvalViews(l, pend), "Recent": u.approvalViews(l, recent), "Status": status, "Questions": u.D.Questions()}
+	data := map[string]any{"Pending": u.approvalViews(l, pend), "Recent": u.approvalViews(l, recent), "Status": status, "Questions": u.D.Questions(), "Handoffs": u.D.Handoffs()}
 	cfg := u.D.Config.Current()
 	data["Timeout"] = timeoutWord(cfg.Approvals.Timeout.D())
 	data["TelegramSet"] = cfg.Approvals.Telegram != nil

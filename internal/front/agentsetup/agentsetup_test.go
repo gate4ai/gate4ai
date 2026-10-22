@@ -66,12 +66,39 @@ func TestConnectVSCodeAndClaudeCodeSkill(t *testing.T) {
 	if !strings.Contains(string(b), `"servers"`) || !strings.Contains(string(b), `"type": "stdio"`) {
 		t.Fatal(string(b))
 	}
+	// Настройки Claude Code: свои ключи сохраняются, добавляются токен агента
+	// для Bash и правило разрешения команд gate4ai.
+	sp := filepath.Join(e.Home, ".claude/settings.json")
+	_ = os.MkdirAll(filepath.Dir(sp), 0o700)
+	_ = os.WriteFile(sp, []byte(`{"model": "opus", "permissions": {"allow": ["Bash(ls *)"]}, "env": {"FOO": "1"}}`), 0o600)
 	r, err := e.Connect("claude-code", "/b/gate4ai", "t2", "---\nname: gate4ai\n---\n")
-	if err != nil || len(r.Notes) != 1 {
+	if err != nil || len(r.Notes) != 2 {
 		t.Fatal(r, err)
 	}
 	if _, err := os.Stat(filepath.Join(e.Home, ".claude/skills/gate4ai/SKILL.md")); err != nil {
 		t.Fatal("skill", err)
+	}
+	var st struct {
+		Model       string `json:"model"`
+		Env         map[string]string
+		Permissions struct{ Allow []string }
+	}
+	b, _ = os.ReadFile(sp)
+	if err := json.Unmarshal(b, &st); err != nil || st.Model != "opus" || st.Env["FOO"] != "1" || st.Env["GATE4AI_TOKEN"] != "t2" ||
+		strings.Join(st.Permissions.Allow, ",") != "Bash(ls *),"+BashRule {
+		t.Fatal(string(b), err)
+	}
+	e.Connect("claude-code", "/b/gate4ai", "t3", "") // повторно: правило одно, токен новый
+	b, _ = os.ReadFile(sp)
+	if strings.Count(string(b), BashRule) != 1 || !strings.Contains(string(b), `"GATE4AI_TOKEN": "t3"`) {
+		t.Fatal(string(b))
+	}
+	if _, err := e.Disconnect("claude-code"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(sp)
+	if strings.Contains(string(b), "GATE4AI_TOKEN") || strings.Contains(string(b), BashRule) || !strings.Contains(string(b), "Bash(ls *)") {
+		t.Fatal("disconnect removes the token and the rule only:", string(b))
 	}
 	if p := e.ConfigPath("claude-desktop"); !strings.HasSuffix(p, "Library/Application Support/Claude/claude_desktop_config.json") {
 		t.Fatal(p)

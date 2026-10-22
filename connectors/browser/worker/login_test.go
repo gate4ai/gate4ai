@@ -347,7 +347,7 @@ func TestStillOnLoginAndSecretOnPage(t *testing.T) {
 	if _, err := s.Observe(ctx, 0); !errors.Is(err, ErrSecretOnPage) {
 		t.Fatal("observe:", err)
 	}
-	if _, err := s.Elements(ctx, ""); !errors.Is(err, ErrSecretOnPage) {
+	if _, err := s.Elements(ctx, "", nil); !errors.Is(err, ErrSecretOnPage) {
 		t.Fatal("elements:", err)
 	}
 	if _, err := s.Network(ctx, "", false); !errors.Is(err, ErrSecretOnPage) {

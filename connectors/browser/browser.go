@@ -171,8 +171,16 @@ func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (
 	if r.Caller != nil && str(r.Args, "session") != "" {
 		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "session is for agents; a connector's page lives for its root call")
 	}
-	if r.Action == "act" { // аргументы act — до страницы и сеанса
+	switch r.Action { // аргументы — до страницы и сеанса
+	case "act":
 		if err := worker.CheckAct(actRequest(r.Args)); err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
+		}
+	case "handoff":
+		if r.Caller != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "handoff is for agents")
+		}
+		if err := worker.CheckHandoff(handoffRequest(r.Args)); err != nil {
 			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
 		}
 	}
@@ -387,8 +395,8 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		if p.Truncated {
 			res["truncated"] = true
 		}
-		if el, _ := r.Args["elements"].(bool); el {
-			els, err := cs.s.Elements(ctx, root)
+		if el, _ := r.Args["elements"].(bool); el || len(strs(r.Args["kinds"])) > 0 {
+			els, err := cs.s.Elements(ctx, root, strs(r.Args["kinds"]))
 			if err != nil {
 				return abi.ExecResult{}, err
 			}
@@ -408,7 +416,34 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			return abi.ExecResult{}, err
 		}
 		cs.url = res.URL
-		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(res.URL), "text": res.Text}, ResultRef: cleanURL(res.URL)}, nil
+		out := map[string]any{"url": cleanURL(res.URL), "text": res.Text}
+		if res.Value != nil {
+			out["value"] = res.Value
+		}
+		return abi.ExecResult{Structured: out, ResultRef: cleanURL(res.URL)}, nil
+	case "reload":
+		u, err := cs.s.Reload(ctx)
+		if err != nil {
+			return abi.ExecResult{}, err
+		}
+		cs.url = u
+		if err := cs.s.WaitFor(ctx, str(r.Args, "wait_for_selector"), str(r.Args, "wait_for_text"), num(r.Args, "timeout_ms")); err != nil {
+			return abi.ExecResult{}, err
+		}
+		title, _ := cs.s.Engine.Title(ctx)
+		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(u), "title": title}, ResultRef: cleanURL(u)}, nil
+	case "handoff":
+		hr := handoffRequest(r.Args)
+		if pre, _ := r.Args["precheck"].(bool); pre {
+			// хост проверяет до уведомления человека: сеанс и страница есть
+			return abi.ExecResult{Structured: map[string]any{"url": cleanURL(cs.url)}}, worker.CheckHandoff(hr)
+		}
+		res, err := cs.s.Handoff(ctx, hr)
+		if err != nil {
+			return abi.ExecResult{}, err
+		}
+		cs.url = res.URL
+		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(res.URL), "status": res.Status}, ResultRef: res.Status}, nil
 	case "network":
 		all, _ := r.Args["all_sites"].(bool)
 		reqs, err := cs.s.Network(ctx, str(r.Args, "url_contains"), all)
@@ -787,6 +822,12 @@ func actRequest(a map[string]any) worker.ActRequest {
 		ExpectText: str(a, "expect_text"), ExpectURLChange: urlChange, ExpectMS: num(a, "expect_timeout_ms")}
 }
 
+func handoffRequest(a map[string]any) worker.HandoffRequest {
+	change, _ := a["until_url_change"].(bool)
+	return worker.HandoffRequest{UntilURLChange: change, UntilSelector: str(a, "until_selector"),
+		Timeout: time.Duration(num(a, "timeout_ms")) * time.Millisecond}
+}
+
 // EndCall освобождает страницу корневого действия (native.CallEnder).
 func (b *Browser) EndCall(call string) {
 	b.mu.Lock()
@@ -860,8 +901,9 @@ func idParams(reqs []worker.Request) []string {
 // viaArg — служебный аргумент: действие пришло от коннектора входа в сеансе агента.
 const viaArg = "_via"
 
-// siteHint — отказ агенту по списку сайтов с командой для владельца (сайты
-// агента — настройки браузера; сайты коннектора — его манифест).
+// siteHint — отказ агенту по списку сайтов с командой для владельца и
+// запросом доступа для агента (сайты агента — настройки браузера; сайты
+// коннектора — его манифест).
 func siteHint(err error) error {
 	if !errors.Is(err, worker.ErrDomain) {
 		return err
@@ -875,5 +917,7 @@ func siteHint(err error) error {
 	if host == "" || strings.Contains(host, " ") {
 		return err
 	}
-	return fmt.Errorf("%w (the owner adds the site: gate4ai sites allow %s — or Web UI → Connectors → browser)", err, host)
+	return fmt.Errorf("%w (the owner adds the site: gate4ai sites allow %s — or Web UI → Connectors → browser; an agent asks the owner for it: "+
+		`gate4ai gate4ai change_policy --summary "allow %s" --changes '[{"op":"add_setting_items","connector":"browser","key":"allowed_domains","items":["%s"]}]'`+
+		"; the sites allowed now: gate4ai gate4ai policy_summary)", err, host, host, host)
 }

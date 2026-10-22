@@ -35,7 +35,7 @@
 <div class="help">{{T "One per line. Only these folders; hidden folders (.ssh, .aws…) and keys stay closed anyway."}}</div>{{end}}
 {{if eq .Name "browser"}}<label for="s-sites">{{T "Sites"}}</label><input id="s-sites" name="sites" value="{{.Sites}}" placeholder="github.com, *.notion.so" style="width:100%">
 <div class="help">{{T "The browser opens only these sites; *.example.com means all subdomains. You can add sites later."}}</div>{{end}}
-{{range .Groups}}<div class="grp"><span id="g-{{$c.Name}}-{{.Class}}">{{T .Title}}</span>
+{{range .Groups}}<div class="grp"><span id="g-{{$c.Name}}-{{.Class}}">{{T .Title}}{{with .Warn}}<br><span class="help">{{T .}}</span>{{end}}</span>
 <span class="seg" role="radiogroup" aria-labelledby="g-{{$c.Name}}-{{.Class}}">{{$g := .}}{{range (list "allow" "ask" "deny")}}<label><input type="radio" name="effect.{{$c.Name}}.{{$g.Class}}" value="{{.}}" {{if eq . $g.Effect}}checked{{end}}><span>{{effect .}}</span></label>{{end}}</span></div>{{end}}
 </div>{{else}}<p class="warn">{{T "No connectors yet."}} <a href="{{$.Base}}/connectors">{{T "Install one"}}</a></p>{{end}}
 <p class="help" style="margin-top:.6rem">{{T "More connectors (email, sites without an API) — in Access after the setup."}}</p>

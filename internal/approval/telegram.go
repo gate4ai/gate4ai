@@ -366,6 +366,9 @@ func (t *Telegram) answer(ctx context.Context, msgID int64, text string) bool {
 	return true
 }
 
+// HandedOff — агент передал страницу браузера человеку (browser.handoff).
+func (t *Telegram) HandedOff(text string) { t.Notice("🙋 " + text) }
+
 // Notice — служебное сообщение владельцу.
 func (t *Telegram) Notice(text string) {
 	ctx, cancel := botCtx(context.Background())

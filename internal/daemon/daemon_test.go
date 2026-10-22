@@ -160,10 +160,23 @@ func TestDaemonSockets(t *testing.T) {
 	// write → ask по умолчанию; подтверждение владельцем.
 	var res map[string]any
 	agent.do(t, "POST", "/v1/call", map[string]any{"action": "notes.append", "args": map[string]any{"text": "hello"}}, &res)
-	if res["status"] != "pending" || res["code"] != "pending_approval" {
+	if res["status"] != "pending" || errOf(res)["code"] != "pending_approval" {
 		t.Fatal(res)
 	}
 	id := res["id"].(string)
+	// Агент со своим токеном не одобряет свой же запрос — ни на сокете агентов, ни на сокете владельца.
+	for _, c := range []client{agent, agentOnOwnerSock} {
+		var e map[string]any
+		if code := c.do(t, "POST", "/v1/approvals/"+id+"/decide", map[string]any{"approve": true}, &e); code != 403 || e["status"] != "error" || errOf(e)["code"] != "owner_only" {
+			t.Fatal("agent approved its own request:", code, e)
+		}
+	}
+	// Владелец без --as: agent_required с понятным сообщением.
+	var ar map[string]any
+	if code := owner.do(t, "POST", "/v1/call", map[string]any{"action": "notes.append", "args": map[string]any{"text": "x"}}, &ar); code != 400 ||
+		errOf(ar)["code"] != "agent_required" || !strings.Contains(errOf(ar)["message"].(string), "gate4ai agents token") {
+		t.Fatal(code, ar)
+	}
 	var pend []map[string]any
 	owner.do(t, "GET", "/v1/approvals?status=pending", nil, &pend)
 	if len(pend) != 1 || !strings.Contains(pend[0]["preview"].(string), "hello") {
@@ -179,12 +192,12 @@ func TestDaemonSockets(t *testing.T) {
 	}
 	// deny по правилу.
 	agent.do(t, "POST", "/v1/call", map[string]any{"action": "notes.append", "args": map[string]any{"text": "my password"}}, &res)
-	if res["code"] != "denied_by_policy" || !strings.Contains(res["message"].(string), "no secrets in notes") {
+	if errOf(res)["code"] != "denied_by_policy" || !strings.Contains(errOf(res)["message"].(string), "no secrets in notes") {
 		t.Fatal(res)
 	}
 	// Действие вне профиля не видно.
 	agent.do(t, "POST", "/v1/call", map[string]any{"action": "bank.pay", "args": map[string]any{}}, &res)
-	if res["code"] != "unknown_action" {
+	if errOf(res)["code"] != "unknown_action" {
 		t.Fatal(res)
 	}
 	// Владелец видит журнал и проверяет цепочку.
@@ -214,7 +227,7 @@ func TestDaemonSockets(t *testing.T) {
 		t.Fatal(code)
 	}
 	agent.do(t, "POST", "/v1/call", map[string]any{"action": "notes.read"}, &res)
-	if res["code"] != "denied_by_policy" {
+	if errOf(res)["code"] != "denied_by_policy" {
 		t.Fatal("new policy not applied", res)
 	}
 	owner.do(t, "POST", "/v1/policy/rollback", map[string]int{"version": 1}, nil)
@@ -228,3 +241,6 @@ func TestDaemonSockets(t *testing.T) {
 		t.Fatal("revoked token works", code)
 	}
 }
+
+// errOf — error {code, message, hint} из конверта ответа.
+func errOf(m map[string]any) map[string]any { e, _ := m["error"].(map[string]any); return e }

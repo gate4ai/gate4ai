@@ -81,6 +81,11 @@ func (s *switchable) Denied(ag, ac, r string) {
 		s.async(func() { n.Denied(ag, ac, r) })
 	}
 }
+func (s *switchable) HandedOff(text string) {
+	if h, ok := s.get().(daemon.HandedOff); ok {
+		s.async(func() { h.HandedOff(text) })
+	}
+}
 func (s *switchable) Asked(id, text string) {
 	if a, ok := s.get().(daemon.Asker); ok {
 		s.async(func() { a.Asked(id, text) })

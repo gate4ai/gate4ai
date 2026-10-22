@@ -31,6 +31,10 @@ const (
 	ActionFillSecret = "fill_secret"
 )
 
+// ActionHandoff — страница браузера передана человеку: агент ждёт, человек
+// делает шаг сам; хост уведомляет человека (Pipeline.Handoff).
+const ActionHandoff = "handoff"
+
 // CodeSecretDenied — учётка недоступна вызывающему (агенту — ответ этим кодом).
 const CodeSecretDenied = abi.CodeSecretDenied
 
@@ -47,6 +51,13 @@ type Question struct {
 	Account string   // учётка
 	Bind    []string // сайт входа
 	Text    string   // вопрос владельца из учётки или коннектора
+}
+
+// Handoff — страница браузера передана человеку (browser.handoff): агент и
+// его слова (одной строкой, не длиннее maxPromptLen).
+type Handoff struct {
+	Agent   string
+	Message string
 }
 
 // accessor — кто пользуется учёткой: профиль агента корневого действия или

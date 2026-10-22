@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,12 +31,26 @@ type DoctorEnv struct {
 	Exists   func(path string) bool
 	LookPath func(string) (string, error)
 	Daemon   func() error
+	// ClaudeSettings — настройки Claude Code (~/.claude/settings.json), "" — не проверять.
+	ClaudeSettings string
+	ReadFile       func(string) ([]byte, error)
+	// Skill — SKILL.md gate4ai у Claude Code и его текущая версия из каталога
+	// ("" — не проверять).
+	SkillPath string
+	Skill     func() (string, error)
 }
+
+// BashRule — правило Claude Code, которое отдаёт решения о командах gate4ai
+// его политике (тот же текст пишет подключение Claude Code в Web UI).
+const BashRule = "Bash(gate4ai *)"
+
+// agentEnv — переменные, по которым видно, что команду запустил агент.
+var agentEnv = []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CODEX_SANDBOX", "CODEX_MANAGED_BY_NPM", "GEMINI_CLI", "CURSOR_AGENT"}
 
 // RealDoctorEnv — окружение текущего процесса.
 func RealDoctorEnv(daemon func() error) DoctorEnv {
 	home, _ := os.UserHomeDir()
-	return DoctorEnv{Home: home, GOOS: goos(), Environ: os.Environ(), Daemon: daemon, LookPath: exec.LookPath,
+	return DoctorEnv{Home: home, GOOS: goos(), Environ: os.Environ(), Daemon: daemon, LookPath: exec.LookPath, ReadFile: os.ReadFile,
 		Exists:   func(p string) bool { _, err := os.Stat(p); return err == nil },
 		Readable: canOpen(os.O_RDONLY), Writable: canOpen(os.O_WRONLY)}
 }
@@ -77,6 +92,34 @@ func Doctor(e DoctorEnv) []Check {
 	} else {
 		add("isolation", "warn", "this shell is not inside `gate4ai run`: an agent started here has the full rights of your user",
 			"start agents with `gate4ai run <agent> --workspace <dir>` (sandbox-runtime), --container or --microvm")
+	}
+
+	agent := ""
+	for _, k := range agentEnv {
+		if env[k] != "" {
+			agent = k
+			break
+		}
+	}
+	switch {
+	case agent != "" && env["GATE4AI_TOKEN"] == "":
+		add("agent-token", "warn", "this shell belongs to an agent ("+agent+") and has no GATE4AI_TOKEN: its gate4ai commands run with the owner's rights — it could approve its own requests (gate4ai approvals approve) and change the policy",
+			"give the agent its own token: Web UI → Agents → connect Claude Code (writes the token into ~/.claude/settings.json), or gate4ai agents token <agent> and put it into GATE4AI_TOKEN of the agent's environment")
+	case env["GATE4AI_TOKEN"] != "":
+		add("agent-token", "ok", "GATE4AI_TOKEN is set: gate4ai commands run with the agent's profile, owner commands are refused", "")
+	}
+	if e.ClaudeSettings != "" {
+		out = append(out, claudeChecks(e)...)
+	}
+	if e.SkillPath != "" && e.Skill != nil {
+		if old, err := e.ReadFile(e.SkillPath); err == nil {
+			if cur, err := e.Skill(); err == nil && cur != string(old) {
+				add("skill", "warn", e.SkillPath+" is older than the catalog: the agent does not see some actions or their limits",
+					"gate4ai skill > "+e.SkillPath+" (or connect Claude Code again in Web UI → Agents)")
+			} else if err == nil {
+				add("skill", "ok", e.SkillPath+" matches the catalog", "")
+			}
+		}
 	}
 
 	var browsers []string
@@ -168,6 +211,48 @@ func Doctor(e DoctorEnv) []Check {
 		if _, err := e.LookPath("podman"); err != nil {
 			add("containers", "warn", "neither docker nor podman found: --container is unavailable", "install Docker or Podman")
 		}
+	}
+	return out
+}
+
+// claudeChecks — настройки Claude Code: токен агента для команд Bash и правило
+// разрешения команд gate4ai (иначе одно действие одобряют дважды: Claude Code
+// и политика gate4ai — и решения расходятся).
+func claudeChecks(e DoctorEnv) []Check {
+	b, err := e.ReadFile(e.ClaudeSettings)
+	if err != nil {
+		if _, lerr := e.LookPath("claude"); lerr != nil {
+			return nil // Claude Code нет
+		}
+		b = []byte("{}")
+	}
+	var st struct {
+		Env         map[string]any `json:"env"`
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(b, &st); err != nil {
+		return []Check{{"claude-code-settings", "warn", e.ClaudeSettings + " is not valid JSON: " + err.Error(), "fix the file"}}
+	}
+	var out []Check
+	if tok, _ := st.Env["GATE4AI_TOKEN"].(string); tok == "" {
+		out = append(out, Check{"claude-code-token", "warn", "Claude Code has no GATE4AI_TOKEN in " + e.ClaudeSettings + ": its gate4ai commands run with the owner's rights",
+			"Web UI → Agents → connect Claude Code, or add \"env\": {\"GATE4AI_TOKEN\": \"<gate4ai agents token claude-code>\"} to " + e.ClaudeSettings})
+	} else {
+		out = append(out, Check{"claude-code-token", "ok", "Claude Code runs gate4ai with its agent token", ""})
+	}
+	allowed := false
+	for _, r := range st.Permissions.Allow {
+		if r == "Bash(gate4ai *)" || r == "Bash(gate4ai:*)" || r == "Bash(gate4ai)" {
+			allowed = true
+		}
+	}
+	if allowed {
+		out = append(out, Check{"claude-code-permission", "ok", "Claude Code leaves decisions about gate4ai commands to gate4ai's policy", ""})
+	} else {
+		out = append(out, Check{"claude-code-permission", "warn", "Claude Code asks about gate4ai commands itself, on top of gate4ai's policy: one action is approved twice and the decisions may differ",
+			"add \"" + BashRule + "\" to permissions.allow in " + e.ClaudeSettings + " (Web UI → Agents → connect Claude Code does it); gate4ai's policy still decides every action"})
 	}
 	return out
 }

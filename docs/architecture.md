@@ -12,6 +12,8 @@
 | Журнал: квитанции RFC 8785, цепочка, AEAD, доказательства age, чекпоинты (связаны `prev`), экспорт; редактирование по сроку — с записью `journal.redact` (хэш и хэш заголовка) под чекпоинтом, доказательства удаляются с учётом ссылок других квитанций | `internal/audit` |
 | Vault (keychain, алиасы, маскирование) | `internal/secrets/vault`, `internal/secrets/keys` |
 | Учётки входа на сайты (`credentials`): доступ, форма и значения только для `browser.login` / `browser.fill_secret`, вход коннектором входа (`via`), события `secret.use`; вопросы человеку с вводом кода | `internal/config/credentials.go`, `internal/pipeline/credentials.go`, `internal/daemon/questions.go` |
+| Передача страницы человеку (`browser.handoff`): проверка сеанса пакетом, затем уведомление по каналам (`HandedOff`: рабочий стол, Telegram, push) и список в Web UI → Подтверждения, пока агент ждёт | `Pipeline.Handoff` в `internal/pipeline/pipeline.go` (`invoke`), `internal/daemon/handoff.go`; ожидание — `connectors/browser/worker/handoff.go` |
+| Единый конверт ответа `{status, result?, error: {code, message}?}`: результат действия, ошибки API daemon и CLI | `internal/pipeline/pipeline.go` (`Result.MarshalJSON`), `internal/daemon/api.go` (`WriteError`), `internal/front/cli/errors.go` |
 | Approval Service: desktop, Telegram | `internal/approval` |
 | Манифест, ABI, функции хоста, проверка возможностей, PDK и тестовый хост коннекторов | `sdk-go/` (`github.com/gate4ai/gate4ai/sdk-go`, Apache-2.0) |
 | Реестр коннекторов, WASM-хост (wazero), установленные коннекторы | `internal/connectors`, `internal/connectors/wasm`, `internal/connectors/store` |
@@ -41,6 +43,6 @@
 | Автозапуск (systemd --user / XDG, LaunchAgent, HKCU Run) — общий для `gate4ai service` и Web UI | `internal/platform/autostart` |
 | Трей (бинарник `gate4ai-tray`) | `cmd/gate4ai-tray` (меню, fyne.io/systray), `internal/front/tray` (состояние, решения, уведомления) |
 | Магазин: пакеты .g4c, индекс registry, установка с согласием, отзыв | `internal/connectors/store`; индекс — отдельный репозиторий `gate4ai/registry` ([repo-structure.md](repo-structure.md)); формат индекса и его подпись — `sdk-go/registry` (те же правила у сайта gate4.ai) |
-| Изоляция: Egress Proxy, `gate4ai run`, `doctor` | `internal/hostsvc/egress`, `internal/sandbox` |
+| Изоляция: Egress Proxy, `gate4ai run`, `doctor` (в том числе агент с правами владельца, токен и правило `Bash(gate4ai *)` в настройках Claude Code, устаревший SKILL.md) | `internal/hostsvc/egress`, `internal/sandbox` (`doctor.go`); настройки Claude Code при подключении — `internal/front/agentsetup` |
 | Сквозной тест (хост, relay и настоящие коннекторы из того же коммита) | `e2e/` |
 | CI, направление зависимостей, SPDX, проверка истории на секреты; выпуск — [publishing.md](publishing.md) | `scripts/ci.sh`, `scripts/deps-check.sh`, `scripts/spdx.sh`, `scripts/secret-scan.sh`, `.github/workflows/` |

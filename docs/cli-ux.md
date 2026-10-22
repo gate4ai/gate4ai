@@ -12,7 +12,8 @@
 
   Если задан `GATE4AI_HOME`, сокет лежит в `$GATE4AI_HOME/run/`. Явный путь задают `GATE4AI_SOCKET` и `GATE4AI_AGENT_SOCKET`. Длина пути сокета проверяется до запуска (предел 108 байт на Linux, 104 на macOS).
 - Токен агента в `GATE4AI_TOKEN` переключает клиента на сокет агентов, а вместе с `GATE4AI_URL` — на HTTPS к публичному адресу устройства.
-- Коды выхода (`internal/front/cli/client.go`): `0` ok, `1` ошибка, `2` отказ политикой, `3` ждёт подтверждения, `4` проверка не прошла, `5` usage / 400 / 404, `6` daemon недоступен. От формата вывода не зависят.
+- Коды выхода (`internal/front/cli/client.go`): `0` ok, `1` ошибка, `2` отказ политикой, `3` ждёт подтверждения, `4` проверка не прошла, `5` usage / 400 / 404, `6` daemon недоступен, `7` вызывающему нельзя (`unauthorized`, `owner_only`, `agent_required`). От формата вывода не зависят.
+- Строковый аргумент действия — из файла: `--<имя>_file путь` (`-` — stdin, до 16 МБ); `--help` действия показывает варианты, длину и диапазон каждого аргумента.
 
 ## 2. Команды
 
@@ -49,7 +50,7 @@
 
 ## 4. Ошибки
 
-Ошибка в JSON — `{"status":"error","code":…,"message":…,"hint":…,"detail":…}`: короткое `message` без дубля кода, `hint` — что делать, `detail` — техническая причина (`internal/front/cli/errors.go`: `Explain`, `UnavailableError`).
+Ответ в JSON — единый конверт `{"status", "result"?, "error"?: {"code", "message", "hint"?, "detail"?}}`: у результата действия (`internal/pipeline` — `Result.MarshalJSON`), ошибки CLI и API daemon (`WriteError`) одна форма; `error` есть у любого статуса, кроме `ok`. Ошибка: короткое `message` без дубля кода, `hint` — что делать, `detail` — техническая причина (`internal/front/cli/errors.go`: `Explain`, `UnavailableError`).
 
 Daemon недоступен (`unavailable`, exit 6) — по причине:
 
@@ -61,17 +62,19 @@ Daemon недоступен (`unavailable`, exit 6) — по причине:
 | сокет другого пользователя | socket belongs to another user | запускать от того же пользователя |
 | удалённый агент (`GATE4AI_URL`) | device is offline | агент повторяет позже |
 
-Агенту (`GATE4AI_TOKEN`) подсказка другая: «попросите владельца запустить gate4ai». `unauthorized` (неверный или отозванный токен) подсказывает `gate4ai agents token <agent>` у владельца.
+Агенту (`GATE4AI_TOKEN`) подсказка другая: «попросите владельца запустить gate4ai». `unauthorized` (неверный или отозванный токен) подсказывает `gate4ai agents token <agent>` у владельца; `agent_required` (вызов действия на сокете владельца без `--as` — обычно агент без своего токена) — дать агенту его токен.
 
 Пример — скрипт без daemon:
 
 ```
 $ gate4ai ui --no-start | cat
 {
-  "code": "unavailable",
-  "detail": "no socket at /run/user/1000/gate4ai/gate4ai.sock",
-  "hint": "start it: gate4ai daemon start (in the background) or gate4ai service install (also at every login); gate4ai daemon runs it in this terminal",
-  "message": "gate4ai daemon is not running",
+  "error": {
+    "code": "unavailable",
+    "detail": "no socket at /run/user/1000/gate4ai/gate4ai.sock",
+    "hint": "start it: gate4ai daemon start (in the background) or gate4ai service install (also at every login); gate4ai daemon runs it in this terminal",
+    "message": "gate4ai daemon is not running"
+  },
   "status": "error"
 }
 ```

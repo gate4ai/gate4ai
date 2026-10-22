@@ -59,6 +59,8 @@ func Explain(err error, agent bool) Problem {
 			p.Hint = "the agent token is invalid or revoked: the owner issues a new one with gate4ai agents token <agent>"
 		case "owner_only":
 			p.Hint = "this command is for the owner: run it without GATE4AI_TOKEN on the computer with the daemon"
+		case "agent_required":
+			p.Hint = "an agent calls gate4ai with its own token: the owner runs gate4ai agents token <agent> and puts it into the agent's GATE4AI_TOKEN (gate4ai doctor checks it); the owner runs an action with an agent's profile: --as <agent>"
 		}
 		return p
 	}
@@ -115,7 +117,10 @@ func (e *Env) fail(err error) int {
 	case errors.Is(err, ErrUnavailable):
 		code = ExitUnavailable
 	case errors.As(err, &ae):
-		if ae.Status == 400 || ae.Status == 404 {
+		switch {
+		case authCodes[ae.Code]:
+			code = ExitAuth
+		case ae.Status == 400 || ae.Status == 404:
 			code = ExitUsage
 		}
 	}
@@ -146,14 +151,14 @@ func (e *Env) problem(p Problem) {
 		}
 		return
 	}
-	out := map[string]any{"status": "error", "code": p.Code, "message": p.Message}
+	ee := map[string]any{"code": p.Code, "message": p.Message}
 	if p.Hint != "" {
-		out["hint"] = p.Hint
+		ee["hint"] = p.Hint
 	}
 	if p.Detail != "" {
-		out["detail"] = p.Detail
+		ee["detail"] = p.Detail
 	}
-	e.printJSON(out)
+	e.printJSON(map[string]any{"status": "error", "error": ee})
 	if e.StderrTTY {
 		fmt.Fprintf(e.Stderr, "\n%s\n", sentence(msg))
 		if p.Hint != "" {

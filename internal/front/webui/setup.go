@@ -16,6 +16,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
+	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/relayclient"
 )
@@ -37,12 +38,20 @@ var groupTitles = map[string]map[string]string{
 	"email":   {"read": "Read emails", "write": "Save drafts", "external": "Send emails"},
 }
 
+// groupWarns — предупреждения к группам действий: что значит «разрешать».
+// Самонастройка: правило allow на change_policy разрешает агенту расширять свои
+// права (сайты, правила, коннекторы) без вопроса владельцу.
+var groupWarns = map[string]map[string]string{
+	daemon.SelfConnector: {"write": "“Allow” lets the agent widen its own rights — sites, rules, connectors — without asking you. Keep “Ask” unless you trust every change it makes."},
+}
+
 // groupView — группа действий коннектора одного класса и решение для неё в профиле.
 type groupView struct {
 	Connector, Class, Title string
 	Effect                  string   // allow | ask | deny; "mixed" — разные решения или правила с условием
 	Actions                 []string // полные имена
 	Scoped                  bool     // решение действует в выбранных папках (правила с условием «внутри папки»)
+	Warn                    string   // что значит «разрешать» для этой группы (groupWarns)
 }
 
 // foldersOnly — условие правила состоит только из «путь внутри папки …» через «или».
@@ -88,7 +97,7 @@ func (u *UI) groups(conn string, prof config.Profile) []groupView {
 		}
 		g, ok := by[a.Class]
 		if !ok {
-			g = &groupView{Connector: conn, Class: a.Class, Title: or(groupTitles[conn][a.Class], classVerbs[a.Class])}
+			g = &groupView{Connector: conn, Class: a.Class, Title: or(groupTitles[conn][a.Class], classVerbs[a.Class]), Warn: groupWarns[conn][a.Class]}
 			by[a.Class] = g
 		}
 		full := conn + "." + a.Name
@@ -171,6 +180,9 @@ func (u *UI) setGroup(w http.ResponseWriter, r *http.Request) map[string]any {
 		return setGroupRules(c, prof, acts, effect)
 	}); err != nil {
 		return redirectErr(back, err)
+	}
+	if w := groupWarns[conn][class]; w != "" && effect == config.EffectAllow {
+		return redirect(back, M("%s: %s. %s", Word(title), Word(effectWords[effect]), Word(w)))
 	}
 	return redirect(back, M("%s: %s.", Word(title), Word(effectWords[effect])))
 }

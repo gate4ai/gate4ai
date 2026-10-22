@@ -7,6 +7,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -47,10 +48,11 @@ const (
 	CodeInvalidResult      = "invalid_result"
 )
 
-// Result — ответ агенту.
+// Result — ответ агенту в едином конверте (MarshalJSON): status, при успехе —
+// result, иначе — error {code, message}.
 type Result struct {
 	Status       string        `json:"status"`
-	Code         string        `json:"code,omitempty"`
+	Code         string        `json:"-"` // error.code
 	Action       string        `json:"action"`
 	ID           string        `json:"id,omitempty"`      // id подтверждения (для status) или квитанции
 	Receipt      string        `json:"receipt,omitempty"` // краткий хэш квитанции "#a3f9c21e"
@@ -60,13 +62,58 @@ type Result struct {
 	Verification string        `json:"verification,omitempty"`
 	Reason       string        `json:"reason,omitempty"`
 	RuleIDs      []string      `json:"rule_ids,omitempty"`
-	Message      string        `json:"message,omitempty"`
+	Message      string        `json:"-"` // error.message
 	Provenance   *Provenance   `json:"provenance,omitempty"`
 	// Log — строки лога коннектора за время вызова (только своя сборка, --dev):
 	// агент, который пишет коннектор, видит, что тот делал.
 	Log []string `json:"log,omitempty"`
 	// connectorCode — код ошибки коннектора (abi) для вложенного вызова.
 	connectorCode string
+}
+
+// ErrorInfo — ошибка в конверте ответа: код для кода и текст для человека и агента.
+type ErrorInfo struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// resultWire — Result без методов JSON (конверт собирают MarshalJSON и UnmarshalJSON).
+type resultWire Result
+
+// MarshalJSON — единый конверт: error {code, message} у любого статуса, кроме
+// ok (pending — тоже: результата ещё нет, в message — что делать).
+func (r Result) MarshalJSON() ([]byte, error) {
+	out := struct {
+		resultWire
+		Error *ErrorInfo `json:"error,omitempty"`
+	}{resultWire: resultWire(r)}
+	if r.Status != StatusOK && (r.Code != "" || r.Message != "") {
+		msg := r.Message
+		if msg == "" {
+			msg = r.Reason
+		}
+		if msg == "" {
+			msg = r.Code
+		}
+		out.Error = &ErrorInfo{Code: r.Code, Message: msg}
+	}
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON — обратно из конверта (сохранённый результат подтверждения).
+func (r *Result) UnmarshalJSON(b []byte) error {
+	var in struct {
+		resultWire
+		Error *ErrorInfo `json:"error"`
+	}
+	if err := json.Unmarshal(b, &in); err != nil {
+		return err
+	}
+	*r = Result(in.resultWire)
+	if in.Error != nil {
+		r.Code, r.Message = in.Error.Code, in.Error.Message
+	}
+	return nil
 }
 
 // Provenance — метка недоверенного контента в ответе.
@@ -118,6 +165,9 @@ type Pipeline struct {
 	Vault Vault
 	// Ask — вопрос человеку с вводом значения (browser.fill_secret, source: human).
 	Ask func(ctx context.Context, q Question) (string, error)
+	// Handoff — человеку передана страница браузера (browser.handoff): уведомить
+	// его; done — ожидание закончилось (убрать из списка).
+	Handoff func(h Handoff) (done func())
 
 	mu     sync.RWMutex
 	engine *policy.Engine
@@ -582,6 +632,17 @@ func (p *Pipeline) invoke(ctx context.Context, agent, action string, cli connect
 		if err := prep.human(); err != nil {
 			return abi.ExecResult{}, err
 		}
+	}
+	if act.Name == ActionHandoff && strings.SplitN(action, ".", 2)[0] == BrowserConnector && cli.Manifest().Runtime == manifest.RuntimeNative && p.Handoff != nil {
+		// Сначала браузер проверяет сеанс и страницу, потом уведомление человеку.
+		check := req
+		check.Args = map[string]any{ArgPrecheck: true}
+		maps.Copy(check.Args, req.Args)
+		if _, err := cli.Execute(WithAgent(ctx, agent), check); err != nil {
+			return abi.ExecResult{}, err
+		}
+		msg, _ := req.Args["message"].(string)
+		defer p.Handoff(Handoff{Agent: agent, Message: promptText(msg)})()
 	}
 	if prep != nil && prep.via != nil {
 		session, _ := req.Args["session"].(string)

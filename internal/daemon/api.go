@@ -141,9 +141,9 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	_ = enc.Encode(v)
 }
 
-// WriteError — ошибка API: {"error": {"code", "message"}}.
+// WriteError — ошибка API в едином конверте: {"status": "error", "error": {"code", "message"}}.
 func WriteError(w http.ResponseWriter, status int, code, msg string) {
-	WriteJSON(w, status, map[string]APIError{"error": {Code: code, Message: msg}})
+	WriteJSON(w, status, map[string]any{"status": "error", "error": APIError{Code: code, Message: msg}})
 }
 
 func readJSON(r *http.Request, v any) error {
@@ -580,7 +580,7 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 		agent := p.Agent
 		if p.IsOwner() {
 			if req.Agent == "" {
-				WriteError(w, 400, "agent_required", "owner calls must name the agent whose profile applies (--as <agent>)")
+				WriteError(w, 400, "agent_required", "this call has the owner's rights, not an agent's: an agent calls with its own token (the owner gives it: gate4ai agents token <agent> → GATE4AI_TOKEN); the owner names the agent whose profile applies: --as <agent>")
 				return
 			}
 			agent = req.Agent

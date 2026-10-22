@@ -169,7 +169,7 @@ func TestLoginRealChrome(t *testing.T) {
 	if _, err := x.Act(ctx, ActRequest{Selector: "button", Method: ActWait, Text: "войти"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := x.Elements(ctx, ""); !errors.Is(err, ErrSecretOnPage) {
+	if _, err := x.Elements(ctx, "", nil); !errors.Is(err, ErrSecretOnPage) {
 		t.Fatal("elements with a secret on the page:", err)
 	}
 	// Снимок — с закрашенным полем пароля: ни одного светлого пикселя.

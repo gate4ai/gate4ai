@@ -160,7 +160,7 @@ approvals:
 	r := run(claude, "", "mail", "send", "--to", "landlord@example.com", "--subject", "Аренда за октябрь", "--body", "Оплатил, квитанция во вложении.")
 	// 2. Адресат не в списке доверенных → ask.
 	res := r.json(t)
-	if r.code != 3 || res["code"] != "pending_approval" {
+	if r.code != 3 || errOf(res)["code"] != "pending_approval" {
 		t.Fatalf("exit %d: %s", r.code, r.out)
 	}
 	id := res["id"].(string)
@@ -219,7 +219,7 @@ approvals:
 
 	// Отказ: честная понятная ошибка.
 	r = run(openclaw, "", "mail", "send", "--to", "landlord@example.com", "--subject", "x")
-	if r.code != 2 || !strings.Contains(r.json(t)["message"].(string), "denied_by_policy: recipient not in allowlist; user notified") {
+	if r.code != 2 || !strings.Contains(errOf(r.json(t))["message"].(string), "denied_by_policy: recipient not in allowlist; user notified") {
 		t.Fatalf("exit %d: %s", r.code, r.out)
 	}
 	// Агентский токен не даёт прав владельца.
@@ -238,3 +238,6 @@ approvals:
 		t.Fatal(r.out)
 	}
 }
+
+// errOf — error {code, message, hint} из конверта ответа.
+func errOf(m map[string]any) map[string]any { e, _ := m["error"].(map[string]any); return e }

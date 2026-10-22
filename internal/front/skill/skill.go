@@ -47,16 +47,20 @@ Everything outside your sandbox (the user's mail, host files, browser sessions, 
 
 ## Output and exit codes
 
-Output is JSON. Exit codes: ` + "`0`" + ` ok · ` + "`2`" + ` denied_by_policy · ` + "`3`" + ` pending_approval · ` + "`4`" + ` verification_failed · ` + "`5`" + ` invalid arguments / unknown action · ` + "`6`" + ` gate4ai unavailable · ` + "`1`" + ` other error.
+Output is JSON in one envelope: ` + "`{\"status\": \"ok\" | \"denied\" | \"pending\" | \"verification_failed\" | \"error\", \"result\": {…}, \"error\": {\"code\", \"message\", \"hint\"}}`" + ` — ` + "`result`" + ` on success, ` + "`error`" + ` otherwise. Exit codes: ` + "`0`" + ` ok · ` + "`2`" + ` denied_by_policy · ` + "`3`" + ` pending_approval · ` + "`4`" + ` verification_failed · ` + "`5`" + ` invalid arguments / unknown action · ` + "`6`" + ` gate4ai unavailable · ` + "`7`" + ` caller not allowed (token invalid, owner-only command, ` + "`agent_required`" + `) · ` + "`1`" + ` other error.
 
-## Connection
+## Connection and identity
 
 ` + "`gate4ai`" + ` reads your agent token from ` + "`GATE4AI_TOKEN`" + `. If gate4ai runs on another computer, ` + "`GATE4AI_URL`" + ` holds its address (` + "`https://…`" + `); the commands are the same. Exit code ` + "`6`" + ` then usually means the device is asleep or offline: retry later.
 
-## Discovering actions
+If a call answers ` + "`agent_required`" + ` (exit ` + "`7`" + `), you are using the owner's access instead of your own token. Do not add ` + "`--as`" + ` and never run owner commands (` + "`approvals`" + `, ` + "`vault`" + `, ` + "`agents`" + `, ` + "`sites`" + `, ` + "`policy`" + `): tell the user to give you your token — ` + "`gate4ai agents token <agent>`" + ` into ` + "`GATE4AI_TOKEN`" + ` (` + "`gate4ai doctor`" + ` checks it).
 
-- ` + "`gate4ai tools --json`" + ` — actions available to you (filtered by your profile).
-- ` + "`gate4ai <connector> <action> --help`" + ` — arguments of one action.
+## Discovering actions and asking for access
+
+- ` + "`gate4ai tools --json`" + ` — actions available to you (filtered by your profile); ` + "`gate4ai skill`" + ` — this file for the current catalog (the list below may be older).
+- ` + "`gate4ai <connector> <action> --help`" + ` — arguments of one action with their limits and allowed values.
+- A long text argument goes from a file: ` + "`--<name>_file <path>`" + ` (` + "`-`" + ` — stdin), e.g. ` + "`--value_file article.md`" + `.
+- ` + "`gate4ai gate4ai policy_summary`" + ` — your rules and settings (the browser's ` + "`allowed_domains`" + `); ` + "`gate4ai gate4ai change_policy`" + ` asks the owner to change them (a site: ` + "`add_setting_items {connector: browser, key: allowed_domains, items: [site]}`" + `). Explain why in ` + "`--reason`" + `.
 
 `)
 	byConn := map[string][]Tool{}
@@ -64,6 +68,9 @@ Output is JSON. Exit codes: ` + "`0`" + ` ok · ` + "`2`" + ` denied_by_policy �
 		byConn[t.Connector] = append(byConn[t.Connector], t)
 	}
 	conns := slices.Sorted(maps.Keys(byConn))
+	if _, ok := byConn["browser"]; ok {
+		b.WriteString(browserGuide)
+	}
 	if len(conns) > 0 {
 		b.WriteString("## Actions\n")
 	}
@@ -71,10 +78,64 @@ Output is JSON. Exit codes: ` + "`0`" + ` ok · ` + "`2`" + ` denied_by_policy �
 		fmt.Fprintf(&b, "\n### %s\n\n", c)
 		for _, t := range byConn[c] {
 			fmt.Fprintf(&b, "- **`%s`** (%s) — %s\n", t.Name, t.Class, t.Description)
+			if args := Args(t.Schema); args != "" {
+				fmt.Fprintf(&b, "  Arguments: %s\n", args)
+			}
 			fmt.Fprintf(&b, "  `%s`\n", Example(t))
 		}
 	}
 	return b.String()
+}
+
+// browserGuide — сеанс браузера: как работать со страницей между вызовами.
+const browserGuide = `## Browser sessions
+
+- ` + "`browser open --url …`" + ` without ` + "`--session`" + ` starts a session and returns its id; pass ` + "`--session s-…`" + ` to every next page action and end with ` + "`browser close --session s-…`" + ` (an idle session closes after 10 minutes; ` + "`close --all`" + ` if the id is lost). The page is one: while your session is open, other browser calls answer ` + "`busy`" + `.
+- Read the page with ` + "`observe`" + ` (` + "`--elements`" + ` gives fields, buttons and links with CSS selectors and the values of fields; ` + "`--kinds fields,buttons`" + ` narrows them), act with ` + "`act`" + ` by selector: ` + "`click`" + `, ` + "`fill`" + ` / ` + "`append`" + ` / ` + "`paste`" + ` (up to 256 KB; a long text — ` + "`--value_file`" + `; the answer shows what ended up in the field), ` + "`press`" + ` (keys and combinations like ` + "`Ctrl+A`" + `, ` + "`Ctrl+Enter`" + `), ` + "`wait`" + `. ` + "`reload`" + ` reloads the page.
+- Sign-in: ` + "`login --account @name`" + ` with an account the owner configured; when there is none (or a captcha / SMS code), ` + "`handoff --session … --message \"Sign in to example.org\"`" + ` notifies the user and waits until they finish in the gate4ai Chrome window. Never ask the user for passwords in chat.
+- A site outside your list fails with ` + "`capability_denied`" + `: ask for it with ` + "`change_policy`" + ` (see above), do not open it another way.
+
+`
+
+// Args — аргументы действия одной строкой: --name (тип, обязательный, пределы).
+func Args(s manifest.Schema) string {
+	var out []string
+	for _, p := range s.Properties {
+		a := "`--" + p.Name + "`"
+		var notes []string
+		if s.IsRequired(p.Name) {
+			notes = append(notes, "required")
+		}
+		if l := Limits(p.Schema); l != "" {
+			notes = append(notes, l)
+		}
+		if len(notes) > 0 {
+			a += " (" + strings.Join(notes, "; ") + ")"
+		}
+		out = append(out, a)
+	}
+	return strings.Join(out, ", ")
+}
+
+// Limits — допустимые значения аргумента: варианты, длина, диапазон ("" — нет).
+func Limits(s *manifest.Schema) string {
+	var out []string
+	if s.Type == manifest.TArray && s.Items != nil && len(s.Items.Enum) > 0 {
+		out = append(out, "of: "+strings.Join(s.Items.Enum, ", "))
+	}
+	if len(s.Enum) > 0 {
+		out = append(out, "one of: "+strings.Join(s.Enum, ", "))
+	}
+	if s.MaxLength != nil {
+		out = append(out, fmt.Sprintf("up to %d characters", *s.MaxLength))
+	}
+	switch {
+	case s.Minimum != nil && s.Maximum != nil:
+		out = append(out, fmt.Sprintf("%g..%g", *s.Minimum, *s.Maximum))
+	case s.Maximum != nil:
+		out = append(out, fmt.Sprintf("up to %g", *s.Maximum))
+	}
+	return strings.Join(out, "; ")
 }
 
 // Example — пример вызова CLI.

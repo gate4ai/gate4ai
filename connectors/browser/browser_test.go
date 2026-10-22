@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 
 // fakeEngine — страница без Chrome: переходы, текст, поиск элемента для act.
 type fakeEngine struct {
+	mu    sync.Mutex // url меняет и «человек» (handoff) из другой горутины
 	url   string
 	keys  []string
 	hooks int
@@ -28,10 +30,16 @@ func (f *fakeEngine) Navigate(_ context.Context, u string) error {
 	if strings.HasSuffix(u, "/redirect") {
 		u = "https://evil.example/"
 	}
+	f.mu.Lock()
 	f.url = u
+	f.mu.Unlock()
 	return nil
 }
-func (f *fakeEngine) URL(context.Context) (string, error) { return f.url, nil }
+func (f *fakeEngine) URL(context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.url, nil
+}
 func (f *fakeEngine) Title(context.Context) (string, error) {
 	return "Личный кабинет", nil
 }
@@ -60,7 +68,7 @@ func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 		return json.Unmarshal([]byte("null"), out)
 	}
 	if strings.Contains(expr, "#away") {
-		f.url = "https://evil.example/"
+		f.Navigate(context.Background(), "https://evil.example/")
 	}
 	return json.Unmarshal([]byte(`{"text":"ok"}`), out)
 }
@@ -323,6 +331,58 @@ func TestAgentSession(t *testing.T) {
 		t.Fatal("the page is free after close:", err)
 	}
 	b.EndCall("root1")
+}
+
+// TestAgentEditReloadHandoff — act fill возвращает итоговое значение, reload
+// и handoff работают в сеансе; handoff проверяется до уведомления человека.
+func TestAgentEditReloadHandoff(t *testing.T) {
+	_, b, eng := setup(t, nil)
+	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://evil.example/"}); err == nil ||
+		!strings.Contains(err.Error(), `"op":"add_setting_items","connector":"browser","key":"allowed_domains","items":["evil.example"]`) {
+		t.Fatal("the agent learns how to ask for a site:", err)
+	}
+	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	if _, err := agentExec(t, b, "act", map[string]any{"session": id, "selector": "textarea", "method": "fill", "value": strings.Repeat("x", worker.MaxActValue+1)}); err == nil ||
+		!strings.Contains(err.Error(), `argument "value" is too long`) {
+		t.Fatal(err)
+	}
+	if _, err := agentExec(t, b, "act", map[string]any{"session": id, "selector": "textarea", "method": "press", "value": "Ctrl+V"}); err == nil ||
+		!strings.Contains(err.Error(), "method paste") {
+		t.Fatal(err)
+	}
+	if res, err = agentExec(t, b, "reload", map[string]any{"session": id}); err != nil || res["url"] != "https://a.example.com/" {
+		t.Fatal(res, err)
+	}
+	if res, err = agentExec(t, b, "handoff", map[string]any{"session": id, "message": "Войдите", "precheck": true}); err != nil {
+		t.Fatal(res, err)
+	}
+	if _, err = agentExec(t, b, "handoff", map[string]any{"session": id, "message": "Войдите", "timeout_ms": 3600000.0}); err == nil {
+		t.Fatal("handoff over the limit")
+	}
+	old := worker.HandoffPoll
+	worker.HandoffPoll = 10 * time.Millisecond
+	defer func() { worker.HandoffPoll = old }()
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		eng.Navigate(context.Background(), "https://a.example.com/home")
+	}()
+	if res, err = agentExec(t, b, "handoff", map[string]any{"session": id, "message": "Войдите", "timeout_ms": 5000.0}); err != nil ||
+		res["status"] != "done" || res["url"] != "https://a.example.com/home" {
+		t.Fatal(res, err)
+	}
+	res, err = agentExec(t, b, "close", map[string]any{"session": id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range res["steps"].([]map[string]any) {
+		if st["action"] == "handoff" && st["args"].(map[string]any)["precheck"] != nil {
+			t.Fatal("the host's precheck is not a step:", st)
+		}
+	}
 }
 
 func TestAgentSessionIdle(t *testing.T) {

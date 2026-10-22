@@ -267,23 +267,21 @@ func (c *CDP) InsertText(ctx context.Context, text string) error {
 	return c.call(ctx, c.session, "Input.insertText", map[string]any{"text": text}, nil)
 }
 
-// cdpKeys — коды клавиш для Input.dispatchKeyEvent.
-var cdpKeys = map[string]int{"Enter": 13, "Tab": 9, "Escape": 27, "Backspace": 8, "ArrowUp": 38, "ArrowDown": 40}
-
-// Key — нажатие клавиши (keyDown + keyUp).
-func (c *CDP) Key(ctx context.Context, key string) error {
-	code, ok := cdpKeys[key]
-	if !ok {
-		return fmt.Errorf("key %q is not supported", key)
+// Key — нажатие клавиши или сочетания (keyDown + keyUp) с модификаторами.
+func (c *CDP) Key(ctx context.Context, name string) error {
+	k, err := ParseKey(name)
+	if err != nil {
+		return err
 	}
-	down := map[string]any{"type": "rawKeyDown", "key": key, "code": key, "windowsVirtualKeyCode": code}
-	if key == "Enter" {
-		down["type"], down["text"] = "keyDown", "\r"
+	key, code, vk, text, mods := k.cdpKey()
+	down := map[string]any{"type": "rawKeyDown", "key": key, "code": code, "windowsVirtualKeyCode": vk, "modifiers": mods}
+	if text != "" {
+		down["type"], down["text"] = "keyDown", text
 	}
 	if err := c.call(ctx, c.session, "Input.dispatchKeyEvent", down, nil); err != nil {
 		return err
 	}
-	return c.call(ctx, c.session, "Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": key, "windowsVirtualKeyCode": code}, nil)
+	return c.call(ctx, c.session, "Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": code, "windowsVirtualKeyCode": vk, "modifiers": mods}, nil)
 }
 
 func (c *CDP) URL(ctx context.Context) (string, error) {

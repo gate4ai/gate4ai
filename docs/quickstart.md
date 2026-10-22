@@ -169,7 +169,9 @@ gate4ai mail send --to landlord@example.com --subject "Аренда" --body "…
 gate4ai skill > SKILL.md                   # навык для Claude Code / Hermes / OpenClaw
 ```
 
-Коды выхода: `0` ok, `1` прочие ошибки, `2` denied_by_policy, `3` pending_approval, `4` verification_failed, `5` неверные аргументы, `6` daemon недоступен.
+Коды выхода: `0` ok, `1` прочие ошибки, `2` запрещено политикой (`denied_by_policy`), `3` ждёт подтверждения (`pending_approval`), `4` проверка не прошла (`verification_failed`), `5` неверные аргументы или неизвестное действие, `6` daemon недоступен, `7` вызывающему нельзя: неверный или отозванный токен (`unauthorized`), команда владельца с токеном агента (`owner_only`), вызов владельца без `--as` (`agent_required`). Ответ — JSON в едином конверте: `{"status": "ok" | "denied" | "pending" | "verification_failed" | "error", "result": …, "error": {"code", "message", "hint", "detail"}}` — `result` при успехе, `error` в остальных случаях (у `pending` — что делать дальше). Длинный текст аргумента — из файла: `--<имя>_file путь` (`-` — stdin).
+
+Claude Code: подключение в Web UI (Агенты → Claude Code) пишет токен агента в `env.GATE4AI_TOKEN` и правило `"Bash(gate4ai *)"` в `permissions.allow` файла `~/.claude/settings.json`; `gate4ai doctor` предупреждает, если агент работает с правами владельца (без своего токена) или правила нет.
 
 **MCP по stdio** (Claude Code и др.): `{"mcpServers": {"gate4ai": {"command": "gate4ai", "args": ["mcp"], "env": {"GATE4AI_TOKEN": "g4a_…"}}}}`.
 
