@@ -1,6 +1,6 @@
 connector: browser
 description: Pages in the user's dedicated Chrome profile; browser sessions for agents and page actions for other connectors
-version: "0.7.3"
+version: "0.7.4"
 runtime: native
 platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64]
 contract: 1
