@@ -4,9 +4,7 @@ package config
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -43,15 +41,6 @@ func (es Errors) Error() string {
 // ExtraValidator — дополнительная проверка (например, компиляция CEL в policy).
 // Возвращает ошибки с путями вида "profiles.assistant.rules[0].when".
 type ExtraValidator func(*Config) Errors
-
-// LoadFile читает и проверяет файл конфигурации.
-func LoadFile(path string, extra ...ExtraValidator) (*Config, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return Parse(b, extra...)
-}
 
 // Parse разбирает YAML, проверяет схему и заполняет значения по умолчанию.
 func Parse(b []byte, extra ...ExtraValidator) (*Config, error) {
@@ -295,12 +284,6 @@ func splitPath(p string) []string {
 		}
 	}
 	return out
-}
-
-// IsSchemaError — является ли err ошибкой схемы.
-func IsSchemaError(err error) bool {
-	var es Errors
-	return errors.As(err, &es)
 }
 
 // envNameRe — имя переменной окружения для заглушки egress-секрета.

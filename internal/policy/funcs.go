@@ -167,9 +167,6 @@ func globSegs(ps, pats []string) bool {
 	return len(ps) == 0
 }
 
-// HostOf — хост http(s)-URL (правило — в sdk-go/domain, общее с коннекторами).
-func HostOf(raw string) string { return domain.HostOf(raw) }
-
 // DomainMatches — хост URL совпадает с одним из шаблонов: "example.com" — точно,
 // "*.example.com" — только поддомены (не сам example.com).
 func DomainMatches(raw string, patterns []string) bool { return domain.Matches(raw, patterns) }

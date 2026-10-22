@@ -91,7 +91,7 @@ func Example(t Tool) string {
 			continue
 		}
 		a := p.Schema
-		v := "<" + p.Name + ">"
+		var v string
 		switch {
 		case a.Format == "email":
 			v = "name@example.com"

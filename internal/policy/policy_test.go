@@ -296,16 +296,6 @@ func TestDomainMatches(t *testing.T) {
 	}
 }
 
-func TestTighten(t *testing.T) {
-	d := Tighten(Decision{Effect: "allow", RuleIDs: []string{"r"}}, "phishing")
-	if d.Effect != "ask" {
-		t.Fatal(d)
-	}
-	if Tighten(Decision{Effect: "deny"}, "x").Effect != "deny" {
-		t.Fatal("must not loosen")
-	}
-}
-
 func TestActionMatches(t *testing.T) {
 	if !ActionMatches("payments.*", "payments.pay_bill") || ActionMatches("payments.*", "paymentsx.a") || !ActionMatches("*", "a.b") || ActionMatches("email.send", "email.sender") {
 		t.Fatal()

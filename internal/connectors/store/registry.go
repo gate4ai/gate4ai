@@ -4,7 +4,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/gate4ai/gate4ai/sdk-go/registry"
 )
 
 // TrustLocal — пакет владельца из файла (--dev). Уровни доверия издателей
@@ -76,17 +73,4 @@ func IndexData(ctx context.Context, src string) (raw []byte, sig string, err err
 		return nil, "", fmt.Errorf("registry index signature: %w", err)
 	}
 	return raw, strings.TrimSpace(string(s)), nil
-}
-
-// LoadIndex загружает индекс и проверяет подпись ключами registry.
-func LoadIndex(ctx context.Context, src string, keys []string) (*registry.Index, []byte, error) {
-	raw, sig, err := IndexData(ctx, src)
-	if err != nil {
-		return nil, nil, err
-	}
-	ix, err := registry.ParseIndex(raw, sig, keys)
-	if errors.Is(err, registry.ErrNoKeys) || errors.Is(err, registry.ErrBadSignature) {
-		err = fmt.Errorf("%w (store.registry_keys)", err)
-	}
-	return ix, raw, err
 }

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"strconv"
 	"sync"
 	"time"
 
@@ -182,6 +181,3 @@ func (ss *session) Data(r io.Reader) error {
 
 func (ss *session) Reset()        { ss.env = Envelope{} }
 func (ss *session) Logout() error { return nil }
-
-// Port — порт строкой (для логов).
-func Port(p int) string { return strconv.Itoa(p) }

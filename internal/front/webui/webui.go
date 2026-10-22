@@ -594,15 +594,6 @@ func (u *UI) counts(v *view) {
 	}
 }
 
-// sid — сессия запроса ("" — нет).
-func (u *UI) sid(m mount, r *http.Request) string {
-	id, _, ok := u.session(m, r)
-	if !ok {
-		return ""
-	}
-	return id
-}
-
 // popNote — сообщение после действия для этой сессии (показывается один раз).
 func (u *UI) popNote(sid string) (note, bool) {
 	u.mu.Lock()

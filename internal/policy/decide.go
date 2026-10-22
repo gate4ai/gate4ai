@@ -138,18 +138,6 @@ func stateErr(req Request, counters Counters) error {
 	return nil
 }
 
-// Tighten применяет консультативный сигнал (например, от LLM «похоже на фишинг»):
-// он может только ужесточить решение allow → ask, но не ослабить.
-func Tighten(d Decision, signal string) Decision {
-	if d.Effect == config.EffectAllow {
-		d.Effect = config.EffectAsk
-		d.RuleIDs = append(append([]string{}, d.RuleIDs...), "advisory")
-		d.Reason = "advisory signal: " + signal
-		d.Default = false
-	}
-	return d
-}
-
 func (e *Engine) activation(req Request, counters Counters) map[string]any {
 	vars := map[string]any{}
 	prov := map[string][]string{}

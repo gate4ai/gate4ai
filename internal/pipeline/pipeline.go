@@ -7,7 +7,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -769,9 +768,4 @@ func (p *Pipeline) maskString(s string) string {
 func num(v any) float64 {
 	f, _ := v.(float64)
 	return f
-}
-
-func toJSON(v any) json.RawMessage {
-	b, _ := json.Marshal(v)
-	return b
 }

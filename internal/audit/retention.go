@@ -194,15 +194,3 @@ func (j *Journal) coverLegacyRedactions() error {
 	_, err = j.redact(seqs, true)
 	return err
 }
-
-func minPositive(a, b time.Duration) time.Duration {
-	switch {
-	case a <= 0:
-		return b
-	case b <= 0:
-		return a
-	case a < b:
-		return a
-	}
-	return b
-}

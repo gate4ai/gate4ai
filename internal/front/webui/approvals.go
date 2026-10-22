@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"regexp"
 	"slices"
 	"sort"
@@ -609,9 +608,6 @@ func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any
 	}
 	return redirectErr(back, M("Unknown step"))
 }
-
-// pathBase — последняя часть пути для коротких подписей.
-func pathBase(p string) string { return path.Base(strings.ReplaceAll(p, `\`, "/")) }
 
 // lowerFirst — «Append to a file» → «append to a file» (внутри фразы).
 func lowerFirst(s string) string {
