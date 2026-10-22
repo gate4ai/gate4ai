@@ -201,12 +201,7 @@ func ClassRank(class string) int {
 
 // CallsAction — действие a объявило подвызов target.action.
 func (a Action) CallsAction(target, action string) bool {
-	for _, c := range a.Calls {
-		if c == target+"."+action {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(a.Calls, target+"."+action)
 }
 
 // Summary — возможности и подвызовы действий человеческим языком: то, на что
@@ -404,15 +399,9 @@ func (m *Manifest) Validate() error {
 				return fmt.Errorf("manifest %s.%s: bad or duplicate call %q (want <connector>.<action>)", m.Connector, a.Name, c)
 			}
 			seenCall[c] = true
-			declared := false
-			for _, sc := range m.Capabilities.Services {
-				if sc.Target == target {
-					for _, x := range sc.Actions {
-						declared = declared || x == action
-					}
-				}
-			}
-			if !declared {
+			if !slices.ContainsFunc(m.Capabilities.Services, func(sc ServiceCap) bool {
+				return sc.Target == target && slices.Contains(sc.Actions, action)
+			}) {
 				return fmt.Errorf("manifest %s.%s: call %s is not declared in capabilities.services", m.Connector, a.Name, c)
 			}
 		}
@@ -428,14 +417,7 @@ var Platforms = map[string]bool{"linux/amd64": true, "linux/arm64": true, "darwi
 	"windows/amd64": true, "windows/arm64": true}
 
 // IsService — действие доступно другим коннекторам через service_call.
-func (m *Manifest) IsService(action string) bool {
-	for _, s := range m.Services {
-		if s == action {
-			return true
-		}
-	}
-	return false
-}
+func (m *Manifest) IsService(action string) bool { return slices.Contains(m.Services, action) }
 
 // ArgError — ошибка нормализации аргументов (отдаётся агенту как invalid_arguments).
 type ArgError struct{ Msg string }
@@ -454,8 +436,6 @@ func (a Action) JSONSchema() map[string]any { return a.InputSchema.JSONSchema() 
 
 // ArgNames — имена аргументов верхнего уровня.
 func (a Action) ArgNames() []string { return a.InputSchema.Names() }
-
-func sortStrings(s []string) { sort.Strings(s) }
 
 // Origins — origin слота с подставленными настройками экземпляра (канонические).
 func (c CredentialSlot) Origins(settings map[string]any) []string {

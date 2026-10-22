@@ -86,23 +86,21 @@ func (p *Package) SignedBy() string {
 	return p.Sig.PublicKey
 }
 
-func sum(b []byte) string {
+// SHA256 — sha256 (hex): файла пакета (для индекса registry) и частей дайджеста.
+func SHA256(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
 
 // Digest — дайджест пакета.
 func Digest(manifestYAML, wasmBytes []byte) string {
-	return sum([]byte(digestPrefix + sum(manifestYAML) + "\n" + sum(wasmBytes)))
+	return SHA256([]byte(digestPrefix + SHA256(manifestYAML) + "\n" + SHA256(wasmBytes)))
 }
 
 // DigestNative — дайджест нативного пакета.
 func DigestNative(manifestYAML []byte, platform string, bin []byte) string {
-	return sum([]byte(nativeDigestPrefix + sum(manifestYAML) + "\n" + platform + "\n" + sum(bin)))
+	return SHA256([]byte(nativeDigestPrefix + SHA256(manifestYAML) + "\n" + platform + "\n" + SHA256(bin)))
 }
-
-// SHA256 — sha256 файла пакета (для индекса registry).
-func SHA256(b []byte) string { return sum(b) }
 
 // Pack собирает пакет; key nil — без подписи (только для локальной установки владельцем).
 func Pack(manifestYAML, wasmBytes []byte, key ed25519.PrivateKey) ([]byte, error) {

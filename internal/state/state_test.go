@@ -27,12 +27,12 @@ func TestCounters(t *testing.T) {
 	s, _ := openT(t)
 	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.Local)
 	s.Now = func() time.Time { return now.Add(-24 * time.Hour) }
-	s.RecordAction("a", "payments.pay_bill", "money", 10000) // вчера
+	s.ReserveAction("a", "payments.pay_bill", "money", 10000) // вчера
 	s.Now = func() time.Time { return now }
-	s.RecordAction("a", "payments.pay_bill", "money", 5000)
-	s.RecordAction("b", "payments.transfer", "money", 700)
-	s.RecordAction("a", "email.send", "external", 0)
-	s.RecordAction("a", "email.send", "external", 0)
+	s.ReserveAction("a", "payments.pay_bill", "money", 5000)
+	s.ReserveAction("b", "payments.transfer", "money", 700)
+	s.ReserveAction("a", "email.send", "external", 0)
+	s.ReserveAction("a", "email.send", "external", 0)
 	c := s.Counters()
 	if c.SpentToday() != 5700 {
 		t.Fatal(c.SpentToday())

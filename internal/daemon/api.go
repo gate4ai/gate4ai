@@ -92,28 +92,22 @@ func WithPrincipal(ctx context.Context, p auth.Principal) context.Context {
 // identify: на сокете владельца проверенный собеседник — владелец, если не
 // предъявил токен агента; на сокете агентов нужен токен, прав владельца нет.
 func (d *Daemon) identify(r *http.Request, ownerSock bool) (auth.Principal, error) {
-	tok := bearer(r)
-	if tok != "" {
-		agent, err := d.State.AgentByToken(tok)
-		if err != nil {
-			return auth.Principal{}, err
-		}
-		if _, ok := d.Config.Current().Agents[agent]; !ok {
-			return auth.Principal{}, fmt.Errorf("agent %q is not in the configuration", agent)
-		}
+	if bearer(r) != "" {
 		via := map[bool]string{true: "socket", false: "agent-socket"}[ownerSock]
 		// Клиент сообщает, кто он (gate4ai mcp — "mcp"); на права это не влияет.
 		seen := via
 		if c := r.Header.Get(ClientHeader); c == "mcp" || c == "cli" {
 			seen = c
 		}
-		d.State.Seen(agent, seen, tok)
+		agent, err := d.tokenAgent(r, seen)
+		if err != nil {
+			return auth.Principal{}, err
+		}
 		return auth.AgentVia(agent, via), nil
 	}
 	if ownerSock {
 		if _, ok := ipc.PeerFrom(r.Context()); ok {
-			p := auth.OwnerVia("socket")
-			return p, nil
+			return auth.OwnerVia("socket"), nil
 		}
 	}
 	return auth.Principal{}, errors.New("authentication required: pass an agent token (GATE4AI_TOKEN)")
@@ -159,10 +153,7 @@ func readJSON(r *http.Request, v any) error {
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.UseNumber()
-	if err := dec.Decode(v); err != nil {
-		return err
-	}
-	return nil
+	return dec.Decode(v)
 }
 
 // numbersToFloat приводит json.Number к float64 (для аргументов действий).
@@ -596,8 +587,8 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 			writeErr(w, 400, "bad_request", err.Error())
 			return
 		}
-		if p.Via == "https" && wait > maxPublicWait {
-			wait = maxPublicWait
+		if p.Via == "https" {
+			wait = min(wait, maxPublicWait)
 		}
 		args, _ := numbersToFloat(map[string]any(req.Args)).(map[string]any)
 		res := d.Pipeline.Execute(r.Context(), pipeline.Call{Agent: agent, Action: req.Action, Args: args, Wait: wait})
@@ -611,8 +602,8 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 			return
 		}
 		wait, _ := config.ParseDuration(r.URL.Query().Get("wait"))
-		if p.Via == "https" && wait > maxPublicWait {
-			wait = maxPublicWait // публичный адрес: соединение не держится дольше
+		if p.Via == "https" {
+			wait = min(wait, maxPublicWait) // публичный адрес: соединение не держится дольше
 		}
 		if wait > 0 {
 			writeJSON(w, 200, d.Pipeline.WaitFor(r.Context(), id, wait))

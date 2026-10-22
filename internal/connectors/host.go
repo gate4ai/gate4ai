@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
@@ -19,9 +20,7 @@ import (
 
 // Client — то, чем daemon пользуется для вызова коннектора.
 type Client interface {
-	Manifest() manifest.Manifest
-	Execute(ctx context.Context, req abi.ExecRequest) (abi.ExecResult, error)
-	Verify(ctx context.Context, req abi.VerifyRequest) (abi.VerifyResult, error)
+	Connector
 	Close() error
 }
 
@@ -151,18 +150,14 @@ func (r *Registry) Manifests() []manifest.Manifest {
 
 // Lookup находит действие "connector.action".
 func (r *Registry) Lookup(full string) (Client, manifest.Action, bool) {
-	for i := 0; i < len(full); i++ {
-		if full[i] == '.' {
-			c, ok := r.Get(full[:i])
-			if !ok {
-				return nil, manifest.Action{}, false
-			}
-			m := c.Manifest()
-			a, ok := m.Find(full[i+1:])
-			return c, a, ok
-		}
+	name, act, ok := strings.Cut(full, ".")
+	c, found := r.Get(name)
+	if !ok || !found {
+		return nil, manifest.Action{}, false
 	}
-	return nil, manifest.Action{}, false
+	m := c.Manifest()
+	a, ok := m.Find(act)
+	return c, a, ok
 }
 
 // Catalog — аргументы всех действий для проверки условий политик.

@@ -177,7 +177,8 @@ func gateBinary() string {
 		name += ".exe"
 	}
 	if self, err := os.Executable(); err == nil {
-		if p := filepath.Join(filepath.Dir(self), name); fileExists(p) {
+		p := filepath.Join(filepath.Dir(self), name)
+		if _, err := os.Stat(p); err == nil {
 			return p
 		}
 	}
@@ -185,9 +186,4 @@ func gateBinary() string {
 		return p
 	}
 	return name
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }

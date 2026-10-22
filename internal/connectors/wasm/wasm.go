@@ -308,10 +308,6 @@ func (c *Connector) trap(ctx context.Context, err error, stderr *limitedBuffer) 
 	return abi.Errorf(abi.CodeConnector, "connector %s crashed: %s", c.man.Connector, msg)
 }
 
-func (c *Connector) dispatcher(ctx context.Context, settings map[string]any) (*hostfuncs.Dispatcher, error) {
-	return c.e.Dispatcher(ctx, c.man, c.limits, settings)
-}
-
 // Dispatcher — функции хоста для одного вызова коннектора m (WASM, встроенного
 // или нативного): возможности манифеста с настройками экземпляра и службы хоста.
 func (e *Engine) Dispatcher(ctx context.Context, m manifest.Manifest, lim manifest.Limits, settings map[string]any) (*hostfuncs.Dispatcher, error) {
@@ -340,36 +336,35 @@ func (e *Engine) Dispatcher(ctx context.Context, m manifest.Manifest, lim manife
 // Manifest — манифест пакета (совпадает с манифестом модуля).
 func (c *Connector) Manifest() manifest.Manifest { return c.man }
 
-// Execute исполняет действие в новом экземпляре модуля.
-func (c *Connector) Execute(ctx context.Context, req abi.ExecRequest) (abi.ExecResult, error) {
-	var res abi.ExecResult
-	d, err := c.dispatcher(ctx, req.Settings)
+// run — экспорт export с запросом req в новом экземпляре модуля; ответ в out,
+// доказательства функций хоста — в результате.
+func (c *Connector) run(ctx context.Context, export string, settings map[string]any, req, out any) ([]abi.EvidenceItem, error) {
+	d, err := c.e.Dispatcher(ctx, c.man, c.limits, settings)
 	if err != nil {
-		return res, err
+		return nil, err
 	}
 	defer d.Close()
 	in, _ := json.Marshal(req)
-	if err := c.invoke(ctx, abi.ExportExecute, d, in, &res); err != nil {
-		return res, err
+	if err := c.invoke(ctx, export, d, in, out); err != nil {
+		return nil, err
 	}
-	res.Evidence = append(res.Evidence, d.Evidence()...)
-	return res, nil
+	return d.Evidence(), nil
+}
+
+// Execute исполняет действие в новом экземпляре модуля.
+func (c *Connector) Execute(ctx context.Context, req abi.ExecRequest) (abi.ExecResult, error) {
+	var res abi.ExecResult
+	ev, err := c.run(ctx, abi.ExportExecute, req.Settings, req, &res)
+	res.Evidence = append(res.Evidence, ev...)
+	return res, err
 }
 
 // Verify проверяет результат в новом экземпляре модуля.
 func (c *Connector) Verify(ctx context.Context, req abi.VerifyRequest) (abi.VerifyResult, error) {
 	var res abi.VerifyResult
-	d, err := c.dispatcher(ctx, req.Settings)
-	if err != nil {
-		return res, err
-	}
-	defer d.Close()
-	in, _ := json.Marshal(req)
-	if err := c.invoke(ctx, abi.ExportVerify, d, in, &res); err != nil {
-		return res, err
-	}
-	res.Evidence = append(res.Evidence, d.Evidence()...)
-	return res, nil
+	ev, err := c.run(ctx, abi.ExportVerify, req.Settings, req, &res)
+	res.Evidence = append(res.Evidence, ev...)
+	return res, err
 }
 
 // Close выгружает модуль.

@@ -32,12 +32,11 @@ type Journal struct {
 	priv     ed25519.PrivateKey
 	Evidence *Evidence
 
-	mu        sync.Mutex
-	every     int
-	witness   Witness
-	now       func() time.Time
-	lastCPAt  time.Time
-	onReceipt []func(Entry)
+	mu       sync.Mutex
+	every    int
+	witness  Witness
+	now      func() time.Time
+	lastCPAt time.Time
 }
 
 // Entry — квитанция с её хэшем.
@@ -160,13 +159,6 @@ func (j *Journal) Close() error { return j.db.Close() }
 // PublicKey — публичный ключ устройства (Ed25519).
 func (j *Journal) PublicKey() ed25519.PublicKey { return j.priv.Public().(ed25519.PublicKey) }
 
-// OnReceipt подписывает на новые квитанции (Web UI, трей).
-func (j *Journal) OnReceipt(f func(Entry)) {
-	j.mu.Lock()
-	j.onReceipt = append(j.onReceipt, f)
-	j.mu.Unlock()
-}
-
 // SetWitness задаёт свидетеля (relay).
 func (j *Journal) SetWitness(w Witness) {
 	j.mu.Lock()
@@ -175,9 +167,7 @@ func (j *Journal) SetWitness(w Witness) {
 }
 
 // NewID — идентификатор квитанции (его можно задать до записи: вложенные вызовы ссылаются на него).
-func NewID() string { return newID() }
-
-func newID() string {
+func NewID() string {
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)
 	return "r_" + hex.EncodeToString(b)
@@ -223,7 +213,7 @@ func (j *Journal) Append(r *Receipt) (string, error) {
 	r.Seq = seq + 1
 	r.PrevHash = prev
 	if r.ID == "" {
-		r.ID = newID()
+		r.ID = NewID()
 	}
 	if r.TS.IsZero() {
 		r.TS = j.now()
@@ -260,35 +250,18 @@ func (j *Journal) Append(r *Receipt) (string, error) {
 	if r.Seq%int64(j.every) == 0 {
 		cp, cpErr = j.checkpointLocked()
 	}
-	subs := append([]func(Entry){}, j.onReceipt...)
 	w := j.witness
 	j.mu.Unlock()
 	// Свидетель (HTTP к relay) — вне мьютекса: запись журнала его не ждёт.
 	j.witnessCP(w, cp)
-	for _, f := range subs {
-		f(Entry{Receipt: *r, Hash: hash})
-	}
 	return hash, cpErr
 }
 
 // OpenIntents — квитанции-намерения без итоговой квитанции: исполнение
 // прервала остановка daemon (восстановление при старте).
 func (j *Journal) OpenIntents() ([]Entry, error) {
-	rows, err := j.db.Query(`SELECT seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash FROM receipts r
+	return j.query(`SELECT `+entryCols+` FROM receipts r
 		WHERE kind=? AND NOT EXISTS (SELECT 1 FROM receipts f WHERE f.intent=r.id) ORDER BY seq`, kindIntent)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Entry
-	for rows.Next() {
-		e, err := j.scan(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
 }
 
 // Filter — выборка из журнала.
@@ -304,7 +277,7 @@ type Filter struct {
 
 // List возвращает квитанции по фильтру.
 func (j *Journal) List(f Filter) ([]Entry, error) {
-	q := `SELECT seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash FROM receipts WHERE 1=1`
+	q := `SELECT ` + entryCols + ` FROM receipts WHERE 1=1`
 	var args []any
 	if !f.All {
 		q += ` AND kind != 'intent'`
@@ -337,6 +310,11 @@ func (j *Journal) List(f Filter) ([]Entry, error) {
 	if f.Limit > 0 {
 		q += fmt.Sprintf(` LIMIT %d`, f.Limit)
 	}
+	return j.query(q, args...)
+}
+
+// query — квитанции по запросу SELECT entryCols.
+func (j *Journal) query(q string, args ...any) ([]Entry, error) {
 	rows, err := j.db.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -355,23 +333,17 @@ func (j *Journal) List(f Filter) ([]Entry, error) {
 
 type scanner interface{ Scan(...any) error }
 
+// entryCols — колонки квитанции для scan и scanIndex.
+const entryCols = `seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash`
+
+// scan — квитанция с расшифрованным телом (отредактированная — только индекс).
 func (j *Journal) scan(s scanner) (Entry, error) {
-	var (
-		seq, ts                                int64
-		id, hash, agent, action, class, effect string
-		prev                                   string
-		body                                   []byte
-		red                                    int
-	)
-	if err := s.Scan(&seq, &id, &hash, &body, &red, &ts, &agent, &action, &class, &effect, &prev); err != nil {
-		return Entry{}, err
+	e, body, err := scanIndex(s)
+	if err != nil || e.Redacted {
+		return e, err
 	}
-	e := Entry{Hash: hash, Redacted: red != 0}
-	if e.Redacted {
-		e.Receipt = Receipt{Seq: seq, ID: id, TS: time.Unix(0, ts).UTC(), Agent: agent, Action: action, Class: class,
-			Decision: Decision{Effect: effect}, PrevHash: prev}
-		return e, nil
-	}
+	id := e.Receipt.ID
+	e.Receipt = Receipt{}
 	plain, err := j.open(id, body)
 	if err != nil {
 		return Entry{}, fmt.Errorf("receipt %s: decrypt: %w", id, err)
@@ -382,20 +354,20 @@ func (j *Journal) scan(s scanner) (Entry, error) {
 	return e, nil
 }
 
-// scanIndex — квитанция только по колонкам индекса (без расшифровки тела).
-func (j *Journal) scanIndex(s scanner) (Entry, error) {
+// scanIndex — квитанция только по колонкам индекса (без расшифровки) и её
+// зашифрованное тело.
+func scanIndex(s scanner) (Entry, []byte, error) {
 	var (
-		seq, ts                                int64
-		id, hash, agent, action, class, effect string
-		prev                                   string
-		body                                   []byte
-		red                                    int
+		seq, ts                                      int64
+		id, hash, agent, action, class, effect, prev string
+		body                                         []byte
+		red                                          int
 	)
 	if err := s.Scan(&seq, &id, &hash, &body, &red, &ts, &agent, &action, &class, &effect, &prev); err != nil {
-		return Entry{}, err
+		return Entry{}, nil, err
 	}
 	return Entry{Hash: hash, Redacted: red != 0, Receipt: Receipt{Seq: seq, ID: id, TS: time.Unix(0, ts).UTC(), Agent: agent, Action: action,
-		Class: class, Decision: Decision{Effect: effect}, PrevHash: prev}}, nil
+		Class: class, Decision: Decision{Effect: effect}, PrevHash: prev}}, body, nil
 }
 
 // ErrNotFound — квитанция не найдена.
@@ -407,30 +379,21 @@ func (j *Journal) Find(key string) (Entry, error) {
 	if key == "" {
 		return Entry{}, ErrNotFound
 	}
-	const cols = `SELECT seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash FROM receipts `
-	var rows *sql.Rows
+	const cols = `SELECT ` + entryCols + ` FROM receipts `
+	var found []Entry
 	var err error
 	if strings.HasPrefix(key, "r_") {
-		rows, err = j.db.Query(cols+`WHERE id=?`, key)
+		found, err = j.query(cols+`WHERE id=?`, key)
 	} else {
 		if len(key) < 6 || strings.Trim(strings.ToLower(key), "0123456789abcdef") != "" {
 			return Entry{}, fmt.Errorf("hash prefix must be at least 6 hex characters")
 		}
 		k := strings.ToLower(key) + "%"
 		// По хэшу превью находится итоговая квитанция, не намерение того же действия.
-		rows, err = j.db.Query(cols+`WHERE hash LIKE ? OR (preview_hash LIKE ? AND kind != 'intent') LIMIT 2`, k, k)
+		found, err = j.query(cols+`WHERE hash LIKE ? OR (preview_hash LIKE ? AND kind != 'intent') LIMIT 2`, k, k)
 	}
 	if err != nil {
 		return Entry{}, err
-	}
-	defer rows.Close()
-	var found []Entry
-	for rows.Next() {
-		e, err := j.scan(rows)
-		if err != nil {
-			return Entry{}, err
-		}
-		found = append(found, e)
 	}
 	switch len(found) {
 	case 0:

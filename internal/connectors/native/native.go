@@ -254,7 +254,8 @@ func (p *Process) call(ctx context.Context, method string, settings map[string]a
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
 			return nil, abi.Errorf(abi.CodeLimit, "connector %s: time limit %ds exceeded", p.man.Connector, lim.TimeoutS)
 		case errors.Is(ctx.Err(), context.Canceled):
-			return nil, cancelled(p.man.Connector)
+			// Отменил тот, кто начал вызов (агент прервал CLI, закрылся HTTP-запрос): коннектор не падал.
+			return nil, abi.Errorf(abi.CodeCancelled, "connector %s: the call was cancelled because the request that started it ended", p.man.Connector)
 		}
 		return nil, abi.Errorf(abi.CodeConnector, "connector %s crashed: %v", p.man.Connector, err)
 	}
@@ -423,10 +424,4 @@ func BuildGo(ctx context.Context, srcDir, platform, out string) error {
 		return fmt.Errorf("go build %s for %s: %v\n%s", srcDir, platform, err, b)
 	}
 	return nil
-}
-
-// cancelled — вызов отменён тем, кто его начал (агент прервал CLI, закрылся
-// HTTP-запрос): коннектор не падал.
-func cancelled(name string) error {
-	return abi.Errorf(abi.CodeCancelled, "connector %s: the call was cancelled because the request that started it ended", name)
 }

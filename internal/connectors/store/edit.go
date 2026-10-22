@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -49,12 +49,7 @@ func capsMatch(m manifest.Manifest, caps []string) bool {
 // Для CI registry: pull request не пройдёт с записью, которой не соответствует
 // опубликованный пакет.
 func VerifyPackages(ctx context.Context, ix *registry.Index, base string) (checked int, errs []string) {
-	names := make([]string, 0, len(ix.Connectors))
-	for n := range ix.Connectors {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(ix.Connectors)) {
 		e := ix.Connectors[name]
 		for _, rel := range e.Versions {
 			if _, err := FetchRelease(ctx, base, name, e.Publisher, rel, ix.Publishers[e.Publisher], ""); err != nil {
@@ -114,10 +109,8 @@ func AddRelease(ix *registry.Index, publisher string, p PackInfo, url string, me
 	} else if e.Publisher != publisher {
 		return fmt.Errorf("connector %s belongs to publisher %s", p.Connector, e.Publisher)
 	}
-	for _, r := range e.Versions {
-		if r.Version == p.Version {
-			return fmt.Errorf("connector %s %s is already in the index (versions are immutable; publish a new version)", p.Connector, p.Version)
-		}
+	if slices.ContainsFunc(e.Versions, func(r registry.Release) bool { return r.Version == p.Version }) {
+		return fmt.Errorf("connector %s %s is already in the index (versions are immutable; publish a new version)", p.Connector, p.Version)
 	}
 	e.Versions = append(e.Versions, registry.Release{Version: p.Version, URL: url, SHA256: p.SHA256, Digest: p.Digest, Capabilities: nonNil(p.Capabilities)})
 	ix.Publishers[publisher] = pub

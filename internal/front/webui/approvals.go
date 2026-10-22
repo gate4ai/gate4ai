@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -186,15 +186,10 @@ func (u *UI) approvalView(l string, a *state.Approval) approvalView {
 			used[k] = true
 		}
 	}
-	keys := make([]string, 0, len(a.Args))
-	for k := range a.Args {
+	for _, k := range slices.Sorted(maps.Keys(a.Args)) {
 		if !used[k] {
-			keys = append(keys, k)
+			v.Args = append(v.Args, argKV{k, clip(argString(a.Args[k]), 300)})
 		}
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v.Args = append(v.Args, argKV{k, clip(argString(a.Args[k]), 300)})
 	}
 	if a.Decision.Default {
 		v.Why = M("There is no rule for this, so “%s” actions ask you.", Word(or(classWords[a.Class], a.Class))).In(l)
@@ -215,20 +210,18 @@ func (u *UI) approvalViews(l string, as []*state.Approval) []approvalView {
 	return out
 }
 
-func (u *UI) approvalsPage(m mount) func(r *http.Request) (string, map[string]any, error) {
-	return func(r *http.Request) (string, map[string]any, error) {
-		l := u.lang(r)
-		pend, err := u.D.State.ListApprovals(state.Pending, 50)
-		status := r.URL.Query().Get("status")
-		recent, _ := u.D.State.ListApprovals(status, 50)
-		recent = slices.DeleteFunc(recent, func(a *state.Approval) bool { return a.Status == state.Pending })
-		data := map[string]any{"Pending": u.approvalViews(l, pend), "Recent": u.approvalViews(l, recent), "Status": status, "Questions": u.D.Questions()}
-		cfg := u.D.Config.Current()
-		data["Timeout"] = timeoutWord(cfg.Approvals.Timeout.D())
-		data["TelegramSet"] = cfg.Approvals.Telegram != nil
-		data["PhoneOK"] = cfg.ChannelOn("telegram") || cfg.ChannelOn("webpush")
-		return "approvals", data, err
-	}
+func (u *UI) approvalsPage(r *http.Request) (string, map[string]any, error) {
+	l := u.lang(r)
+	pend, err := u.D.State.ListApprovals(state.Pending, 50)
+	status := r.URL.Query().Get("status")
+	recent, _ := u.D.State.ListApprovals(status, 50)
+	recent = slices.DeleteFunc(recent, func(a *state.Approval) bool { return a.Status == state.Pending })
+	data := map[string]any{"Pending": u.approvalViews(l, pend), "Recent": u.approvalViews(l, recent), "Status": status, "Questions": u.D.Questions()}
+	cfg := u.D.Config.Current()
+	data["Timeout"] = timeoutWord(cfg.Approvals.Timeout.D())
+	data["TelegramSet"] = cfg.Approvals.Telegram != nil
+	data["PhoneOK"] = cfg.ChannelOn("telegram") || cfg.ChannelOn("webpush")
+	return "approvals", data, err
 }
 
 // decide — решение по запросу; канал в квитанции различает локальный и удалённый вход.
@@ -322,10 +315,7 @@ func (u *UI) allowAlways(a *state.Approval) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if warn := u.overridden(prof, a.Action, config.EffectAllow, a.ID); warn != nil {
-		return id, warn
-	}
-	return id, nil
+	return id, u.overridden(prof, a.Action, config.EffectAllow, a.ID)
 }
 
 // resolvedText — кто и как решил запрос: «bot → notes.append: allowed in Telegram, just now».
@@ -574,7 +564,7 @@ func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any
 		}
 		users, err := u.Channels.TelegramWriters(ctx, tok)
 		r.URL.RawQuery = url.Values{"for": {r.PostForm.Get("for")}}.Encode()
-		data, _ := func() (map[string]any, error) { _, d, e := u.telegramPage(r); return d, e }()
+		_, data, _ := u.telegramPage(r)
 		data["page"] = "telegram"
 		data["Users"] = users
 		data["Searched"] = true
@@ -588,12 +578,7 @@ func (u *UI) telegramStep(w http.ResponseWriter, r *http.Request) map[string]any
 			return redirectErr(back, M("The Telegram ID must be a number"))
 		}
 		if err := u.edit("telegram approvals", func(c *config.Config) error {
-			t := &config.Telegram{Token: "@telegram.bot", OwnerID: id}
-			if c.Approvals.Telegram != nil {
-				t.Webhook = c.Approvals.Telegram.Webhook
-			}
-			t.Webhook = r.PostForm.Get("webhook") == "1"
-			c.Approvals.Telegram = t
+			c.Approvals.Telegram = &config.Telegram{Token: "@telegram.bot", OwnerID: id, Webhook: r.PostForm.Get("webhook") == "1"}
 			c.SetChannel("telegram", true)
 			return nil
 		}); err != nil {

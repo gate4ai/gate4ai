@@ -130,8 +130,6 @@ func (p *Proxy) transport() *http.Transport {
 		p.tr = &http.Transport{
 			DialContext:         func(ctx context.Context, _, addr string) (net.Conn, error) { return p.dial(ctx, addr) },
 			TLSClientConfig:     cfg,
-			Proxy:               nil,
-			ForceAttemptHTTP2:   false,
 			MaxIdleConnsPerHost: 8,
 			IdleConnTimeout:     90 * time.Second,
 			TLSHandshakeTimeout: 30 * time.Second,
@@ -213,14 +211,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	host, port := splitHostPort(r.URL.Host, 80)
 	rec := Record{Agent: agent, Host: host, Port: port, Method: r.Method}
-	allow, reason := p.Decide(r.Context(), agent, host, port)
-	if !allow {
-		rec.Decision, rec.Reason = "deny", reason
-		p.log(rec)
-		http.Error(w, "denied_by_policy: egress to "+host+" is not allowed ("+reason+")", http.StatusForbidden)
+	if !p.allowed(w, r, &rec) {
 		return
 	}
-	rec.Decision = "allow"
 	// Обычный HTTP идёт по сети открытым текстом: секрет сюда не подставляется
 	// никогда, а заглушка домена с подстановкой — отказ (агент ошибся схемой).
 	if ph := placeholderIn(r, p.injections(run, host, 443)); ph != "" {
@@ -248,6 +241,19 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	n, _ := io.Copy(w, resp.Body)
 	rec.Down = n
 	p.log(rec)
+}
+
+// allowed — решение по домену записи rec; при отказе — запись в журнал и 403.
+func (p *Proxy) allowed(w http.ResponseWriter, r *http.Request, rec *Record) bool {
+	allow, reason := p.Decide(r.Context(), rec.Agent, rec.Host, rec.Port)
+	if !allow {
+		rec.Decision, rec.Reason = "deny", reason
+		p.log(*rec)
+		http.Error(w, "denied_by_policy: egress to "+rec.Host+" is not allowed ("+reason+")", http.StatusForbidden)
+		return false
+	}
+	rec.Decision = "allow"
+	return true
 }
 
 // placeholderIn — заглушка из injs где-либо в URL или заголовках запроса.
@@ -304,14 +310,9 @@ func (c countConn) Read(b []byte) (int, error) {
 func (p *Proxy) connect(w http.ResponseWriter, r *http.Request, agent, run string) {
 	host, port := splitHostPort(r.Host, 443)
 	rec := Record{Agent: agent, Host: host, Port: port, Method: "CONNECT"}
-	allow, reason := p.Decide(r.Context(), agent, host, port)
-	if !allow {
-		rec.Decision, rec.Reason = "deny", reason
-		p.log(rec)
-		http.Error(w, "denied_by_policy: egress to "+host+" is not allowed ("+reason+")", http.StatusForbidden)
+	if !p.allowed(w, r, &rec) {
 		return
 	}
-	rec.Decision = "allow"
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "hijack unsupported", 500)
@@ -504,6 +505,3 @@ type prefixConn struct {
 }
 
 func (c prefixConn) Read(b []byte) (int, error) { return c.r.Read(b) }
-
-// ErrDenied — соединение запрещено.
-var ErrDenied = errors.New("egress denied")

@@ -14,6 +14,7 @@
 package webui
 
 import (
+	"cmp"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -25,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -51,16 +53,9 @@ var funcs = template.FuncMap{
 		b, _ := json.MarshalIndent(v, "", "  ")
 		return string(b)
 	},
-	"join":   strings.Join,
-	"isCode": func(w string) bool { _, ok := DescribeWhen(w); return !ok },
-	"has": func(list []string, s string) bool {
-		for _, x := range list {
-			if x == s {
-				return true
-			}
-		}
-		return false
-	},
+	"join":      strings.Join,
+	"isCode":    func(w string) bool { _, ok := DescribeWhen(w); return !ok },
+	"has":       slices.Contains[[]string],
 	"accAnchor": AccountAnchor,
 	"secAnchor": SecretAnchor,
 	"inc":       func(i int) int { return i + 1 },
@@ -99,12 +94,8 @@ var titles = map[string]string{"overview": "Home", "approvals": "Approvals", "te
 	"policy_yaml": "YAML", "journal": "Journal", "receipt": "Journal entry", "vault": "Passwords and accounts", "settings": "Settings", "relay": "Internet access",
 	"remote_only": "Only on this computer"}
 
-func or(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
+// or — первое непустое.
+var or = cmp.Or[string]
 
 // agoIn — «3 min ago» на языке l (t — time.Time; нулевое — «never»).
 func agoIn(l string, v any) string {
@@ -289,7 +280,6 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		if req.Remote {
 			var err error
 			if link, err = u.RemoteLoginURL(); err != nil {
-				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(409)
 				code := "no_public_address"
 				if errors.Is(err, errRelayOffline) {
@@ -369,7 +359,7 @@ func (u *UI) handler(m mount) http.Handler {
 
 	// Удалённо: обзор, подтверждения, журнал (и подписка на push).
 	get("/{$}", u.overview(m))
-	get("/approvals", u.approvalsPage(m))
+	get("/approvals", u.approvalsPage)
 	mux.HandleFunc("GET "+b+"/approvals/live", u.livePending(m))
 	get("/journal", u.journal)
 	get("/journal/{hash}", u.receipt)
@@ -736,5 +726,3 @@ func localPath(to string) string {
 }
 
 var owner = auth.OwnerVia("webui")
-
-func urlq(s string) string { return template.URLQueryEscaper(s) }

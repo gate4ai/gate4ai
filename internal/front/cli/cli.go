@@ -10,9 +10,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +26,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/platform/paths"
 	"github.com/gate4ai/gate4ai/internal/platform/version"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
+	"golang.org/x/term"
 )
 
 // Env — окружение CLI (подменяется в тестах).
@@ -51,9 +54,10 @@ type Env struct {
 
 // DefaultEnv — реальное окружение процесса.
 func DefaultEnv() *Env {
-	errTTY := IsTerminal(os.Stderr)
+	tty := func(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
+	errTTY := tty(os.Stderr)
 	return &Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
-		Interactive: errTTY && IsTerminal(os.Stdin), StderrTTY: errTTY, StdoutTTY: IsTerminal(os.Stdout),
+		Interactive: errTTY && tty(os.Stdin), StderrTTY: errTTY, StdoutTTY: tty(os.Stdout),
 		Connect: func(token string) *Client {
 			if token != "" {
 				// Удалённый агент: daemon на другом компьютере, доступ по HTTPS.
@@ -72,6 +76,16 @@ func DefaultEnv() *Env {
 
 // Client — клиент к daemon с токеном из GATE4AI_TOKEN.
 func (e *Env) Client() *Client { return e.Connect(e.Getenv("GATE4AI_TOKEN")) }
+
+// call — запрос к daemon с выводом ответа JSON-ом.
+func (e *Env) call(ctx context.Context, c *Client, method, path string, body any) int {
+	var res any
+	if err := c.Do(ctx, method, path, body, &res); err != nil {
+		return e.fail(err)
+	}
+	e.printJSON(res)
+	return ExitOK
+}
 
 func (e *Env) printJSON(v any) {
 	enc := json.NewEncoder(e.Stdout)
@@ -145,7 +159,7 @@ func Run(ctx context.Context, e *Env, args []string) int {
 		return ExitOK
 	}
 	cmd, rest := args[0], args[1:]
-	if isCommand(cmd) && wantsHelp(cmd, rest) {
+	if isCommand(cmd) && wantsHelp(rest) {
 		return e.commandHelp(cmd)
 	}
 	if f, ok := e.Extra[cmd]; ok {
@@ -215,28 +229,16 @@ func Run(ctx context.Context, e *Env, args []string) int {
 	case "doctor":
 		return e.doctor(ctx)
 	case "egress":
-		var res any
-		if err := e.Client().Do(ctx, "GET", "/v1/egress/log?limit=200", nil, &res); err != nil {
-			return e.fail(err)
-		}
-		e.printJSON(res)
-		return ExitOK
+		return e.call(ctx, e.Client(), "GET", "/v1/egress/log?limit=200", nil)
 	}
 	return e.action(ctx, cmd, rest)
 }
 
-func isCommand(s string) bool {
-	for _, c := range commands {
-		if c == s {
-			return true
-		}
-	}
-	return false
-}
+func isCommand(s string) bool { return slices.Contains(commands, s) }
 
 // wantsHelp — среди аргументов встроенной команды есть --help / -h (до `--`:
 // после него — команда агента в `gate4ai run`).
-func wantsHelp(cmd string, rest []string) bool {
+func wantsHelp(rest []string) bool {
 	for _, a := range rest {
 		if a == "--" {
 			return false
@@ -608,9 +610,7 @@ func parseArgs(t skill.Tool, args []string) (map[string]any, callOpts, error) {
 			if err := json.Unmarshal([]byte(v), &m); err != nil {
 				return nil, o, fmt.Errorf("--json: %v", err)
 			}
-			for k, x := range m {
-				vals[k] = x
-			}
+			maps.Copy(vals, m)
 			continue
 		}
 		sch, ok := types[name]
@@ -834,10 +834,9 @@ func (e *Env) agents(ctx context.Context, args []string) int {
 		sub, args = args[0], args[1:]
 	}
 	c := e.Client()
-	var res any
-	var err error
 	switch sub {
 	case "list":
+		var res any
 		var l struct {
 			Agents map[string]any `json:"agents"`
 		}
@@ -857,28 +856,23 @@ func (e *Env) agents(ctx context.Context, args []string) int {
 			fmt.Fprintln(e.Stderr, "usage: gate4ai agents token <agent> [--label l]")
 			return ExitUsage
 		}
-		err = c.Do(ctx, "POST", "/v1/agents/"+name+"/token", map[string]string{"label": *label}, &res)
+		return e.call(ctx, c, "POST", "/v1/agents/"+name+"/token", map[string]string{"label": *label})
 	case "connect":
 		if len(args) != 1 {
 			fmt.Fprintln(e.Stderr, "usage: gate4ai agents connect <agent>   (one-time code for a remote MCP client)")
 			return ExitUsage
 		}
-		err = c.Do(ctx, "POST", "/v1/agents/"+args[0]+"/connect", nil, &res)
+		return e.call(ctx, c, "POST", "/v1/agents/"+args[0]+"/connect", nil)
 	case "revoke":
 		if len(args) != 1 {
 			fmt.Fprintln(e.Stderr, "usage: gate4ai agents revoke <agent>")
 			return ExitUsage
 		}
-		err = c.Do(ctx, "POST", "/v1/agents/"+args[0]+"/revoke", nil, &res)
+		return e.call(ctx, c, "POST", "/v1/agents/"+args[0]+"/revoke", nil)
 	default:
 		fmt.Fprintln(e.Stderr, "usage: gate4ai agents list | token <agent> [--label l] | connect <agent> | revoke <agent>")
 		return ExitUsage
 	}
-	if err != nil {
-		return e.fail(err)
-	}
-	e.printJSON(res)
-	return ExitOK
 }
 
 func (e *Env) policy(ctx context.Context, args []string) int {
@@ -910,12 +904,7 @@ func (e *Env) policy(ctx context.Context, args []string) int {
 		if err != nil {
 			return e.fail(err)
 		}
-		var res any
-		if err := c.Do(ctx, "PUT", "/v1/policy", map[string]string{"yaml": string(b), "comment": *msg}, &res); err != nil {
-			return e.fail(err)
-		}
-		e.printJSON(res)
-		return ExitOK
+		return e.call(ctx, c, "PUT", "/v1/policy", map[string]string{"yaml": string(b), "comment": *msg})
 	case "versions":
 		var res any
 		if err := c.Do(ctx, "GET", "/v1/policy/versions", nil, &res); err != nil {
@@ -929,12 +918,7 @@ func (e *Env) policy(ctx context.Context, args []string) int {
 			fmt.Fprintln(e.Stderr, "usage: gate4ai policy rollback <version>")
 			return ExitUsage
 		}
-		var res any
-		if err := c.Do(ctx, "POST", "/v1/policy/rollback", map[string]int{"version": n}, &res); err != nil {
-			return e.fail(err)
-		}
-		e.printJSON(res)
-		return ExitOK
+		return e.call(ctx, c, "POST", "/v1/policy/rollback", map[string]int{"version": n})
 	case "test":
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
 		fs.SetOutput(e.Stderr)
@@ -958,12 +942,7 @@ func (e *Env) policy(ctx context.Context, args []string) int {
 			}
 			body["yaml"] = string(b)
 		}
-		var res any
-		if err := c.Do(ctx, "POST", "/v1/policy/test", body, &res); err != nil {
-			return e.fail(err)
-		}
-		e.printJSON(res)
-		return ExitOK
+		return e.call(ctx, c, "POST", "/v1/policy/test", body)
 	}
 	fmt.Fprintln(e.Stderr, "usage: gate4ai policy show | set | versions | rollback | test")
 	return ExitUsage
@@ -1099,7 +1078,6 @@ func (e *Env) relay(ctx context.Context, args []string) int {
 	if len(args) > 0 {
 		sub, args = args[0], args[1:]
 	}
-	var res any
 	switch sub {
 	case "status":
 		var st map[string]any
@@ -1117,15 +1095,10 @@ func (e *Env) relay(ctx context.Context, args []string) int {
 		if fs.Parse(args) != nil {
 			return ExitUsage
 		}
-		if err := e.Client().Do(ctx, "POST", "/v1/relay/register", map[string]any{"url": *u, "ca_file": *ca, "self_signed": *self}, &res); err != nil {
-			return e.fail(err)
-		}
-	default:
-		fmt.Fprintln(e.Stderr, "usage: gate4ai relay register --url https://relay.gate4.ai | status")
-		return ExitUsage
+		return e.call(ctx, e.Client(), "POST", "/v1/relay/register", map[string]any{"url": *u, "ca_file": *ca, "self_signed": *self})
 	}
-	e.printJSON(res)
-	return ExitOK
+	fmt.Fprintln(e.Stderr, "usage: gate4ai relay register --url https://relay.gate4.ai | status")
+	return ExitUsage
 }
 
 func (e *Env) ui(ctx context.Context, args []string) int {

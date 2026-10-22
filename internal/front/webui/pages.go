@@ -3,6 +3,7 @@
 package webui
 
 import (
+	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -46,7 +47,7 @@ func withParam(to, k, v string) string {
 	if strings.Contains(path, "?") {
 		sep = "&"
 	}
-	path += sep + k + "=" + urlq(v)
+	path += sep + k + "=" + template.URLQueryEscaper(v)
 	if hasFrag {
 		path += "#" + frag
 	}

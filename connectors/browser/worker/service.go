@@ -169,7 +169,7 @@ func (s *Service) Acquire(ctx context.Context, st Settings, wait time.Duration) 
 		return nil, err
 	}
 	x.RedactParams = st.RedactParams
-	return &Session{s: s, x: x, max: st.MaxTextChars}, nil
+	return &Session{Executor: x, s: s, max: st.MaxTextChars}, nil
 }
 
 // Close закрывает движок и Chrome, который воркер запустил сам (чужой Chrome
@@ -196,10 +196,11 @@ func (s *Service) Close() error {
 	return nil
 }
 
-// Session — страница одного вызова.
+// Session — страница одного вызова: действия Executor (Act, Extract, Network,
+// Login…) и освобождение страницы.
 type Session struct {
+	*Executor
 	s    *Service
-	x    *Executor
 	max  int
 	done bool
 }
@@ -207,12 +208,12 @@ type Session struct {
 // Open переходит по URL; sites — разрешённые сайты, итоговый адрес после
 // редиректов тоже проверяется.
 func (ss *Session) Open(ctx context.Context, url string, sites domain.Sites) (Page, error) {
-	ss.x.Sites = sites
-	final, err := ss.x.Open(ctx, url)
+	ss.Executor.Sites = sites
+	final, err := ss.Executor.Open(ctx, url)
 	if err != nil {
 		return Page{}, err
 	}
-	title, _ := ss.x.Engine.Title(ctx)
+	title, _ := ss.Executor.Engine.Title(ctx)
 	return Page{URL: final, Title: title}, nil
 }
 
@@ -221,72 +222,22 @@ func (ss *Session) Observe(ctx context.Context, max int) (Page, error) {
 	if max <= 0 || max > ss.max {
 		max = ss.max
 	}
-	u, title, text, trunc, err := ss.x.Observe(ctx, max)
+	u, title, text, trunc, err := ss.Executor.Observe(ctx, max)
 	return Page{URL: u, Title: title, Text: text, Truncated: trunc}, err
-}
-
-// Extract — данные со страницы по инструкции.
-func (ss *Session) Extract(ctx context.Context, instruction string) (any, error) {
-	return ss.x.Extract(ctx, instruction)
 }
 
 // ScreenshotElement — снимок элемента по CSS-селектору.
 func (ss *Session) ScreenshotElement(ctx context.Context, selector string) ([]byte, error) {
-	return ss.x.Screenshot(ctx, selector)
-}
-
-// Elements — интерактивные элементы страницы с селекторами для Act.
-func (ss *Session) Elements(ctx context.Context, root string) ([]Element, error) {
-	return ss.x.Elements(ctx, root)
-}
-
-// TextIn — текст элемента по селектору.
-func (ss *Session) TextIn(ctx context.Context, sel string) (string, error) {
-	return ss.x.TextIn(ctx, sel)
-}
-
-// Outline — структура страницы или элемента root.
-func (ss *Session) Outline(ctx context.Context, root string) ([]Node, error) {
-	return ss.x.Outline(ctx, root)
-}
-
-// WaitFor ждёт видимый элемент по селектору и/или с текстом.
-func (ss *Session) WaitFor(ctx context.Context, sel, text string, timeoutMS int) error {
-	return ss.x.WaitFor(ctx, sel, text, timeoutMS)
-}
-
-// Network — запросы страницы к серверу (fetch / XHR); contains — фильтр по адресу.
-func (ss *Session) Network(ctx context.Context, contains string, all bool) ([]Request, error) {
-	return ss.x.Network(ctx, contains, all)
-}
-
-// Act — click / fill / press / wait по селектору; элемента нет — ErrNotFound.
-func (ss *Session) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
-	return ss.x.Act(ctx, r)
+	return ss.Executor.Screenshot(ctx, selector)
 }
 
 // SetLoginOrigins — origin страниц входа учёток вызывающего (разрешены вне сайтов).
-func (ss *Session) SetLoginOrigins(origins []string) { ss.x.LoginOrigins = origins }
-
-// Login — простой вход по форме учётки на открытой странице входа.
-func (ss *Session) Login(ctx context.Context, f LoginForm) (LoginResult, error) {
-	return ss.x.Login(ctx, f)
-}
-
-// CheckSecret — проверки fill_secret без ввода.
-func (ss *Session) CheckSecret(ctx context.Context, bind []string, f LoginField) (LoginResult, error) {
-	return ss.x.CheckSecret(ctx, bind, f)
-}
+func (ss *Session) SetLoginOrigins(origins []string) { ss.Executor.LoginOrigins = origins }
 
 // Present — на странице есть видимый элемент по селектору.
 func (ss *Session) Present(ctx context.Context, sel string) bool {
-	ok, err := ss.x.present(ctx, sel, "")
+	ok, err := ss.Executor.present(ctx, sel, "")
 	return err == nil && ok
-}
-
-// FillSecret — одно поле учётки на открытой странице входа (без отправки).
-func (ss *Session) FillSecret(ctx context.Context, bind []string, f LoginField) (LoginResult, error) {
-	return ss.x.FillSecret(ctx, bind, f)
 }
 
 // Release освобождает сессию.
@@ -295,7 +246,7 @@ func (ss *Session) Release() {
 		return
 	}
 	ss.done = true
-	ss.x.Sites, ss.x.LoginOrigins = domain.Sites{}, nil
+	ss.Executor.Sites, ss.Executor.LoginOrigins = domain.Sites{}, nil
 	<-ss.s.slotCh()
 }
 

@@ -72,11 +72,10 @@ func writeHandoff(u string) (string, error) {
 		return "", err
 	}
 	_ = os.Chmod(dir, 0o700)
-	if old, _ := filepath.Glob(filepath.Join(dir, "login-*.html")); len(old) > 0 {
-		for _, f := range old {
-			if fi, err := os.Stat(f); err == nil && time.Since(fi.ModTime()) > handoffTTL {
-				_ = os.Remove(f)
-			}
+	old, _ := filepath.Glob(filepath.Join(dir, "login-*.html"))
+	for _, f := range old {
+		if fi, err := os.Stat(f); err == nil && time.Since(fi.ModTime()) > handoffTTL {
+			_ = os.Remove(f)
 		}
 	}
 	f, err := os.CreateTemp(dir, "login-*.html")

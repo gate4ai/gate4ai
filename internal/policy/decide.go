@@ -4,7 +4,8 @@ package policy
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/gate4ai/gate4ai/internal/config"
 )
@@ -112,10 +113,7 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 		if d.Reason == "" {
 			d.Reason = fmt.Sprintf("rule %s: %s", d.RuleIDs[0], eff)
 		}
-		for o := range obl {
-			d.Obligations = append(d.Obligations, o)
-		}
-		sort.Strings(d.Obligations)
+		d.Obligations = slices.Sorted(maps.Keys(obl))
 		return d
 	}
 	if req.Nested {
@@ -149,9 +147,7 @@ func (e *Engine) activation(req Request, counters Counters) map[string]any {
 		prov[k] = append([]string{}, v...)
 	}
 	lists := map[string][]string{}
-	for k, v := range e.cfg.Lists {
-		lists[k] = v
-	}
+	maps.Copy(lists, e.cfg.Lists)
 	now := req.Now
 	vars["provenance"] = prov
 	vars["counters"] = map[string]float64{

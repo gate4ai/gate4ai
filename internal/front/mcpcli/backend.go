@@ -24,16 +24,14 @@ func (b ClientBackend) Tools(ctx context.Context) ([]mcp.Tool, error) {
 // Call — вызов действия или статуса.
 func (b ClientBackend) Call(ctx context.Context, action string, args map[string]any) (map[string]any, error) {
 	var res map[string]any
+	var err error
 	if action == "@status" {
 		id, _ := args["id"].(string)
 		wait, _ := args["wait"].(string)
-		err := b.C.Do(ctx, "GET", "/v1/status/"+url.PathEscape(id)+"?wait="+url.QueryEscape(wait), nil, &res)
-		if ae, ok := err.(*cli.APIError); ok {
-			return map[string]any{"status": "error", "code": ae.Code, "message": ae.Message}, nil
-		}
-		return res, err
+		err = b.C.Do(ctx, "GET", "/v1/status/"+url.PathEscape(id)+"?wait="+url.QueryEscape(wait), nil, &res)
+	} else {
+		err = b.C.Do(ctx, "POST", "/v1/call", map[string]any{"action": action, "args": args}, &res)
 	}
-	err := b.C.Do(ctx, "POST", "/v1/call", map[string]any{"action": action, "args": args}, &res)
 	if ae, ok := err.(*cli.APIError); ok {
 		return map[string]any{"status": "error", "code": ae.Code, "message": ae.Message}, nil
 	}

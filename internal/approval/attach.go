@@ -31,6 +31,14 @@ type switchable struct {
 const queueLen = 256
 
 func (s *switchable) set(n pipeline.Notifier) { s.mu.Lock(); s.n = n; s.mu.Unlock() }
+
+// setIf включает канал n, если on, иначе выключает.
+func (s *switchable) setIf(on bool, n pipeline.Notifier) {
+	if !on {
+		n = nil
+	}
+	s.set(n)
+}
 func (s *switchable) get() pipeline.Notifier {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -115,16 +123,8 @@ func Attach(ctx context.Context, d *daemon.Daemon, desktop *Desktop, telegramBas
 		for _, ch := range c.Approvals.Channels {
 			on[ch] = true
 		}
-		if on["desktop"] && desktop != nil {
-			desk.set(desktop)
-		} else {
-			desk.set(nil)
-		}
-		if on["webpush"] && push != nil {
-			pushSw.set(push)
-		} else {
-			pushSw.set(nil)
-		}
+		desk.setIf(on["desktop"] && desktop != nil, desktop)
+		pushSw.setIf(on["webpush"] && push != nil, push)
 		key, hook := "", ""
 		var token string
 		if t := c.Approvals.Telegram; on["telegram"] && t != nil {

@@ -7,8 +7,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -114,13 +116,8 @@ func (s *scrubber) walk(v any) any {
 		return s.text(t)
 	case map[string]any:
 		// По порядку ключей: одинаковые замены при каждом запуске.
-		keys := make([]string, 0, len(t))
-		for k := range t {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
 		out := map[string]any{}
-		for _, k := range keys {
+		for _, k := range slices.Sorted(maps.Keys(t)) {
 			out[s.text(k)] = s.walk(t[k])
 		}
 		return out
@@ -134,10 +131,7 @@ func (s *scrubber) walk(v any) any {
 
 func (s *scrubber) text(t string) string {
 	// Сначала длинные значения: «Иванов Иван» раньше «Иван».
-	keys := make([]string, 0, len(s.pairs))
-	for k := range s.pairs {
-		keys = append(keys, k)
-	}
+	keys := slices.Collect(maps.Keys(s.pairs))
 	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
 	for _, k := range keys {
 		if n := strings.Count(t, k); n > 0 {

@@ -47,9 +47,9 @@ var (
 	builds   = map[string]*built{}
 )
 
-// binary собирает пакет pkg модуля из ../<dir> один раз за прогон и
-// возвращает путь к бинарнику (общий для тестов: они его не меняют).
-func binary(t *testing.T, dir, pkg string) string {
+// binary собирает пакет pkg модуля (путь от корня репозитория) один раз за
+// прогон и возвращает путь к бинарнику (общий для тестов: они его не меняют).
+func binary(t *testing.T, pkg string) string {
 	t.Helper()
 	buildsMu.Lock()
 	b, ok := builds[pkg]
@@ -68,11 +68,8 @@ func binary(t *testing.T, dir, pkg string) string {
 			b.err = err
 			return
 		}
-		if dir == "gate4ai" {
-			dir = ""
-		}
 		cmd := exec.Command("go", "build", "-o", b.path, pkg)
-		cmd.Dir, cmd.Env = filepath.Join("..", dir), env
+		cmd.Dir, cmd.Env = "..", env
 		if out, err := cmd.CombinedOutput(); err != nil {
 			b.err = fmt.Errorf("build %s: %v\n%s", pkg, err, out)
 		}
@@ -83,13 +80,10 @@ func binary(t *testing.T, dir, pkg string) string {
 	return b.path
 }
 
-// src — абсолютный путь к каталогу репозитория ("" или "gate4ai" — корень,
-// иначе relay, connectors/mail, …).
+// src — абсолютный путь к каталогу репозитория ("" — корень, иначе relay,
+// connectors/mail, …).
 func src(t *testing.T, name string) string {
 	t.Helper()
-	if name == "gate4ai" {
-		name = ""
-	}
 	p, err := filepath.Abs(filepath.Join("..", name))
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +164,7 @@ func startGate(t *testing.T, extra ...string) *gate {
 		t.Skip("e2e builds binaries")
 	}
 	tmp := t.TempDir()
-	g := &gate{t: t, bin: binary(t, "gate4ai", "./cmd/gate4ai"), home: filepath.Join(tmp, "gate4ai-home"), user: filepath.Join(tmp, "user")}
+	g := &gate{t: t, bin: binary(t, "./cmd/gate4ai"), home: filepath.Join(tmp, "gate4ai-home"), user: filepath.Join(tmp, "user")}
 	os.MkdirAll(g.user, 0o755)
 	g.env = append(workEnv(t), "GATE4AI_HOME="+g.home, "HOME="+g.user)
 

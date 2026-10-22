@@ -19,6 +19,10 @@ var secretParam = regexp.MustCompile(`(?i)^(code|token|access_token|id_token|ref
 
 var urlInText = regexp.MustCompile(`https?://[^\s"'<>]+`)
 
+// MaskURLText — текст с *** вместо одноразовых кодов и токенов в адресах
+// (для уведомлений каналов подтверждения: Telegram, рабочий стол).
+func MaskURLText(s string) string { return maskURLs(s).(string) }
+
 // maskURLs заменяет значения секретных параметров во всех адресах внутри v
 // (строки, списки, объекты после JSON).
 func maskURLs(v any) any {

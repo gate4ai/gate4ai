@@ -5,8 +5,9 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -223,14 +224,7 @@ func (c *Config) Validate() Errors {
 	return es
 }
 
-func sortedKeys[V any](m map[string]V) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	sort.Strings(ks)
-	return ks
-}
+func sortedKeys[V any](m map[string]V) []string { return slices.Sorted(maps.Keys(m)) }
 
 // lineOf ищет строку YAML по пути "a.b[2].c"; возвращает строку ближайшего найденного узла.
 func lineOf(root *yaml.Node, path string) int {

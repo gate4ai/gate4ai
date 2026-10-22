@@ -219,7 +219,7 @@ Start it in another terminal: gate4ai daemon   — or run it at login: gate4ai s
 | P2 | Официальный магазин в начальной конфигурации | S2 | совместимо | `emptyConfig`, README |
 | P2 | Подсказка для `unauthorized`; код в README; отказ от согласия при установке коннектора | A2, S3 | совместимо | `Explain`, `consent` |
 | P2 | Сокет по запасным путям (с `XDG_RUNTIME_DIR` и без) | F2 | совместимо | `paths.FindOwnerSocket` |
-| P3 | Таблицы для человека: списки и состояние владельца, ошибки текстом | D1 | спецификация обновлена с согласия человека (2026-10-15) | если stdout — терминал (`IsTerminal`: ioctl TCGETS / TIOCGETA, GetConsoleMode); `--json`, `GATE4AI_OUTPUT=json\|table`; `output.go` |
+| P3 | Таблицы для человека: списки и состояние владельца, ошибки текстом | D1 | спецификация обновлена с согласия человека (2026-10-15) | если stdout — терминал (`term.IsTerminal` из golang.org/x/term: ioctl TCGETS / TIOCGETA, GetConsoleMode); `--json`, `GATE4AI_OUTPUT=json\|table`; `output.go` |
 | P3 | Язык трея | D4 | вне спецификации | русский при русской локали, иначе английский (как CLI); `GATE4AI_LANG` |
 
 Не сделано: вопрос «включить автозапуск? (Y/n)» в установщике (в `curl | sh` stdin занят скриптом), трей сразу после `service install` не запускается (может быть уже запущен руками). Вживую на macOS и Windows автозапуск не проверялся.
@@ -264,7 +264,7 @@ http://127.0.0.1:7431/login?t=…
 
 ### Как CLI отличает человека от скрипта
 
-По тому, куда подключены потоки (`IsTerminal`: `ioctl TCGETS` на Linux, `TIOCGETA` на macOS, `GetConsoleMode` на Windows; `/dev/null` терминалом не считается):
+По тому, куда подключены потоки (`term.IsTerminal` из golang.org/x/term: `ioctl TCGETS` на Linux, `TIOCGETA` на macOS, `GetConsoleMode` на Windows; `/dev/null` терминалом не считается):
 
 - **формат вывода** — по stdout: терминал — таблицы и текстовые ошибки; pipe или файл (`| jq`, `$(…)`, агенты, cron, CI) — JSON;
 - **подсказки** в stderr — только если stderr — терминал;

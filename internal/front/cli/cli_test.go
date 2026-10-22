@@ -59,7 +59,6 @@ profiles:
 type harness struct {
 	owner, agentSock string
 	out, errb        *bytes.Buffer
-	env              *Env
 }
 
 func start(t *testing.T) *harness {

@@ -160,7 +160,7 @@ func New(opt Options) (*Daemon, error) {
 	}
 	d.dropRevoked()
 	d.AddRoutes(d.connectorRoutes)
-	eng, _, err := d.compilePolicy(d.Config.Current())
+	eng, err := d.compilePolicy(d.Config.Current())
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func New(opt Options) (*Daemon, error) {
 		d.State.Now = opt.Now
 	}
 	d.Config.Subscribe(func(c *config.Config) {
-		e, _, err := d.compilePolicy(c)
+		e, err := d.compilePolicy(c)
 		if err != nil {
 			d.Log.Error("policy compile after config change", "err", err)
 			return
@@ -241,24 +241,21 @@ func (d *Daemon) validate(c *config.Config) config.Errors {
 			out = append(out, e)
 		}
 	}
-	if len(out) == 0 {
-		return nil
-	}
 	return out
 }
 
 // compilePolicy — движок политики по каталогу. Если имена аргументов в
 // условиях не сходятся с каталогом (коннектор удалён или не загрузился),
 // политика компилируется без каталога: такие условия для неизвестного
-// действия не вычисляются, а остальное работает. warn — что не сошлось
-// (видно владельцу в daemon status).
-func (d *Daemon) compilePolicy(c *config.Config) (*policy.Engine, string, error) {
+// действия не вычисляются, а остальное работает. Что не сошлось — в
+// PolicyWarning (видно владельцу в daemon status).
+func (d *Daemon) compilePolicy(c *config.Config) (*policy.Engine, error) {
 	e, err := policy.New(c, policy.Catalog(d.Registry.Catalog()))
 	warn := ""
 	if err != nil {
 		var err2 error
 		if e, err2 = policy.New(c, nil); err2 != nil {
-			return nil, "", err
+			return nil, err
 		}
 		warn = err.Error()
 		d.Log.Warn("policy compiled without the connector catalog", "err", err)
@@ -266,7 +263,7 @@ func (d *Daemon) compilePolicy(c *config.Config) (*policy.Engine, string, error)
 	d.mu.Lock()
 	d.policyWarn = warn
 	d.mu.Unlock()
-	return e, warn, nil
+	return e, nil
 }
 
 // PolicyWarning — почему политика скомпилирована без каталога ("" — всё сошлось).
@@ -364,9 +361,7 @@ func (d *Daemon) stopCh() chan struct{} {
 // ServeListener обслуживает API на слушателе: owner — сокет владельца.
 func (d *Daemon) ServeListener(l net.Listener, owner bool, errc chan<- error) *http.Server {
 	srv := &http.Server{Handler: d.Handler(owner), ConnContext: ipc.ConnContext, ReadHeaderTimeout: 10 * time.Second}
-	d.mu.Lock()
-	d.servers = append(d.servers, srv)
-	d.mu.Unlock()
+	d.TrackServer(srv)
 	go func() {
 		if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) && errc != nil {
 			errc <- err

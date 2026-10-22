@@ -248,7 +248,7 @@ func (e *Env) say(msg string) {
 // StartBackground запускает daemon в фоне и ждёт ответа (трей); bin — gate4ai.
 func StartBackground(ctx context.Context, bin string) error {
 	e := DefaultEnv()
-	e.Stdout, e.Stderr, e.StderrTTY, e.StartBinary = discard{}, discard{}, false, bin
+	e.Stdout, e.Stderr, e.StderrTTY, e.StartBinary = io.Discard, io.Discard, false, bin
 	return e.startDaemon(ctx, nil)
 }
 

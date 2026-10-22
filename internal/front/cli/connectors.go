@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -109,10 +110,9 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 		folder := ""
 		if sub == "update" {
 			path, body = "/v1/connectors/update", map[string]any{"name": pos[0]}
-			if dir, err := e.installedFolder(ctx, pos[0]); err != nil {
+			var err error
+			if folder, err = e.installedFolder(ctx, pos[0]); err != nil {
 				return e.fail(err)
-			} else if dir != "" {
-				folder = dir
 			}
 		} else if dir, ok := store.SourceFolder(pos[0]); ok {
 			folder = dir
@@ -144,12 +144,7 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 			fmt.Fprintln(e.Stderr, connectorsUsage)
 			return ExitUsage
 		}
-		var res any
-		if err := c.Do(ctx, "POST", "/v1/connectors/remove", map[string]any{"name": rest[0]}, &res); err != nil {
-			return e.fail(err)
-		}
-		e.printJSON(res)
-		return ExitOK
+		return e.call(ctx, c, "POST", "/v1/connectors/remove", map[string]any{"name": rest[0]})
 	case "logs":
 		pos, fl := splitFlags(rest, map[string]bool{"limit": true, "since": true})
 		fs := flag.NewFlagSet(sub, flag.ContinueOnError)
@@ -182,12 +177,7 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 		})
 		return ExitOK
 	case "refresh":
-		var res any
-		if err := c.Do(ctx, "POST", "/v1/connectors/refresh", nil, &res); err != nil {
-			return e.fail(err)
-		}
-		e.printJSON(res)
-		return ExitOK
+		return e.call(ctx, c, "POST", "/v1/connectors/refresh", nil)
 	}
 	fmt.Fprintln(e.Stderr, connectorsUsage)
 	return ExitUsage
@@ -254,7 +244,7 @@ func (e *Env) installFolder(ctx context.Context, folder string, yes bool) (any, 
 	if err != nil {
 		return nil, e.fail(err)
 	}
-	pkg, err := packWith(man, wb, "")
+	pkg, err := store.Pack(man, wb, nil)
 	if err != nil {
 		return nil, e.fail(err)
 	}
@@ -403,9 +393,13 @@ func (e *Env) pack(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	var key []byte
+	var key ed25519.PrivateKey
 	if *keyFile != "" {
-		if key, err = os.ReadFile(*keyFile); err != nil {
+		kb, err := os.ReadFile(*keyFile)
+		if err != nil {
+			return e.fail(err)
+		}
+		if key, err = registry.ParsePrivateKey(string(kb)); err != nil {
 			return e.fail(err)
 		}
 	}
@@ -414,7 +408,7 @@ func (e *Env) pack(ctx context.Context, args []string) int {
 		return e.fail(err)
 	}
 	if m.Runtime == manifest.RuntimeNative {
-		return e.packNative(ctx, dir, man, m, string(key), *platform, *out)
+		return e.packNative(ctx, dir, man, m, key, *platform, *out)
 	}
 	var wb []byte
 	var toolchain string
@@ -426,7 +420,7 @@ func (e *Env) pack(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	pkg, err := packWith(man, wb, string(key))
+	pkg, err := store.Pack(man, wb, key)
 	if err != nil {
 		return e.fail(err)
 	}
@@ -450,7 +444,7 @@ func (e *Env) pack(ctx context.Context, args []string) int {
 }
 
 // packNative собирает нативный пакет под каждую платформу и список платформ.
-func (e *Env) packNative(ctx context.Context, dir string, man []byte, m manifest.Manifest, key, only, out string) int {
+func (e *Env) packNative(ctx context.Context, dir string, man []byte, m manifest.Manifest, key ed25519.PrivateKey, only, out string) int {
 	plats := m.Platforms
 	if only != "" {
 		plats = strings.Split(only, ",")
@@ -471,7 +465,7 @@ func (e *Env) packNative(ctx context.Context, dir string, man []byte, m manifest
 		if err != nil {
 			return e.fail(err)
 		}
-		pkg, err := packNativeWith(man, bin, plat, key)
+		pkg, err := store.PackNative(man, bin, plat, key)
 		if err != nil {
 			return e.fail(err)
 		}
@@ -518,17 +512,6 @@ func buildNative(ctx context.Context, dir, platform string) ([]byte, error) {
 		return nil, err
 	}
 	return os.ReadFile(bin)
-}
-
-func packNativeWith(man, bin []byte, platform, key string) ([]byte, error) {
-	if key == "" {
-		return store.PackNative(man, bin, platform, nil)
-	}
-	k, err := registry.ParsePrivateKey(key)
-	if err != nil {
-		return nil, err
-	}
-	return store.PackNative(man, bin, platform, k)
 }
 
 // buildModule собирает WASM-модуль из исходников dir и возвращает его и версию Go.
@@ -636,17 +619,6 @@ func (e *Env) verifyPackage(ctx context.Context, args []string) int {
 	}
 	e.printJSON(res)
 	return ExitOK
-}
-
-func packWith(man, wb []byte, key string) ([]byte, error) {
-	if key == "" {
-		return store.Pack(man, wb, nil)
-	}
-	k, err := registry.ParsePrivateKey(key)
-	if err != nil {
-		return nil, err
-	}
-	return store.Pack(man, wb, k)
 }
 
 const registryUsage = `usage:

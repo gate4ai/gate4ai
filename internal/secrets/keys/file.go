@@ -51,19 +51,19 @@ func (f *File) save(m map[string]string) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o600); err != nil && runtime.GOOS != "windows" {
-		tmp.Close()
-		return err
+	if err = tmp.Chmod(0o600); runtime.GOOS == "windows" {
+		err = nil
 	}
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		return err
+	if err == nil {
+		_, err = tmp.Write(b)
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
+	if err == nil {
+		err = tmp.Sync()
 	}
-	if err := tmp.Close(); err != nil {
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
 		return err
 	}
 	return os.Rename(tmp.Name(), f.path)

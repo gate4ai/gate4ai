@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -95,16 +97,11 @@ func agentsTable(v any) func(io.Writer) {
 				active[t.Agent]++
 			}
 		}
-		names := make([]string, 0, len(r.Agents))
-		for n := range r.Agents {
-			names = append(names, n)
-		}
-		sort.Strings(names)
-		if len(names) == 0 {
+		if len(r.Agents) == 0 {
 			return
 		}
 		fmt.Fprintln(w, "AGENT\tPROFILE\tTOKENS\tDESCRIPTION")
-		for _, n := range names {
+		for _, n := range slices.Sorted(maps.Keys(r.Agents)) {
 			a := r.Agents[n]
 			fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", n, a.Profile, active[n], a.Description)
 		}
@@ -170,7 +167,7 @@ func kvTable(v map[string]any, skip ...string) func(io.Writer) {
 	return func(w io.Writer) {
 		keys := make([]string, 0, len(v))
 		for k := range v {
-			if k == "status" || contains(skip, k) {
+			if k == "status" || slices.Contains(skip, k) {
 				continue
 			}
 			keys = append(keys, k)
@@ -198,13 +195,8 @@ func plain(v any) string {
 	case []string:
 		return strings.Join(x, ", ")
 	case map[string]any:
-		keys := make([]string, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
 		var s []string
-		for _, k := range keys {
+		for _, k := range slices.Sorted(maps.Keys(x)) {
 			s = append(s, k+" "+plain(x[k]))
 		}
 		return strings.Join(s, ", ")
@@ -230,13 +222,4 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
-}
-
-func contains(l []string, s string) bool {
-	for _, x := range l {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }

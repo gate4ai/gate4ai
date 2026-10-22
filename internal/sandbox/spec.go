@@ -10,6 +10,7 @@ package sandbox
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -54,10 +55,7 @@ func TemplateFor(agent string) (Template, bool) {
 	if t, ok := Templates[agent]; ok {
 		return t, true
 	}
-	keys := make([]string, 0, len(Templates))
-	for k := range Templates {
-		keys = append(keys, k)
-	}
+	keys := slices.Collect(maps.Keys(Templates))
 	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
 	for _, k := range keys {
 		if strings.HasPrefix(agent, k) {
@@ -116,7 +114,7 @@ type Spec struct {
 }
 
 // SensitivePaths — что закрыто для чтения в песочнице.
-func SensitivePaths(home, goos string) []string {
+func SensitivePaths(goos string) []string {
 	p := []string{"~/.ssh", "~/.gnupg", "~/.aws", "~/.config/gcloud", "~/.kube", "~/.docker", "~/.netrc",
 		"~/.local/share/keyrings", "~/.mozilla", "~/.thunderbird",
 		"~/.config/gh", "~/.git-credentials", "~/.npmrc", "~/.pypirc"}
@@ -187,7 +185,7 @@ func SRTSettings(r Run, o Options) map[string]any {
 			"httpProxyPort":     r.ProxyPort,
 		},
 		"filesystem": map[string]any{
-			"denyRead":   append(SensitivePaths(o.Home, runtime.GOOS), DataDenyPaths(dataDirs(r, o), r.Socket)...),
+			"denyRead":   append(SensitivePaths(runtime.GOOS), DataDenyPaths(dataDirs(r, o), r.Socket)...),
 			"allowWrite": []string{o.Workspace},
 			"denyWrite":  []string{},
 		},

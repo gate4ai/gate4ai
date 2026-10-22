@@ -87,21 +87,13 @@ func (j *Journal) Purge(now time.Time, ret Retention) (PurgeReport, error) {
 	}
 	var seqs []int64
 	pick := func(where string, before time.Time) error {
-		rows, err := j.db.Query(`SELECT seq FROM receipts WHERE redacted=0 AND ts < ? AND action != ? `+where, before.UnixNano(), RedactAction)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var s int64
-			if err := rows.Scan(&s); err != nil {
-				return err
-			}
+		found, err := j.seqs(`SELECT seq FROM receipts WHERE redacted=0 AND ts < ? AND action != ? `+where, before.UnixNano(), RedactAction)
+		for _, s := range found {
 			if !slices.Contains(seqs, s) {
 				seqs = append(seqs, s)
 			}
 		}
-		return rows.Err()
+		return err
 	}
 	if ret.Denied > 0 {
 		// Отказы политики; отклонения и таймауты человека (есть approval —
@@ -132,9 +124,9 @@ func (j *Journal) redact(seqs []int64, legacy bool) (int, error) {
 	for _, s := range seqs {
 		var e Entry
 		var err error
-		row := j.db.QueryRow(`SELECT seq,id,hash,body,redacted,ts,agent,action,class,effect,prev_hash FROM receipts WHERE seq=?`, s)
+		row := j.db.QueryRow(`SELECT `+entryCols+` FROM receipts WHERE seq=?`, s)
 		if legacy {
-			e, err = j.scanIndex(row)
+			e, _, err = scanIndex(row)
 		} else {
 			e, err = j.scan(row)
 		}
@@ -177,20 +169,28 @@ func (j *Journal) coverLegacyRedactions() error {
 	if err := j.db.QueryRow(`SELECT COUNT(*) FROM receipts WHERE action=?`, RedactAction).Scan(&n); err != nil || n > 0 {
 		return err
 	}
-	rows, err := j.db.Query(`SELECT seq FROM receipts WHERE redacted=1`)
+	seqs, err := j.seqs(`SELECT seq FROM receipts WHERE redacted=1`)
 	if err != nil {
 		return err
 	}
-	var seqs []int64
+	_, err = j.redact(seqs, true)
+	return err
+}
+
+// seqs — номера квитанций по запросу SELECT seq.
+func (j *Journal) seqs(q string, args ...any) ([]int64, error) {
+	rows, err := j.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
 	for rows.Next() {
 		var s int64
 		if err := rows.Scan(&s); err != nil {
-			rows.Close()
-			return err
+			return nil, err
 		}
-		seqs = append(seqs, s)
+		out = append(out, s)
 	}
-	rows.Close()
-	_, err = j.redact(seqs, true)
-	return err
+	return out, rows.Err()
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -267,14 +268,7 @@ type ServiceRule struct {
 }
 
 // Allows — действие action поставщика разрешено.
-func (s ServiceRule) Allows(action string) bool {
-	for _, a := range s.Actions {
-		if a == action {
-			return true
-		}
-	}
-	return false
-}
+func (s ServiceRule) Allows(action string) bool { return slices.Contains(s.Actions, action) }
 
 // checkParams проверяет шаблоны в строках параметров.
 func checkParams(field string, v any) error {
@@ -527,18 +521,7 @@ func (c Capabilities) Summary() []string {
 }
 
 // Equal — возможности совпадают (для повторного согласия при обновлении).
-func (c Capabilities) Equal(o Capabilities) bool {
-	a, b := c.Summary(), o.Summary()
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
+func (c Capabilities) Equal(o Capabilities) bool { return slices.Equal(c.Summary(), o.Summary()) }
 
 // Parse читает манифест из YAML (или JSON — подмножество YAML) и проверяет его.
 func Parse(b []byte) (Manifest, error) {

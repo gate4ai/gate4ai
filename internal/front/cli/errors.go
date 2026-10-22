@@ -131,12 +131,12 @@ func (e *Env) fail(err error) int {
 // problem печатает Problem: JSON в stdout и подсказку в stderr терминала; если
 // stdout — терминал (human), только текст в stderr.
 func (e *Env) problem(p Problem) {
+	msg := p.Message
+	if !strings.HasPrefix(msg, "gate4ai ") {
+		msg = "gate4ai: " + msg
+	}
 	if e.human() {
 		// Человеку в терминале — только текст: что случилось, что делать, подробности.
-		msg := p.Message
-		if !strings.HasPrefix(msg, "gate4ai ") {
-			msg = "gate4ai: " + msg
-		}
 		fmt.Fprintln(e.Stderr, sentence(msg))
 		if p.Hint != "" {
 			fmt.Fprintln(e.Stderr, sentence(upperFirst(p.Hint)))
@@ -155,10 +155,6 @@ func (e *Env) problem(p Problem) {
 	}
 	e.printJSON(out)
 	if e.StderrTTY {
-		msg := p.Message
-		if !strings.HasPrefix(msg, "gate4ai ") {
-			msg = "gate4ai: " + msg
-		}
 		fmt.Fprintf(e.Stderr, "\n%s\n", sentence(msg))
 		if p.Hint != "" {
 			fmt.Fprintln(e.Stderr, sentence(upperFirst(p.Hint)))

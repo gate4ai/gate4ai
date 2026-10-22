@@ -32,59 +32,51 @@ func (h *Host) call(fn string, req, resp any) error {
 	return Decode(h.T.Call(fn, b), resp)
 }
 
+// callAs — call с ответом типа T.
+func callAs[T any](h *Host, fn string, req any) (T, error) {
+	var out T
+	err := h.call(fn, req, &out)
+	return out, err
+}
+
 // HTTP — http_request.
 func (h *Host) HTTP(r HTTPRequest) (HTTPResponse, error) {
-	var out HTTPResponse
-	err := h.call(FnHTTPRequest, r, &out)
-	return out, err
+	return callAs[HTTPResponse](h, FnHTTPRequest, r)
 }
 
 // FSRead — fs_read.
 func (h *Host) FSRead(path string, max int64) (FSReadResponse, error) {
-	var out FSReadResponse
-	err := h.call(FnFSRead, FSRequest{Path: path, Max: max}, &out)
-	return out, err
+	return callAs[FSReadResponse](h, FnFSRead, FSRequest{Path: path, Max: max})
 }
 
 // FSReadAt — fs_read с позиции offset (отрицательное — столько байт с конца файла).
 func (h *Host) FSReadAt(path string, offset, max int64) (FSReadResponse, error) {
-	var out FSReadResponse
-	err := h.call(FnFSRead, FSRequest{Path: path, Max: max, Offset: offset}, &out)
-	return out, err
+	return callAs[FSReadResponse](h, FnFSRead, FSRequest{Path: path, Max: max, Offset: offset})
 }
 
 // FSWrite — fs_write (атомарно: временный файл и переименование).
 func (h *Host) FSWrite(path string, data []byte) (FSWriteResponse, error) {
-	var out FSWriteResponse
-	err := h.call(FnFSWrite, FSRequest{Path: path, Data: data}, &out)
-	return out, err
+	return callAs[FSWriteResponse](h, FnFSWrite, FSRequest{Path: path, Data: data})
 }
 
 // FSAppend — fs_append (создаёт файл, если его нет).
 func (h *Host) FSAppend(path string, data []byte) (FSWriteResponse, error) {
-	var out FSWriteResponse
-	err := h.call(FnFSAppend, FSRequest{Path: path, Data: data}, &out)
-	return out, err
+	return callAs[FSWriteResponse](h, FnFSAppend, FSRequest{Path: path, Data: data})
 }
 
 // FSList — fs_list.
 func (h *Host) FSList(path string) (FSListResponse, error) {
-	var out FSListResponse
-	err := h.call(FnFSList, FSRequest{Path: path}, &out)
-	return out, err
+	return callAs[FSListResponse](h, FnFSList, FSRequest{Path: path})
 }
 
 // FSStat — fs_stat.
 func (h *Host) FSStat(path string) (FSStatResponse, error) {
-	var out FSStatResponse
-	err := h.call(FnFSStat, FSRequest{Path: path}, &out)
-	return out, err
+	return callAs[FSStatResponse](h, FnFSStat, FSRequest{Path: path})
 }
 
 // KVGet — kv_get.
 func (h *Host) KVGet(key string) ([]byte, bool, error) {
-	var out KVResponse
-	err := h.call(FnKVGet, KVRequest{Key: key}, &out)
+	out, err := callAs[KVResponse](h, FnKVGet, KVRequest{Key: key})
 	return out.Value, out.Found, err
 }
 
@@ -201,11 +193,8 @@ func (c *Conn) Write(p []byte) (int, error) {
 	if closed {
 		return 0, ErrClosed
 	}
-	var out ConnWriteResponse
-	if err := c.h.call(FnConnWrite, ConnWrite{Conn: c.id, Data: p}, &out); err != nil {
-		return out.N, err
-	}
-	return out.N, nil
+	out, err := callAs[ConnWriteResponse](c.h, FnConnWrite, ConnWrite{Conn: c.id, Data: p})
+	return out.N, err
 }
 
 // Close — conn_close.

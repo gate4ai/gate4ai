@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"html/template"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -258,9 +259,7 @@ func (u *UI) internetPage(r *http.Request) (string, map[string]any, error) {
 			data["RemoteLinkOffline"] = errors.Is(err, errRelayOffline)
 		}
 	}
-	for k, v := range u.relayData() {
-		data[k] = v
-	}
+	maps.Copy(data, u.relayData())
 	return "settings", data, nil
 }
 

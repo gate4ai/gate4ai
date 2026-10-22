@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -75,8 +76,9 @@ var ErrNativeThirdParty = errors.New("native packages are accepted only from gat
 
 func (o Options) indexKeysOK() bool { return o.Registry != "" && len(o.RegistryKeys) > 0 }
 
-// cachedIndex — индекс из последней проверенной загрузки (для отзыва без сети).
-func (o Options) cachedIndex() *registry.Index {
+// CachedIndex — индекс registry из последней проверенной загрузки (для отзыва
+// без сети; nil — нет).
+func (o Options) CachedIndex() *registry.Index {
 	raw, err := os.ReadFile(filepath.Join(o.Dir, "registry-index.json"))
 	if err != nil {
 		return nil
@@ -88,9 +90,6 @@ func (o Options) cachedIndex() *registry.Index {
 	}
 	return ix
 }
-
-// CachedIndex — индекс registry из последней проверенной загрузки (nil — нет).
-func (o Options) CachedIndex() *registry.Index { return o.cachedIndex() }
 
 // RefreshIndex загружает индекс registry, проверяет подпись и кэширует его.
 func (o Options) RefreshIndex(ctx context.Context) (*registry.Index, error) {
@@ -107,7 +106,7 @@ func (o Options) RefreshIndex(ctx context.Context) (*registry.Index, error) {
 	}
 	// Откат: индекс старше закэшированного (до отзыва версии) или просроченный
 	// не принимается и кэш не заменяет.
-	if err := ix.CheckNewer(o.cachedIndex(), time.Now()); err != nil {
+	if err := ix.CheckNewer(o.CachedIndex(), time.Now()); err != nil {
 		return nil, err
 	}
 	_ = os.MkdirAll(o.Dir, 0o700)
@@ -173,10 +172,7 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 	for _, a := range m.Actions {
 		classes[a.Class] = true
 	}
-	for c := range classes {
-		p.Classes = append(p.Classes, c)
-	}
-	slices.Sort(p.Classes)
+	p.Classes = slices.Sorted(maps.Keys(classes))
 	p.NeedsConsent = true
 	if info, err := o.Info(m.Connector); err == nil {
 		p.Installed = info.Version
@@ -221,7 +217,7 @@ func (o Options) prepareFile(ctx context.Context, source string, dev bool) (*Pla
 	}
 	var ix *registry.Index
 	if o.indexKeysOK() {
-		ix = o.cachedIndex()
+		ix = o.CachedIndex()
 	}
 	var why error
 	trusted := signedBy(o.TrustedKeys)

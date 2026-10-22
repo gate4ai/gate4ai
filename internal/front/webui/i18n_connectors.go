@@ -2,7 +2,11 @@
 
 package webui
 
-import "github.com/gate4ai/gate4ai/sdk-go/manifest"
+import (
+	"maps"
+
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
+)
 
 // Названия и переводы официальных коннекторов, пока их манифесты без i18n:
 // манифест разбирается строго, и daemon прежних версий не поставил бы пакет с
@@ -54,9 +58,7 @@ func localized(m manifest.Manifest) manifest.Manifest {
 	}
 	if _, has := m.I18n[langRU]; !has {
 		i := map[string]manifest.Text{}
-		for k, v := range m.I18n {
-			i[k] = v
-		}
+		maps.Copy(i, m.I18n)
 		i[langRU] = manifest.Text{Title: t.RuTitle, Description: t.RuDesc}
 		m.I18n = i
 	}
@@ -68,9 +70,7 @@ func localized(m manifest.Manifest) manifest.Manifest {
 			}
 			if _, has := a.I18n[langRU]; !has {
 				i := map[string]manifest.Text{}
-				for k, v := range a.I18n {
-					i[k] = v
-				}
+				maps.Copy(i, a.I18n)
 				i[langRU] = manifest.Text{Title: at.RuTitle, Description: at.RuDesc}
 				a.I18n = i
 			}

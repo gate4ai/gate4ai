@@ -104,44 +104,43 @@ func (d *Daemon) reloadConnector(name string, removed bool) error {
 	return nil
 }
 
-// InstallConnector ставит коннектор (файл .g4c или имя из registry) с согласием
+// InstallConnectorDev ставит коннектор (файл .g4c или имя из registry) с согласием
 // на возможности consent; при ErrConsent возвращает план для показа владельцу.
-func (d *Daemon) InstallConnector(ctx context.Context, source string, consent []string) (store.Info, *store.Plan, string, error) {
-	return d.InstallConnectorDev(ctx, source, consent, false)
-}
-
-// InstallConnectorDev — InstallConnector; dev — своя сборка без доверенной подписи
-// (папка с исходниками, файл или адрес .g4c), как `connectors install --dev`.
+// dev — своя сборка без доверенной подписи (папка с исходниками, файл или адрес
+// .g4c), как `connectors install --dev`.
 func (d *Daemon) InstallConnectorDev(ctx context.Context, source string, consent []string, dev bool) (store.Info, *store.Plan, string, error) {
 	opts := d.StoreOptions()
 	plan, err := opts.Prepare(ctx, source, dev)
 	if err != nil {
 		return store.Info{}, nil, "", err
 	}
+	info, warn, err := d.installPlan(opts, plan, consent)
+	return info, plan, warn, err
+}
+
+// installPlan ставит подготовленный план под installMu (без согласия —
+// ErrConsent); warn — политика не сошлась с новым каталогом (см. reloadConnector).
+func (d *Daemon) installPlan(opts store.Options, plan *store.Plan, consent []string) (info store.Info, warn string, err error) {
 	d.installMu.Lock()
 	defer d.installMu.Unlock()
-	if plan.ConsentOK(consent) {
-		d.stopNative(plan.Connector)
+	if !plan.ConsentOK(consent) {
+		return store.Info{}, "", store.ErrConsent
 	}
-	info, err := opts.Install(plan, consent)
-	if err != nil {
+	d.stopNative(plan.Connector)
+	if info, err = opts.Install(plan, consent); err != nil {
 		d.restartNative(plan.Connector)
-		return store.Info{}, plan, "", err
+		return store.Info{}, "", err
 	}
-	warn := ""
 	if err := d.reloadConnector(info.Connector, false); err != nil {
 		warn = err.Error()
+		d.Log.Warn("connector reloaded with a warning", "connector", info.Connector, "err", err)
 	}
 	d.Log.Info("connector installed", "connector", info.Connector, "version", info.Version, "trust", info.Trust)
-	return info, plan, warn, nil
+	return info, warn, nil
 }
 
-// PrepareConnector — план установки (возможности, доверие) без установки.
-func (d *Daemon) PrepareConnector(ctx context.Context, source string) (*store.Plan, error) {
-	return d.StoreOptions().Prepare(ctx, source, false)
-}
-
-// PrepareConnectorDev — PrepareConnector для своей сборки (dev, см. InstallConnectorDev).
+// PrepareConnectorDev — план установки (возможности, доверие) без установки;
+// dev — своя сборка (см. InstallConnectorDev).
 func (d *Daemon) PrepareConnectorDev(ctx context.Context, source string, dev bool) (*store.Plan, error) {
 	return d.StoreOptions().Prepare(ctx, source, dev)
 }
@@ -226,15 +225,7 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			writeJSON(w, 200, map[string]any{"status": "up_to_date", "plan": plan})
 			return
 		}
-		d.installMu.Lock()
-		defer d.installMu.Unlock()
-		if plan.ConsentOK(consent) {
-			d.stopNative(plan.Connector)
-		}
-		info, err := opts.Install(plan, consent)
-		if err != nil {
-			d.restartNative(plan.Connector)
-		}
+		info, warn, err := d.installPlan(opts, plan, consent)
 		if errors.Is(err, store.ErrConsent) {
 			writeJSON(w, 409, map[string]any{"error": map[string]string{"code": "consent_required",
 				"message": "review the capabilities and confirm"}, "plan": plan})
@@ -245,10 +236,9 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			return
 		}
 		res := map[string]any{"status": "installed", "installed": info}
-		if err := d.reloadConnector(info.Connector, false); err != nil {
-			res["warning"] = err.Error()
+		if warn != "" {
+			res["warning"] = warn
 		}
-		d.Log.Info("connector installed", "connector", info.Connector, "version", info.Version, "trust", info.Trust)
 		writeJSON(w, 200, res)
 	}
 	mux.HandleFunc("POST /v1/connectors/install", owner(func(w http.ResponseWriter, r *http.Request) {

@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -104,21 +104,10 @@ func (p *Pipeline) allowed(cfg *config.Config, alias string, cr config.Credentia
 // браузера может находиться.
 func (p *Pipeline) accountsFor(cfg *config.Config, a accessor) []abi.Account {
 	var out []abi.Account
-	names := make([]string, 0, len(cfg.Credentials))
-	for n := range cfg.Credentials {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, alias := range names {
-		cr := cfg.Credentials[alias]
-		if !p.allowed(cfg, alias, cr, a) {
-			continue
+	for _, alias := range slices.Sorted(maps.Keys(cfg.Credentials)) {
+		if cr := cfg.Credentials[alias]; p.allowed(cfg, alias, cr, a) {
+			out = append(out, accountOf(alias, cr))
 		}
-		acc := abi.Account{Alias: alias, Bind: cr.Origins(), LoginPage: pageOf(cr)}
-		if cr.Via != nil {
-			acc.Via = cr.Via.Full()
-		}
-		out = append(out, acc)
 	}
 	return out
 }
@@ -144,13 +133,19 @@ func pageOf(cr config.Credential) *abi.AccountPage {
 	return &abi.AccountPage{Selector: cr.LoginPage.Selector, URLPrefix: cr.LoginPage.URLPrefix}
 }
 
-// formOf — учётка с формой для browser (без значений): поля формы или
-// коннектора входа (via).
-func formOf(alias string, cr config.Credential) *abi.Account {
-	acc := &abi.Account{Alias: alias, Bind: cr.Origins(), LoginPage: pageOf(cr)}
+// accountOf — учётка для browser без формы: сайт входа, страница, коннектор входа.
+func accountOf(alias string, cr config.Credential) abi.Account {
+	acc := abi.Account{Alias: alias, Bind: cr.Origins(), LoginPage: pageOf(cr)}
 	if cr.Via != nil {
 		acc.Via = cr.Via.Full()
 	}
+	return acc
+}
+
+// formOf — учётка с формой для browser (без значений): поля формы или
+// коннектора входа (via).
+func formOf(alias string, cr config.Credential) *abi.Account {
+	acc := accountOf(alias, cr)
 	for _, fl := range cr.AllFields() {
 		name := fl.Name
 		if name == "" {
@@ -164,7 +159,7 @@ func formOf(alias string, cr config.Credential) *abi.Account {
 			acc.Success = f.Success.URLPrefix
 		}
 	}
-	return acc
+	return &acc
 }
 
 // fieldMatches — поле учётки по имени из fill_secret (как его ищет browser):
@@ -219,10 +214,8 @@ func (p *Pipeline) prepareBrowser(ctx context.Context, agent string, act manifes
 		// Без подсказки, есть ли такая учётка у владельца.
 		return nil, denied("account %s is not available to %s (credentials.%s: use / connectors)", arg, who, arg)
 	}
-	args := make(map[string]any, len(req.Args))
-	for k, v := range req.Args {
-		args[k] = v
-	}
+	args := map[string]any{}
+	maps.Copy(args, req.Args)
 	args["account"] = alias
 	req.Args = args
 	req.Login = formOf(alias, cr)
@@ -352,8 +345,8 @@ func (p *Pipeline) loginVia(ctx context.Context, agent string, info callInfo, pr
 	}
 	dec := p.Engine().Decide(policy.Request{Agent: agent, Action: full, Class: act.Class, Args: args, Now: p.Now(), Nested: true}, p.State.Counters())
 	if dec.Effect == config.EffectDeny {
-		res := p.denyAt(agent, act, full, args, dec, nil, info.ID)
-		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "%s denied by policy: %s", full, res.Reason)
+		p.deny(agent, act, full, args, dec, nil, info.ID)
+		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "%s denied by policy: %s", full, dec.Reason)
 	}
 	// Коннектор входа работает через browser: в цепочке вызовов его нет.
 	info.Chain = slices.DeleteFunc(slices.Clone(info.Chain), func(c string) bool { return c == BrowserConnector })
@@ -445,19 +438,10 @@ func (p *Pipeline) accountPreview(agent, action string, act manifest.Action, arg
 			lines = append(lines, fmt.Sprintf("signs in on %s with account %s (slot %s)", strings.Join(cfg.Credentials[alias].Origins(), ", "), alias, s.Slot))
 		}
 	}
-	for _, alias := range sortedCredentials(cfg) {
+	for _, alias := range slices.Sorted(maps.Keys(cfg.Credentials)) {
 		if slices.Contains(cfg.Credentials[alias].Connectors, conn) {
 			lines = append(lines, fmt.Sprintf("may sign in on %s with account %s", strings.Join(cfg.Credentials[alias].Origins(), ", "), alias))
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-func sortedCredentials(cfg *config.Config) []string {
-	out := make([]string, 0, len(cfg.Credentials))
-	for n := range cfg.Credentials {
-		out = append(out, n)
-	}
-	sort.Strings(out)
-	return out
 }

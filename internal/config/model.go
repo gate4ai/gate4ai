@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -253,11 +254,4 @@ func (c *Config) ProfileOf(agent string) (Profile, bool) {
 }
 
 // HasConnector — доступен ли коннектор профилю.
-func (p Profile) HasConnector(name string) bool {
-	for _, c := range p.Connectors {
-		if c == name {
-			return true
-		}
-	}
-	return false
-}
+func (p Profile) HasConnector(name string) bool { return slices.Contains(p.Connectors, name) }

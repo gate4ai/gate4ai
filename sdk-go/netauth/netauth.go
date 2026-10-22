@@ -177,7 +177,7 @@ func (c *Conn) imapTagged(tag string) (string, error) {
 }
 
 // imapString — строка IMAP: quoted для ASCII, литерал для остального.
-func (c *Conn) imapString(s string) (quoted string, literal bool) {
+func imapString(s string) (quoted string, literal bool) {
 	for _, r := range s {
 		if r > 0x7e || r < 0x20 {
 			return fmt.Sprintf("{%d}", len(s)), true
@@ -209,18 +209,12 @@ func (c *Conn) imap(cfg Config, tlsCfg *tls.Config) error {
 		}
 	}
 	if cfg.Auth != nil && !preauth {
-		user, ul := c.imapString(cfg.Auth.Username)
-		pass, pl := c.imapString(cfg.Password)
 		// LOGIN с литералами: после "{n}" сервер отвечает "+", затем данные.
-		parts := []struct {
-			s   string
-			lit bool
-			raw string
-		}{{user, ul, cfg.Auth.Username}, {pass, pl, cfg.Password}}
 		cmd := "g1 LOGIN"
-		for _, p := range parts {
-			cmd += " " + p.s
-			if p.lit {
+		for _, raw := range []string{cfg.Auth.Username, cfg.Password} {
+			q, lit := imapString(raw)
+			cmd += " " + q
+			if lit {
 				if err := c.send(cmd); err != nil {
 					return err
 				}
@@ -231,7 +225,7 @@ func (c *Conn) imap(cfg Config, tlsCfg *tls.Config) error {
 				if !strings.HasPrefix(l, "+") {
 					return abi.Errorf(abi.CodeAuth, "imap login rejected")
 				}
-				cmd = p.raw
+				cmd = raw
 			}
 		}
 		if err := c.send(cmd); err != nil {
@@ -276,46 +270,47 @@ func (c *Conn) smtpReply() (int, []string, error) {
 	}
 }
 
-func (c *Conn) smtpCmd(cmd string, want int) ([]string, error) {
-	if err := c.send(cmd); err != nil {
-		return nil, err
-	}
+// smtpExpect читает ответ SMTP и проверяет его код.
+func (c *Conn) smtpExpect(what string, want int) error {
 	code, lines, err := c.smtpReply()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if code != want {
-		verb, _, _ := strings.Cut(cmd, " ")
-		return nil, abi.Errorf(abi.CodeIO, "smtp %s: %d %s", verb, code, strings.Join(lines, " "))
+		return abi.Errorf(abi.CodeIO, "smtp %s: %d %s", what, code, strings.Join(lines, " "))
 	}
-	return lines, nil
+	return nil
+}
+
+func (c *Conn) smtpCmd(cmd string, want int) error {
+	if err := c.send(cmd); err != nil {
+		return err
+	}
+	verb, _, _ := strings.Cut(cmd, " ")
+	return c.smtpExpect(verb, want)
 }
 
 func (c *Conn) smtp(cfg Config, tlsCfg *tls.Config) error {
-	code, lines, err := c.smtpReply()
-	if err != nil {
+	if err := c.smtpExpect("greeting", 220); err != nil {
 		return err
 	}
-	if code != 220 {
-		return abi.Errorf(abi.CodeIO, "smtp greeting: %d %s", code, strings.Join(lines, " "))
-	}
-	if _, err := c.smtpCmd("EHLO gate4ai.local", 250); err != nil {
+	if err := c.smtpCmd("EHLO gate4ai.local", 250); err != nil {
 		return err
 	}
 	if cfg.TLS == abi.TLSStartTLS {
-		if _, err := c.smtpCmd("STARTTLS", 220); err != nil {
+		if err := c.smtpCmd("STARTTLS", 220); err != nil {
 			return err
 		}
 		if err := c.upgrade(tlsCfg); err != nil {
 			return err
 		}
-		if _, err := c.smtpCmd("EHLO gate4ai.local", 250); err != nil {
+		if err := c.smtpCmd("EHLO gate4ai.local", 250); err != nil {
 			return err
 		}
 	}
 	if cfg.Auth != nil {
 		tok := base64.StdEncoding.EncodeToString([]byte("\x00" + cfg.Auth.Username + "\x00" + cfg.Password))
-		if _, err := c.smtpCmd("AUTH PLAIN "+tok, 235); err != nil {
+		if err := c.smtpCmd("AUTH PLAIN "+tok, 235); err != nil {
 			var e *abi.Error
 			if errors.As(err, &e) {
 				e.Code, e.Message = abi.CodeAuth, "smtp auth failed"

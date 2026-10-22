@@ -10,9 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -171,14 +171,9 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 		return res
 	}
 	conn := strings.SplitN(c.Action, ".", 2)[0]
-	if act.ServiceOnly {
-		// Действие только для других коннекторов (service_call): агент его не видит.
-		res.Status, res.Code = StatusError, CodeUnknownAction
-		res.Message = fmt.Sprintf("unknown action %q", c.Action)
-		return res
-	}
-	if prof, ok := p.cfg().ProfileOf(c.Agent); !ok || (!prof.HasConnector(conn) && !(c.Internal && policy.Implicit[conn]) && !policy.Everyone[conn]) || (policy.Implicit[conn] && !c.Internal) {
-		// Коннекторы вне профиля агент не видит вовсе.
+	// Действие только для других коннекторов (service_call) и коннекторы вне
+	// профиля агент не видит вовсе.
+	if prof, ok := p.cfg().ProfileOf(c.Agent); act.ServiceOnly || !ok || (!prof.HasConnector(conn) && !(c.Internal && policy.Implicit[conn]) && !policy.Everyone[conn]) || (policy.Implicit[conn] && !c.Internal) {
 		res.Status, res.Code = StatusError, CodeUnknownAction
 		res.Message = fmt.Sprintf("unknown action %q", c.Action)
 		return res
@@ -207,7 +202,7 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 	}
 	switch dec.Effect {
 	case config.EffectDeny:
-		return p.deny(c.Agent, act, c.Action, args, dec, nil)
+		return p.deny(c.Agent, act, c.Action, args, dec, nil, "")
 	case config.EffectAsk:
 		// 4. Подтверждение.
 		a, err := p.requestApproval(c.Agent, c.Action, act, args, prov, dec)
@@ -215,7 +210,7 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 			res.Status, res.Code, res.Message = StatusError, CodeExecution, err.Error()
 			return res
 		}
-		return p.wait(ctx, a.ID, c.Wait)
+		return p.WaitFor(ctx, a.ID, c.Wait)
 	}
 	return p.run(ctx, c.Agent, c.Action, cli, act, args, dec, nil)
 }
@@ -231,17 +226,13 @@ func (p *Pipeline) decidePolicy(req policy.Request) policy.Decision {
 	return dec
 }
 
-// deny пишет квитанцию отказа и формирует честную ошибку.
-func (p *Pipeline) deny(agent string, act manifest.Action, action string, args map[string]any, dec policy.Decision, appr *audit.Approval) Result {
-	return p.denyAt(agent, act, action, args, dec, appr, "")
-}
-
-// denyAt — deny с квитанцией, которая ссылается на родительскую (parent —
-// квитанция действия, во время которого сделан вложенный вызов).
+// deny пишет квитанцию отказа и формирует честную ошибку; квитанция ссылается
+// на родительскую (parent — квитанция действия, во время которого сделан
+// вложенный вызов; "" — корневое действие).
 // Отказ политики при исполнении уже одобренного действия (политика, лимиты
 // или доступ агента изменились после запроса) — denied_by_policy, а не
 // «отклонено человеком».
-func (p *Pipeline) denyAt(agent string, act manifest.Action, action string, args map[string]any, dec policy.Decision, appr *audit.Approval, parent string) Result {
+func (p *Pipeline) deny(agent string, act manifest.Action, action string, args map[string]any, dec policy.Decision, appr *audit.Approval, parent string) Result {
 	r := &audit.Receipt{Agent: agent, Action: action, Class: act.Class, Args: p.maskArgs(act, args), Parent: parent,
 		Decision:     receiptDecision(config.EffectDeny, dec),
 		Approval:     appr,
@@ -295,7 +286,7 @@ func (p *Pipeline) admit(ctx context.Context, agent, action string, act manifest
 	defer p.admitMu.Unlock()
 	dec := p.decidePolicy(req)
 	if dec.Effect == config.EffectDeny {
-		r := p.denyAt(agent, act, action, args, dec, appr, parentID)
+		r := p.deny(agent, act, action, args, dec, appr, parentID)
 		return 0, &r
 	}
 	// ask и allow: человек уже подтвердил или правило разрешает.
@@ -303,7 +294,7 @@ func (p *Pipeline) admit(ctx context.Context, agent, action string, act manifest
 	if err != nil {
 		dec := policy.Decision{Effect: config.EffectDeny, RuleIDs: []string{policy.RuleStateUnavailable},
 			Reason: "state store unavailable, limits cannot be checked: " + err.Error()}
-		r := p.denyAt(agent, act, action, args, dec, appr, parentID)
+		r := p.deny(agent, act, action, args, dec, appr, parentID)
 		return 0, &r
 	}
 	return id, nil
@@ -584,9 +575,7 @@ func (p *Pipeline) invoke(ctx context.Context, agent, action string, cli connect
 		// Сначала браузер проверяет страницу и поле, потом вопрос человеку.
 		check := req
 		check.Args = map[string]any{ArgPrecheck: true}
-		for k, v := range req.Args {
-			check.Args[k] = v
-		}
+		maps.Copy(check.Args, req.Args)
 		if _, err := cli.Execute(WithAgent(ctx, agent), check); err != nil {
 			return abi.ExecResult{}, err
 		}
@@ -602,9 +591,7 @@ func (p *Pipeline) invoke(ctx context.Context, agent, action string, cli connect
 			// не заменяют его в фикстуре вызывающего.
 			rec := req
 			rec.Args = map[string]any{ArgRecordOnly: true, "result": ex.Structured}
-			for k, v := range req.Args {
-				rec.Args[k] = v
-			}
+			maps.Copy(rec.Args, req.Args)
 			_, _ = cli.Execute(WithAgent(ctx, agent), rec)
 		}
 	} else {
@@ -655,12 +642,7 @@ func (p *Pipeline) provenance(args map[string]any) (map[string][]string, error) 
 			}
 		}
 		if len(labels) > 0 {
-			l := make([]string, 0, len(labels))
-			for x := range labels {
-				l = append(l, x)
-			}
-			sort.Strings(l)
-			out[k] = l
+			out[k] = slices.Sorted(maps.Keys(labels))
 		}
 	}
 	return out, firstErr
@@ -676,24 +658,11 @@ var (
 // стать аргументами действий: адреса, ссылки, реквизиты.
 func extractValues(v any) []string {
 	var out []string
-	var walk func(any)
-	walk = func(v any) {
-		switch t := v.(type) {
-		case string:
-			out = append(out, emailRe.FindAllString(t, -1)...)
-			out = append(out, urlRe.FindAllString(t, -1)...)
-			out = append(out, acctRe.FindAllString(t, -1)...)
-		case []any:
-			for _, x := range t {
-				walk(x)
-			}
-		case map[string]any:
-			for _, x := range t {
-				walk(x)
-			}
-		}
+	for _, s := range argStrings(v) {
+		out = append(out, emailRe.FindAllString(s, -1)...)
+		out = append(out, urlRe.FindAllString(s, -1)...)
+		out = append(out, acctRe.FindAllString(s, -1)...)
 	}
-	walk(v)
 	return out
 }
 
@@ -741,12 +710,8 @@ func (p *Pipeline) maskContent(cs []abi.Content) []abi.Content {
 
 func (p *Pipeline) maskArgs(act manifest.Action, args map[string]any) map[string]any {
 	out := map[string]any{}
-	sens := map[string]bool{}
-	for _, s := range act.Sensitive {
-		sens[s] = true
-	}
 	for k, v := range args {
-		if sens[k] {
+		if slices.Contains(act.Sensitive, k) {
 			out[k] = "***"
 		} else {
 			out[k] = v

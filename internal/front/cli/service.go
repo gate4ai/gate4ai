@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -148,13 +149,9 @@ func (e *Env) waitStarted(ctx context.Context, logPath string) error {
 // quiet — то же окружение без сообщений человеку и JSON-вывода.
 func (e *Env) quiet() *Env {
 	q := *e
-	q.Stdout, q.StderrTTY, q.ForceJSON = discard{}, false, true
+	q.Stdout, q.StderrTTY, q.ForceJSON = io.Discard, false, true
 	return &q
 }
-
-type discard struct{}
-
-func (discard) Write(p []byte) (int, error) { return len(p), nil }
 
 func trayNowHint(tray string) string {
 	if runtime.GOOS == "windows" {

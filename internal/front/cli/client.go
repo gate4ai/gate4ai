@@ -83,11 +83,9 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 	if err != nil {
 		return err
 	}
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
 		kind := c.Kind
 		if kind == "" {
 			kind = "cli"

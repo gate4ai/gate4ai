@@ -127,11 +127,7 @@ type transport struct {
 
 func (t transport) Call(fn string, req []byte) []byte {
 	var out RawResponse
-	ctx := t.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := t.p.Call(ctx, MethodHost, HostParams{Call: t.call, Fn: fn, Req: req}, &out); err != nil {
+	if err := t.p.Call(t.ctx, MethodHost, HostParams{Call: t.call, Fn: fn, Req: req}, &out); err != nil {
 		return abi.Fail(abi.Errorf(abi.CodeIO, "host: %v", err))
 	}
 	return out

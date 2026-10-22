@@ -4,6 +4,7 @@ package webui
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -47,7 +48,7 @@ func (u *UI) agentRows(l string) []agentRow {
 		users[a.Profile]++
 	}
 	y, mo, d := u.Now().Date()
-	today := time_(y, mo, d)
+	today := time.Date(y, mo, d, 0, 0, 0, 0, time.Local)
 	var rows []agentRow
 	for name, a := range cfg.Agents {
 		row := agentRow{Name: name, Agent: a, Seen: seen[name], Profile: cfg.Profiles[a.Profile], Shared: users[a.Profile] > 1}
@@ -145,11 +146,7 @@ func (u *UI) agentPage(r *http.Request) (string, map[string]any, error) {
 		}
 	}
 	journal, _ := u.D.Journal.List(audit.Filter{Agent: name, Limit: 10, Desc: true})
-	profiles := make([]string, 0, len(cfg.Profiles))
-	for p := range cfg.Profiles {
-		profiles = append(profiles, p)
-	}
-	sort.Strings(profiles)
+	profiles := slices.Sorted(maps.Keys(cfg.Profiles))
 	client := r.URL.Query().Get("client")
 	if client == "" {
 		for _, t := range row.Tokens {
@@ -208,21 +205,17 @@ func (u *UI) clientTiles() []clientTile {
 	return out
 }
 
-func agentPrincipal(agent string) auth.Principal { return auth.AgentVia(agent, "webui") }
-
 // skillMD — SKILL.md для агента (его каталог).
 func (u *UI) skillMD(agent string) string {
 	var tools []skill.Tool
-	b, _ := json.Marshal(u.D.Tools(agentPrincipal(agent)))
+	b, _ := json.Marshal(u.D.Tools(auth.AgentVia(agent, "webui")))
 	_ = json.Unmarshal(b, &tools)
 	return skill.Generate(tools)
 }
 
 func (u *UI) agentPageWith(r *http.Request, extra map[string]any) map[string]any {
 	_, d, err := u.agentPage(r)
-	for k, v := range extra {
-		d[k] = v
-	}
+	maps.Copy(d, extra)
 	if err != nil {
 		d["error"] = err
 	}
@@ -325,6 +318,3 @@ func (u *UI) disconnectClient(w http.ResponseWriter, r *http.Request) map[string
 	n, _ := u.D.State.RevokeLabel(name, "auto:"+client)
 	return redirectDetail(back, M("gate4ai is removed from %s; tokens revoked: %d", clientTitle(client), n), res.Path)
 }
-
-// time_ — начало дня по местному времени.
-func time_(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.Local) }

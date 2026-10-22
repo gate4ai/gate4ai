@@ -69,12 +69,8 @@ func (s *Stagehand) URL(ctx context.Context) (string, error)   { return s.page.U
 func (s *Stagehand) Title(ctx context.Context) (string, error) { return s.page.Title(ctx) }
 
 func (s *Stagehand) Text(ctx context.Context) (string, error) {
-	raw, err := s.page.Evaluate(ctx, visibleTextJS+"(document.body)")
-	if err != nil {
-		return "", err
-	}
 	var t string
-	err = json.Unmarshal(raw, &t)
+	err := s.Eval(ctx, visibleTextJS+"(document.body)", &t)
 	return t, err
 }
 

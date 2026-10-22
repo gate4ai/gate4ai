@@ -47,19 +47,14 @@ func (c Checkpoint) VerifySig(pub ed25519.PublicKey) bool {
 }
 
 // Checkpoint создаёт подписанный чекпоинт текущей головы (если есть новые записи).
-func (j *Journal) Checkpoint() (*Checkpoint, error) {
-	j.mu.Lock()
-	cp, err := j.checkpointLocked()
-	w := j.witness
-	j.mu.Unlock()
-	j.witnessCP(w, cp)
-	return cp, err
-}
+func (j *Journal) Checkpoint() (*Checkpoint, error) { return j.checkpoint(false) }
 
 // MaybeDailyCheckpoint — чекпоинт, если с прошлого прошло больше суток.
-func (j *Journal) MaybeDailyCheckpoint() (*Checkpoint, error) {
+func (j *Journal) MaybeDailyCheckpoint() (*Checkpoint, error) { return j.checkpoint(true) }
+
+func (j *Journal) checkpoint(daily bool) (*Checkpoint, error) {
 	j.mu.Lock()
-	if j.now().Sub(j.lastCPAt) < 24*time.Hour {
+	if daily && j.now().Sub(j.lastCPAt) < 24*time.Hour {
 		j.mu.Unlock()
 		return nil, nil
 	}

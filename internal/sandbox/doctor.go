@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -35,23 +36,19 @@ type DoctorEnv struct {
 func RealDoctorEnv(daemon func() error) DoctorEnv {
 	home, _ := os.UserHomeDir()
 	return DoctorEnv{Home: home, GOOS: goos(), Environ: os.Environ(), Daemon: daemon, LookPath: exec.LookPath,
-		Exists: func(p string) bool { _, err := os.Stat(p); return err == nil },
-		Readable: func(p string) bool {
-			f, err := os.Open(p)
-			if err != nil {
-				return false
-			}
+		Exists:   func(p string) bool { _, err := os.Stat(p); return err == nil },
+		Readable: canOpen(os.O_RDONLY), Writable: canOpen(os.O_WRONLY)}
+}
+
+// canOpen — файл открывается с флагом flag.
+func canOpen(flag int) func(string) bool {
+	return func(p string) bool {
+		f, err := os.OpenFile(p, flag, 0)
+		if err == nil {
 			f.Close()
-			return true
-		},
-		Writable: func(p string) bool {
-			f, err := os.OpenFile(p, os.O_WRONLY, 0)
-			if err != nil {
-				return false
-			}
-			f.Close()
-			return true
-		}}
+		}
+		return err == nil
+	}
 }
 
 var secretEnvRe = regexp.MustCompile(`(?i)(TOKEN|API_?KEY|SECRET|PASSWORD|PASSWD|CREDENTIAL|PRIVATE_KEY|ACCESS_KEY)`)
@@ -174,6 +171,8 @@ func Doctor(e DoctorEnv) []Check {
 	}
 	return out
 }
+
+var runtimeGOOS = runtime.GOOS
 
 func goos() string {
 	if v := os.Getenv("GATE4AI_GOOS"); v != "" {

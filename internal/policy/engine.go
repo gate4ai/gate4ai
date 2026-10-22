@@ -7,7 +7,9 @@ package policy
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -214,10 +216,6 @@ func compile(r config.Rule, cfg *config.Config, cat Catalog) (cel.Program, error
 		return nil, fmt.Errorf("CEL: %v", iss.Err())
 	}
 	free := freeIdents(parsed)
-	reserved := map[string]bool{}
-	for _, n := range Reserved {
-		reserved[n] = true
-	}
 	var argNames map[string]bool
 	if cat != nil {
 		argNames = map[string]bool{}
@@ -231,17 +229,12 @@ func compile(r config.Rule, cfg *config.Config, cat Catalog) (cel.Program, error
 	}
 	var opts []cel.EnvOption
 	for _, id := range free {
-		if reserved[id] {
+		if slices.Contains(Reserved, id) {
 			continue
 		}
 		if argNames != nil && !argNames[id] {
-			known := make([]string, 0, len(argNames))
-			for a := range argNames {
-				known = append(known, a)
-			}
-			sort.Strings(known)
 			return nil, fmt.Errorf("unknown variable %q for action %s (arguments: %s; also: %s)",
-				id, r.Action, strings.Join(known, ", "), strings.Join(Reserved, ", "))
+				id, r.Action, strings.Join(slices.Sorted(maps.Keys(argNames)), ", "), strings.Join(Reserved, ", "))
 		}
 		opts = append(opts, cel.Variable(id, cel.DynType))
 	}

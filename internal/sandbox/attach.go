@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -25,6 +26,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/front/skill"
 	"github.com/gate4ai/gate4ai/internal/hostsvc/egress"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
+	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
@@ -93,7 +95,7 @@ func Attach(ctx context.Context, d *daemon.Daemon, runDir, listen string) (*Runs
 }
 
 func (r *Runs) auth(user, pass string) (agent, run string, ok bool) {
-	id, ok := cutPrefix(user, "run-")
+	id, ok := strings.CutPrefix(user, "run-")
 	if !ok {
 		return "", "", false
 	}
@@ -104,13 +106,6 @@ func (r *Runs) auth(user, pass string) (agent, run string, ok bool) {
 		return "", "", false
 	}
 	return st.agent, id, true
-}
-
-func cutPrefix(s, p string) (string, bool) {
-	if len(s) > len(p) && s[:len(p)] == p {
-		return s[len(p):], true
-	}
-	return "", false
 }
 
 // decide: allow_domains профиля — сразу; ask_domains — через pipeline
@@ -311,7 +306,7 @@ func (r *Runs) Start(agent string) (Run, error) {
 	}
 	proxy := (&url.URL{Scheme: "http", User: url.UserPassword("run-"+id, pass), Host: net.JoinHostPort(host, strconv.Itoa(r.Addr.Port))}).String()
 	var tools []skill.Tool
-	b, _ := json.Marshal(r.D.Tools(agentPrincipal(agent)))
+	b, _ := json.Marshal(r.D.Tools(auth.AgentVia(agent, "run")))
 	_ = json.Unmarshal(b, &tools)
 	return Run{ID: id, Agent: agent, Token: tok, Socket: sock, ProxyURL: proxy, ProxyHost: host, ProxyPort: r.Addr.Port, Home: r.D.Home,
 		SecretEnv: phs, KeepAliveS: int(KeepAliveEvery / time.Second),
@@ -356,10 +351,7 @@ func (r *Runs) Stop(id string) {
 
 func (r *Runs) closeAll() {
 	r.mu.Lock()
-	ids := make([]string, 0, len(r.runs))
-	for id := range r.runs {
-		ids = append(ids, id)
-	}
+	ids := slices.Collect(maps.Keys(r.runs))
 	r.mu.Unlock()
 	for _, id := range ids {
 		r.Stop(id)

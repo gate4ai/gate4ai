@@ -47,9 +47,6 @@ func (p Protection) Extra() bool { return p.Password != "" || p.Telegram }
 // Custom — защита отличается от умолчания (только ссылка).
 func (p Protection) Custom() bool { return p.NoLink || p.Extra() }
 
-// linkRequired — нужна ли одноразовая ссылка.
-func (p Protection) linkRequired(m mount) bool { return !p.NoLink }
-
 // valid — хотя бы один способ входа остаётся.
 func (p Protection) valid() error {
 	if p.NoLink && !p.Extra() {
@@ -61,15 +58,9 @@ func (p Protection) valid() error {
 // lastMethod — единственный включённый способ входа (link, password, telegram):
 // его не выключить, пока не включён другой. "" — включено несколько.
 func (p Protection) lastMethod() string {
-	var on []string
+	on := p.Requires()
 	if !p.NoLink {
 		on = append(on, "link")
-	}
-	if p.Password != "" {
-		on = append(on, "password")
-	}
-	if p.Telegram {
-		on = append(on, "telegram")
 	}
 	if len(on) == 1 {
 		return on[0]
@@ -207,7 +198,7 @@ func (u *UI) loginPage(w http.ResponseWriter, r *http.Request, m mount) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(401)
 	v := view{Base: m.base, Remote: m.remote, Lang: l, Path: m.base + "/"}
-	if !p.linkRequired(m) {
+	if p.NoLink {
 		v.Data = map[string]any{"Start": true, "Password": p.Password != "", "Telegram": map[bool]string{true: tgNeed}[p.Telegram]}
 		_ = tplIn(l).ExecuteTemplate(w, "login_step.html", v)
 		return
@@ -387,7 +378,7 @@ func (u *UI) loginPost(m mount) http.HandlerFunc {
 		// Без ссылки попытка начинается кнопкой «Войти» на постоянном адресе (POST
 		// с проверкой Origin: чужой сайт попытку не начнёт и Telegram не потревожит).
 		// Повторное «Войти» начинает попытку заново (неверные пароли считает общая задержка).
-		if p := u.Protection(); r.PostForm.Get("start") == "1" && !p.linkRequired(m) {
+		if p := u.Protection(); r.PostForm.Get("start") == "1" && p.NoLink {
 			delete(u.attempts, id)
 			id = u.newAttempt(m, p)
 			a = u.attempts[id]

@@ -176,108 +176,80 @@ func (d *Dispatcher) Call(fn string, req []byte) []byte {
 	return abi.OK(res)
 }
 
-func decode(req []byte, v any) error {
-	if err := json.Unmarshal(req, v); err != nil {
-		return abi.Errorf(abi.CodeBadRequest, "%v", err)
+// handle разбирает запрос функции хоста и вызывает её обработчик.
+func handle[Req, Res any](req []byte, f func(Req) (Res, error)) (any, error) {
+	var r Req
+	if err := json.Unmarshal(req, &r); err != nil {
+		return nil, abi.Errorf(abi.CodeBadRequest, "%v", err)
 	}
-	return nil
+	return f(r)
 }
 
 func (d *Dispatcher) call(fn string, req []byte) (any, error) {
 	switch fn {
 	case abi.FnHTTPRequest:
-		var r abi.HTTPRequest
-		if err := decode(req, &r); err != nil {
-			return nil, err
-		}
-		return d.http(r)
+		return handle(req, d.http)
 	case abi.FnTLSDial:
-		var r abi.DialRequest
-		if err := decode(req, &r); err != nil {
-			return nil, err
-		}
-		return d.dial(r)
+		return handle(req, d.dial)
 	case abi.FnConnRead:
-		var r abi.ConnRead
-		if err := decode(req, &r); err != nil {
-			return nil, err
-		}
-		c, err := d.conn(r.Conn)
-		if err != nil {
-			return nil, err
-		}
-		return c.read(r.Max, r.WaitMS), nil
+		return handle(req, func(r abi.ConnRead) (any, error) {
+			c, err := d.conn(r.Conn)
+			if err != nil {
+				return nil, err
+			}
+			return c.read(r.Max, r.WaitMS), nil
+		})
 	case abi.FnConnWrite:
-		var r abi.ConnWrite
-		if err := decode(req, &r); err != nil {
-			return nil, err
-		}
-		c, err := d.conn(r.Conn)
-		if err != nil {
-			return nil, err
-		}
-		_ = c.c.SetWriteDeadline(time.Now().Add(d.timeout()))
-		n, err := c.c.Write(r.Data)
-		if err != nil {
-			return abi.ConnWriteResponse{N: n}, abi.Errorf(abi.CodeIO, "write: %v", err)
-		}
-		return abi.ConnWriteResponse{N: n}, nil
+		return handle(req, func(r abi.ConnWrite) (any, error) {
+			c, err := d.conn(r.Conn)
+			if err != nil {
+				return nil, err
+			}
+			_ = c.c.SetWriteDeadline(time.Now().Add(d.timeout()))
+			n, err := c.c.Write(r.Data)
+			if err != nil {
+				return nil, abi.Errorf(abi.CodeIO, "write: %v", err)
+			}
+			return abi.ConnWriteResponse{N: n}, nil
+		})
 	case abi.FnConnClose:
-		var r abi.ConnClose
-		if err := decode(req, &r); err != nil {
-			return nil, err
-		}
-		d.mu.Lock()
-		c := d.conns[r.Conn]
-		delete(d.conns, r.Conn)
-		d.mu.Unlock()
-		if c != nil {
-			c.close()
-		}
-		return struct{}{}, nil
+		return handle(req, func(r abi.ConnClose) (any, error) {
+			d.mu.Lock()
+			c := d.conns[r.Conn]
+			delete(d.conns, r.Conn)
+			d.mu.Unlock()
+			if c != nil {
+				c.close()
+			}
+			return struct{}{}, nil
+		})
 	case abi.FnFSRead, abi.FnFSWrite, abi.FnFSAppend, abi.FnFSList, abi.FnFSStat:
-		var r abi.FSRequest
-		if err := decode(req, &r); err != nil {
-			return nil, err
-		}
-		return d.fs(fn, r)
+		return handle(req, func(r abi.FSRequest) (any, error) { return d.fs(fn, r) })
 	case abi.FnKVGet, abi.FnKVSet, abi.FnKVDelete:
-		var r abi.KVRequest
-		if err := decode(req, &r); err != nil {
-			return nil, err
-		}
-		return d.kv(fn, r)
+		return handle(req, func(r abi.KVRequest) (any, error) { return d.kv(fn, r) })
 	case abi.FnEvidenceAdd:
-		var r abi.EvidenceItem
-		if err := decode(req, &r); err != nil {
-			return nil, err
-		}
-		if textual(r.MIME) {
-			r.Data = d.maskBytes(r.Data)
-		}
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		if d.evSize+len(r.Data) > MaxEvidence {
-			return nil, abi.Errorf(abi.CodeLimit, "evidence is larger than %d bytes", MaxEvidence)
-		}
-		d.evSize += len(r.Data)
-		d.evidence = append(d.evidence, r)
-		return struct{}{}, nil
+		return handle(req, func(r abi.EvidenceItem) (any, error) {
+			if textual(r.MIME) {
+				r.Data = d.maskBytes(r.Data)
+			}
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if d.evSize+len(r.Data) > MaxEvidence {
+				return nil, abi.Errorf(abi.CodeLimit, "evidence is larger than %d bytes", MaxEvidence)
+			}
+			d.evSize += len(r.Data)
+			d.evidence = append(d.evidence, r)
+			return struct{}{}, nil
+		})
 	case abi.FnLog:
-		var r abi.LogRequest
-		if err := decode(req, &r); err != nil {
-			return nil, err
-		}
-		if d.Log != nil {
-			d.Log(r.Level, d.Mask(r.Msg))
-		}
-		return struct{}{}, nil
+		return handle(req, func(r abi.LogRequest) (any, error) {
+			if d.Log != nil {
+				d.Log(r.Level, d.Mask(r.Msg))
+			}
+			return struct{}{}, nil
+		})
 	case abi.FnServiceCall:
-		var r abi.ServiceCallRequest
-		if err := decode(req, &r); err != nil {
-			return nil, err
-		}
-		return d.service(r)
+		return handle(req, d.service)
 	}
 	return nil, abi.Errorf(abi.CodeNotSupported, "unknown host function %q", fn)
 }
@@ -454,9 +426,7 @@ func (c *conn) read(max, waitMS int) abi.ConnReadResponse {
 	if max <= 0 || max > 1<<20 {
 		max = 64 << 10
 	}
-	if waitMS > maxConnReadWait {
-		waitMS = maxConnReadWait
-	}
+	waitMS = min(waitMS, maxConnReadWait)
 	c.mu.Lock()
 	empty := len(c.buf) == 0 && !c.eof
 	c.mu.Unlock()
@@ -521,23 +491,20 @@ func (d *Dispatcher) dial(r abi.DialRequest) (abi.DialResponse, error) {
 	d.dialing++
 	d.mu.Unlock()
 	nc, err := netauth.Dial(d.ctx(), cfg)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.dialing--
 	if err != nil {
-		d.mu.Lock()
-		d.dialing--
-		d.mu.Unlock()
 		return out, err
 	}
 	c := newConn(nc, nc.Greeting)
 	go c.pump()
-	d.mu.Lock()
-	d.dialing--
 	if d.conns == nil {
 		d.conns = map[int]*conn{}
 	}
 	d.next++
 	d.conns[d.next] = c
 	out.Conn = d.next
-	d.mu.Unlock()
 	return out, nil
 }
 
@@ -649,12 +616,9 @@ func (d *Dispatcher) fsAt(fn string, r abi.FSRequest, loc capability.Location) (
 		}
 		return abi.FSStatResponse{Exists: true, Dir: fi.IsDir(), Size: fi.Size(), RealPath: real}, nil
 	case abi.FnFSRead:
-		max := r.Max
-		if max <= 0 {
-			max = DefaultFSRead
-		}
-		if max > MaxFSRead {
-			max = MaxFSRead
+		limit := min(r.Max, MaxFSRead)
+		if limit <= 0 {
+			limit = DefaultFSRead
 		}
 		f, err := open(os.O_RDONLY, 0)
 		if err != nil {
@@ -671,22 +635,19 @@ func (d *Dispatcher) fsAt(fn string, r abi.FSRequest, loc capability.Location) (
 		if r.Offset != 0 { // с позиции; отрицательное — столько байт с конца
 			off := r.Offset
 			if off < 0 {
-				off = fi.Size() + off
-			}
-			if off < 0 {
-				off = 0
+				off = max(fi.Size()+off, 0)
 			}
 			if _, err := f.Seek(min(off, fi.Size()), io.SeekStart); err != nil {
 				return nil, ioErr(err)
 			}
 		}
-		b, err := io.ReadAll(io.LimitReader(f, max+1))
+		b, err := io.ReadAll(io.LimitReader(f, limit+1))
 		if err != nil {
 			return nil, ioErr(err)
 		}
 		out := abi.FSReadResponse{Size: fi.Size(), RealPath: real}
-		if int64(len(b)) > max {
-			b, out.Truncated = b[:max], true
+		if int64(len(b)) > limit {
+			b, out.Truncated = b[:limit], true
 		}
 		out.Data = b
 		return out, nil

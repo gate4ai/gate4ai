@@ -125,20 +125,7 @@ func (s *Store) ListApprovals(status string, limit int) ([]*Approval, error) {
 		q += ` LIMIT ?`
 		args = append(args, limit)
 	}
-	rows, err := s.db.Query(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*Approval
-	for rows.Next() {
-		a, err := s.scanApproval(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	return s.queryApprovals(q, args...)
 }
 
 // ErrExpired — срок запроса истёк: решение человека не принимается

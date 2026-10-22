@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -76,12 +78,18 @@ func (x *Executor) Elements(ctx context.Context, root string) ([]Element, error)
 	if err := x.pace(ctx, "elements"); err != nil {
 		return nil, err
 	}
+	return evalIn[Element](ctx, x, elementsJS, MaxElements, root)
+}
+
+// evalIn — список из js(max, root) на читаемой странице; null (элемента root
+// нет) — ErrNotFound.
+func evalIn[T any](ctx context.Context, x *Executor, js string, max int, root string) ([]T, error) {
 	if err := x.readable(ctx); err != nil {
 		return nil, err
 	}
-	var out *[]Element
+	var out *[]T
 	rj, _ := json.Marshal(root)
-	if err := x.Engine.Eval(ctx, elementsJS+"("+itoa(MaxElements)+", "+string(rj)+")", &out); err != nil {
+	if err := x.Engine.Eval(ctx, js+"("+strconv.Itoa(max)+", "+string(rj)+")", &out); err != nil {
 		return nil, err
 	}
 	if out == nil {
@@ -165,21 +173,8 @@ var outlineJS = `((max, root) => {
 
 // Outline — структура страницы (или элемента root): контейнеры с селекторами.
 func (x *Executor) Outline(ctx context.Context, root string) ([]Node, error) {
-	if err := x.readable(ctx); err != nil {
-		return nil, err
-	}
-	var out *[]Node
-	rj, _ := json.Marshal(root)
-	if err := x.Engine.Eval(ctx, outlineJS+"("+itoa(MaxNodes)+", "+string(rj)+")", &out); err != nil {
-		return nil, err
-	}
-	if out == nil {
-		return nil, fmt.Errorf("%w: %s", ErrNotFound, root)
-	}
-	return *out, nil
+	return evalIn[Node](ctx, x, outlineJS, MaxNodes, root)
 }
-
-func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
 // Request — запрос страницы к серверу (fetch / XHR), как его видит агент,
 // который ищет API сайта.
@@ -345,23 +340,24 @@ func RedactBody(url, body string) string {
 	if err := json.Unmarshal([]byte(body), &v); err != nil {
 		return sensitiveField.ReplaceAllString(body, `$1"***"`)
 	}
-	b, _ := json.Marshal(redact(v))
+	b, _ := json.Marshal(redactKeys(v, sensitiveKey.MatchString))
 	return string(b)
 }
 
-func redact(v any) any {
+// redactKeys заменяет на *** значения полей JSON, для которых hide истинно.
+func redactKeys(v any, hide func(string) bool) any {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, x := range t {
-			if sensitiveKey.MatchString(k) {
+			if hide(k) {
 				t[k] = "***" // и объект целиком: {"session": {"id": …, "key": …}}
 				continue
 			}
-			t[k] = redact(x)
+			t[k] = redactKeys(x, hide)
 		}
 	case []any:
 		for i := range t {
-			t[i] = redact(t[i])
+			t[i] = redactKeys(t[i], hide)
 		}
 	}
 	return v
@@ -412,12 +408,7 @@ func redactPairs(query string, hide func(string) bool) string {
 }
 
 func (x *Executor) redacted(k string) bool {
-	for _, p := range x.RedactParams {
-		if strings.EqualFold(p, k) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(x.RedactParams, func(p string) bool { return strings.EqualFold(p, k) })
 }
 
 // redactValues — поля JSON с именами из RedactParams.
@@ -429,25 +420,7 @@ func (x *Executor) redactValues(body string) string {
 	if json.Unmarshal([]byte(body), &v) != nil {
 		return body
 	}
-	var walk func(any) any
-	walk = func(v any) any {
-		switch t := v.(type) {
-		case map[string]any:
-			for k, x2 := range t {
-				if x.redacted(k) {
-					t[k] = "***"
-				} else {
-					t[k] = walk(x2)
-				}
-			}
-		case []any:
-			for i := range t {
-				t[i] = walk(t[i])
-			}
-		}
-		return v
-	}
-	b, _ := json.Marshal(walk(v))
+	b, _ := json.Marshal(redactKeys(v, x.redacted))
 	return string(b)
 }
 

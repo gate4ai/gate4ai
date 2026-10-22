@@ -259,11 +259,11 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 
 	// Любой другой коннектор при установке — тоже в default, действия с подтверждения;
 	// правило владельца на действие остаётся.
-	plan, err := d.PrepareConnector(context.Background(), "bank")
+	plan, err := d.PrepareConnectorDev(context.Background(), "bank", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := d.InstallConnector(context.Background(), "bank", plan.Capabilities); err != nil {
+	if _, _, _, err := d.InstallConnectorDev(context.Background(), "bank", plan.Capabilities, false); err != nil {
 		t.Fatal(err)
 	}
 	for action, want := range map[string]string{"bank.balance": config.EffectDeny, "bank.pay": config.EffectAsk} {
@@ -298,7 +298,7 @@ func TestStoreFilesReplacedByBuiltin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.PrepareConnector(context.Background(), "files"); err == nil || !strings.Contains(err.Error(), "part of gate4ai") {
+	if _, err := d.PrepareConnectorDev(context.Background(), "files", false); err == nil || !strings.Contains(err.Error(), "part of gate4ai") {
 		t.Fatal("store files must be refused:", err)
 	}
 	// Установка прежней версией ядра — пакет в каталоге коннекторов.
