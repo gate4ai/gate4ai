@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,8 +12,10 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"mime"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
@@ -527,8 +530,76 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 		e.ForceJSON = true
 	}
 	body := map[string]any{"action": tool.Name, "args": vals, "wait": opts.wait, "agent": opts.as}
-	return e.callObject(ctx, e.Client(), "POST", "/v1/call", body, ExitForResult)
+	var res map[string]any
+	if err := e.Client().Do(ctx, "POST", "/v1/call", body, &res); err != nil {
+		return e.fail(err)
+	}
+	if err := saveContent(res, opts.out, tool.Name); err != nil {
+		e.problem(Problem{Code: "io_error", Message: err.Error(), Hint: "pass --out <file.png> in a folder you can write to"})
+		return ExitError
+	}
+	e.printJSON(res)
+	return ExitForResult(res)
 }
+
+// saveContent — двоичные блоки ответа (картинка page_screenshot, screenshot)
+// в файлы: в JSON агенту — путь (path) и размер вместо base64. out — файл
+// (несколько блоков: out, out-2, …); "" — временный файл. Путь первого файла —
+// ещё и в result.file.
+func saveContent(res map[string]any, out, action string) error {
+	blocks, _ := res["content"].([]any)
+	n := 0
+	for _, b := range blocks {
+		m, ok := b.(map[string]any)
+		raw, _ := m["data"].(string)
+		if !ok || raw == "" {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			continue
+		}
+		n++
+		ext := ".bin"
+		if exts, _ := mime.ExtensionsByType(str(m["mime_type"])); len(exts) > 0 {
+			ext = exts[len(exts)-1]
+		}
+		if str(m["mime_type"]) == "image/png" {
+			ext = ".png"
+		}
+		path := out
+		switch {
+		case path == "":
+			f, err := os.CreateTemp("", "gate4ai-"+strings.ReplaceAll(action, ".", "-")+"-*"+ext)
+			if err != nil {
+				return err
+			}
+			path = f.Name()
+			f.Close()
+		case n > 1:
+			path = strings.TrimSuffix(out, filepath.Ext(out)) + fmt.Sprintf("-%d", n) + filepath.Ext(out)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			return fmt.Errorf("--out: %v", err)
+		}
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		delete(m, "data")
+		m["path"], m["size"] = path, len(data)
+		if n == 1 {
+			r, _ := res["result"].(map[string]any)
+			if r == nil {
+				r = map[string]any{}
+				res["result"] = r
+			}
+			r["file"] = path
+		}
+	}
+	return nil
+}
+
+func str(v any) string { s, _ := v.(string); return s }
 
 // ExitForResult — код выхода по результату pipeline.
 func ExitForResult(res map[string]any) int {
@@ -563,7 +634,7 @@ func (e *Env) actionHelp(t skill.Tool) {
 		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, bracket(skill.Limits(p.Schema)))
 	}
 	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n"+
-		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
+		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           an image or file in the answer goes to file f (default: a temporary file); its path is in result.file\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
 }
 
 func bracket(s string) string {
@@ -616,9 +687,9 @@ func hoistCallOpts(args []string) (rest, opts []string) {
 			return args, opts
 		case name == "json" && !hasVal:
 			opts, args = append(opts, a), args[1:]
-		case (name == "wait" || name == "as") && hasVal:
+		case (name == "wait" || name == "as" || name == "out") && hasVal:
 			opts, args = append(opts, a), args[1:]
-		case (name == "wait" || name == "as") && len(args) > 1:
+		case (name == "wait" || name == "as" || name == "out") && len(args) > 1:
 			opts, args = append(opts, args[0], args[1]), args[2:]
 		default:
 			return args, opts
@@ -630,6 +701,7 @@ func hoistCallOpts(args []string) (rest, opts []string) {
 type callOpts struct {
 	wait string
 	as   string
+	out  string // файл для картинки или файла из ответа (page_screenshot)
 	help bool
 	json bool // --json без значения: вывод JSON
 }
@@ -693,7 +765,7 @@ func parseArgs(t skill.Tool, args []string, stdin io.Reader) (map[string]any, ca
 		_, isArg := types[name]
 		switch {
 		case isArg:
-		case name == "wait" || name == "as":
+		case name == "wait" || name == "as" || name == "out":
 			v, err := next()
 			if err != nil {
 				if name == "wait" {
@@ -701,10 +773,13 @@ func parseArgs(t skill.Tool, args []string, stdin io.Reader) (map[string]any, ca
 				}
 				return nil, o, err
 			}
-			if name == "wait" {
+			switch name {
+			case "wait":
 				o.wait = v
-			} else {
+			case "as":
 				o.as = v
+			default:
+				o.out = v
 			}
 			continue
 		case name == "json" && !hasVal && (i+1 >= len(args) || strings.HasPrefix(args[i+1], "-")):
