@@ -17,6 +17,9 @@ go build ./...
 go vet ./...
 go test $pkgs
 go test -race -short $pkgs
+# Сборка для стенда (GATE4AI_OWNER_CHECK=off действует только в ней).
+go vet -tags gate4ai_devstand ./cmd/gate4ai ./internal/front/cli
+go test -tags gate4ai_devstand ./internal/platform/agentid
 if [ -z "${CI:-}" ]; then
   for os in darwin windows; do
     GOOS=$os GOARCH=amd64 go build ./...

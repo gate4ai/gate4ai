@@ -85,3 +85,13 @@ func TestIdentifySelf(t *testing.T) {
 		t.Fatalf("cwd %q, want %q", d, wd)
 	}
 }
+
+func TestCheckOffOnlyInDevstand(t *testing.T) {
+	off := func(string) string { return "off" }
+	if CheckOff(off) != DevStand {
+		t.Fatalf("CheckOff with GATE4AI_OWNER_CHECK=off = %v, want %v (DevStand)", CheckOff(off), DevStand)
+	}
+	if CheckOff(func(string) string { return "" }) {
+		t.Fatal("CheckOff without the variable")
+	}
+}

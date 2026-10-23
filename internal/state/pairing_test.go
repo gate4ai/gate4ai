@@ -91,4 +91,3 @@ func TestPairingLimit(t *testing.T) {
 		t.Fatalf("the limit is per channel: %v", err)
 	}
 }
-

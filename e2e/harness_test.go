@@ -70,7 +70,13 @@ func binary(t *testing.T, pkg string) string {
 			b.err = err
 			return
 		}
-		cmd := exec.Command("go", "build", "-o", b.path, pkg)
+		args := []string{"build", "-o", b.path}
+		if underAgent {
+			// Тесты запустил агент: GATE4AI_OWNER_CHECK=off нужен стенду, а
+			// действует он только в сборке с этим тегом.
+			args = append(args, "-tags", "gate4ai_devstand")
+		}
+		cmd := exec.Command("go", append(args, pkg)...)
 		cmd.Dir, cmd.Env = "..", env
 		if out, err := cmd.CombinedOutput(); err != nil {
 			b.err = fmt.Errorf("build %s: %v\n%s", pkg, err, out)

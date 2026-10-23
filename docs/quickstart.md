@@ -246,7 +246,8 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 ```sh
 mkdir -p /tmp/g4stand
 export GATE4AI_HOME=$PWD/.stand GATE4AI_SOCKET=/tmp/g4stand/owner.sock GATE4AI_AGENT_SOCKET=/tmp/g4stand/agent.sock
-# стенд, который запускает сам агент (Claude Code): GATE4AI_OWNER_CHECK=off — сокет владельца не отличает агента от человека
+# стенд, который запускает сам агент (Claude Code): сборка go build -tags gate4ai_devstand ./cmd/gate4ai
+# и GATE4AI_OWNER_CHECK=off — сокет владельца не отличает агента от человека (в выпуске переменная не действует)
 gate4ai daemon --ui 127.0.0.1:7531 --keystore file &       # ключи в файле, а не в связке ОС
 gate4ai connectors install connectors/mail --yes --watch   # коннектор из каталога исходников, пересобирается при правках
 gate4ai ui --print                                         # одноразовая ссылка на Web UI (2 минуты)

@@ -128,3 +128,9 @@ func FromChain(chain []procinfo.Proc, cwd func(int) string) Caller {
 	}
 	return c
 }
+
+// CheckOff — проверка агента выключена: только в сборке для стенда
+// (DevStand) и только с GATE4AI_OWNER_CHECK=off.
+func CheckOff(getenv func(string) string) bool {
+	return DevStand && getenv("GATE4AI_OWNER_CHECK") == "off"
+}

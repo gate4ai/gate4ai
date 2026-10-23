@@ -55,9 +55,9 @@ func PickKey(keys []AgentKey, name, kind, dir string) (AgentKey, bool) {
 func (e *Env) self() agentid.Caller {
 	if !e.selfDone {
 		e.selfDone = true
-		if e.Getenv("GATE4AI_OWNER_CHECK") == "off" {
-			// Тестовый стенд, сам запущенный агентом: агента не ищем (решает
-			// daemon — с той же переменной он тоже не отличает агента).
+		if agentid.CheckOff(e.Getenv) {
+			// Стенд, сам запущенный агентом (сборка с тегом gate4ai_devstand):
+			// агента не ищем — daemon с той же переменной его тоже не отличает.
 			return e.selfC
 		}
 		if e.Self != nil {
