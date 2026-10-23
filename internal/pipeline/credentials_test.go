@@ -407,6 +407,28 @@ func TestAccountsOnlyForNativeBrowser(t *testing.T) {
 	}
 }
 
+// Сеансы браузера — у экземпляра агента: сессия Claude Code, иначе процесс-корень
+// агента; удалённый вызов и вызов не из агента экземпляра не знают.
+func TestBrowserAgentInstance(t *testing.T) {
+	chain := []audit.CallerProc{{PID: 10, Name: "gate4ai"}, {PID: 7, Name: "codex"}}
+	for _, tc := range []struct {
+		c    *audit.Caller
+		want string
+	}{
+		{&audit.Caller{Kind: "claude-code", Source: "peer", Session: "f170", Chain: chain}, "session:f170"},
+		{&audit.Caller{Kind: "codex", Source: "peer", Chain: chain}, "pid:7"},
+		{&audit.Caller{Source: "peer", Chain: chain[:1]}, ""},
+		{&audit.Caller{Kind: "claude-code", Source: "reported", Session: "f170"}, ""},
+		{nil, ""},
+	} {
+		e := newCredEnv(t, manifest.RuntimeNative)
+		e.p.Execute(WithCaller(context.Background(), tc.c), Call{Agent: "dev", Action: "browser.login", Args: map[string]any{"account": "@emias"}})
+		if q := e.br.last(); q.Agent != "dev" || q.AgentInstance != tc.want {
+			t.Fatalf("%+v: agent %q instance %q, want %q", tc.c, q.Agent, q.AgentInstance, tc.want)
+		}
+	}
+}
+
 func TestApprovalShowsAccount(t *testing.T) {
 	e := newCredEnv(t, manifest.RuntimeNative)
 	cfg := e.p.cfg()

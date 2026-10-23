@@ -567,6 +567,51 @@ func TestAgentSessionsPerAgent(t *testing.T) {
 	}
 }
 
+func agentIn(b *Browser, agent, instance, action string, args map[string]any) (map[string]any, error) {
+	res, err := b.Execute(context.Background(), nil, abi.ExecRequest{Action: action, Args: args, Agent: agent, AgentInstance: instance,
+		Settings: map[string]any{"cdp_url": "http://127.0.0.1:1", "allowed_domains": []any{"*.example.com"}}})
+	m, _ := res.Structured.(map[string]any)
+	return m, err
+}
+
+// Две сессии Claude Code — один агент claude-code: сеанс у своей сессии,
+// close --all второй не закрывает сеанс первой, а busy не советует продолжать
+// в чужом сеансе. Экземпляр неизвестен — сеансы всех экземпляров агента.
+func TestAgentSessionsPerInstance(t *testing.T) {
+	old := AgentWait
+	AgentWait = 50 * time.Millisecond
+	t.Cleanup(func() { AgentWait = old })
+	_, b, _ := setup(t, nil)
+	res, err := agentIn(b, "claude-code", "session:one", "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	_, err = agentIn(b, "claude-code", "session:two", "open", map[string]any{"url": "https://b.example.com/"})
+	if err == nil || !strings.Contains(err.Error(), "held by another browser session") || strings.Contains(err.Error(), "continue in it") {
+		t.Fatal("the second session's open:", err)
+	}
+	if _, err := agentIn(b, "claude-code", "session:two", "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed or unknown") {
+		t.Fatal("another session of the agent uses the id:", err)
+	}
+	if res, err := agentIn(b, "claude-code", "session:two", "close", map[string]any{"all": true}); err != nil || res["sessions"] != 0 {
+		t.Fatal("close --all of the second session:", res, err)
+	}
+	if _, err := agentIn(b, "claude-code", "session:one", "observe", map[string]any{"session": id}); err != nil {
+		t.Fatal("the first session's browser session survives:", err)
+	}
+	_, err = agentIn(b, "claude-code", "session:one", "open", map[string]any{"url": "https://a.example.com/"})
+	if err == nil || !strings.Contains(err.Error(), "continue in it") {
+		t.Fatal("the holder's second open is told to continue in its session:", err)
+	}
+	if _, err := agentIn(b, "claude-code", "", "observe", map[string]any{"session": id}); err != nil {
+		t.Fatal("an unknown instance of the agent:", err)
+	}
+	if res, err := agentIn(b, "claude-code", "", "close", map[string]any{"all": true}); err != nil || res["sessions"] != 1 {
+		t.Fatal("close --all with an unknown instance:", res, err)
+	}
+}
+
 // close --all отменяет идущее действие сеанса и освобождает страницу только
 // после его завершения: следующий сеанс не получает её посреди действия.
 func TestCloseAllWaitsForAction(t *testing.T) {

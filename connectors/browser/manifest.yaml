@@ -393,7 +393,7 @@ actions:
   - name: close
     class: read
     untrusted: true
-    description: "End the browser session and free the page. Returns {session, closed: true, steps: <number of recorded steps>}; steps: true adds step_list (action, args, status: ok or the error code — without results and page texts); save_steps: true writes the full record ({session, steps} with results) to a file and returns its path in steps_file — a test fixture for a connector (hosttest.LoadFixture, hosttest.Replay). all: true closes every session of this agent (a lost id, a stuck session): {closed: true, sessions: N}"
+    description: "End the browser session and free the page. Returns {session, closed: true, steps: <number of recorded steps>}; steps: true adds step_list (action, args, status: ok or the error code — without results and page texts); save_steps: true writes the full record ({session, steps} with results) to a file and returns its path in steps_file — a test fixture for a connector (hosttest.LoadFixture, hosttest.Replay). all: true closes every session of yours — this agent in this agent session (a lost id, a stuck session); others' sessions stay open: {closed: true, sessions: N}"
     input_schema:
       type: object
       properties:
