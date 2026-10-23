@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Агент подключается сам: первая команда — код, владелец подтверждает его в
@@ -45,6 +46,19 @@ func TestAgentPairing(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(g.home, "agents", "claude-code.json")); err != nil || !strings.Contains(string(b), `"pairing"`) {
 		t.Fatalf("key file: %s %v", b, err)
+	}
+
+	// Запрос — в журнале daemon, а не во всплывающем уведомлении
+	// (GATE4AI_PAIR_NOTIFY=log в харнессе); каналы уведомляют асинхронно.
+	logged := func() bool {
+		l := g.log.String()
+		return strings.Contains(l, "pairing requested") && strings.Contains(l, code)
+	}
+	for end := time.Now().Add(5 * time.Second); !logged() && time.Now().Before(end); {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !logged() {
+		t.Fatalf("pairing request not in the daemon log:\n%s", g.log.String())
 	}
 
 	// Владелец: Web UI по одноразовой ссылке, запрос с тем же кодом, «Разрешить».
