@@ -21,6 +21,7 @@ type Stagehand struct {
 	browser *stagehand.Browser
 	client  *stagehand.Stagehand
 	page    *stagehand.Page
+	tab     bool // временная вкладка (NewTab): Close закрывает только её
 }
 
 // StagehandConfig — модель для extract.
@@ -109,14 +110,32 @@ type extracted struct {
 }
 
 func (s *Stagehand) Extract(ctx context.Context, instruction string) (any, error) {
-	r, err := stagehand.Extract[extracted](ctx, s.client, instruction, nil)
+	// Страница — явно: иначе SDK берёт активную, а это может быть чужая вкладка.
+	r, err := stagehand.Extract[extracted](ctx, s.client, instruction, &stagehand.StagehandClientExtractOptions{Page: s.page})
 	if err != nil {
 		return nil, err
 	}
 	return r.Data.Answer, nil
 }
 
+// NewTab — временная вкладка того же Chrome (тот же профиль и cookie) на
+// общем подключении SDK; Close закрывает только её.
+func (s *Stagehand) NewTab(ctx context.Context) (Engine, error) {
+	bc, err := s.browser.Context()
+	if err != nil {
+		return nil, err
+	}
+	p, err := bc.NewPage(ctx, "about:blank")
+	if err != nil {
+		return nil, fmt.Errorf("stagehand: new tab: %w", err)
+	}
+	return &Stagehand{browser: s.browser, client: s.client, page: p, tab: true}, nil
+}
+
 func (s *Stagehand) Close() error {
 	ctx := context.Background()
+	if s.tab {
+		return s.page.Close(ctx)
+	}
 	return errors.Join(s.client.Close(ctx), s.browser.Close(ctx))
 }

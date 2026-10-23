@@ -12,7 +12,7 @@ actions:
   - name: read
     class: read
     untrusted: true
-    description: "Open a page on an allowed site and return its text; a page that is not HTML (a JSON API, text) — its body as the server sent it (body, content_type)"
+    description: "Open a page on an allowed site and return its text; a page that is not HTML (a JSON API, text) — its body as the server sent it (body, content_type). Works in a temporary tab of the same browser profile (its cookies) that closes afterwards: an open browser session is not touched, so it works while one is open."
     input_schema:
       type: object
       properties:
@@ -32,7 +32,7 @@ actions:
   - name: screenshot
     class: read
     evidence: png
-    description: Screenshot of one element (CSS selector); the image is returned and stored as evidence
+    description: "Screenshot of one element (CSS selector); the image is returned and stored as evidence. Works in a temporary tab of the same browser profile (its cookies) that closes afterwards: an open browser session is not touched, so it works while one is open."
     input_schema:
       type: object
       properties:
@@ -48,7 +48,7 @@ actions:
   - name: extract
     class: read
     untrusted: true
-    description: Extract data from a page by instruction (uses the model configured by the user)
+    description: "Extract data from a page by instruction (uses the model configured by the user). Works in a temporary tab of the same browser profile (its cookies) that closes afterwards: an open browser session is not touched, so it works while one is open."
     input_schema:
       type: object
       properties:

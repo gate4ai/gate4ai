@@ -36,7 +36,7 @@ var AgentWait = 5 * time.Second
 const MaxSteps = 500
 
 // Browser — коннектор: действия агента без сеанса (read, screenshot, extract —
-// страница на время действия), сеанс агента (open → observe / act / network /
+// временная вкладка на время действия: открытый сеанс агента они не трогают), сеанс агента (open → observe / act / network /
 // page_extract / page_screenshot → close; сайты — из настроек) и те же
 // действия для других коннекторов через service_call (страница на корневое
 // действие, сайты — params.sites вызывающего).
@@ -204,8 +204,13 @@ func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (
 	return res, fail(b.busy(err))
 }
 
-// busy — подсказка, кто держит страницу.
+// busy — подсказка, кто держит страницу, и что сделать вместо ожидания.
 func (b *Browser) busy(err error) error {
+	if errors.Is(err, worker.ErrTabLimit) {
+		return abi.Errorf(abi.CodeLimit, "%v (%d at most; read, screenshot and extract each use one while they run): try again when they finish, "+
+			"or use your open session: browser.get --session <id> --url <url> (a request with the session's cookies) or "+
+			"browser.open --session <id> --url <url> then browser.observe / page_screenshot / page_extract", err, worker.MaxTabs)
+	}
 	if !errors.Is(err, worker.ErrBusy) {
 		return err
 	}
@@ -213,7 +218,8 @@ func (b *Browser) busy(err error) error {
 	n := len(b.agents)
 	b.mu.Unlock()
 	if n > 0 {
-		return abi.Errorf(abi.CodeLimit, "%v: an agent's browser session is open; close it with browser.close (an idle session closes after %s)", err, AgentIdle)
+		return abi.Errorf(abi.CodeLimit, "%v: an agent's browser session is open (one at a time); continue in it: browser.open --session <id> --url <url>, "+
+			"or browser.read / screenshot / extract --url <url> without session (a temporary tab); or close it with browser.close (an idle session closes after %s)", err, AgentIdle)
 	}
 	return abi.Errorf(abi.CodeLimit, "%v: a connector's action is using the page; try again when it ends", err)
 }
@@ -230,13 +236,14 @@ func agentSites(r abi.ExecRequest) (domain.Sites, error) {
 	return sites, nil
 }
 
-// agent — действие агента: страница на время действия.
+// agent — действие агента: временная вкладка того же профиля на время
+// действия (страница, адрес и состояние сеансов не меняются).
 func (b *Browser) agent(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
 	sites, err := agentSites(r)
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	s, err := b.W.Acquire(ctx, settings(r), AgentWait)
+	s, err := b.W.Tab(ctx, settings(r), AgentWait)
 	if err != nil {
 		return abi.ExecResult{}, err
 	}

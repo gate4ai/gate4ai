@@ -38,13 +38,15 @@ func DefaultEngine(ctx context.Context, s Settings, cdpURL string) (Engine, erro
 }
 
 // Service — браузерный воркер: один движок между вызовами, одна сессия за
-// раз — страница не делится между вызовами.
+// раз — страница не делится между вызовами; одноразовые вызовы — во временных
+// вкладках того же Chrome (Tab), не дольше MaxTabs одновременно.
 type Service struct {
 	NewEngine EngineFactory
 	Launch    func(ctx context.Context, chrome, profile string, extra ...string) (string, *os.Process, error)
 
 	mu   sync.Mutex
 	slot chan struct{} // одна сессия за раз
+	tabs chan struct{} // временные вкладки одноразовых вызовов (MaxTabs)
 	exec *Executor
 	key  string
 	cdp  string // адрес DevTools текущего Chrome
@@ -68,10 +70,15 @@ func normalize(st Settings) Settings {
 	return st
 }
 
+// settingsKey — настройки, при смене которых движок и Chrome пересоздаются.
+func settingsKey(st Settings) string {
+	return fmt.Sprint(st.CDPURL, st.ChromePath, st.ProfileDir, st.Engine, st.Model, st.ModelKey)
+}
+
 func (s *Service) executor(ctx context.Context, st Settings) (*Executor, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := fmt.Sprint(st.CDPURL, st.ChromePath, st.ProfileDir, st.Engine, st.Model, st.ModelKey)
+	key := settingsKey(st)
 	reuse := ""
 	if s.exec != nil && s.key == key {
 		if alive(ctx, s.exec.Engine) {
@@ -131,6 +138,89 @@ func (s *Service) slotCh() chan struct{} {
 		s.slot = make(chan struct{}, 1)
 	}
 	return s.slot
+}
+
+// MaxTabs — сколько временных вкладок (одноразовые read / screenshot /
+// extract) открыто одновременно, кроме страницы сессии.
+var MaxTabs = 4
+
+// ErrTabLimit — все временные вкладки заняты дольше, чем вызов готов ждать.
+var ErrTabLimit = errors.New("too many temporary browser tabs are open")
+
+// Tabber — движок умеет открыть временную вкладку того же Chrome.
+type Tabber interface {
+	NewTab(ctx context.Context) (Engine, error)
+}
+
+func (s *Service) tabsCh() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tabs == nil {
+		s.tabs = make(chan struct{}, MaxTabs)
+	}
+	return s.tabs
+}
+
+// Tab — временная вкладка того же Chrome и профиля для одноразового вызова:
+// страницу сессии (слот Acquire) не занимает и не трогает; Release закрывает
+// вкладку. Пока заняты все MaxTabs вкладок, ждёт не дольше wait (ErrTabLimit;
+// 0 — до конца ctx).
+func (s *Service) Tab(ctx context.Context, st Settings, wait time.Duration) (*Session, error) {
+	tabs := s.tabsCh()
+	var timeout <-chan time.Time
+	if wait > 0 {
+		t := time.NewTimer(wait)
+		defer t.Stop()
+		timeout = t.C
+	}
+	select {
+	case tabs <- struct{}{}:
+	case <-timeout:
+		return nil, ErrTabLimit
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: %v", ErrTabLimit, ctx.Err())
+	}
+	st = normalize(st)
+	main, err := s.mainEngine(ctx, st)
+	if err != nil {
+		<-tabs
+		return nil, err
+	}
+	t, ok := main.(Tabber)
+	if !ok {
+		<-tabs
+		return nil, errors.New("the browser engine cannot open a temporary tab")
+	}
+	eng, err := t.NewTab(ctx)
+	if err != nil {
+		<-tabs
+		return nil, err
+	}
+	return &Session{Executor: &Executor{Engine: eng, RedactParams: st.RedactParams}, s: s, max: st.MaxTextChars, tab: tabs}, nil
+}
+
+// mainEngine — движок страницы сессии, от которого открываются вкладки.
+// Страница свободна — Chrome запускается или переподключается как в Acquire;
+// занята сессией — берётся её движок как есть (перезапуск оборвал бы сессию).
+func (s *Service) mainEngine(ctx context.Context, st Settings) (Engine, error) {
+	slot := s.slotCh()
+	select {
+	case slot <- struct{}{}:
+		defer func() { <-slot }()
+		x, err := s.executor(ctx, st)
+		if err != nil {
+			return nil, err
+		}
+		return x.Engine, nil
+	default:
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.exec == nil || s.key != settingsKey(st) {
+		// Сессия открыта с другими настройками браузера (их сменили на ходу).
+		return nil, ErrBusy
+	}
+	return s.exec.Engine, nil
 }
 
 // ProbeTimeout — сколько ждать ответа Chrome при проверке, что он жив.
@@ -203,6 +293,7 @@ type Session struct {
 	s    *Service
 	max  int
 	done bool
+	tab  chan struct{} // временная вкладка (Tab): Release закрывает её
 }
 
 // Open переходит по URL; sites — разрешённые сайты, итоговый адрес после
@@ -264,6 +355,11 @@ func (ss *Session) Release() {
 		return
 	}
 	ss.done = true
+	if ss.tab != nil {
+		_ = ss.Executor.Engine.Close()
+		<-ss.tab
+		return
+	}
 	ss.Executor.Sites, ss.Executor.LoginOrigins = domain.Sites{}, nil
 	<-ss.s.slotCh()
 }
