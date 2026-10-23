@@ -12,7 +12,7 @@ actions:
   - name: read
     class: read
     untrusted: true
-    description: Open a page on an allowed site and return its text
+    description: "Open a page on an allowed site and return its text; a page that is not HTML (a JSON API, text) — its body as the server sent it (body, content_type)"
     input_schema:
       type: object
       properties:
@@ -24,6 +24,9 @@ actions:
         url: { type: string }
         title: { type: string }
         truncated: { type: boolean }
+        content_type: { type: string, description: "a page that is not HTML: its type" }
+        body: { type: string, description: "a page that is not HTML (JSON, text): the body as the server sent it, up to the limit (tokens and the owner's redact_params hidden)" }
+        size: { type: integer, description: "a page that is not HTML: bytes in the body" }
       required: [url, title]
     example: gate4ai browser read --url https://app.example.org/
   - name: screenshot
@@ -66,7 +69,8 @@ actions:
         session: { type: string, description: "agents: the session from a previous browser.open" }
         wait_for_selector: { type: string, description: "wait until a visible element matches (SPA content loads after the page)" }
         wait_for_text: { type: string, description: "wait until a visible element (of wait_for_selector, or any) contains this text" }
-        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s)" }
+        wait_for_url: { type: string, description: "wait until the address matches: with * — the whole address by the pattern (https://app.example.org/alerting/*), without — the address contains it" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s, up to 60 s). On timeout the error shows the page state: url, title, ready_state, pending_requests, the start of its text; leaving for a sign-in page ends the wait at once with code redirected" }
       required: [url]
     output_schema:
       type: object
@@ -74,6 +78,7 @@ actions:
         url: { type: string, description: address after redirects }
         title: { type: string }
         session: { type: string, description: "agents: pass it to the next page actions and to browser.close" }
+        still_loading: { type: boolean, description: "the page was still loading after 5 s (requests in flight): wait for its content with observe --wait_for_text / --wait_for_selector" }
         login_required:
           type: object
           description: "the page is at the sign-in site of an account available to you: call browser.login with it"
@@ -84,7 +89,7 @@ actions:
   - name: observe
     class: read
     untrusted: true
-    description: "Address, title and text of the open page (or of one element: selector); elements: true adds the interactive elements with CSS selectors for act and the values of fields (not passwords), kinds narrows them (fields, buttons, links); outline: true — the page structure (containers with id, role, data-testid)"
+    description: "Address, title and text of the open page (or of one element: selector); a page that is not HTML (JSON API, text) — its body as the server sent it (body, content_type), without Chrome's viewer; elements: true adds the interactive elements with CSS selectors for act and the values of fields (not passwords), kinds narrows them (fields, buttons, links); outline: true — the page structure (containers with id, role, data-testid)"
     input_schema:
       type: object
       properties:
@@ -96,7 +101,8 @@ actions:
         outline: { type: boolean, description: "add the structure: visible containers with a selector (dialogs, lists, sections), up to 300" }
         wait_for_selector: { type: string, description: "wait until a visible element matches (SPA content loads after the page)" }
         wait_for_text: { type: string, description: "wait until a visible element (of wait_for_selector, or any) contains this text" }
-        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s)" }
+        wait_for_url: { type: string, description: "wait until the address matches: with * — the whole address by the pattern (https://app.example.org/alerting/*), without — the address contains it" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s, up to 60 s). On timeout the error shows the page state: url, title, ready_state, pending_requests, the start of its text; leaving for a sign-in page ends the wait at once with code redirected" }
     output_schema:
       type: object
       properties:
@@ -104,6 +110,9 @@ actions:
         title: { type: string }
         text: { type: string }
         truncated: { type: boolean }
+        content_type: { type: string, description: "a page that is not HTML: its type" }
+        body: { type: string, description: "a page that is not HTML (JSON, text): the body as the server sent it, up to max_chars (tokens and the owner's redact_params hidden)" }
+        size: { type: integer, description: "a page that is not HTML: bytes in the body" }
         elements:
           type: array
           items:
@@ -182,7 +191,8 @@ actions:
         session: { type: string, description: "the session from browser.open" }
         wait_for_selector: { type: string, description: "wait until a visible element matches" }
         wait_for_text: { type: string, description: "wait until a visible element (of wait_for_selector, or any) contains this text" }
-        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s)" }
+        wait_for_url: { type: string, description: "wait until the address matches: with * — the whole address by the pattern (https://app.example.org/alerting/*), without — the address contains it" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s, up to 60 s). On timeout the error shows the page state: url, title, ready_state, pending_requests, the start of its text; leaving for a sign-in page ends the wait at once with code redirected" }
       required: [session]
     output_schema:
       type: object
@@ -243,6 +253,83 @@ actions:
           properties: { account: { type: string } }
           required: [account]
       required: [requests]
+  # Запросы со страницы сеанса (fetch с её cookies и origin): метод — имя
+  # действия, чтобы класс и правила политики различали чтение и изменения.
+  - name: get
+    class: read
+    untrusted: true
+    description: "An HTTP GET from the open page of the session (with the user's cookies): an API of the site, e.g. the one browser.network found. The address is checked by the site list; the response — status, url, headers (without cookies and authorization), json (parsed) or body with content_type, size in bytes, truncated; a request with effect is not redirected (redirect: true)"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "the session from browser.open: the request goes from its page (its origin and cookies)" }
+        url: { type: string, format: url, description: "an address on the allowed sites" }
+        headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
+        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+      required: [session, url]
+  - name: head
+    class: read
+    untrusted: true
+    description: "An HTTP HEAD from the open page of the session: status, url and headers"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "the session from browser.open: the request goes from its page (its origin and cookies)" }
+        url: { type: string, format: url, description: "an address on the allowed sites" }
+        headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
+        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+      required: [session, url]
+  - name: post
+    class: write
+    untrusted: true
+    description: "An HTTP POST from the open page of the session (with the user's cookies) to an API of the site: changes data, so it needs the owner's approval unless a rule allows it (rules see url). The receipt records the method, address, status and size. Response — as browser.get: status, url, headers, json or body, size; redirect: true — a redirect was not followed"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "the session from browser.open: the request goes from its page (its origin and cookies)" }
+        url: { type: string, format: url, description: "an address on the allowed sites" }
+        headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
+        body: { type: string, maxLength: 262144, description: "the request body (a JSON body gets Content-Type: application/json unless headers set it; CLI: --body_file <path>)" }
+        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+      required: [session, url]
+  - name: put
+    class: write
+    untrusted: true
+    description: "An HTTP PUT from the open page of the session (with the user's cookies) to an API of the site: changes data, so it needs the owner's approval unless a rule allows it (rules see url). The receipt records the method, address, status and size. Response — as browser.get: status, url, headers, json or body, size; redirect: true — a redirect was not followed"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "the session from browser.open: the request goes from its page (its origin and cookies)" }
+        url: { type: string, format: url, description: "an address on the allowed sites" }
+        headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
+        body: { type: string, maxLength: 262144, description: "the request body (a JSON body gets Content-Type: application/json unless headers set it; CLI: --body_file <path>)" }
+        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+      required: [session, url]
+  - name: patch
+    class: write
+    untrusted: true
+    description: "An HTTP PATCH from the open page of the session (with the user's cookies) to an API of the site: changes data, so it needs the owner's approval unless a rule allows it (rules see url). The receipt records the method, address, status and size. Response — as browser.get: status, url, headers, json or body, size; redirect: true — a redirect was not followed"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "the session from browser.open: the request goes from its page (its origin and cookies)" }
+        url: { type: string, format: url, description: "an address on the allowed sites" }
+        headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
+        body: { type: string, maxLength: 262144, description: "the request body (a JSON body gets Content-Type: application/json unless headers set it; CLI: --body_file <path>)" }
+        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+      required: [session, url]
+  - name: delete
+    class: write
+    untrusted: true
+    description: "An HTTP DELETE from the open page of the session (with the user's cookies) to an API of the site: changes data, so it needs the owner's approval unless a rule allows it (rules see url). The receipt records the method, address, status and size. Response — as browser.get: status, url, headers, json or body, size; redirect: true — a redirect was not followed"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "the session from browser.open: the request goes from its page (its origin and cookies)" }
+        url: { type: string, format: url, description: "an address on the allowed sites" }
+        headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
+        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+      required: [session, url]
   # Вход по учётке владельца (credentials в конфигурации gate4ai): значения
   # секретов хост передаёт пакету только для этих двух действий, агенту и
   # коннектору они не видны. После ввода секрета страницу нельзя читать
@@ -306,9 +393,11 @@ actions:
   - name: close
     class: read
     untrusted: true
-    description: "End the browser session and free the page. Returns the recorded steps (action, args, result or error): save them as a test fixture for a connector (hosttest.Replay). all: true closes every session of this agent (a lost id, a stuck session)"
+    description: "End the browser session and free the page. Returns {session, closed: true, steps: <number of recorded steps>}; steps: true adds step_list (action, args, status: ok or the error code — without results and page texts); save_steps: true writes the full record ({session, steps} with results) to a file and returns its path in steps_file — a test fixture for a connector (hosttest.LoadFixture, hosttest.Replay). all: true closes every session of this agent (a lost id, a stuck session): {closed: true, sessions: N}"
     input_schema:
       type: object
       properties:
         session: { type: string, description: "the session from browser.open" }
         all: { type: boolean, description: "close all your sessions instead" }
+        steps: { type: boolean, description: "list the steps: action, args (long values cut), status ok or the error code" }
+        save_steps: { type: boolean, description: "write the full record ({session, steps} with results) to a file in the gate4ai data folder; its path is steps_file" }

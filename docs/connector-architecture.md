@@ -186,7 +186,7 @@ platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64]
 
 Секреты не передаются коннектору ни в `settings`, ни в ответах функций хоста. Исключение — `reveal` для нативных коннекторов с отдельным согласием пользователя (secret-architecture.md).
 
-Браузер — нативный пакет `browser`, а не функции хоста: другие коннекторы вызывают его действия через `service_call` (`open`, `observe`, `act`, `page_extract`, `page_screenshot`; страница — одна на корневой вызов, освобождается по `end_call`; сайты — `params.domains` вызывающего). Те же действия доступны агенту в сеансе (`session` из `open`, плюс `network` и `close`) — см. [connector-authoring.md](connector-authoring.md). Ввод учёток в формы (`login`, `fill_secret`) — тоже действия пакета; значение он получает от daemon только в них и только для origin привязки учётки. Проверки, что селектор `browser.act` взят из `observe`, нет.
+Браузер — нативный пакет `browser`, а не функции хоста: другие коннекторы вызывают его действия через `service_call` (`open`, `observe`, `act`, `page_extract`, `page_screenshot`; страница — одна на корневой вызов, освобождается по `end_call`; сайты — `params.domains` вызывающего). Те же действия доступны агенту в сеансе (`session` из `open`, плюс `network`, запросы со страницы `get` / `head` (класс `read`) и `post` / `put` / `patch` / `delete` (`write`) — метод в имени действия, чтобы класс и правила политики различали чтение и изменения, — и `close`) — см. [connector-authoring.md](connector-authoring.md). Ввод учёток в формы (`login`, `fill_secret`) — тоже действия пакета; значение он получает от daemon только в них и только для origin привязки учётки. Проверки, что селектор `browser.act` взят из `observe`, нет.
 
 ### Наши коннекторы
 
@@ -194,7 +194,7 @@ platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64]
 |---|---|
 | `files` | встроен в ядро (`runtime: builtin`) поверх файловой службы; корни — `connectors.files.roots` (по умолчанию `~/Documents`; скрытые файлы и папки ниже корня, ключи и данные приложений закрыты всегда — `allow_hidden`, `allow_paths`), в профиле `default` — правило `ask` на каждое действие |
 | `mail` | WASM-модуль: `tls_dial` с входом хостом (IMAP LOGIN, SMTP AUTH PLAIN), разбор писем — в коннекторе |
-| `browser` | нативный пакет: браузерный воркер (выделенный профиль Chrome, CDP, Stagehand), действия агента `read` / `screenshot` / `extract` и сеанс страницы (`open` → `observe` / `act` / `network` / `page_extract` / `page_screenshot` → `close`), те же действия со страницей для других коннекторов через `service_call` |
+| `browser` | нативный пакет: браузерный воркер (выделенный профиль Chrome, CDP, Stagehand), действия агента `read` / `screenshot` / `extract` и сеанс страницы (`open` → `observe` / `act` / `network` / `get` … `delete` / `page_extract` / `page_screenshot` → `close`), те же действия со страницей для других коннекторов через `service_call` |
 | коннекторы к сайтам | действия `browser` через `service_call` (вход — `browser.login`), при необходимости `http_request` с секретом; заготовка — `gate4ai connectors new`, см. [connector-authoring.md](connector-authoring.md) |
 
 ## runtime: native

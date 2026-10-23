@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -163,11 +164,15 @@ func TestAgentLogin(t *testing.T) {
 	if err != nil || res.Structured.(map[string]any)["login_required"] != nil {
 		t.Fatal(res, err)
 	}
-	res, err = h.ExecuteRequest(b, req("close", map[string]any{"session": session}, false))
+	t.Setenv("GATE4AI_HOME", t.TempDir())
+	res, err = h.ExecuteRequest(b, req("close", map[string]any{"session": session, "save_steps": true}, false))
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(res.Structured)
+	raw, err := os.ReadFile(res.Structured.(map[string]any)["steps_file"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(string(raw), testPass) || !strings.Contains(string(raw), `"action":"login","args":{"account":"@emias"},"result":{"origin":"https://login.example","status":"logged_in"`) {
 		t.Fatalf("steps: %s", raw)
 	}
@@ -330,11 +335,15 @@ func TestViaAccount(t *testing.T) {
 	if _, err := b.Execute(context.Background(), nil, rec); err != nil {
 		t.Fatal(err)
 	}
-	res, err = h.ExecuteRequest(b, req("close", map[string]any{"session": session}, false))
+	t.Setenv("GATE4AI_HOME", t.TempDir())
+	res, err = h.ExecuteRequest(b, req("close", map[string]any{"session": session, "save_steps": true}, false))
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(res.Structured)
+	raw, err := os.ReadFile(res.Structured.(map[string]any)["steps_file"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var fx hosttest.Fixture
 	json.Unmarshal(raw, &fx)
 	var vias, logins int

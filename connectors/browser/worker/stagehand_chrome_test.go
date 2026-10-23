@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/gate4ai/gate4ai/sdk-go/domain"
 )
 
 // TestStagehandRealChrome — движок Stagehand подключается к Chrome, запущенному
@@ -23,7 +25,12 @@ func TestStagehandRealChrome(t *testing.T) {
 	if err != nil {
 		t.Skip(err)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"ok":true}`))
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte("<!doctype html><title>Stagehand</title><p>ok"))
 	}))
@@ -48,5 +55,17 @@ func TestStagehandRealChrome(t *testing.T) {
 	}
 	if title, err := eng.Title(ctx); err != nil || title != "Stagehand" {
 		t.Fatal(title, err)
+	}
+	// Запрос со страницы: Evaluate дожидается промиса fetch; JSON-страница —
+	// тело из DOM без просмотрщика Chrome.
+	x := &Executor{Engine: eng, Sites: domain.Sites{Domains: []string{"127.0.0.1"}}}
+	if res, err := x.Fetch(ctx, FetchRequest{Method: "GET", URL: srv.URL + "/api"}); err != nil || res.Status != 200 || res.JSON.(map[string]any)["ok"] != true {
+		t.Fatal(res, err)
+	}
+	if _, err := x.Open(ctx, srv.URL+"/api"); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok, err := x.RawDocument(ctx, 100); err != nil || !ok || b.Body != `{"ok":true}` {
+		t.Fatal(b, ok, err)
 	}
 }

@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -20,10 +21,12 @@ import (
 
 // fakeEngine — страница без Chrome: переходы, текст, поиск элемента для act.
 type fakeEngine struct {
-	mu    sync.Mutex // url меняет и «человек» (handoff) из другой горутины
-	url   string
-	keys  []string
-	hooks int
+	mu      sync.Mutex // url меняет и «человек» (handoff) из другой горутины
+	url     string
+	keys    []string
+	hooks   int
+	json    string   // верхний документ — JSON с этим телом
+	fetches []string // запросы со страницы: метод и адрес
 }
 
 func (f *fakeEngine) Navigate(_ context.Context, u string) error {
@@ -54,6 +57,17 @@ func (f *fakeEngine) Extract(context.Context, string) (any, error) {
 }
 func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 	switch {
+	case strings.Contains(expr, "document.contentType"): // тип документа
+		if f.json != "" {
+			b, _ := json.Marshal(map[string]any{"type": "application/json", "html": false, "body": f.json})
+			return json.Unmarshal(b, out)
+		}
+		return json.Unmarshal([]byte(`{"type":"text/html","html":true}`), out)
+	case strings.Contains(expr, "credentials: 'include'"): // запрос со страницы
+		var args []any
+		json.Unmarshal([]byte(expr[strings.LastIndex(expr, "(...")+4:len(expr)-1]), &args)
+		f.fetches = append(f.fetches, args[1].(string)+" "+args[0].(string))
+		return json.Unmarshal([]byte(`{"status":200,"url":"`+args[0].(string)+`","headers":{"content-type":"application/json","set-cookie":"x","x-total":"1"},"size":30,"body":"{\"uid\":\"a1\",\"token\":\"t0k\"}"}`), out)
 	case strings.Contains(expr, "XMLHttpRequest.prototype.send ="): // перехват запросов
 		f.hooks++
 		return json.Unmarshal([]byte("true"), out)
@@ -65,6 +79,10 @@ func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 		return json.Unmarshal([]byte(`[{"selector":"#pay","tag":"button","type":"submit","text":"Оплатить"}]`), out)
 	}
 	if strings.Contains(expr, "#missing") {
+		return json.Unmarshal([]byte("null"), out)
+	}
+	if strings.Contains(expr, "#bounce") { // SPA ждёт данные, а сайт отправил на вход
+		f.Navigate(context.Background(), "https://login.example.com/sign-in")
 		return json.Unmarshal([]byte("null"), out)
 	}
 	if strings.Contains(expr, "#away") {
@@ -307,21 +325,26 @@ func TestAgentSession(t *testing.T) {
 		t.Fatal("second session:", err)
 	}
 
-	res, err = agentExec(t, b, "close", map[string]any{"session": id})
+	// close: по умолчанию коротко; --steps — шаги без ответов; save_steps —
+	// полная запись в файл каталога данных (фикстура hosttest.Replay).
+	t.Setenv("GATE4AI_HOME", t.TempDir())
+	res, err = agentExec(t, b, "close", map[string]any{"session": id, "steps": true, "save_steps": true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	steps := res["steps"].([]map[string]any)
-	if len(steps) != 5 || steps[0]["action"] != "open" || steps[3]["error"] == nil || steps[1]["result"] == nil {
-		t.Fatalf("steps: %+v", steps)
+	brief := res["step_list"].([]map[string]any)
+	if len(brief) != 5 || brief[0]["action"] != "open" || brief[3]["status"] != abi.CodeNotFound || brief[1]["status"] != "ok" || brief[1]["result"] != nil {
+		t.Fatalf("brief steps: %+v", brief)
 	}
-	if _, ok := steps[0]["args"].(map[string]any)["session"]; ok {
+	if _, ok := brief[0]["args"].(map[string]any)["session"]; ok {
 		t.Fatal("steps are recorded without session (connectors call without it)")
 	}
-	// Шаги — фикстура для hosttest.Replay: та же форма после JSON.
-	raw, _ := json.Marshal(res)
-	var fx hosttest.Fixture
-	if err := json.Unmarshal(raw, &fx); err != nil || len(fx.Steps) != 5 || fx.Steps[3].Error.Code != abi.CodeNotFound {
+	path, _ := res["steps_file"].(string)
+	if !strings.HasPrefix(path, os.Getenv("GATE4AI_HOME")) {
+		t.Fatal("steps file in the data dir:", res)
+	}
+	fx, err := hosttest.LoadFixture(path)
+	if err != nil || len(fx.Steps) != 5 || fx.Steps[3].Error.Code != abi.CodeNotFound || fx.Steps[1].Result["text"] == nil {
 		t.Fatalf("fixture: %+v %v", fx, err)
 	}
 	if _, err := agentExec(t, b, "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed or unknown") {
@@ -374,11 +397,11 @@ func TestAgentEditReloadHandoff(t *testing.T) {
 		res["status"] != "done" || res["url"] != "https://a.example.com/home" {
 		t.Fatal(res, err)
 	}
-	res, err = agentExec(t, b, "close", map[string]any{"session": id})
-	if err != nil {
-		t.Fatal(err)
+	res, err = agentExec(t, b, "close", map[string]any{"session": id, "steps": true})
+	if err != nil || res["steps"] != 3 {
+		t.Fatal(res, err)
 	}
-	for _, st := range res["steps"].([]map[string]any) {
+	for _, st := range res["step_list"].([]map[string]any) {
 		if st["action"] == "handoff" && st["args"].(map[string]any)["precheck"] != nil {
 			t.Fatal("the host's precheck is not a step:", st)
 		}
@@ -419,7 +442,7 @@ func TestAgentCloseAllAndCleanSteps(t *testing.T) {
 	}
 	// id потерян: закрыть все сеансы.
 	res, err = agentExec(t, b, "close", map[string]any{"all": true})
-	if err != nil || res["closed"] != 1 {
+	if err != nil || res["sessions"] != 1 {
 		t.Fatal(res, err)
 	}
 	if _, err := agentExec(t, b, "read", map[string]any{"url": "https://a.example.com/"}); err != nil {
@@ -457,13 +480,13 @@ func TestAgentSessionsPerAgent(t *testing.T) {
 			t.Fatalf("%s on another agent's session: %v", a, err)
 		}
 	}
-	if res, err := agentAs(b, "mallory", "close", map[string]any{"all": true}); err != nil || res["closed"] != 0 {
+	if res, err := agentAs(b, "mallory", "close", map[string]any{"all": true}); err != nil || res["sessions"] != 0 {
 		t.Fatal("close --all of another agent:", res, err)
 	}
 	if _, err := agentAs(b, "alice", "observe", map[string]any{"session": id}); err != nil {
 		t.Fatal("the owner's session survives:", err)
 	}
-	if res, err := agentAs(b, "alice", "close", map[string]any{"all": true}); err != nil || res["closed"] != 1 {
+	if res, err := agentAs(b, "alice", "close", map[string]any{"all": true}); err != nil || res["sessions"] != 1 {
 		t.Fatal(res, err)
 	}
 }
@@ -485,7 +508,7 @@ func TestCloseAllWaitsForAction(t *testing.T) {
 	}()
 	time.Sleep(100 * time.Millisecond)
 	start := time.Now()
-	if res, err := agentExec(t, b, "close", map[string]any{"all": true}); err != nil || res["closed"] != 1 {
+	if res, err := agentExec(t, b, "close", map[string]any{"all": true}); err != nil || res["sessions"] != 1 {
 		t.Fatal(res, err)
 	}
 	select {
@@ -502,6 +525,125 @@ func TestCloseAllWaitsForAction(t *testing.T) {
 	if _, err := agentExec(t, b, "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed or unknown") {
 		t.Fatal(err)
 	}
+}
+
+// Запросы со страницы сеанса: метод — имя действия (get, head — чтение,
+// post, put, patch, delete — изменения), адрес — по списку сайтов, ответ —
+// разобранный JSON без токенов и cookies, квитанция — метод, адрес, статус, размер.
+func TestAgentFetch(t *testing.T) {
+	h, b, eng := setup(t, nil)
+	for name, class := range map[string]string{"get": "read", "head": "read", "post": "write", "put": "write", "patch": "write", "delete": "write"} {
+		a, ok := h.Manifest.Find(name)
+		if !ok || a.Class != class || !a.Untrusted {
+			t.Errorf("%s: %+v", name, a)
+		}
+		if _, body := a.InputSchema.Properties.Get("body"); body != (class == "write" && name != "delete") {
+			t.Errorf("%s: body argument %v", name, body)
+		}
+	}
+	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	r, err := exec(b, "get", map[string]any{"session": id, "url": "https://a.example.com/api/v1/provisioning/alert-rules"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := r.Structured.(map[string]any)
+	if out["status"] != 200 || out["json"].(map[string]any)["token"] != "***" || out["json"].(map[string]any)["uid"] != "a1" ||
+		out["headers"].(map[string]string)["set-cookie"] != "" || out["headers"].(map[string]string)["x-total"] != "1" {
+		t.Fatalf("%+v", out)
+	}
+	r, err = exec(b, "delete", map[string]any{"session": id, "url": "https://a.example.com/api/v1/provisioning/alert-rules/a1"}, nil)
+	if err != nil || r.ResultRef != "DELETE https://a.example.com/api/v1/provisioning/alert-rules/a1 → 200, 30 bytes" {
+		t.Fatal(r.ResultRef, err)
+	}
+	if len(eng.fetches) != 2 || eng.fetches[1] != "DELETE https://a.example.com/api/v1/provisioning/alert-rules/a1" {
+		t.Fatal(eng.fetches)
+	}
+	if _, err := exec(b, "delete", map[string]any{"session": id, "url": "https://evil.example/api"}, nil); err == nil || !strings.Contains(err.Error(), abi.CodeCapabilityDenied) || len(eng.fetches) != 2 {
+		t.Fatal("site list:", err)
+	}
+	for _, bad := range []map[string]any{
+		{"session": id, "url": "https://a.example.com/", "headers": "Accept: x"},
+		{"session": id, "url": "https://a.example.com/", "body": strings.Repeat("x", worker.MaxFetchBody+1)},
+	} {
+		if _, err := exec(b, "post", bad, nil); err == nil || !strings.Contains(err.Error(), abi.CodeBadRequest) {
+			t.Fatal(bad["headers"], err)
+		}
+	}
+	if _, err := exec(b, "get", map[string]any{"url": "https://a.example.com/"}, &abi.Caller{Connector: "site", Call: "c1"}); err == nil {
+		t.Fatal("for agents only")
+	}
+	if _, err := exec(b, "get", map[string]any{"url": "https://a.example.com/"}, nil); err == nil || !strings.Contains(err.Error(), "browser.open") {
+		t.Fatal("needs a session:", err)
+	}
+	fr, _ := fetchRequest(abi.ExecRequest{Action: "post", Args: map[string]any{"url": "https://a.example.com/", "body": `{"a":1}`}})
+	if fr.Headers["Content-Type"] != "application/json" {
+		t.Fatal("a JSON body gets its type:", fr.Headers)
+	}
+	// Шаги close: кратко, без ответов.
+	res, err = agentExec(t, b, "close", map[string]any{"session": id, "steps": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := res["step_list"].([]map[string]any); len(st) != 4 || st[2]["action"] != "delete" || st[2]["status"] != "ok" || st[3]["status"] != abi.CodeCapabilityDenied {
+		t.Fatalf("%+v", st)
+	}
+}
+
+// JSON-страница: observe и read отдают тело как прислал сервер, с типом;
+// результат — по схеме манифеста.
+func TestObserveJSONPage(t *testing.T) {
+	h, b, eng := setup(t, nil)
+	eng.json = `{"rules":[{"uid":"a1"}],"access_token":"t0k"}`
+	res, err := h.Execute(b, "read", map[string]any{"url": "https://a.example.com/api/rules"})
+	if err != nil || res.Structured.(map[string]any)["body"] != `{"access_token":"***","rules":[{"uid":"a1"}]}` || res.Structured.(map[string]any)["content_type"] != "application/json" {
+		t.Fatal(res, err)
+	}
+	if err := abi.CheckResult(res, mustFind(t, h, "read").OutputSchema); err != nil {
+		t.Fatal(err)
+	}
+	r, err := exec(b, "open", map[string]any{"url": "https://a.example.com/api/rules"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := r.Structured.(map[string]any)["session"].(string)
+	r, err = exec(b, "observe", map[string]any{"session": id, "max_chars": 10.0}, nil)
+	if err != nil || r.Structured.(map[string]any)["body"] != `{"access_t` || r.Structured.(map[string]any)["truncated"] != true || r.Structured.(map[string]any)["text"] != nil {
+		t.Fatal(r, err)
+	}
+	if err := abi.CheckResult(r, mustFind(t, h, "observe").OutputSchema); err != nil {
+		t.Fatal(err)
+	}
+	agentExec(t, b, "close", map[string]any{"session": id})
+}
+
+// Уход на сайт входа во время ожидания — код redirected с подсказкой учётки.
+func TestOpenRedirected(t *testing.T) {
+	_, b, _ := setup(t, nil)
+	_, err := b.Execute(context.Background(), nil, abi.ExecRequest{Action: "open", Agent: "a",
+		Args:     map[string]any{"url": "https://a.example.com/alerting", "wait_for_selector": "#bounce", "timeout_ms": 30000.0},
+		Accounts: []abi.Account{{Alias: "@site", Bind: []string{"https://login.example.com"}}},
+		Settings: map[string]any{"cdp_url": "http://127.0.0.1:1", "allowed_domains": []any{"a.example.com"}}})
+	var ae *abi.Error
+	if !errors.As(err, &ae) || ae.Code != CodeRedirected || !strings.Contains(ae.Message, "https://login.example.com/sign-in") ||
+		!strings.Contains(ae.Message, "browser.login --account @site") {
+		t.Fatal(err)
+	}
+	if _, err := agentExec(t, b, "read", map[string]any{"url": "https://a.example.com/"}); err != nil {
+		t.Fatal("the failed open left no session:", err)
+	}
+}
+
+func mustFind(t *testing.T, h *hosttest.Host, name string) manifest.Action {
+	t.Helper()
+	a, ok := h.Manifest.Find(name)
+	if !ok {
+		t.Fatal(name)
+	}
+	return a
 }
 
 func TestMain(m *testing.M) {

@@ -197,8 +197,8 @@ func TestCancelReachesTheProcess(t *testing.T) {
 // и ключи из окружения daemon.
 func TestMinimalEnv(t *testing.T) {
 	got := strings.Join(MinimalEnv([]string{"PATH=/bin", "HOME=/h", "LC_ALL=C", "XDG_RUNTIME_DIR=/run/u", "DISPLAY=:0",
-		"GATE4AI_TOKEN=t0k", "GITHUB_TOKEN=gh", "OPENAI_API_KEY=sk", "AWS_SECRET_ACCESS_KEY=x", "LocalAppData=C:\\u"}), " ")
-	if got != "PATH=/bin HOME=/h LC_ALL=C XDG_RUNTIME_DIR=/run/u DISPLAY=:0 LocalAppData=C:\\u" {
+		"GATE4AI_TOKEN=t0k", "GATE4AI_HOME=/g", "GITHUB_TOKEN=gh", "OPENAI_API_KEY=sk", "AWS_SECRET_ACCESS_KEY=x", "LocalAppData=C:\\u"}), " ")
+	if got != "PATH=/bin HOME=/h LC_ALL=C XDG_RUNTIME_DIR=/run/u DISPLAY=:0 GATE4AI_HOME=/g LocalAppData=C:\\u" {
 		t.Fatal(got)
 	}
 }

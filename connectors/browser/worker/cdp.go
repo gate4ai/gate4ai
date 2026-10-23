@@ -113,6 +113,9 @@ func DialCDP(ctx context.Context, httpURL string) (*CDP, error) {
 		return nil, err
 	}
 	c.session = a.SessionID
+	c.net.mu.Lock()
+	c.net.frame = c.target // id верхнего фрейма вкладки — id её цели
+	c.net.mu.Unlock()
 	if err := c.call(ctx, c.session, "Page.enable", nil, nil); err != nil {
 		c.Close()
 		return nil, err
@@ -253,7 +256,7 @@ func (c *CDP) Eval(ctx context.Context, expr string, out any) error {
 			Text string `json:"text"`
 		} `json:"exceptionDetails"`
 	}
-	if err := c.call(ctx, c.session, "Runtime.evaluate", map[string]any{"expression": expr, "returnByValue": true}, &r); err != nil {
+	if err := c.call(ctx, c.session, "Runtime.evaluate", map[string]any{"expression": expr, "returnByValue": true, "awaitPromise": true}, &r); err != nil {
 		return err
 	}
 	if r.Exception != nil {
