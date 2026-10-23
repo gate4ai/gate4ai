@@ -123,6 +123,10 @@ func (u *UI) savePolicy(w http.ResponseWriter, r *http.Request) map[string]any {
 		}
 		return d
 	}
+	if ws := policy.Warnings(u.D.Config.Current()); len(ws) > 0 {
+		// Правило allow, которое не действует так, как написано (change_policy, запись браузера по шаблону).
+		return redirect("/policy/yaml", M("Saved as version %d. Note: %s", v.N, strings.Join(ws, "; ")))
+	}
 	return redirect("/policy/yaml", M("Saved as version %d", v.N))
 }
 

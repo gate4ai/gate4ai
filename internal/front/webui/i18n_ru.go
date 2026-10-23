@@ -109,7 +109,7 @@ var ru = map[string]string{
 	// Подтверждения
 	"Unanswered requests are denied after %s.": "Запросы без ответа отклоняются через %s.", "Get these requests on your phone →": "Получать эти запросы на телефоне →",
 	"Notifications →": "Уведомления →", "A code is needed": "Нужен код",
-	"“Allow” lets the agent widen its own rights — sites, rules, connectors — without asking you. Keep “Ask” unless you trust every change it makes.": "«Разрешать» позволит агенту расширять свои права — сайты, правила, коннекторы — не спрашивая вас. Оставьте «Спрашивать», если не доверяете каждой его правке.",
+	"A change of gate4.ai settings by an agent — sites, rules, accounts, connectors — always asks you: “Allow” has no effect here, “Deny” forbids asking.": "Правку настроек gate4.ai агентом — сайтов, правил, учёток, коннекторов — вы всегда подтверждаете сами: «Разрешать» здесь не действует, «Запрещать» запрещает и спрашивать.",
 	"%s: %s. %s":                            "%s: %s. %s",
 	"An agent is waiting for you in Chrome": "Агент ждёт вас в Chrome",
 	"<b>%s</b> handed the browser over to you %s and asks:":                                                                              "<b>%s</b> передал вам браузер %s и просит:",
@@ -315,7 +315,7 @@ var ru = map[string]string{
 	"Bring back version %d?": "Вернуть версию %d?", "Bring back": "Вернуть", "YAML for technical users": "YAML для технических пользователей",
 	"shared permissions": "общие права", "up (does not change the decision)": "выше (на решение не влияет)",
 	"down (does not change the decision)": "ниже (на решение не влияет)", "Remove the rule %s?": "Удалить правило %s?",
-	"Saved as version %d": "Сохранено как версия %d", "Version %d is back (saved as %d)": "Возвращена версия %d (сохранена как %d)",
+	"Saved as version %d": "Сохранено как версия %d", "Saved as version %d. Note: %s": "Сохранено как версия %d. Обратите внимание: %s", "Version %d is back (saved as %d)": "Возвращена версия %d (сохранена как %d)",
 	"A rule based on the request %s → %s. Narrow the conditions so nothing extra is allowed.": "Правило на основе запроса %s → %s. Уточните условия, чтобы не разрешить лишнего.",
 	"A rule based on journal entry #%s. Narrow the conditions so nothing extra is allowed.":   "Правило на основе записи журнала #%s. Уточните условия, чтобы не разрешить лишнего.",
 	"This rule already exists: %s. Nothing was added.":                                        "Такое правило уже есть: %s. Новое не добавлено.",

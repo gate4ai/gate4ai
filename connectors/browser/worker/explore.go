@@ -29,6 +29,9 @@ type Element struct {
 	Value       string `json:"value,omitempty"`
 	ValueLength int    `json:"value_length,omitempty"`
 	Checked     bool   `json:"checked,omitempty"`
+	// Icon — иконка без текста внутри интерактивного элемента (крестик
+	// удаления, стрелка списка): Text — её aria-label, title или текст рядом.
+	Icon bool `json:"icon,omitempty"`
 }
 
 // MaxElements — предел списка элементов в observe.
@@ -46,26 +49,11 @@ const adHosts = `adfox|doubleclick|googlesyndication|googleadservices|adservice|
 	`an\\.yandex|yabs\\.yandex|mc\\.yandex|adnxs|adsrvr|amazon-adsystem|moatads|scorecardresearch|smartadserver|` +
 	`mytarget|top-fwz1\\.mail|ad\\.mail\\.ru|[/.]ads\\.|/ads/|[?&](yclid|gclid|fbclid)=`
 
-// elementsJS — видимые интерактивные элементы: поля, кнопки и ссылки (kinds —
-// какие; пусто — все), кроме рекламных и трекинговых (ссылки и содержимое
-// рекламных блоков). Селектор — самый устойчивый из однозначных:
-// data-testid, name, placeholder, aria-label, #id (если не похож на
-// сгенерированный), title, короткий href, затем путь с :nth-of-type от
-// ближайшего предка с устойчивым атрибутом. Значения полей — начало и длина
-// (не пароль; на странице с введённым секретом — нет).
-var elementsJS = `((max, root, kinds, secret, valMax) => {
-  const vt = ` + visibleTextJS + `;
-  const base = root ? document.querySelector(root) : document;
-  if (!base) return null;
-  const q = 'a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=link], [role=tab], ' +
-    '[role=menuitem], [role=checkbox], [role=radio], [role=option], [role=switch], [role=textbox], [onclick], [contenteditable=""], [contenteditable=true]';
-  const vis = e => { const r = e.getBoundingClientRect(), st = getComputedStyle(e);
-    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'; };
-  const ad = new RegExp('` + adHosts + `', 'i');
-  const adBox = /(^|[\s_-])(adfox|adv|advert|advertisement|ads|sponsor|sponsored)([\s_-]|$)/i;
-  const inAd = e => { for (let x = e; x && x !== document.body; x = x.parentElement) {
-      if (adBox.test(String(x.className && x.className.baseVal !== undefined ? x.className.baseVal : x.className || '')) || adBox.test(x.id || '')) return true; }
-    return false; };
+// selectorJS — функция e → CSS-селектор, по которому элемент находится
+// однозначно: самый устойчивый из data-testid, name, placeholder, aria-label,
+// #id (если не похож на сгенерированный), title, короткий href, затем путь с
+// :nth-of-type от ближайшего предка с устойчивым атрибутом.
+const selectorJS = `(() => {
   const one = s => { try { return document.querySelectorAll(s).length === 1; } catch (_) { return false; } };
   const esc = v => v.replace(/["\\]/g, '\\$&');
   const attr = (e, a) => { const v = e.getAttribute(a); if (!v || v.length > 80) return ''; const s = '[' + a + '="' + esc(v) + '"]';
@@ -79,7 +67,7 @@ var elementsJS = `((max, root, kinds, secret, valMax) => {
     if (e.localName === 'a') { const s = attr(e, 'href'); if (s) return s; }
     return '';
   };
-  const sel = e => {
+  return e => {
     const s0 = stable(e); if (s0) return s0;
     const path = [];
     for (let x = e; x && x.nodeType === 1 && x !== document.documentElement; x = x.parentElement) {
@@ -94,32 +82,76 @@ var elementsJS = `((max, root, kinds, secret, valMax) => {
     if (path.length > 3 && e.id && one('#' + CSS.escape(e.id))) return '#' + CSS.escape(e.id);
     return path.join(' > ');
   };
+})()`
+
+// interactiveJS — признаки интерактивного элемента: теги и роли (q), а
+// также самописные виджеты — обработчик click (перехват clickHookJS или
+// onclick) и cursor: pointer (внешний элемент с ним: у вложенных он
+// унаследован).
+const interactiveJS = `
+  const q = 'a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=link], [role=tab], ' +
+    '[role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], [role=checkbox], [role=radio], [role=option], [role=listbox], ' +
+    '[role=combobox], [role=switch], [role=textbox], [role=treeitem], [onclick], [contenteditable=""], [contenteditable=true], [tabindex]';
+  const clicks = window.__gate4aiClick;
+  const listens = e => (clicks && clicks.has(e)) || typeof e.onclick === 'function';
+  const pointer = e => e && e.nodeType === 1 && getComputedStyle(e).cursor === 'pointer';
+  const big = e => { const r = e.getBoundingClientRect(); return r.width * r.height > innerWidth * innerHeight / 3; };
+  // [tabindex=-1] — часто контейнер, которому скрипт отдаёт фокус: только с
+  // другим признаком (роль, обработчик, cursor: pointer)
+  const tagged = e => e.matches(q) && !(e.getAttribute('tabindex') === '-1' && !e.matches(q.replace(', [tabindex]', '')) && !pointer(e) && !listens(e));
+  const interactive = e => tagged(e) || ((listens(e) || (pointer(e) && !pointer(e.parentElement))) && !big(e) &&
+    !['html', 'body'].includes(e.localName));
+  // иконки без текста внутри интерактивного элемента с текстом: крестик
+  // удаления у выбранного значения, стрелка списка — отдельная цель клика
+  const iconQ = 'svg, img, i, [class*="icon" i], [class*="close" i], [class*="remove" i], [class*="clear" i], [class*="delete" i], [class*="cross" i]';
+`
+
+// elementsJS — видимые интерактивные элементы: поля, кнопки и ссылки (kinds —
+// какие; пусто — все), кроме рекламных и трекинговых (ссылки и содержимое
+// рекламных блоков); кроме тегов и ролей — элементы с обработчиком click или
+// cursor: pointer (варианты самописных списков, «чипсы») и иконки без текста
+// внутри них (крестик удаления). Имя иконки — aria-label, title или текст
+// рядом. Значения полей — начало и длина (не пароль; на странице с введённым
+// секретом — нет).
+var elementsJS = `((max, root, kinds, secret, valMax) => {
+  const vt = ` + visibleTextJS + `;
+  const base = root ? document.querySelector(root) : document;
+  if (!base) return null;` + interactiveJS + `
+  const vis = e => { const r = e.getBoundingClientRect(), st = getComputedStyle(e);
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'; };
+  const ad = new RegExp('` + adHosts + `', 'i');
+  const adBox = /(^|[\s_-])(adfox|adv|advert|advertisement|ads|sponsor|sponsored)([\s_-]|$)/i;
+  const inAd = e => { for (let x = e; x && x !== document.body; x = x.parentElement) {
+      if (adBox.test(String(x.className && x.className.baseVal !== undefined ? x.className.baseVal : x.className || '')) || adBox.test(x.id || '')) return true; }
+    return false; };
+  const sel = ` + selectorJS + `;
   const norm = s => (s || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  // текст рядом: у родителя (без самого элемента) — имя иконки без подписи
+  const near = e => { for (let x = e.parentElement, i = 0; x && i < 3; x = x.parentElement, i++) { const t = norm(vt(x)); if (t) return t; } return ''; };
+  const svgTitle = e => { const t = e.querySelector && e.querySelector('svg title, title'); return t ? t.textContent : ''; };
   const label = e => norm(e.getAttribute('aria-label') || (e.isContentEditable ? '' : vt(e)) || e.placeholder || e.getAttribute('title') ||
-    (e.labels ? [...e.labels].map(l => vt(l)).join(' ') : '') || (e.type === 'submit' || e.type === 'button' ? e.value : ''));
+    (e.labels ? [...e.labels].map(l => vt(l)).join(' ') : '') || (e.type === 'submit' || e.type === 'button' ? e.value : '') ||
+    svgTitle(e) || e.getAttribute('alt'));
   const btnType = e => e.localName === 'input' && ['submit', 'button', 'reset', 'image'].includes(e.type);
   const kindOf = e => {
     const r = e.getAttribute('role');
     if (e.localName === 'a' || r === 'link') return 'link';
     if ((e.localName === 'input' && !btnType(e)) || ['select', 'textarea'].includes(e.localName) || e.isContentEditable ||
-      ['checkbox', 'radio', 'switch', 'textbox'].includes(r)) return 'field';
+      ['checkbox', 'radio', 'switch', 'textbox', 'combobox'].includes(r)) return 'field';
     return 'button';
   };
   const want = kinds && kinds.length ? new Set(kinds.map(k => k.replace(/s$/, ''))) : null;
-  const out = [];
-  for (const e of base.querySelectorAll(q)) {
-    if (e.parentElement && e.parentElement.closest('[contenteditable=""], [contenteditable=true]')) continue; // внутри редактора
-    if (!vis(e)) continue;
+  const out = [], listed = new Set();
+  const push = (e, it) => { listed.add(e); out.push(it); };
+  const item = e => {
     const kind = kindOf(e);
-    if (want && !want.has(kind)) continue;
-    if (e.localName === 'a' && ad.test(e.href)) continue;
-    if (kind !== 'field' && inAd(e)) continue;
     const it = {selector: sel(e), kind: kind, tag: e.localName};
-    if (e.type && e.localName !== 'a') it.type = String(e.type);
+    if (e.type && e.localName !== 'a' && typeof e.type === 'string') it.type = String(e.type);
     if (e.getAttribute('role')) it.role = e.getAttribute('role');
-    const t = label(e); if (t) it.text = t;
+    const t = label(e) || (kind === 'button' ? near(e) : ''); if (t) it.text = t;
     if (e.localName === 'a') it.href = e.href.length > 300 ? e.href.slice(0, 300) + '…' : e.href;
     if (e.disabled || e.getAttribute('aria-disabled') === 'true') it.disabled = true;
+    if (e.getAttribute('aria-selected') === 'true') it.checked = true;
     if (kind === 'field') {
       if (e.type === 'checkbox' || e.type === 'radio') { if (e.checked) it.checked = true; }
       else if (e.getAttribute('aria-checked') === 'true') it.checked = true;
@@ -130,11 +162,54 @@ var elementsJS = `((max, root, kinds, secret, valMax) => {
         if (cs.length) { it.value = cs.slice(0, valMax).join(''); it.value_length = cs.length; }
       }
     }
-    out.push(it);
+    return it;
+  };
+  for (const e of base.querySelectorAll('*')) {
     if (out.length >= max) break;
+    if (listed.has(e) || !interactive(e)) continue;
+    if (e.parentElement && e.parentElement.closest('[contenteditable=""], [contenteditable=true]')) continue; // внутри редактора
+    if (!vis(e)) continue;
+    const kind = kindOf(e);
+    if (want && !want.has(kind)) continue;
+    if (e.localName === 'a' && ad.test(e.href)) continue;
+    if (kind !== 'field' && inAd(e)) continue;
+    push(e, item(e));
+    if (kind === 'field' || !norm(vt(e))) continue; // иконка без текста — сама цель
+    for (const ic of e.querySelectorAll(iconQ)) {
+      if (out.length >= max) break;
+      if (listed.has(ic) || (ic.parentElement && ic.parentElement.closest('svg') && ic.localName !== 'svg') || norm(vt(ic)) || !vis(ic)) continue;
+      if (ic.querySelector('svg, img') && ic.localName !== 'svg') continue; // обёртка иконки: возьмём саму иконку
+      const r = ic.getBoundingClientRect();
+      if (r.width > 48 || r.height > 48) continue;
+      const it = {selector: sel(ic), kind: 'button', tag: ic.localName, icon: true};
+      let named = '';
+      for (let x = ic; x && x !== e; x = x.parentElement) { named = x.getAttribute('aria-label') || x.getAttribute('title') || svgTitle(x) || x.getAttribute('alt') || ''; if (named) break; }
+      const t = norm(named) || norm(vt(e)); if (t) it.text = t;
+      push(ic, it);
+    }
   }
   return out;
 })`
+
+// clickHookJS — до скриптов страницы (Page.addScriptToEvaluateOnNewDocument):
+// запоминает элементы, на которые страница вешает обработчик click (и
+// mousedown / pointerdown — так открываются самописные списки), чтобы observe
+// видел их интерактивными. Странице перехват не виден: toString подменённой
+// функции — как у встроенной.
+const clickHookJS = `(() => {
+  if (window.__gate4aiClick) return;
+  const set = new WeakSet();
+  Object.defineProperty(window, '__gate4aiClick', {value: set});
+  const proto = EventTarget.prototype, orig = proto.addEventListener;
+  const kinds = new Set(['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup']);
+  const hooked = function addEventListener(type, listener, options) {
+    if (kinds.has(type) && this instanceof Element) set.add(this);
+    return orig.call(this, type, listener, options);
+  };
+  const ts = Function.prototype.toString;
+  Object.defineProperty(hooked, 'toString', {value: function toString() { return ts.call(orig); }});
+  proto.addEventListener = hooked;
+})()`
 
 // Elements — интерактивные элементы текущей страницы (до MaxElements); kinds —
 // fields, buttons, links (пусто — все).

@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/gate4ai/gate4ai/internal/daemon"
+	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
+	"github.com/gate4ai/gate4ai/internal/front/skill"
 	"github.com/gate4ai/gate4ai/internal/platform/agentid"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/platform/paths"
@@ -141,6 +143,13 @@ func daemonMain(args []string, tty bool) error {
 		return err
 	}
 	go d.InstallDefaults(ctx)
+	// Установленный навык Claude Code прежней версии (полный текст каталога)
+	// заменяется обёрткой «выполни gate4ai skill»: он не устаревает с бинарником.
+	if ok, err := agentsetup.Default().RefreshSkill(skill.Stub()); err != nil {
+		log.Warn("skill not refreshed", "err", err)
+	} else if ok {
+		log.Info("skill refreshed", "path", agentsetup.Default().SkillPath())
+	}
 	if tty {
 		go banner(ctx, *ownerSock)
 	}

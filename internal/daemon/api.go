@@ -434,7 +434,11 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 			WriteError(w, 400, "invalid_policy", err.Error())
 			return
 		}
-		WriteJSON(w, 200, v)
+		// Правила, которые не действуют так, как написаны: владелец видит это сразу.
+		WriteJSON(w, 200, struct {
+			config.Version
+			Warnings []string `json:"warnings,omitempty"`
+		}{v, policy.Warnings(d.Config.Current())})
 	}))
 	mux.HandleFunc("GET /v1/policy/versions", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		vs, err := d.Config.Versions()

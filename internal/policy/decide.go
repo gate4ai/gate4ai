@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/gate4ai/gate4ai/internal/config"
 )
@@ -41,9 +43,13 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 		obl                []string
 	}
 	var hits []hit
-	var errs []string
+	var errs, skipped []string
 	for _, c := range prof.rules {
 		if !ActionMatches(c.rule.Action, req.Action) {
+			continue
+		}
+		if why := allowSkip(c.rule, req.Action); why != "" {
+			skipped = append(skipped, why)
 			continue
 		}
 		fired := true
@@ -113,8 +119,11 @@ func (e *Engine) Decide(req Request, counters Counters) Decision {
 			Reason: "nested call: no rule matched; covered by the decision on the calling action"}
 	}
 	eff := DefaultEffect(req.Class)
-	return Decision{Effect: eff, Default: true, Errors: errs, RuleIDs: []string{},
-		Reason: fmt.Sprintf("no rule matched; default for effect class %q is %s", req.Class, eff)}
+	reason := fmt.Sprintf("no rule matched; default for effect class %q is %s", req.Class, eff)
+	if len(skipped) > 0 {
+		reason = strings.Join(skipped, "; ") + "; default for effect class " + strconv.Quote(req.Class) + " is " + eff
+	}
+	return Decision{Effect: eff, Default: true, Errors: errs, RuleIDs: []string{}, Reason: reason}
 }
 
 // stateErr — ошибка State Store запроса или счётчиков.

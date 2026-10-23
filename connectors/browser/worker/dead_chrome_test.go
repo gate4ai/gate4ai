@@ -44,7 +44,13 @@ func TestClosedRealChrome(t *testing.T) {
 	if err != nil {
 		t.Skip("chrome did not start:", err)
 	}
+	if s.Gone(ctx) {
+		t.Fatal("a live Chrome is not gone")
+	}
 	StopChrome(procs[0], time.Second) // окно закрыли
+	if !s.Gone(ctx) {
+		t.Fatal("the session of a closed Chrome is gone: the browser connector closes it with this reason")
+	}
 	done := make(chan error, 1)
 	go func() { _, err := s.Observe(ctx, 0); done <- err }()
 	select {

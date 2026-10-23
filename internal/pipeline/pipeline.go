@@ -244,8 +244,9 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 	req := policy.Request{Agent: c.Agent, Action: c.Action, Class: act.Class, Args: args, Provenance: prov, Now: p.Now(), StateError: perr}
 	// 3. PDP.
 	dec := p.decidePolicy(req)
-	if f := p.AlwaysAsk[conn]; f != nil && dec.Effect == config.EffectAllow {
-		// Правило allow такое действие не разрешает без человека (deny — по-прежнему).
+	if f := p.AlwaysAsk[conn]; f != nil && (dec.Effect == config.EffectAllow || dec.Effect == config.EffectAsk && dec.Default) {
+		// Правило allow такое действие не разрешает без человека (deny — по-прежнему);
+		// без правила — подтверждение с конкретной причиной.
 		if reason := f(args); reason != "" {
 			dec = policy.Decision{Effect: config.EffectAsk, RuleIDs: []string{"always-ask"}, Reason: reason}
 		}

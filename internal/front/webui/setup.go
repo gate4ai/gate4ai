@@ -39,10 +39,10 @@ var groupTitles = map[string]map[string]string{
 }
 
 // groupWarns — предупреждения к группам действий: что значит «разрешать».
-// Самонастройка: правило allow на change_policy разрешает агенту расширять свои
-// права (сайты, правила, коннекторы) без вопроса владельцу.
+// Самонастройка: правило allow на change_policy не действует (policy.OwnerOnly) —
+// правку подтверждает владелец.
 var groupWarns = map[string]map[string]string{
-	daemon.SelfConnector: {"write": "“Allow” lets the agent widen its own rights — sites, rules, connectors — without asking you. Keep “Ask” unless you trust every change it makes."},
+	daemon.SelfConnector: {"write": "A change of gate4.ai settings by an agent — sites, rules, accounts, connectors — always asks you: “Allow” has no effect here, “Deny” forbids asking."},
 }
 
 // groupView — группа действий коннектора одного класса и решение для неё в профиле.
