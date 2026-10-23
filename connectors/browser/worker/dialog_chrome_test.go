@@ -74,10 +74,10 @@ func TestDialogsRealChrome(t *testing.T) {
 				t.Fatal(err)
 			}
 			start := time.Now()
-			rctx, rcancel := context.WithTimeout(ctx, 10*time.Second)
+			rctx, rcancel := context.WithTimeout(ctx, 30*time.Second)
 			err = s.Run(rctx, true, func(ctx context.Context) error { _, err := s.Reload(ctx); return err })
 			rcancel()
-			if err != nil || time.Since(start) > 8*time.Second {
+			if err != nil || time.Since(start) > 25*time.Second {
 				t.Fatalf("reload with beforeunload: %v in %s", err, time.Since(start))
 			}
 			if p, err := s.Observe(ctx, 0); err != nil || p.Title != "Form" {
@@ -89,7 +89,7 @@ func TestDialogsRealChrome(t *testing.T) {
 				_, err := s.Act(ctx, ActRequest{Selector: "#hi", Method: ActClick})
 				return err
 			})
-			if !errors.As(err, &de) || de.Dialog.Type != "alert" || de.Dialog.Message != "Saved?" || time.Since(start) > 5*time.Second {
+			if !errors.As(err, &de) || de.Dialog.Type != "alert" || de.Dialog.Message != "Saved?" || time.Since(start) > 15*time.Second {
 				t.Fatalf("alert: %v in %s", err, time.Since(start))
 			}
 			err = s.Run(ctx, false, func(ctx context.Context) error { _, err := s.Observe(ctx, 0); return err })

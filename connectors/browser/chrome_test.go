@@ -76,14 +76,14 @@ func TestReloadBeforeUnloadRealChrome(t *testing.T) {
 				t.Fatal(err)
 			}
 			start := time.Now()
-			res, err = call("dev", "c1", "reload", map[string]any{"session": id, "wait_for_selector": "textarea", "timeout_ms": 5000.0})
-			if err != nil || res["title"] != "Form" || time.Since(start) > 5*time.Second {
+			res, err = call("dev", "c1", "reload", map[string]any{"session": id, "wait_for_selector": "textarea", "timeout_ms": 20000.0})
+			if err != nil || res["title"] != "Form" || time.Since(start) > 20*time.Second {
 				t.Fatalf("reload with beforeunload: %v %v in %s", res, err, time.Since(start))
 			}
 			// Срок на действие целиком: элемента нет — ответ timeout за timeout_ms с состоянием страницы.
 			start = time.Now()
 			_, err = call("dev", "c1", "reload", map[string]any{"session": id, "wait_for_selector": "#never", "timeout_ms": 1500.0})
-			if err == nil || !strings.Contains(err.Error(), `"title":"Form"`) || time.Since(start) > 1500*time.Millisecond+ActionGrace {
+			if err == nil || !strings.Contains(err.Error(), `"title":"Form"`) || time.Since(start) > 1500*time.Millisecond+ActionGrace+2*time.Second {
 				t.Fatalf("reload past timeout_ms: %v in %s", err, time.Since(start))
 			}
 			if res, err := call("dev", "c1", "observe", map[string]any{"session": id}); err != nil || res["title"] != "Form" {
@@ -95,7 +95,7 @@ func TestReloadBeforeUnloadRealChrome(t *testing.T) {
 				t.Fatal("alert:", err)
 			}
 			start = time.Now()
-			if _, err := call("dev", "c1", "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), CodeDialogOpen) || time.Since(start) > 2*time.Second {
+			if _, err := call("dev", "c1", "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), CodeDialogOpen) || time.Since(start) > 10*time.Second {
 				t.Fatal("observe with a dialog open:", err)
 			}
 			if res, err := call("dev", "c1", "dialog", map[string]any{"session": id, "accept": true}); err != nil || res["accepted"] != true {

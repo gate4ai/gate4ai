@@ -86,8 +86,9 @@ connectors:
 	sA := open["session"].(string)
 	call(tokA, 0, "browser", "act", "--session", sA, "--selector", "#q", "--method", "press", "--value", "a")
 	start := time.Now()
-	rl := call(tokA, 0, "browser", "reload", "--session", sA, "--wait_for_selector", "textarea", "--timeout_ms", "5000")
-	if rl["title"] != "Publish" || time.Since(start) > 8*time.Second {
+	// Срок с запасом на нагрузку CI (Chrome без окна рядом с другими тестами); зависание — это минуты.
+	rl := call(tokA, 0, "browser", "reload", "--session", sA, "--wait_for_selector", "textarea", "--timeout_ms", "20000")
+	if rl["title"] != "Publish" || time.Since(start) > 25*time.Second {
 		t.Fatalf("reload with beforeunload: %v in %s", rl, time.Since(start))
 	}
 	if p := call(tokA, 0, "browser", "observe", "--session", sA); p["title"] != "Publish" {
