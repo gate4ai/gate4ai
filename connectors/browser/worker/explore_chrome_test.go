@@ -139,7 +139,7 @@ func TestExploreRealChrome(t *testing.T) {
 	if _, err := x.Act(ctx, ActRequest{Selector: got["Обновить"].Selector, Method: ActClick, ExpectSelector: "[role=dialog]", ExpectText: "кабинет"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := x.WaitFor(ctx, "[role=dialog]", "", 2000); err != nil {
+	if err := x.WaitFor(ctx, Wait{Selector: "[role=dialog]", TimeoutMS: 2000}); err != nil {
 		t.Fatal(err)
 	}
 	if txt, err := x.TextIn(ctx, "[role=dialog]"); err != nil || !strings.Contains(txt, "Кабинет 12") || strings.Contains(txt, "Счета") {

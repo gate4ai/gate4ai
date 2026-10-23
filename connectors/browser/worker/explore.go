@@ -271,41 +271,50 @@ const (
 )
 
 // netHookJS — перехват fetch и XHR страницы: метод, адрес, статус, тип и
-// начало ответа (JSON и текст) — в window.__gate4aiNet (последние 100).
-// Тела запросов не пишутся: в них бывают пароли, которые человек вводит сам.
-// Повторная установка ничего не меняет.
+// начало ответа (JSON и текст) — в window.__gate4aiNet (последние 100),
+// незавершённые — в window.__gate4aiPending (ожидание загрузки, состояние
+// страницы). Тела запросов не пишутся: в них бывают пароли, которые человек
+// вводит сам. Повторная установка ничего не меняет.
 const netHookJS = `(() => {
   if (window.__gate4aiNet) return true;
   const log = window.__gate4aiNet = [];
+  window.__gate4aiPending = 0;
+  const busy = d => { window.__gate4aiPending = Math.max(0, window.__gate4aiPending + d); };
   const add = r => { log.push(r); if (log.length > 100) log.shift(); };
   const text = ct => /json|text\/plain|javascript/.test(ct || '');
   const f = window.fetch;
   if (f) window.fetch = function(input, init) {
     const method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
     const url = String((input && input.url) || input);
+    busy(1);
     return f.apply(this, arguments).then(resp => {
+      busy(-1);
       const ct = resp.headers.get('content-type') || '';
       const r = {kind: 'fetch', method, url: resp.url || url, status: resp.status, mime: ct};
       add(r);
       if (text(ct)) resp.clone().text().then(b => { r.body = b.slice(0, 4000); r.size = b.length; }).catch(() => {});
       return resp;
-    });
+    }, e => { busy(-1); throw e; });
   };
   const open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function(method, url) { this.__g4 = {kind: 'xhr', method: String(method).toUpperCase(), url: String(url)}; return open.apply(this, arguments); };
   XMLHttpRequest.prototype.send = function() {
     const r = this.__g4;
-    if (r) this.addEventListener('loadend', () => {
-      r.status = this.status; r.url = this.responseURL || r.url; r.mime = this.getResponseHeader('content-type') || '';
-      if (text(r.mime)) {
-        // HttpClient (Angular) и axios берут ответ как json: responseText тогда недоступен
-        let b = '';
-        try { b = (this.responseType === '' || this.responseType === 'text') ? this.responseText
-          : this.responseType === 'json' ? JSON.stringify(this.response) : ''; } catch (_) {}
-        if (b) { r.body = b.slice(0, 4000); r.size = b.length; }
-      }
-      add(r);
-    });
+    if (r) {
+      busy(1);
+      this.addEventListener('loadend', () => {
+        busy(-1);
+        r.status = this.status; r.url = this.responseURL || r.url; r.mime = this.getResponseHeader('content-type') || '';
+        if (text(r.mime)) {
+          // HttpClient (Angular) и axios берут ответ как json: responseText тогда недоступен
+          let b = '';
+          try { b = (this.responseType === '' || this.responseType === 'text') ? this.responseText
+            : this.responseType === 'json' ? JSON.stringify(this.response) : ''; } catch (_) {}
+          if (b) { r.body = b.slice(0, 4000); r.size = b.length; }
+        }
+        add(r);
+      });
+    }
     return send.apply(this, arguments);
   };
   return true;

@@ -131,6 +131,9 @@ func sitesOf(m map[string]any, domainsKey string) (domain.Sites, error) {
 	return domain.Sites{Domains: strs(m[domainsKey])}, nil
 }
 
+// CodeRedirected — пока ждали (wait_for_*), страница ушла на страницу или сайт входа.
+const CodeRedirected = "redirected"
+
 // fail — ошибка воркера в коде ABI.
 func fail(err error) error {
 	switch {
@@ -142,6 +145,8 @@ func fail(err error) error {
 		return abi.Errorf(abi.CodeNotFound, "%v", err)
 	case errors.Is(err, context.Canceled):
 		return abi.Errorf(abi.CodeCancelled, "%v", err)
+	case errors.Is(err, worker.ErrRedirected):
+		return abi.Errorf(CodeRedirected, "%s", strings.TrimPrefix(err.Error(), worker.ErrRedirected.Error()+": "))
 	}
 	for _, e := range []error{worker.ErrWrongOrigin, worker.ErrFormMismatch, worker.ErrSecretOnPage} {
 		if errors.Is(err, e) {
@@ -172,6 +177,13 @@ func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (
 		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "session is for agents; a connector's page lives for its root call")
 	}
 	switch r.Action { // аргументы — до страницы и сеанса
+	case "get", "head", "post", "put", "patch", "delete":
+		if r.Caller != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "browser.%s is for agents; a connector makes requests with http_request", r.Action)
+		}
+		if _, err := fetchRequest(r); err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
+		}
 	case "act":
 		if err := worker.CheckAct(actRequest(r.Args)); err != nil {
 			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
@@ -236,6 +248,12 @@ func (b *Browser) agent(ctx context.Context, r abi.ExecRequest) (abi.ExecResult,
 	page.URL = cleanURL(page.URL) // адрес после редиректов: в нём бывают токены
 	switch r.Action {
 	case "read":
+		if raw, ok, err := s.Raw(ctx, 0); err != nil {
+			return abi.ExecResult{}, err
+		} else if ok {
+			// JSON, текст: тело как прислал сервер, без просмотрщика Chrome.
+			return abi.ExecResult{Structured: rawResult(page.URL, page.Title, raw), Content: []abi.Content{abi.Text(raw.Body)}, ResultRef: page.URL, Source: "web:" + page.URL}, nil
+		}
 		p, err := s.Observe(ctx, 0)
 		if err != nil {
 			return abi.ExecResult{}, err
@@ -320,6 +338,14 @@ func (cs *callSession) page(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 	}
 	cs.s.SetLoginOrigins(loginOrigins(r.Accounts))
 	res, err := cs.do(ctx, r)
+	if errors.Is(err, worker.ErrRedirected) {
+		if u, uerr := cs.s.Engine.URL(ctx); uerr == nil {
+			cs.url = u
+			if acc := loginRequired(ctx, cs.s, u, r.Accounts); acc != "" {
+				err = fmt.Errorf("%w; account %s is available: browser.login --account %s", err, acc, acc)
+			}
+		}
+	}
 	if err != nil {
 		return res, err
 	}
@@ -367,13 +393,27 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			return abi.ExecResult{}, err
 		}
 		cs.opened, cs.url = true, p.URL
-		if err := cs.s.WaitFor(ctx, str(r.Args, "wait_for_selector"), str(r.Args, "wait_for_text"), num(r.Args, "timeout_ms")); err != nil {
+		w := waitOf(r.Args, str(r.Args, "url"))
+		if err := cs.s.WaitFor(ctx, w); err != nil {
 			return abi.ExecResult{}, err
 		}
-		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(p.URL), "title": p.Title}, ResultRef: cleanURL(p.URL)}, nil
+		res := map[string]any{"url": cleanURL(p.URL), "title": p.Title}
+		if p.StillLoading && w.Selector == "" && w.Text == "" && w.URL == "" {
+			res["still_loading"] = true // дождаться содержимого: observe --wait_for_text / --wait_for_selector
+		}
+		return abi.ExecResult{Structured: res, ResultRef: cleanURL(p.URL)}, nil
 	case "observe":
-		if err := cs.s.WaitFor(ctx, str(r.Args, "wait_for_selector"), str(r.Args, "wait_for_text"), num(r.Args, "timeout_ms")); err != nil {
+		if err := cs.s.WaitFor(ctx, waitOf(r.Args, cs.url)); err != nil {
 			return abi.ExecResult{}, err
+		}
+		if raw, ok, err := cs.s.Raw(ctx, num(r.Args, "max_chars")); err != nil {
+			return abi.ExecResult{}, err
+		} else if ok {
+			// JSON, текст: тело как прислал сервер (элементов и структуры у него нет).
+			u, _ := cs.s.Engine.URL(ctx)
+			title, _ := cs.s.Engine.Title(ctx)
+			cs.url = u
+			return abi.ExecResult{Structured: rawResult(cleanURL(u), title, raw), ResultRef: cleanURL(u), Source: "web:" + cleanURL(u)}, nil
 		}
 		p, err := cs.s.Observe(ctx, num(r.Args, "max_chars"))
 		if err != nil {
@@ -427,7 +467,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			return abi.ExecResult{}, err
 		}
 		cs.url = u
-		if err := cs.s.WaitFor(ctx, str(r.Args, "wait_for_selector"), str(r.Args, "wait_for_text"), num(r.Args, "timeout_ms")); err != nil {
+		if err := cs.s.WaitFor(ctx, waitOf(r.Args, u)); err != nil {
 			return abi.ExecResult{}, err
 		}
 		title, _ := cs.s.Engine.Title(ctx)
@@ -456,6 +496,26 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 				"): they may be personal data; the owner can hide them with connectors.browser.redact_params"
 		}
 		return abi.ExecResult{Structured: res, Source: "web:" + cleanURL(cs.url)}, nil
+	case "get", "head", "post", "put", "patch", "delete":
+		fr, err := fetchRequest(r)
+		if err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
+		}
+		res, err := cs.s.FetchPage(ctx, fr)
+		if err != nil {
+			return abi.ExecResult{}, err
+		}
+		out := map[string]any{"status": res.Status, "url": cleanURL(res.URL), "size": res.Size}
+		if len(res.Headers) > 0 {
+			out["headers"] = res.Headers
+		}
+		if res.Redirect {
+			out["redirect"] = true
+		}
+		bodyFields(out, res.Body)
+		// Квитанция: метод, адрес, статус и размер ответа.
+		ref := fmt.Sprintf("%s %s → %d, %d bytes", fr.Method, cleanURL(fr.URL), res.Status, res.Size)
+		return abi.ExecResult{Structured: out, ResultRef: ref, Source: "web:" + cleanURL(res.URL)}, nil
 	case "page_extract":
 		data, err := cs.s.Extract(ctx, str(r.Args, "instruction"))
 		if err != nil {
@@ -549,11 +609,7 @@ func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 	b.mu.Unlock()
 	if r.Action == "close" {
 		b.closeAgent(as)
-		res := map[string]any{"session": as.id, "steps": as.steps}
-		if as.truncated {
-			res["truncated"] = true
-		}
-		return abi.ExecResult{Structured: res, Source: "web:session:" + as.id}, nil
+		return as.closeResult(r.Args)
 	}
 	res, err := as.page(ctx, r)
 	as.record(r, res, err)
@@ -625,7 +681,7 @@ func (b *Browser) closeAll(agent string) abi.ExecResult {
 		b.closeAgent(as)
 		as.mu.Unlock()
 	}
-	return abi.ExecResult{Structured: map[string]any{"closed": len(mine)}}
+	return abi.ExecResult{Structured: map[string]any{"closed": true, "sessions": len(mine)}}
 }
 
 // closeAgent освобождает страницу сеанса агента (close, close --all, простой,

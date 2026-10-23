@@ -346,7 +346,8 @@ func notify(peer *sdknative.Peer, method string, params any) {
 
 // envAllow — переменные окружения хоста, которые получает нативный процесс:
 // системные (пути, язык, дисплей, временные каталоги, профиль пользователя
-// Windows), но не токены и ключи из окружения daemon.
+// Windows) и каталог данных gate4ai (GATE4AI_HOME: браузер пишет туда шаги
+// сеанса), но не токены и ключи из окружения daemon.
 var envAllow = map[string]bool{
 	"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true, "LANG": true, "LANGUAGE": true, "TZ": true,
 	"TMPDIR": true, "TEMP": true, "TMP": true, "DISPLAY": true, "WAYLAND_DISPLAY": true, "XAUTHORITY": true,
@@ -355,13 +356,14 @@ var envAllow = map[string]bool{
 	"USERNAME": true, "USERDOMAIN": true, "APPDATA": true, "LOCALAPPDATA": true, "PROGRAMDATA": true, "PROGRAMFILES": true,
 	"PROGRAMFILES(X86)": true, "PROGRAMW6432": true, "COMMONPROGRAMFILES": true, "COMMONPROGRAMFILES(X86)": true,
 	"HOMEDRIVE": true, "HOMEPATH": true, "PUBLIC": true, "NUMBER_OF_PROCESSORS": true, "PROCESSOR_ARCHITECTURE": true, "OS": true,
+	"GATE4AI_HOME": true,
 }
 
 // testEnvPrefix — переменные тестов пакета (процесс коннектора — бинарник теста).
 var testEnvPrefix string
 
 // MinimalEnv — окружение нативного процесса из окружения хоста: только
-// envAllow и LC_* / XDG_* (без GATE4AI_* и прочих переменных daemon).
+// envAllow и LC_* / XDG_* (без прочих GATE4AI_* и переменных daemon).
 func MinimalEnv(environ []string) []string {
 	var out []string
 	for _, kv := range environ {

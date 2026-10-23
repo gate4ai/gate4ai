@@ -48,7 +48,7 @@ const changeSchema = `{ type: object, properties: {
   connector: { type: string },
   settings_json: { type: string, description: "connector_settings: JSON object with non-secret settings, e.g. {\"roots\":[\"~/notes\"]}" },
   folder: { type: string, description: "install_dev_connector: absolute path of the folder with manifest.yaml and Go sources" },
-  key: { type: string, description: "add_setting_items / remove_setting_items: the list setting, e.g. allowed_domains" },
+  key: { type: string, description: "add_setting_items / remove_setting_items: the list setting. browser: allowed_domains (sites agents may open: app.example.org, *.example.org), blocked (sites closed with mode blocklist), redact_params (URL parameters and JSON fields hidden in network and responses); files: roots (allowed folders), allow_paths (protected paths opened). Other settings — connector_settings: browser mode (allowlist | blocklist), max_text_chars, model; files allow_hidden, max_bytes" },
   account: { type: string, description: "add_credential: the account alias, e.g. @emias" },
   credential_json: { type: string, description: "add_credential: a NEW account as in credentials of the policy, JSON: {bind, form | via, login_page, prompts, use, connectors}; secrets only as new vault aliases of the account itself (@site.password for @site) — the owner puts the values into the vault" } },
   required: [op] }`
@@ -62,7 +62,7 @@ func (selfConnector) Manifest() manifest.Manifest {
 				InputSchema: manifest.MustSchema(`{ type: object, properties: {
 				  summary: { type: string, maxLength: 200, description: "one line: what the change does" },
 				  reason: { type: string, maxLength: 1000, description: "why the user needs it" },
-				  changes: { type: array, minItems: 1, maxItems: 20, description: "JSON array of changes, each {op, …}: add_rule {action, effect, when?, rule_id?, rule_reason?, profile?}; remove_rule {rule_id, profile?}; add_list_items / remove_list_items {list, items}; add_connector / install_connector {connector, profile?}; connector_settings {connector, settings_json}; install_dev_connector {folder}; add_setting_items / remove_setting_items {connector, key, items}; add_credential {account, credential_json}. A rule decides by precedence deny > ask > allow, not by order", items: ` + changeSchema + ` } },
+				  changes: { type: array, minItems: 1, maxItems: 20, description: "JSON array of changes, each {op, …}: add_rule {action, effect, when?, rule_id?, rule_reason?, profile?}; remove_rule {rule_id, profile?}; add_list_items / remove_list_items {list, items}; add_connector / install_connector {connector, profile?}; connector_settings {connector, settings_json}; install_dev_connector {folder}; add_setting_items / remove_setting_items {connector, key, items}; add_credential {account, credential_json}. Example — a site for the browser: [{\"op\":\"add_setting_items\",\"connector\":\"browser\",\"key\":\"allowed_domains\",\"items\":[\"grafana.example.net\"]}]. A rule decides by precedence deny > ask > allow, not by order", items: ` + changeSchema + ` } },
 				  required: [summary, changes] }`),
 				Example: `gate4ai gate4ai change_policy --summary "Let me append to notes" --changes '[{"op":"add_rule","action":"files.append","when":"glob(path, \"~/notes/**\")","effect":"allow"}]'`},
 			{Name: "policy_summary", Class: "read", Description: "Your profile (connectors, rules, limits — what you may do without asking, what needs approval, what is denied), the other profiles and the lists",

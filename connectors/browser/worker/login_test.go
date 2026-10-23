@@ -388,7 +388,7 @@ func TestStillOnLoginAndSecretOnPage(t *testing.T) {
 	if _, err := s.Act(ctx, ActRequest{Selector: "#bind", Method: ActWait, ExpectSelector: "#password", ExpectText: fakePass[:4], ExpectMS: 1}); !errors.Is(err, ErrNoEffect) {
 		t.Fatal("expect_text matches the secret:", err)
 	}
-	if err := s.WaitFor(ctx, "#password", fakePass[:4], 1); !errors.Is(err, ErrNotFound) {
+	if err := s.WaitFor(ctx, Wait{Selector: "#password", Text: fakePass[:4], TimeoutMS: 1}); !errors.Is(err, ErrNotFound) {
 		t.Fatal("wait_for_text matches the secret:", err)
 	}
 	// Переход верхнего документа снимает режим.

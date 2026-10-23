@@ -21,6 +21,8 @@ type netLog struct {
 	byID     map[string]int // requestId → индекс в entries
 	inflight map[string]bool
 	last     time.Time // последнее событие сети
+	doc      string    // requestId ответа верхнего документа (тело — DocumentBody)
+	frame    string    // id верхнего фрейма вкладки (id цели)
 }
 
 type netEntry struct {
@@ -36,13 +38,15 @@ const maxNetEntries = 200
 func (n *netLog) reset() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.entries, n.byID, n.inflight, n.last = nil, map[string]int{}, map[string]bool{}, time.Now()
+	n.entries, n.byID, n.inflight, n.last, n.doc = nil, map[string]int{}, map[string]bool{}, time.Now(), ""
 }
 
 // handle — событие Network.* вкладки.
 func (n *netLog) handle(m cdpMsg) {
 	var p struct {
 		RequestID string `json:"requestId"`
+		LoaderID  string `json:"loaderId"`
+		FrameID   string `json:"frameId"`
 		Type      string `json:"type"`
 		Request   struct {
 			URL    string `json:"url"`
@@ -66,6 +70,9 @@ func (n *netLog) handle(m cdpMsg) {
 	switch m.Method {
 	case "Network.requestWillBeSent":
 		n.inflight[p.RequestID] = true
+		if p.Type == "Document" && p.RequestID == p.LoaderID && (n.frame == "" || p.FrameID == n.frame) {
+			n.doc = p.RequestID // переход верхнего документа: id запроса — id загрузчика
+		}
 		if p.Type != "XHR" && p.Type != "Fetch" {
 			return
 		}
@@ -140,18 +147,52 @@ func textMIME(m string) bool {
 }
 
 // WaitIdle ждёт, пока у вкладки quiet не будет незавершённых запросов и новых
-// событий сети, не дольше max (idleWaiter).
-func (c *CDP) WaitIdle(ctx context.Context, quiet, max time.Duration) {
+// событий сети, не дольше max (idleWaiter); false — не дождался.
+func (c *CDP) WaitIdle(ctx context.Context, quiet, max time.Duration) bool {
 	deadline := time.Now().Add(max)
 	for time.Now().Before(deadline) {
 		c.net.mu.Lock()
 		idle := len(c.net.inflight) == 0 && time.Since(c.net.last) >= quiet
 		c.net.mu.Unlock()
 		if idle {
-			return
+			return true
 		}
 		if wait(ctx, 50*time.Millisecond) != nil {
-			return
+			return false
 		}
 	}
+	return false
+}
+
+// Pending — незавершённые запросы вкладки (pendingCounter).
+func (c *CDP) Pending() int {
+	c.net.mu.Lock()
+	defer c.net.mu.Unlock()
+	return len(c.net.inflight)
+}
+
+// DocumentBody — тело ответа верхнего документа как его прислал сервер
+// (docBodier): JSON без просмотрщика Chrome.
+func (c *CDP) DocumentBody(ctx context.Context) (string, bool) {
+	c.net.mu.Lock()
+	id := c.net.doc
+	c.net.mu.Unlock()
+	if id == "" {
+		return "", false
+	}
+	var b struct {
+		Body          string `json:"body"`
+		Base64Encoded bool   `json:"base64Encoded"`
+	}
+	if err := c.call(ctx, c.session, "Network.getResponseBody", map[string]any{"requestId": id}, &b); err != nil {
+		return "", false
+	}
+	if b.Base64Encoded {
+		raw, err := base64.StdEncoding.DecodeString(b.Body)
+		if err != nil {
+			return "", false
+		}
+		return string(raw), true
+	}
+	return b.Body, true
 }

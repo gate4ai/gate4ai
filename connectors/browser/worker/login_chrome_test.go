@@ -158,7 +158,7 @@ func TestLoginRealChrome(t *testing.T) {
 		if _, err := x.Act(ctx, ActRequest{Selector: "input", Method: ActWait, Text: text, TimeoutMS: 1}); !errors.Is(err, ErrNotFound) {
 			t.Fatal("act text matches the secret:", text, err)
 		}
-		if err := x.WaitFor(ctx, "", text, 1); !errors.Is(err, ErrNotFound) {
+		if err := x.WaitFor(ctx, Wait{Text: text, TimeoutMS: 1}); !errors.Is(err, ErrNotFound) {
 			t.Fatal("wait_for_text matches the secret:", text, err)
 		}
 		if _, err := x.Act(ctx, ActRequest{Selector: "#bind", Method: ActWait, ExpectText: text, ExpectMS: 1}); !errors.Is(err, ErrNoEffect) {

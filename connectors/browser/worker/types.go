@@ -15,6 +15,8 @@ type Page struct {
 	Title     string `json:"title"`
 	Text      string `json:"text,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
+	// StillLoading — open: страница не догрузилась за IdleMax.
+	StillLoading bool `json:"still_loading,omitempty"`
 }
 
 // ActRequest — действие по CSS-селектору, без естественного языка.

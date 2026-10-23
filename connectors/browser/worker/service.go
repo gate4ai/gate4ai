@@ -214,7 +214,7 @@ func (ss *Session) Open(ctx context.Context, url string, sites domain.Sites) (Pa
 		return Page{}, err
 	}
 	title, _ := ss.Executor.Engine.Title(ctx)
-	return Page{URL: final, Title: title}, nil
+	return Page{URL: final, Title: title, StillLoading: ss.Executor.StillLoading}, nil
 }
 
 // Observe — адрес, заголовок и текст страницы (до max символов).
@@ -224,6 +224,24 @@ func (ss *Session) Observe(ctx context.Context, max int) (Page, error) {
 	}
 	u, title, text, trunc, err := ss.Executor.Observe(ctx, max)
 	return Page{URL: u, Title: title, Text: text, Truncated: trunc}, err
+}
+
+// Raw — верхний документ не HTML (JSON, текст): его тело до max символов
+// (0 и больше предела — предел настроек); ok — false у HTML-страницы.
+func (ss *Session) Raw(ctx context.Context, max int) (Body, bool, error) {
+	if max <= 0 || max > ss.max {
+		max = ss.max
+	}
+	return ss.Executor.RawDocument(ctx, max)
+}
+
+// FetchPage — запрос со страницы сеанса; тело ответа — до Max символов (0 и
+// больше предела — предел настроек).
+func (ss *Session) FetchPage(ctx context.Context, r FetchRequest) (FetchResponse, error) {
+	if r.Max <= 0 || r.Max > ss.max {
+		r.Max = ss.max
+	}
+	return ss.Executor.Fetch(ctx, r)
 }
 
 // ScreenshotElement — снимок элемента по CSS-селектору.

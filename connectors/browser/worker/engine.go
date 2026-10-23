@@ -51,6 +51,10 @@ type Executor struct {
 	// не показывает (настройка redact_params: личные идентификаторы сайта).
 	RedactParams []string
 
+	// StillLoading — после последнего Open страница не догрузилась за
+	// IdleMax (запросы ещё идут или document.readyState не complete).
+	StillLoading bool
+
 	secret    string   // метка документа, на котором введён секрет (markJS)
 	sticky    bool     // секрет введён, метку поставить не удалось: до перехода через Open
 	secretSel []string // поля, куда введены секреты (закрашиваются на снимках)
@@ -119,7 +123,7 @@ func (x *Executor) Open(ctx context.Context, u string) (string, error) {
 		return "", fmt.Errorf("redirected off the allowlist: %w", err)
 	}
 	x.HookNetwork(ctx)
-	x.idle(ctx)
+	x.StillLoading = !x.idle(ctx)
 	return final, nil
 }
 
@@ -446,51 +450,4 @@ func (x *Executor) present(ctx context.Context, sel, text string) (bool, error) 
 		return false, err
 	}
 	return found != nil, nil
-}
-
-// WaitFor ждёт видимый элемент по селектору (и/или с текстом) до timeoutMS
-// (0 — 10 с): SPA дорисовывает страницу после загрузки и после кликов.
-func (x *Executor) WaitFor(ctx context.Context, sel, text string, timeoutMS int) error {
-	if sel == "" && text == "" {
-		return nil
-	}
-	if sel == "" {
-		sel = "body *"
-	}
-	timeout := time.Duration(timeoutMS) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
-	deadline := time.Now().Add(timeout)
-	for {
-		found, err := x.present(ctx, sel, text)
-		if err != nil || found {
-			return err
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("%w: %s %q did not appear in %s", ErrNotFound, sel, text, timeout)
-		}
-		if err := wait(ctx, ActPoll); err != nil {
-			return err
-		}
-	}
-}
-
-// idleWaiter — движок, который знает о запросах страницы (CDP Network).
-type idleWaiter interface {
-	// WaitIdle ждёт, пока у страницы не будет запросов quiet, не дольше max.
-	WaitIdle(ctx context.Context, quiet, max time.Duration)
-}
-
-// Пределы ожидания «сеть успокоилась» после перехода.
-var (
-	IdleQuiet = 500 * time.Millisecond
-	IdleMax   = 5 * time.Second
-)
-
-// idle — после перехода ждёт, пока SPA догрузит данные (если движок умеет).
-func (x *Executor) idle(ctx context.Context) {
-	if w, ok := x.Engine.(idleWaiter); ok {
-		w.WaitIdle(ctx, IdleQuiet, IdleMax)
-	}
 }

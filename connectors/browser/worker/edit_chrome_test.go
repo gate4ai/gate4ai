@@ -42,6 +42,19 @@ document.querySelector('[name=text]').addEventListener('keydown', e => {
 </script>`
 
 func chromeExecutor(t *testing.T, page string) (*Executor, *CDP, string, context.Context) {
+	return chromeServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/next" {
+			w.Write([]byte("<!doctype html><title>next</title><p class=done>готово</p>"))
+			return
+		}
+		w.Write([]byte(page))
+	}))
+}
+
+// chromeServer — Executor на настоящем Chrome (headless) с открытой корневой
+// страницей сервера h.
+func chromeServer(t *testing.T, h http.Handler) (*Executor, *CDP, string, context.Context) {
 	t.Helper()
 	if testing.Short() || runtime.GOOS == "windows" {
 		t.Skip("needs Chrome")
@@ -50,14 +63,7 @@ func chromeExecutor(t *testing.T, page string) (*Executor, *CDP, string, context
 	if err != nil {
 		t.Skip(err)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if r.URL.Path == "/next" {
-			w.Write([]byte("<!doctype html><title>next</title><p class=done>готово</p>"))
-			return
-		}
-		w.Write([]byte(page))
-	}))
+	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	dir := t.TempDir()
 	wrapper := filepath.Join(dir, "chrome")
