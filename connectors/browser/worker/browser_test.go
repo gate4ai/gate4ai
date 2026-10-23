@@ -66,6 +66,9 @@ func (f *fakeChrome) ws(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(b, &m)
 		f.mu.Lock()
 		f.methods = append(f.methods, m.Method)
+		if m.Method == "Target.createTarget" && m.Params["background"] == true {
+			f.methods = append(f.methods, "background")
+		}
 		var res any = map[string]any{}
 		var event map[string]any
 		switch m.Method {
@@ -166,6 +169,53 @@ func TestOpenObserveScreenshotViaCDP(t *testing.T) {
 	if n := f.called("Target.createTarget"); n != 1 {
 		t.Fatalf("engine recreated %d times", n)
 	}
+}
+
+// TestTabDuringSession — временная вкладка при занятой странице сессии: новая
+// фоновая вкладка того же Chrome, закрывается в Release; сессия остаётся.
+func TestTabDuringSession(t *testing.T) {
+	f := newFakeChrome(t)
+	svc, st := service(f)
+	ctx := context.Background()
+	s, err := svc.Acquire(ctx, st, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Release()
+	if _, err := s.Open(ctx, "https://app.example.org/", allowed); err != nil {
+		t.Fatal(err)
+	}
+	tab, err := svc.Tab(ctx, st, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := tab.Open(ctx, "https://app.example.org/", allowed); err != nil || p.Title != "Личный кабинет" {
+		t.Fatal(p, err)
+	}
+	if _, err := tab.Open(ctx, "https://evil.example/", allowed); !errors.Is(err, ErrDomain) {
+		t.Fatal("site list in a tab:", err)
+	}
+	tab.Release()
+	tab.Release() // повторно — без эффекта
+	if n, bg, closed := f.called("Target.createTarget"), f.called("background"), f.called("Target.closeTarget"); n != 2 || bg != 1 || closed != 1 {
+		t.Fatalf("tabs: created %d (background %d), closed %d", n, bg, closed)
+	}
+	if _, err := s.Observe(ctx, 0); err != nil {
+		t.Fatal("the session works after the tab:", err)
+	}
+	// Вкладок не больше MaxTabs: лишняя ждёт и получает ErrTabLimit.
+	old := MaxTabs
+	MaxTabs = 1
+	defer func() { MaxTabs = old }()
+	svc2, _ := service(f)
+	t1, err := svc2.Tab(ctx, st, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc2.Tab(ctx, st, 10*time.Millisecond); !errors.Is(err, ErrTabLimit) {
+		t.Fatal("tab limit:", err)
+	}
+	t1.Release()
 }
 
 func TestDomainAllowlist(t *testing.T) {

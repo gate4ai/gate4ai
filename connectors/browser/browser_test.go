@@ -27,6 +27,17 @@ type fakeEngine struct {
 	hooks   int
 	json    string   // верхний документ — JSON с этим телом
 	fetches []string // запросы со страницы: метод и адрес
+	tabs    int      // открытые временные вкладки (NewTab)
+	closed  int      // закрытые вкладки (Close)
+	parent  *fakeEngine
+}
+
+// NewTab — временная вкладка: своя страница (адрес), тот же тип документа.
+func (f *fakeEngine) NewTab(context.Context) (worker.Engine, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tabs++
+	return &fakeEngine{url: "about:blank", json: f.json, parent: f}, nil
 }
 
 func (f *fakeEngine) Navigate(_ context.Context, u string) error {
@@ -95,7 +106,14 @@ func (f *fakeEngine) InsertText(_ context.Context, t string) error {
 	return nil
 }
 func (f *fakeEngine) Key(_ context.Context, k string) error { f.keys = append(f.keys, k); return nil }
-func (f *fakeEngine) Close() error                          { return nil }
+func (f *fakeEngine) Close() error {
+	if p := f.parent; p != nil {
+		p.mu.Lock()
+		p.closed++
+		p.mu.Unlock()
+	}
+	return nil
+}
 
 func setup(t *testing.T, settings map[string]any) (*hosttest.Host, *Browser, *fakeEngine) {
 	t.Helper()
@@ -273,9 +291,9 @@ func TestAgentSession(t *testing.T) {
 		!strings.Contains(err.Error(), "gate4ai sites allow evil.example") {
 		t.Fatal("agent site list, with the owner's command:", err)
 	}
-	// Неудачный open не оставляет сеанс: страница свободна.
-	if _, err := agentExec(t, b, "read", map[string]any{"url": "https://a.example.com/"}); err != nil {
-		t.Fatal(err)
+	// Неудачный open не оставляет сеанс.
+	if len(b.agents) != 0 {
+		t.Fatal("the failed open left a session")
 	}
 	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
 	if err != nil {
@@ -310,19 +328,18 @@ func TestAgentSession(t *testing.T) {
 		t.Fatalf("tokens and sign-in responses are hidden: %+v", reqs)
 	}
 
-	// Страница сеанса занята: чтение и коннектор получают busy с подсказкой, а не ждут таймаута.
+	// Страница сеанса занята: коннектор и второй сеанс получают busy с
+	// подсказкой, а не ждут таймаута (read — во временной вкладке, см. TestReadDuringSession).
 	old := AgentWait
 	AgentWait = 20 * time.Millisecond
 	defer func() { AgentWait = old }()
-	if _, err := agentExec(t, b, "read", map[string]any{"url": "https://a.example.com/"}); err == nil || !strings.Contains(err.Error(), "browser.close") {
-		t.Fatal("read while a session is open:", err)
-	}
 	caller := &abi.Caller{Connector: "site", Call: "root1", Params: map[string]any{"domains": []any{"*.example.com"}}}
 	if _, err := exec(b, "open", map[string]any{"url": "https://a.example.com/"}, caller); err == nil || !strings.Contains(err.Error(), "browser.close") {
 		t.Fatal("connector while a session is open:", err)
 	}
-	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"}); err == nil || !strings.Contains(err.Error(), "busy") {
-		t.Fatal("second session:", err)
+	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"}); err == nil || !strings.Contains(err.Error(), "busy") ||
+		!strings.Contains(err.Error(), "browser.open --session <id>") || !strings.Contains(err.Error(), "without session") {
+		t.Fatal("second session, with the alternatives:", err)
 	}
 
 	// close: по умолчанию коротко; --steps — шаги без ответов; save_steps —
@@ -354,6 +371,65 @@ func TestAgentSession(t *testing.T) {
 		t.Fatal("the page is free after close:", err)
 	}
 	b.EndCall("root1")
+}
+
+// TestReadDuringSession — read / screenshot / extract без session при
+// открытом сеансе агента идут во временной вкладке: адрес страницы сеанса не
+// меняется, вкладка закрывается, список сайтов действует как без сеанса;
+// лимит вкладок — ошибка с рабочей альтернативой.
+func TestReadDuringSession(t *testing.T) {
+	_, b, eng := setup(t, nil)
+	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/cabinet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	before, err := agentExec(t, b, "observe", map[string]any{"session": id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := exec(b, "read", map[string]any{"url": "https://b.example.com/status"}, nil)
+	if err != nil || r.Structured.(map[string]any)["url"] != "https://b.example.com/status" || !strings.Contains(r.Content[0].Text, "1 234,56") {
+		t.Fatal("read while a session is open:", r, err)
+	}
+	for _, a := range []map[string]any{{"url": "https://b.example.com/", "selector": "#debt"}, {"url": "https://b.example.com/", "instruction": "debt"}} {
+		action := "screenshot"
+		if a["instruction"] != nil {
+			action = "extract"
+		}
+		if _, err := exec(b, action, a, nil); err != nil {
+			t.Fatal(action, "while a session is open:", err)
+		}
+	}
+	// Список сайтов — как без сеанса.
+	if _, err := exec(b, "read", map[string]any{"url": "https://evil.example/"}, nil); err == nil || !strings.Contains(err.Error(), abi.CodeCapabilityDenied) {
+		t.Fatal("site list in a temporary tab:", err)
+	}
+	after, err := agentExec(t, b, "observe", map[string]any{"session": id})
+	if err != nil || after["url"] != before["url"] || after["url"] != "https://a.example.com/cabinet" || after["title"] != before["title"] {
+		t.Fatal("the session's page did not change:", before, after, err)
+	}
+	if eng.tabs != 4 || eng.closed != 4 {
+		t.Fatalf("each call opens and closes its tab: opened %d, closed %d", eng.tabs, eng.closed)
+	}
+
+	// Все вкладки заняты: ошибка предлагает сеанс, а не только ждать.
+	old, oldMax := AgentWait, worker.MaxTabs
+	AgentWait, worker.MaxTabs = 20*time.Millisecond, 1
+	defer func() { AgentWait, worker.MaxTabs = old, oldMax }()
+	_, b2, _ := setup(t, nil)
+	ss, err := b2.W.Tab(context.Background(), worker.Settings{CDPURL: "http://127.0.0.1:1"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exec(b2, "read", map[string]any{"url": "https://b.example.com/"}, nil); err == nil || !strings.Contains(err.Error(), abi.CodeLimit) ||
+		!strings.Contains(err.Error(), "browser.get --session <id> --url") {
+		t.Fatal("tab limit, with the alternatives:", err)
+	}
+	ss.Release()
+	if _, err := exec(b2, "read", map[string]any{"url": "https://b.example.com/"}, nil); err != nil {
+		t.Fatal("a tab is free again:", err)
+	}
 }
 
 // TestAgentEditReloadHandoff — act fill возвращает итоговое значение, reload
@@ -418,8 +494,8 @@ func TestAgentSessionIdle(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(150 * time.Millisecond)
-	if _, err := agentExec(t, b, "read", map[string]any{"url": "https://a.example.com/"}); err != nil {
-		t.Fatal("idle session is closed:", err)
+	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"}); err != nil {
+		t.Fatal("idle session is closed, the page is free:", err)
 	}
 	if _, err := agentExec(t, b, "observe", map[string]any{"session": res["session"]}); err == nil {
 		t.Fatal("idle session is gone")
@@ -445,7 +521,7 @@ func TestAgentCloseAllAndCleanSteps(t *testing.T) {
 	if err != nil || res["sessions"] != 1 {
 		t.Fatal(res, err)
 	}
-	if _, err := agentExec(t, b, "read", map[string]any{"url": "https://a.example.com/"}); err != nil {
+	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"}); err != nil {
 		t.Fatal("the page is free:", err)
 	}
 	as := &agentSession{}

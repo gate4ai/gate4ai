@@ -31,7 +31,8 @@ type CDP struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	net     netLog
-	owned   bool // вкладку открыл движок: закрыть её в Close
+	owned   bool   // вкладку открыл движок: закрыть её в Close
+	http    string // адрес DevTools (http://127.0.0.1:<port>) — для NewTab
 }
 
 type cdpMsg struct {
@@ -64,7 +65,15 @@ func BrowserWSURL(ctx context.Context, httpURL string) (string, error) {
 }
 
 // DialCDP подключается к браузеру и открывает новую вкладку.
-func DialCDP(ctx context.Context, httpURL string) (*CDP, error) {
+func DialCDP(ctx context.Context, httpURL string) (*CDP, error) { return dialCDP(ctx, httpURL, false) }
+
+// NewTab — временная вкладка того же Chrome (тот же профиль и cookie) со своим
+// подключением; Close закрывает её. Вкладка открывается в фоне: страница
+// сессии остаётся впереди.
+func (c *CDP) NewTab(ctx context.Context) (Engine, error) { return dialCDP(ctx, c.http, true) }
+
+// dialCDP — подключение к вкладке: tab — всегда новая фоновая вкладка.
+func dialCDP(ctx context.Context, httpURL string, tab bool) (*CDP, error) {
 	ws, err := BrowserWSURL(ctx, httpURL)
 	if err != nil {
 		return nil, err
@@ -75,10 +84,10 @@ func DialCDP(ctx context.Context, httpURL string) (*CDP, error) {
 	}
 	conn.SetReadLimit(64 << 20)
 	cctx, cancel := context.WithCancel(context.Background())
-	c := &CDP{conn: conn, pending: map[int64]chan cdpMsg{}, events: make(chan cdpMsg, 256), ctx: cctx, cancel: cancel}
+	c := &CDP{conn: conn, pending: map[int64]chan cdpMsg{}, events: make(chan cdpMsg, 256), ctx: cctx, cancel: cancel, http: httpURL}
 	go c.readLoop()
 	// Пустая стартовая вкладка запущенного Chrome — рабочая: вторая вкладка не
-	// нужна. Нет такой (чужой Chrome по cdp_url) — своя.
+	// нужна. Нет такой (чужой Chrome по cdp_url) или вкладка временная — своя.
 	var list struct {
 		TargetInfos []struct {
 			TargetID string `json:"targetId"`
@@ -87,7 +96,7 @@ func DialCDP(ctx context.Context, httpURL string) (*CDP, error) {
 			Attached bool   `json:"attached"`
 		} `json:"targetInfos"`
 	}
-	if err := c.call(ctx, "", "Target.getTargets", nil, &list); err == nil {
+	if !tab && c.call(ctx, "", "Target.getTargets", nil, &list) == nil {
 		for _, t := range list.TargetInfos {
 			if t.Type == "page" && t.URL == "about:blank" && !t.Attached {
 				c.target = t.TargetID
@@ -99,7 +108,7 @@ func DialCDP(ctx context.Context, httpURL string) (*CDP, error) {
 		var t struct {
 			TargetID string `json:"targetId"`
 		}
-		if err := c.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank"}, &t); err != nil {
+		if err := c.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank", "background": tab}, &t); err != nil {
 			c.Close()
 			return nil, err
 		}
