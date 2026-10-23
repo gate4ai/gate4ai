@@ -162,10 +162,14 @@ type Tabber interface {
 
 // pinger — движок проверяет, что Chrome жив, запросом к браузеру, а не к
 // странице (открытый на ней диалог не мешает).
-type pinger interface{ Ping(ctx context.Context) error }
+type pinger interface {
+	Ping(ctx context.Context) error
+}
 
 // activator — движок выводит свою вкладку вперёд.
-type activator interface{ Activate(ctx context.Context) error }
+type activator interface {
+	Activate(ctx context.Context) error
+}
 
 // freedCh — канал освобождения (под s.mu).
 func (s *Service) freedCh() chan struct{} {
