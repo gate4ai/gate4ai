@@ -53,9 +53,9 @@ func setup(ctx context.Context, d *daemon.Daemon, log *slog.Logger) error {
 	d.AddRoutes(u.OwnerRoutes)
 	d.AddPublic("/ui/", u.RemoteHandler())
 	desktop := approval.NewDesktop()
-	if os.Getenv(approval.PairNotifyEnv) == "log" {
-		desktop.PairLog = log
-		log.Info("agent pairing requests go to this log, not to desktop notifications", approval.PairNotifyEnv, "log")
+	if os.Getenv(approval.NotifyEnv) == "log" {
+		desktop.Log = log
+		log.Info("desktop notifications go to this log and are not shown", approval.NotifyEnv, "log")
 	}
 	u.Channels = approval.Attach(ctx, d, desktop, telegramAPI)
 	if resetUILogin {

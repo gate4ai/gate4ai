@@ -77,16 +77,17 @@ type Desktop struct {
 	GOOS string
 	// Result — итог показа уведомления (статистика канала); nil — не учитывать.
 	Result func(err error)
-	// PairLog — запросы на подключение агента пишутся сюда вместо уведомления
-	// (автотесты и стенд: PairNotifyEnv=log); nil — показывать уведомление.
-	PairLog *slog.Logger
+	// Log — уведомления пишутся сюда вместо показа (автотесты и стенд:
+	// NotifyEnv=log); nil — показывать.
+	Log *slog.Logger
 }
 
-// PairNotifyEnv — переменная окружения daemon: "log" — запросы на подключение
-// агента только в журнал daemon, без уведомления на компьютере. Её ставят
-// e2e-тесты и стенд, чтобы на машине разработчика не всплывали окна;
-// решение по запросу по-прежнему — в Web UI или Telegram.
-const PairNotifyEnv = "GATE4AI_PAIR_NOTIFY"
+// NotifyEnv — переменная окружения daemon: "log" — уведомления на компьютере
+// (подтверждения, запросы на подключение агента, коды, отказы) только в журнал
+// daemon, без всплывающих окон. Её ставят e2e-тесты и стенд, чтобы на машине
+// разработчика не всплывали окна; решения по запросам — как обычно, в Web UI,
+// Telegram или CLI.
+const NotifyEnv = "GATE4AI_DESKTOP_NOTIFY"
 
 // NewDesktop — канал уведомлений для текущей ОС.
 func NewDesktop() *Desktop { return &Desktop{Run: ExecRunner, GOOS: runtime.GOOS} }
@@ -110,6 +111,13 @@ func (d *Desktop) show(title, body string) error {
 	// NUL в аргументе или переменной окружения не даёт запустить процесс:
 	// агент не должен так гасить уведомление.
 	title, body = strings.ReplaceAll(title, "\x00", ""), strings.ReplaceAll(body, "\x00", "")
+	if d.Log != nil {
+		d.Log.Info("desktop notification (not shown: "+NotifyEnv+"=log)", "title", title, "body", body)
+		if d.Result != nil {
+			d.Result(nil)
+		}
+		return nil
+	}
 	var err error
 	switch d.GOOS {
 	case "darwin":
@@ -154,11 +162,6 @@ func (d *Desktop) HandedOff(text string) {
 
 // PairRequested — агент просит подключения (gate4ai pair): решение — в Web UI.
 func (d *Desktop) PairRequested(p *state.Pairing) {
-	if d.PairLog != nil {
-		d.PairLog.Info("pairing requested (desktop notification off: "+PairNotifyEnv+"=log)",
-			"id", p.ID, "agent", p.Agent, "kind", p.Kind, "code", p.Code, "dir", p.Dir, "via", p.Via)
-		return
-	}
 	_ = d.show("gate4.ai: агент просит подключения", PairingText(p)+"\nСверьте код с чатом агента и подтвердите в Web UI (gate4ai ui → Агенты).")
 }
 
