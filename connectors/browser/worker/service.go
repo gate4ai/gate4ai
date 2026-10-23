@@ -24,6 +24,7 @@ type Settings struct {
 	ModelKey     string // значение ключа модели (хост передаёт его по capabilities.reveal)
 	MaxTextChars int
 	RedactParams []string // параметры адресов и поля JSON, скрытые в network
+	DownloadDir  string   // куда Chrome молча сохраняет обычные загрузки (по умолчанию — папка загрузок пользователя)
 }
 
 // EngineFactory создаёт движок (подменяется в тестах).
@@ -56,6 +57,8 @@ type Service struct {
 	sessions int           // открытые сессии (стартовая вкладка и свои)
 	tabs     int           // временные вкладки одноразовых вызовов
 	freed    chan struct{} // закрывается, когда освобождается сессия или вкладка
+	dl       *Downloads    // загрузки без диалога (download.go); nil — подключиться не удалось
+	dlOf     string        // Chrome, к которому подключение для загрузок не удалось (сообщено в лог)
 }
 
 // New — воркер с движками по умолчанию.
@@ -71,6 +74,9 @@ func normalize(st Settings) Settings {
 	if st.ProfileDir == "" {
 		home, _ := os.UserHomeDir()
 		st.ProfileDir = filepath.Join(home, ".gate4ai-chrome")
+	}
+	if st.DownloadDir == "" {
+		st.DownloadDir = UserDownloadDir()
 	}
 	return st
 }
@@ -92,6 +98,7 @@ func (s *Service) executor(ctx context.Context, st Settings, others bool) (*Exec
 	reuse := ""
 	if s.exec != nil && s.key == key {
 		if alive(ctx, s.exec.Engine) {
+			s.downloads(ctx, s.cdp, st.DownloadDir)
 			return s.exec, nil
 		}
 		// Вкладку или окно Chrome закрыли, Chrome упал: подключение мёртвое.
@@ -108,6 +115,7 @@ func (s *Service) executor(ctx context.Context, st Settings, others bool) (*Exec
 	if reuse != "" {
 		if eng, err := s.NewEngine(ctx, st, reuse); err == nil {
 			s.exec = &Executor{Engine: eng}
+			s.downloads(ctx, reuse, st.DownloadDir)
 			return s.exec, nil
 		}
 	}
@@ -138,7 +146,43 @@ func (s *Service) executor(ctx context.Context, st Settings, others bool) (*Exec
 	}
 	s.exec = &Executor{Engine: eng}
 	s.key, s.cdp = key, cdp
+	s.downloads(ctx, cdp, st.DownloadDir)
 	return s.exec, nil
+}
+
+// downloads — подключение для загрузок к Chrome по адресу cdp (под s.mu):
+// живое к тому же Chrome остаётся, иначе — новое. Не вышло (движок без
+// DevTools браузера, фейк в тестах) — без него: download по клику не работает.
+func (s *Service) downloads(ctx context.Context, cdp, dir string) {
+	if s.dl.Alive() && s.dl.c.http == cdp {
+		if s.dl.dir != dir && s.dl.behave(ctx, "allow", dir) == nil {
+			s.dl.dir = dir
+		}
+		return
+	}
+	if s.dl != nil {
+		s.dl.Close()
+		s.dl = nil
+	}
+	d, err := DialDownloads(ctx, cdp, dir)
+	if err != nil {
+		if s.dlOf != cdp {
+			s.dlOf = cdp
+			fmt.Fprintln(os.Stderr, "browser: downloads without a dialog are off:", err)
+		}
+		return
+	}
+	s.dl = d
+}
+
+// downloadsConn — подключение для загрузок (nil — нет).
+func (s *Service) downloadsConn() *Downloads {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.dl.Alive() {
+		return nil
+	}
+	return s.dl
 }
 
 // ErrBusy — все MaxSessions сессий заняты дольше, чем вызов готов ждать.
@@ -332,6 +376,10 @@ func (s *Service) Close() error {
 		}
 		_ = s.exec.Engine.Close()
 		s.exec = nil
+	}
+	if s.dl != nil {
+		s.dl.Close()
+		s.dl = nil
 	}
 	if s.proc != nil {
 		StopChrome(s.proc, 3*time.Second)

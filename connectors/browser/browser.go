@@ -114,7 +114,30 @@ func settings(r abi.ExecRequest) worker.Settings {
 	}
 	st.MaxTextChars = num(s, "max_text_chars")
 	st.RedactParams = strs(s["redact_params"])
+	st.DownloadDir = str(s, "download_dir")
 	return st
+}
+
+// downloadRequest — browser.download из аргументов и пределов владельца
+// (max_download_bytes, download_types).
+func downloadRequest(r abi.ExecRequest) worker.DownloadRequest {
+	return worker.DownloadRequest{Selector: str(r.Args, "selector"), Text: str(r.Args, "text"), URL: str(r.Args, "url"),
+		ResponseURLContains: str(r.Args, "response_url_contains"), TimeoutMS: num(r.Args, "timeout_ms"),
+		MaxBytes: num(r.Settings, "max_download_bytes"), Types: strs(r.Settings["download_types"])}
+}
+
+// downloadResult — файл агенту: сам файл двоичным resource (как files.read),
+// имя, тип, размер и sha256; копия — в доказательства (evidence).
+func downloadResult(f worker.File, page string) abi.ExecResult {
+	out := map[string]any{"name": f.Name, "mime_type": f.MIME, "size": len(f.Data), "sha256": f.SHA256, "via": f.Via}
+	uri := "download:" + url.PathEscape(f.Name)
+	if f.URL != "" {
+		out["url"] = cleanURL(f.URL)
+		uri = cleanURL(f.URL)
+	}
+	return abi.ExecResult{Structured: out, Content: []abi.Content{abi.Resource(uri, f.MIME, "", f.Data)},
+		Evidence:  []abi.EvidenceItem{{Name: f.Name, MIME: f.MIME, Data: f.Data}},
+		ResultRef: fmt.Sprintf("%s, %d bytes, sha256:%s", f.Name, len(f.Data), f.SHA256), Source: "web:" + cleanURL(page)}
 }
 
 // num — числовой аргумент: float64 из JSON, int / int64 (вызов из Go),
@@ -183,8 +206,10 @@ func fail(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, worker.ErrDomain):
+	case errors.Is(err, worker.ErrDomain), errors.Is(err, worker.ErrFileType):
 		return abi.Errorf(abi.CodeCapabilityDenied, "%v", err)
+	case errors.Is(err, worker.ErrTooLarge):
+		return abi.Errorf(abi.CodeLimit, "%v", err)
 	case errors.Is(err, worker.ErrNotFound), errors.Is(err, worker.ErrNoEffect):
 		return abi.Errorf(abi.CodeNotFound, "%v", err)
 	case errors.Is(err, context.Canceled):
@@ -237,6 +262,10 @@ func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (
 		}
 	case "act":
 		if err := worker.CheckAct(actRequest(r.Args)); err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
+		}
+	case "download":
+		if err := worker.CheckDownload(downloadRequest(r)); err != nil {
 			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
 		}
 	case "handoff":
@@ -587,6 +616,15 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		// Квитанция: метод, адрес, статус и размер ответа.
 		ref := fmt.Sprintf("%s %s → %d, %d bytes", fr.Method, cleanURL(fr.URL), res.Status, res.Size)
 		return abi.ExecResult{Structured: out, ResultRef: ref, Source: "web:" + cleanURL(res.URL)}, nil
+	case "download":
+		f, err := cs.s.Download(ctx, downloadRequest(r))
+		if u, uerr := cs.s.Engine.URL(ctx); uerr == nil {
+			cs.url = u
+		}
+		if err != nil {
+			return abi.ExecResult{}, err
+		}
+		return downloadResult(f, cs.url), nil
 	case "page_extract":
 		data, err := cs.s.Extract(ctx, str(r.Args, "instruction"))
 		if err != nil {

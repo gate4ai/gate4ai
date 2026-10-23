@@ -43,6 +43,9 @@ func (b *browserFake) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecRes
 	case "page_screenshot":
 		res.Structured = map[string]any{"mode": "viewport", "width": 1, "height": 1, "bytes": len(fakePNG), "file": "/daemon/browser-shots/s1-1.png"}
 		res.Content = []abi.Content{abi.Image("image/png", fakePNG)}
+	case "download":
+		res.Structured = map[string]any{"name": "a.pdf", "mime_type": "application/pdf", "size": len(pdfFile), "sha256": "x", "via": "download"}
+		res.Content = []abi.Content{abi.Resource("download:a.pdf", "application/pdf", "", pdfFile)}
 	}
 	return res, nil
 }
@@ -157,5 +160,60 @@ profiles:
 	// Больше верхней границы — ошибка аргументов, а не тихая обрезка.
 	if code, out := h.run(t, tok, "browser", "get", "--session", "s1", "--url", "https://a.example.com/api", "--max_chars", "1000001"); code != ExitUsage {
 		t.Fatal("max_chars above the limit:", code, out)
+	}
+}
+
+var pdfFile = []byte("%PDF-1.4\n\x00\xff\xfe binary\n%%EOF")
+
+// --out пишет файл из ответа (двоичный resource) на диск агента; в выводе —
+// file и bytes вместо base64.
+func TestOutWritesContent(t *testing.T) {
+	src, err := os.ReadFile("../../../connectors/browser/manifest.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	man, err := manifest.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := connectors.NewInProcess(&browserFake{man: man, args: map[string]map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := startWith(t, `
+agents:
+  a: { profile: web }
+profiles:
+  web:
+    connectors: [browser]
+    rules:
+      - { id: all, action: "browser.*", effect: allow }
+`, c)
+	_, out := h.run(t, "", "agents", "token", "a")
+	tok := jsonOf(t, out)["token"].(string)
+	path := filepath.Join(t.TempDir(), "a.pdf")
+	code, out := h.run(t, tok, "browser", "download", "--session", "s1", "--selector", "#doc", "--out", path)
+	if code != ExitOK {
+		t.Fatal(code, out)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, pdfFile) {
+		t.Fatalf("%q %v", got, err)
+	}
+	res := jsonOf(t, out)
+	blocks, _ := res["content"].([]any)
+	if len(blocks) != 1 || blocks[0].(map[string]any)["file"] != path || blocks[0].(map[string]any)["data"] != nil ||
+		blocks[0].(map[string]any)["bytes"] != float64(len(pdfFile)) || res["result"].(map[string]any)["file"] != path {
+		t.Fatal(out)
+	}
+	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatal("a downloaded file is the owner's only:", st.Mode(), err)
+	}
+	// Перед именем действия — тоже опция вызова.
+	path2 := filepath.Join(t.TempDir(), "b.pdf")
+	if code, out := h.run(t, tok, "browser", "--out", path2, "download", "--session", "s1", "--url", "https://a.example.com/a.pdf"); code != ExitOK {
+		t.Fatal(code, out)
+	}
+	if got, _ := os.ReadFile(path2); !bytes.Equal(got, pdfFile) {
+		t.Fatalf("%q", got)
 	}
 }

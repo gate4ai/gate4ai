@@ -55,15 +55,18 @@ var settingHints = map[string]map[string]fieldHint{
 		"max_bytes":    {Label: "Largest file to read, bytes", Kind: fieldNumber, Help: "1 MiB by default.", Placeholder: "1048576", Advanced: true},
 	},
 	"browser": {
-		"allowed_domains": {Label: "Allowed sites", Kind: fieldList, Help: "The browser opens only these sites; *.example.com means all subdomains.", Placeholder: "*.example.com"},
-		"mode":            {Label: "Site list mode", Kind: fieldChoice, Choices: []string{"allowlist", "blocklist"}, Help: "allowlist — only the allowed sites (default); blocklist — every site except the blocked ones.", Advanced: true},
-		"blocked":         {Label: "Blocked sites", Kind: fieldList, Help: "For the blocklist mode. Addresses of this computer and the local network are always closed.", Placeholder: "*.example.org", Advanced: true},
-		"model":           {Label: "Model for data extraction", Kind: fieldText, Help: "Provider and model, e.g. openai/gpt-5.4-mini.", Placeholder: "openai/gpt-5.4-mini", Advanced: true},
-		"model_key":       {Label: "Model key", Kind: fieldSecret, Help: "Kept in gate4.ai passwords; given only to the browser package.", Advanced: true},
-		"profile_dir":     {Label: "Chrome profile", Kind: fieldText, Help: "A dedicated profile; ~/.gate4ai-chrome by default.", Placeholder: "~/.gate4ai-chrome", Advanced: true},
-		"chrome_path":     {Label: "Path to Chrome", Kind: fieldText, Help: "Empty — find the installed Chrome.", Advanced: true},
-		"cdp_url":         {Label: "CDP address", Kind: fieldText, Help: "An already running Chrome; empty — the package starts it.", Advanced: true},
-		"engine":          {Label: "Engine", Kind: fieldChoice, Choices: []string{"stagehand", "cdp"}, Help: "stagehand (default) or cdp.", Advanced: true},
+		"allowed_domains":    {Label: "Allowed sites", Kind: fieldList, Help: "The browser opens only these sites; *.example.com means all subdomains.", Placeholder: "*.example.com"},
+		"mode":               {Label: "Site list mode", Kind: fieldChoice, Choices: []string{"allowlist", "blocklist"}, Help: "allowlist — only the allowed sites (default); blocklist — every site except the blocked ones.", Advanced: true},
+		"blocked":            {Label: "Blocked sites", Kind: fieldList, Help: "For the blocklist mode. Addresses of this computer and the local network are always closed.", Placeholder: "*.example.org", Advanced: true},
+		"model":              {Label: "Model for data extraction", Kind: fieldText, Help: "Provider and model, e.g. openai/gpt-5.4-mini.", Placeholder: "openai/gpt-5.4-mini", Advanced: true},
+		"model_key":          {Label: "Model key", Kind: fieldSecret, Help: "Kept in gate4.ai passwords; given only to the browser package.", Advanced: true},
+		"profile_dir":        {Label: "Chrome profile", Kind: fieldText, Help: "A dedicated profile; ~/.gate4ai-chrome by default.", Placeholder: "~/.gate4ai-chrome", Advanced: true},
+		"chrome_path":        {Label: "Path to Chrome", Kind: fieldText, Help: "Empty — find the installed Chrome.", Advanced: true},
+		"cdp_url":            {Label: "CDP address", Kind: fieldText, Help: "An already running Chrome; empty — the package starts it.", Advanced: true},
+		"engine":             {Label: "Engine", Kind: fieldChoice, Choices: []string{"stagehand", "cdp"}, Help: "stagehand (default) or cdp.", Advanced: true},
+		"download_types":     {Label: "File types agents may download", Kind: fieldList, Help: "browser.download returns only these: application/pdf, image/*, .csv. Empty — any type.", Placeholder: "application/pdf", Advanced: true},
+		"max_download_bytes": {Label: "Largest file to download, bytes", Kind: fieldNumber, Help: "20 MiB at most (the default).", Placeholder: "20971520", Advanced: true},
+		"download_dir":       {Label: "Downloads folder", Kind: fieldText, Help: "Where Chrome saves files downloaded in its window, without a Save as dialog; empty — your Downloads folder.", Placeholder: "~/Downloads", Advanced: true},
 	},
 	"email": {
 		"address":       {Label: "Email address", Kind: fieldText, Placeholder: "me@example.com"},
@@ -194,7 +197,7 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 
 var hintOrder = map[string][]string{
 	"files":   {"roots", "allow_hidden", "allow_paths", "max_bytes"},
-	"browser": {"allowed_domains", "mode", "blocked", "model", "model_key", "profile_dir", "chrome_path", "cdp_url", "engine"},
+	"browser": {"allowed_domains", "mode", "blocked", "model", "model_key", "profile_dir", "chrome_path", "cdp_url", "engine", "download_types", "max_download_bytes", "download_dir"},
 	"email":   {"address", "imap.password", "imap.host", "imap.port", "imap.username", "smtp.host", "smtp.port", "smtp.password"},
 }
 

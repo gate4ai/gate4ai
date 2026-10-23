@@ -26,7 +26,7 @@
 | `status` / `status <id> [--wait 10m]` | владелец / агент | да |
 | `daemon [флаги]`, `daemon start \| stop \| restart \| status` | владелец | — |
 | `service install [--no-tray] [-- флаги daemon] \| uninstall \| status` | владелец | нет |
-| `tools [--json] [--as agent]`, `<connector> <action> [--arg v] [--wait] [--json] [--as]`, `skill`, `mcp` | агент / владелец | да |
+| `tools [--json] [--as agent]`, `<connector> <action> [--arg v] [--wait] [--json] [--as] [--out f]`, `skill`, `mcp` | агент / владелец | да |
 | `pair [--here] [--name agent] [--wait 5m]` | агент | да |
 | `log`, `show`, `export`, `journal verify` | владелец | да |
 | `verify file [--pubkey] [--passphrase-env]` | все | нет |
@@ -37,7 +37,7 @@
 
 - Неизвестное первое слово CLI считает именем коннектора и запрашивает каталог у daemon. Опечатку в команде, коннекторе или действии CLI поправляет подсказкой ближайшего имени (Дамерау — Левенштейн), в том числе без daemon.
 - `--help` у любой подкоманды и действия — справка и код 0.
-- Картинки в ответе действия CLI не печатает base64 (вместо него — размер); `--out файл` сохраняет картинку в файл на стороне агента, путь — в `result.file` (`page_screenshot` и без `--out` отдаёт файл в каталоге данных gate4ai, `browser-shots`).
+- Картинки в ответе действия CLI не печатает base64 (вместо него — размер); `--out файл` сохраняет первую картинку или файл ответа (двоичный `resource` — `browser.download`, `files.read`; права 0600) в файл на стороне агента, путь — в `result.file`, вместо данных — `bytes`; ни картинки, ни файла в ответе нет — ошибка (`page_screenshot` и без `--out` отдаёт файл в каталоге данных gate4ai, `browser-shots`).
 - `gate4ai skill` печатает навык для текущего каталога и заодно заменяет установленный навык Claude Code прежней версии (`~/.claude/skills/gate4ai/SKILL.md` с полным текстом) обёрткой «выполни `gate4ai skill`»; то же делает daemon при старте.
 - Опции `--json`, `--wait`, `--as`, `--out` команды действия ставятся в любом месте (`gate4ai files list --path ~/x --json`), если у действия нет аргумента с таким именем; `--json` без значения — вывод JSON.
 - Пустые состояния (`tools`, `log`, `agents`, `connectors list` на свежем daemon) печатают в stderr подсказку, что делать дальше.

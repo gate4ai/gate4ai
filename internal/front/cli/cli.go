@@ -543,15 +543,16 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 }
 
 // saveImage — изображения ответа (content) в терминал не выводятся: вместо
-// base64 — размер; --out f сохраняет первое из них в файл f на этом
-// компьютере (daemon пишет только в свой каталог данных), путь — в result.file.
+// base64 — размер; --out f сохраняет первое изображение или файл (двоичный
+// resource: browser.download, files.read) в файл f на этом компьютере (daemon
+// пишет только в свой каталог данных), путь — в result.file и у блока.
 func saveImage(res map[string]any, out string) error {
 	blocks, _ := res["content"].([]any)
 	saved := out == ""
 	for _, b := range blocks {
 		m, _ := b.(map[string]any)
 		data, _ := m["data"].(string)
-		if m["type"] != "image" || data == "" {
+		if (m["type"] != "image" && (m["type"] != "resource" || out == "" || saved)) || data == "" {
 			continue
 		}
 		raw, err := base64.StdEncoding.DecodeString(data)
@@ -567,7 +568,12 @@ func saveImage(res map[string]any, out string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, raw, 0o644); err != nil {
+		// Файл (PDF анализа, выписка) — только владельцу файла.
+		mode := os.FileMode(0o644)
+		if m["type"] == "resource" {
+			mode = 0o600
+		}
+		if err := os.WriteFile(path, raw, mode); err != nil {
 			return err
 		}
 		saved, m["file"] = true, path
@@ -576,7 +582,7 @@ func saveImage(res map[string]any, out string) error {
 		}
 	}
 	if !saved && res["status"] == "ok" {
-		return errors.New("the result has no image to save")
+		return errors.New("the result has no image or file to save")
 	}
 	return nil
 }
@@ -614,7 +620,7 @@ func (e *Env) actionHelp(t skill.Tool) {
 		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, bracket(skill.Limits(p.Schema)))
 	}
 	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n"+
-		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           save the image of the result (a screenshot) to file f\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
+		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           save the image or the file of the result (page_screenshot, browser.download, files.read) to file f\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
 }
 
 func bracket(s string) string {
@@ -655,7 +661,7 @@ func scalar(name, typ, v string) (any, error) {
 	return v, nil
 }
 
-// hoistCallOpts снимает опции вызова (--json, --wait v, --as v), стоящие перед
+// hoistCallOpts снимает опции вызова (--json, --wait v, --as v, --out f), стоящие перед
 // именем действия: `gate4ai files --json list …`; они разбираются вместе с
 // аргументами действия.
 func hoistCallOpts(args []string) (rest, opts []string) {
@@ -683,7 +689,7 @@ type callOpts struct {
 	as   string
 	help bool
 	json bool   // --json без значения: вывод JSON
-	out  string // --out f: изображение ответа — в файл f
+	out  string // --out f: изображение или файл ответа — в файл f
 }
 
 // MaxArgFile — предел файла аргумента (--<name>_file).
@@ -740,7 +746,7 @@ func parseArgs(t skill.Tool, args []string, stdin io.Reader) (map[string]any, ca
 			i++
 			return args[i], nil
 		}
-		// --wait, --as и --json — опции вызова, если у действия нет
+		// --wait, --as, --out и --json — опции вызова, если у действия нет
 		// аргумента с таким именем.
 		_, isArg := types[name]
 		switch {

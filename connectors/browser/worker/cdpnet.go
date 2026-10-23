@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -195,4 +196,127 @@ func (c *CDP) DocumentBody(ctx context.Context) (string, bool) {
 		return string(raw), true
 	}
 	return b.Body, true
+}
+
+// responseCatch — перехват ответов страницы (CDP Fetch, стадия Response):
+// тело ответа на запрос самой страницы — с её заголовками и токенами,
+// которые агенту не видны. Страница получает ответ как обычно.
+type responseCatch struct {
+	c      *CDP
+	paused chan cdpMsg
+}
+
+// fetchPattern — шаблон адреса Fetch: подстрока, * и ? экранированы.
+func fetchPattern(contains string) string {
+	r := strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`)
+	return "*" + r.Replace(contains) + "*"
+}
+
+// CatchResponses начинает перехват ответов на запросы, адрес которых содержит
+// contains (responseCatcher); Stop заканчивает его.
+func (c *CDP) CatchResponses(ctx context.Context, contains string) (ResponseCatch, error) {
+	rc := &responseCatch{c: c, paused: make(chan cdpMsg, 64)}
+	c.mu.Lock()
+	c.catch = rc
+	c.mu.Unlock()
+	if err := c.call(ctx, c.session, "Fetch.enable", map[string]any{"patterns": []map[string]any{{"urlPattern": fetchPattern(contains), "requestStage": "Response"}}}, nil); err != nil {
+		rc.Stop()
+		return nil, err
+	}
+	return rc, nil
+}
+
+// Next — тело первого перехваченного ответа (ok — false, пока его нет); ответ
+// с ошибкой (4xx, 5xx, сбой сети) — ошибка; больше max байт — ErrTooLarge.
+func (rc *responseCatch) Next(ctx context.Context, max int) (File, bool, error) {
+	var m cdpMsg
+	select {
+	case m = <-rc.paused:
+	default:
+		return File{}, false, nil
+	}
+	var p struct {
+		RequestID string `json:"requestId"`
+		Request   struct {
+			URL    string `json:"url"`
+			Method string `json:"method"`
+		} `json:"request"`
+		Status  int    `json:"responseStatusCode"`
+		Error   string `json:"responseErrorReason"`
+		Headers []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"responseHeaders"`
+	}
+	if err := json.Unmarshal(m.Params, &p); err != nil {
+		return File{}, false, err
+	}
+	defer func() {
+		_ = rc.c.call(ctx, rc.c.session, "Fetch.continueRequest", map[string]any{"requestId": p.RequestID}, nil)
+	}()
+	if p.Error != "" {
+		return File{}, true, fmt.Errorf("the page's request %s %s failed: %s", p.Request.Method, p.Request.URL, p.Error)
+	}
+	if p.Status >= 400 || (p.Status >= 300 && p.Status < 400) {
+		return File{}, true, fmt.Errorf("the page's request %s %s got status %d", p.Request.Method, p.Request.URL, p.Status)
+	}
+	f := File{URL: p.Request.URL, Via: "response"}
+	for _, h := range p.Headers {
+		switch strings.ToLower(h.Name) {
+		case "content-type":
+			f.MIME = h.Value
+		case "content-disposition":
+			f.Name = dispositionName(h.Value)
+		case "content-length":
+			var n int
+			if _, err := fmt.Sscan(h.Value, &n); err == nil && n > max {
+				return File{}, true, fmt.Errorf("%w: %d bytes, the limit is %d", ErrTooLarge, n, max)
+			}
+		}
+	}
+	var b struct {
+		Body          string `json:"body"`
+		Base64Encoded bool   `json:"base64Encoded"`
+	}
+	if err := rc.c.call(ctx, rc.c.session, "Fetch.getResponseBody", map[string]any{"requestId": p.RequestID}, &b); err != nil {
+		return File{}, true, fmt.Errorf("the body of %s is not available: %w", p.Request.URL, err)
+	}
+	f.Data = []byte(b.Body)
+	if b.Base64Encoded {
+		data, err := base64.StdEncoding.DecodeString(b.Body)
+		if err != nil {
+			return File{}, true, err
+		}
+		f.Data = data
+	}
+	if len(f.Data) > max {
+		return File{}, true, fmt.Errorf("%w: %d bytes, the limit is %d", ErrTooLarge, len(f.Data), max)
+	}
+	return f, true, nil
+}
+
+// Stop — перехват выключен; задержанные запросы продолжают путь.
+func (rc *responseCatch) Stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	rc.c.mu.Lock()
+	if rc.c.catch == rc {
+		rc.c.catch = nil
+	}
+	rc.c.mu.Unlock()
+	for {
+		select {
+		case m := <-rc.paused:
+			var p struct {
+				RequestID string `json:"requestId"`
+			}
+			if json.Unmarshal(m.Params, &p) == nil {
+				_ = rc.c.call(ctx, rc.c.session, "Fetch.continueRequest", map[string]any{"requestId": p.RequestID}, nil)
+			}
+			continue
+		default:
+		}
+		break
+	}
+	_ = rc.c.call(ctx, rc.c.session, "Fetch.disable", nil, nil)
 }

@@ -3,10 +3,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -77,6 +83,13 @@ func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 			return json.Unmarshal(b, out)
 		}
 		return json.Unmarshal([]byte(`{"type":"text/html","html":true}`), out)
+	case strings.Contains(expr, "out.data = btoa"): // файл со страницы (download --url)
+		var args []any
+		json.Unmarshal([]byte(expr[strings.LastIndex(expr, "(...")+4:len(expr)-1]), &args)
+		f.fetches = append(f.fetches, "FILE "+args[0].(string))
+		b, _ := json.Marshal(map[string]any{"status": 200, "url": args[0], "type": "application/pdf", "disposition": `attachment; filename="a.pdf"`,
+			"size": len(pdf), "data": base64.StdEncoding.EncodeToString(pdf)})
+		return json.Unmarshal(b, out)
 	case strings.Contains(expr, "credentials: 'include'"): // запрос со страницы
 		var args []any
 		json.Unmarshal([]byte(expr[strings.LastIndex(expr, "(...")+4:len(expr)-1]), &args)
@@ -759,6 +772,74 @@ func TestAgentFetch(t *testing.T) {
 	}
 	if st := res["step_list"].([]map[string]any); len(st) != 4 || st[2]["action"] != "delete" || st[2]["status"] != "ok" || st[3]["status"] != abi.CodeCapabilityDenied {
 		t.Fatalf("%+v", st)
+	}
+}
+
+var pdf = []byte("%PDF-1.4\n\x00\xff binary\n%%EOF")
+
+func TestAgentDownload(t *testing.T) {
+	h, b, eng := setup(t, nil)
+	a := mustFind(t, h, "download")
+	if a.Class != "write" || !a.Untrusted || !slices.Contains(h.Manifest.Services, "download") {
+		t.Fatalf("download clicks like act: %+v", a)
+	}
+	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	r, err := exec(b, "download", map[string]any{"session": id, "url": "https://a.example.com/doc?id=1&token=t0k"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(pdf)
+	out := r.Structured.(map[string]any)
+	if out["name"] != "a.pdf" || out["mime_type"] != "application/pdf" || out["size"] != len(pdf) || out["sha256"] != hex.EncodeToString(sum[:]) ||
+		out["via"] != "fetch" || out["url"] != "https://a.example.com/doc?id=1&token=***" {
+		t.Fatalf("%+v", out)
+	}
+	// Сам файл — двоичный resource (как files.read) и копия в доказательствах.
+	if len(r.Content) != 1 || r.Content[0].Type != abi.ContentResource || !bytes.Equal(r.Content[0].Data, pdf) || r.Content[0].MIMEType != "application/pdf" ||
+		len(r.Evidence) != 1 || !bytes.Equal(r.Evidence[0].Data, pdf) || r.Evidence[0].Name != "a.pdf" || r.Source != "web:https://a.example.com/" ||
+		r.ResultRef != fmt.Sprintf("a.pdf, %d bytes, sha256:%x", len(pdf), sum) {
+		t.Fatalf("%+v", r)
+	}
+	if err := abi.CheckResult(r, a.OutputSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exec(b, "download", map[string]any{"session": id, "url": "https://evil.example/f.pdf"}, nil); err == nil || !strings.Contains(err.Error(), abi.CodeCapabilityDenied) {
+		t.Fatal("site list:", err)
+	}
+	for _, bad := range []map[string]any{
+		{"session": id},
+		{"session": id, "url": "https://a.example.com/f", "selector": "#a"},
+		{"session": id, "url": "https://a.example.com/f", "response_url_contains": "/api"},
+	} {
+		if _, err := exec(b, "download", bad, nil); err == nil || !strings.Contains(err.Error(), abi.CodeBadRequest) {
+			t.Fatal(bad, err)
+		}
+	}
+	// Без подключения к браузеру клик загрузку не поймает: ошибка, а не зависание.
+	if _, err := exec(b, "download", map[string]any{"session": id, "selector": "#doc"}, nil); err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatal(err)
+	}
+	if n := len(eng.fetches); n != 1 {
+		t.Fatal(eng.fetches)
+	}
+	// Типы и размер — по настройкам владельца.
+	for setting, code := range map[string]any{"download_types": abi.CodeCapabilityDenied, "max_download_bytes": abi.CodeLimit} {
+		st := map[string]any{"cdp_url": "http://127.0.0.1:1", "allowed_domains": []any{"*.example.com"},
+			"download_types": []any{"image/*", ".csv"}, "max_download_bytes": 10}
+		for k := range st {
+			if k != setting && (k == "download_types" || k == "max_download_bytes") {
+				delete(st, k)
+			}
+		}
+		_, err := b.Execute(context.Background(), nil, abi.ExecRequest{Action: "download", Settings: st,
+			Args: map[string]any{"session": id, "url": "https://a.example.com/a.pdf"}})
+		if err == nil || !strings.Contains(err.Error(), code.(string)) || !strings.Contains(err.Error(), map[string]string{"download_types": "download_types", "max_download_bytes": "limit"}[setting]) {
+			t.Fatal(setting, err)
+		}
 	}
 }
 
