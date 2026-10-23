@@ -33,7 +33,7 @@ func (f *fakeAutostart) Disable() error        { f.on = false; return nil }
 func loginAs(t *testing.T, u *UI, base string) (*http.Client, string, func(path string, v url.Values) string, func(path string) string) {
 	t.Helper()
 	jar, _ := cookiejar.New(nil)
-	c := &http.Client{Jar: jar}
+	c := &http.Client{Jar: jar, Transport: metaRefresh{}}
 	r, err := c.Get(u.LoginURL())
 	if err != nil {
 		t.Fatal(err)

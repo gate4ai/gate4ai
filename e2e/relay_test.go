@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -154,6 +155,9 @@ func (r *relayProc) browser(t *testing.T) *http.Client {
 		DisableKeepAlives: true}}
 }
 
+var refreshRe = regexp.MustCompile(`http-equiv="refresh" content="0;url=([^"]+)"`)
+
+// get — как браузер: идёт и по <meta http-equiv="refresh"> (так ссылка входа уводит в UI).
 func get(t *testing.T, c *http.Client, u string) (int, string) {
 	t.Helper()
 	resp, err := c.Get(u)
@@ -162,6 +166,13 @@ func get(t *testing.T, c *http.Client, u string) (int, string) {
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
+	if m := refreshRe.FindSubmatch(b); m != nil && resp.StatusCode == 200 {
+		next, err := resp.Request.URL.Parse(html.UnescapeString(string(m[1])))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return get(t, c, next.String())
+	}
 	return resp.StatusCode, string(b)
 }
 

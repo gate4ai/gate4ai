@@ -56,7 +56,7 @@ type browser struct {
 
 func newBrowser(t *testing.T, base string) *browser {
 	jar, _ := cookiejar.New(nil)
-	return &browser{t: t, c: &http.Client{Jar: jar}, base: base}
+	return &browser{t: t, c: &http.Client{Jar: jar, Transport: metaRefresh{}}, base: base}
 }
 
 func (b *browser) get(u string) (int, string) {
@@ -339,8 +339,8 @@ func TestRemoteLoginProtected(t *testing.T) {
 			t.Fatal("remote link without password gave a session")
 		}
 	}
-	if rec.code != http.StatusSeeOther || rec.h.Get("Location") != "/ui/login" {
-		t.Fatal("remote link must start a login attempt", rec.code, rec.h.Get("Location"))
+	if rec.code != 200 || !strings.Contains(rec.buf.String(), `content="0;url=/ui/login"`) {
+		t.Fatal("remote link must start a login attempt", rec.code, rec.buf.String())
 	}
 }
 

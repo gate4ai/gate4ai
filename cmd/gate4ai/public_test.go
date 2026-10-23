@@ -172,7 +172,8 @@ func login(t *testing.T, link, host string) (*http.Cookie, string) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther || len(resp.Cookies()) != 1 {
+	// Ссылка уводит в UI своей страницей (meta refresh), а не 303.
+	if resp.StatusCode != http.StatusOK || len(resp.Cookies()) != 1 {
 		t.Fatalf("login %s: %d", u.Path, resp.StatusCode)
 	}
 	ck := resp.Cookies()[0]
@@ -353,7 +354,7 @@ func TestPublicRemoteUI(t *testing.T) {
 	// …и не сгорает от попытки не в том месте.
 	req, _ = http.NewRequest("GET", e.base+"/ui/login?"+ru.RawQuery, nil)
 	req.Host = publicHost
-	if resp, _ := noRedirect.Do(req); resp.StatusCode != http.StatusSeeOther {
+	if resp, _ := noRedirect.Do(req); resp.StatusCode != http.StatusOK || len(resp.Cookies()) != 1 {
 		t.Errorf("remote login link after a local attempt: %d", resp.StatusCode)
 	}
 }
