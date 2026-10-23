@@ -33,6 +33,9 @@ type CDP struct {
 	net     netLog
 	owned   bool   // вкладку открыл движок: закрыть её в Close
 	http    string // адрес DevTools (http://127.0.0.1:<port>) — для NewTab
+	// onEvent — события подключения к браузеру (без вкладки): загрузки.
+	onEvent func(cdpMsg)
+	catch   *responseCatch // перехват ответов (download --response_url_contains)
 }
 
 type cdpMsg struct {
@@ -137,6 +140,30 @@ func dialCDP(ctx context.Context, httpURL string, tab bool) (*CDP, error) {
 	return c, nil
 }
 
+// dialBrowser — подключение к самому браузеру, без вкладки (Browser.*):
+// события идут в on.
+func dialBrowser(ctx context.Context, httpURL string, on func(cdpMsg)) (*CDP, error) {
+	ws, err := BrowserWSURL(ctx, httpURL)
+	if err != nil {
+		return nil, err
+	}
+	conn, _, err := websocket.Dial(ctx, ws, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cdp dial: %w", err)
+	}
+	cctx, cancel := context.WithCancel(context.Background())
+	c := &CDP{conn: conn, pending: map[int64]chan cdpMsg{}, ctx: cctx, cancel: cancel, http: httpURL, onEvent: on}
+	go c.readLoop()
+	return c, nil
+}
+
+// lost — соединение с Chrome потеряно.
+func (c *CDP) lost() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed != nil
+}
+
 func (c *CDP) readLoop() {
 	for {
 		_, b, err := c.conn.Read(c.ctx)
@@ -161,6 +188,22 @@ func (c *CDP) readLoop() {
 			c.mu.Unlock()
 			if ch != nil {
 				ch <- m
+			}
+			continue
+		}
+		if c.onEvent != nil {
+			c.onEvent(m)
+			continue
+		}
+		if m.Method == "Fetch.requestPaused" {
+			c.mu.Lock()
+			rc := c.catch
+			c.mu.Unlock()
+			if rc != nil && (m.SessionID == "" || m.SessionID == c.session) {
+				select {
+				case rc.paused <- m:
+				default: // очередь полна: запрос продолжит Stop (Fetch.disable)
+				}
 			}
 			continue
 		}

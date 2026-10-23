@@ -26,7 +26,7 @@
 | `status` / `status <id> [--wait 10m]` | владелец / агент | да |
 | `daemon [флаги]`, `daemon start \| stop \| restart \| status` | владелец | — |
 | `service install [--no-tray] [-- флаги daemon] \| uninstall \| status` | владелец | нет |
-| `tools [--json] [--as agent]`, `<connector> <action> [--arg v] [--wait] [--json] [--as]`, `skill`, `mcp` | агент / владелец | да |
+| `tools [--json] [--as agent]`, `<connector> <action> [--arg v] [--wait] [--json] [--as] [--out f]`, `skill`, `mcp` | агент / владелец | да |
 | `pair [--here] [--name agent] [--wait 5m]` | агент | да |
 | `log`, `show`, `export`, `journal verify` | владелец | да |
 | `verify file [--pubkey] [--passphrase-env]` | все | нет |
@@ -37,7 +37,7 @@
 
 - Неизвестное первое слово CLI считает именем коннектора и запрашивает каталог у daemon. Опечатку в команде, коннекторе или действии CLI поправляет подсказкой ближайшего имени (Дамерау — Левенштейн), в том числе без daemon.
 - `--help` у любой подкоманды и действия — справка и код 0.
-- Опции `--json`, `--wait`, `--as` команды действия ставятся в любом месте (`gate4ai files list --path ~/x --json`), если у действия нет аргумента с таким именем; `--json` без значения — вывод JSON.
+- Опции `--json`, `--wait`, `--as`, `--out` команды действия ставятся в любом месте (`gate4ai files list --path ~/x --json`), если у действия нет аргумента с таким именем; `--json` без значения — вывод JSON; `--out <файл>` пишет файл из ответа (двоичный `resource` — `browser.download`, `files.read`; картинку; иначе текст) на диск того, кто вызвал CLI (права 0600), а в выводе вместо данных — `saved_to` и `size`.
 - Пустые состояния (`tools`, `log`, `agents`, `connectors list` на свежем daemon) печатают в stderr подсказку, что делать дальше.
 - `connectors install` спрашивает согласие на возможности в терминале; без терминала нужен `--yes`, отказ виден в выводе.
 

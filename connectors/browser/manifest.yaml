@@ -4,7 +4,7 @@ version: "0.7.6"
 runtime: native
 platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64]
 contract: 1
-services: [open, observe, act, page_extract, page_screenshot, login, fill_secret]
+services: [open, observe, act, download, page_extract, page_screenshot, login, fill_secret]
 capabilities:
   reveal: ["${setting:model_key}"]
 limits: { timeout_s: 600 } # handoff ждёт человека до 9 минут
@@ -333,6 +333,33 @@ actions:
         headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
         max_chars: { type: integer, minimum: 0, maximum: 1000000, description: "the start of the response body to return, up to 1000000 characters (0 — the default: 200000 for JSON, for other text the browser's max_text_chars, 30000 by default); a truncated body comes with truncated: true and hint: its full length and the max_chars to pass (a truncated JSON is not parsed)" }
       required: [session, url]
+  # Скачивание: файл агенту в ответе (двоичный resource, как files.read) и
+  # копия в доказательства. Класс write — действие кликает по странице, как act.
+  - name: download
+    class: write
+    untrusted: true
+    evidence: file
+    description: "Download a file from the open page and get the file itself (not a path on the host): selector — click the element that downloads it (the site's own request with its headers and tokens; Chrome never shows a Save as dialog); response_url_contains — with selector, the file is the page's response to its own request with this in the address (for sites that show the file instead of downloading it; find it with browser.network); url — a GET from the page (its cookies, without its headers). Returns name, mime_type, size, sha256 and the file as a binary resource (CLI: --out <file> writes it to a file); a copy is kept as evidence. Up to 20 MB; the owner may narrow size and types"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "agents: the session from browser.open" }
+        selector: { type: string, description: "CSS selector of the element that starts the download (a button, a link)" }
+        text: { type: string, description: "with selector: the first visible element whose text contains it" }
+        response_url_contains: { type: string, description: "with selector: the file is the body of the page's response whose address contains it (e.g. /api/3/document)" }
+        url: { type: string, format: url, description: "instead of selector: a file on the allowed sites, fetched from the page with its cookies" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 120000, description: "how long to wait for the file after the click (0 — 30 s, up to 120 s)" }
+    output_schema:
+      type: object
+      properties:
+        name: { type: string, description: "file name (from the site; an extension by type is added when missing)" }
+        mime_type: { type: string }
+        size: { type: integer, description: bytes }
+        sha256: { type: string, description: "hex sha256 of the file: compare with a saved copy (sha256sum)" }
+        url: { type: string, description: "address of the file (not shown for blob: and data:)" }
+        via: { type: string, enum: [download, response, fetch], description: "download — Chrome's download, response — the page's response, fetch — a request from the page" }
+      required: [name, mime_type, size, sha256, via]
+    example: gate4ai browser download --session s-… --selector '[data-testid="doc_download"]' --out doc.pdf
   # Вход по учётке владельца (credentials в конфигурации gate4ai): значения
   # секретов хост передаёт пакету только для этих двух действий, агенту и
   # коннектору они не видны. После ввода секрета страницу нельзя читать
