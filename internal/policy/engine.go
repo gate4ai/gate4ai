@@ -46,6 +46,68 @@ var Implicit = map[string]bool{"egress": true}
 // (gate4ai — предложения изменений настроек от агента; применяет владелец).
 var Everyone = map[string]bool{"gate4ai": true}
 
+// OwnerOnly — действия, которые правило allow не разрешает: их подтверждает
+// владелец (deny по-прежнему запрещает). gate4ai.change_policy меняет права
+// агентов — правила, сайты, учётки: агент не расширяет их себе сам.
+var OwnerOnly = map[string]bool{"gate4ai.change_policy": true}
+
+// ExplicitOnly — действия, которые правило allow разрешает, только если
+// называет их явно: шаблон ("browser.*", "*") их не покрывает. Это запросы,
+// меняющие данные на сайтах с cookies пользователя, и вход его учётками.
+var ExplicitOnly = map[string]bool{
+	"browser.post": true, "browser.put": true, "browser.patch": true, "browser.delete": true,
+	"browser.login": true, "browser.fill_secret": true,
+}
+
+// allowSkip — почему правило allow не действует на действие ("" — действует).
+func allowSkip(r config.Rule, action string) string {
+	if r.Effect != config.EffectAllow {
+		return ""
+	}
+	if OwnerOnly[action] {
+		return fmt.Sprintf("rule %s (allow) does not apply: %s always needs the owner's approval", r.ID, action)
+	}
+	if ExplicitOnly[action] && r.Action != action {
+		return fmt.Sprintf("rule %s (allow %s) does not cover %s: it is allowed only by a rule that names it", r.ID, r.Action, action)
+	}
+	return ""
+}
+
+// Warnings — правила allow, которые не действуют так, как написаны
+// (предупреждение при сохранении политики и в policy_summary).
+func Warnings(cfg *config.Config) []string {
+	actions := slices.Sorted(maps.Keys(OwnerOnly))
+	actions = append(actions, slices.Sorted(maps.Keys(ExplicitOnly))...)
+	var out []string
+	for _, pn := range slices.Sorted(maps.Keys(cfg.Profiles)) {
+		for _, r := range cfg.Profiles[pn].Rules {
+			if r.Effect != config.EffectAllow {
+				continue
+			}
+			var owner, explicit []string
+			for _, a := range actions {
+				if !ActionMatches(r.Action, a) {
+					continue
+				}
+				if OwnerOnly[a] {
+					owner = append(owner, a)
+				} else if ExplicitOnly[a] && r.Action != a {
+					explicit = append(explicit, a)
+				}
+			}
+			if len(owner) > 0 {
+				out = append(out, fmt.Sprintf("profiles.%s rule %s: allow has no effect on %s — it always needs the owner's approval (deny still forbids it)",
+					pn, r.ID, strings.Join(owner, ", ")))
+			}
+			if len(explicit) > 0 {
+				out = append(out, fmt.Sprintf("profiles.%s rule %s: %s does not cover %s (requests that change data on sites, sign-in) — they ask you unless a rule names them",
+					pn, r.ID, r.Action, strings.Join(explicit, ", ")))
+			}
+		}
+	}
+	return out
+}
+
 // Reserved — имена входа условий, которые нельзя использовать как аргументы.
 var Reserved = []string{"provenance", "counters", "lists", "now", "hour", "weekday", "agent", "action", "args"}
 

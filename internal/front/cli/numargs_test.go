@@ -75,6 +75,7 @@ profiles:
     connectors: [browser]
     rules:
       - { id: all, action: "browser.*", effect: allow }
+      - { id: post, action: browser.post, effect: allow } # browser.* запросы с эффектом не покрывает
 `, c)
 	_, out := h.run(t, "", "agents", "token", "a")
 	tok := jsonOf(t, out)["token"].(string)
@@ -126,6 +127,7 @@ profiles:
     connectors: [browser]
     rules:
       - { id: all, action: "browser.*", effect: allow }
+      - { id: post, action: browser.post, effect: allow } # browser.* запросы с эффектом не покрывает
 `, c)
 	_, out := h.run(t, "", "agents", "token", "a")
 	tok := jsonOf(t, out)["token"].(string)

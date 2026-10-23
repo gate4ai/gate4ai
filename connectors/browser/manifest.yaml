@@ -4,7 +4,7 @@ version: "0.7.6"
 runtime: native
 platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64]
 contract: 1
-services: [open, observe, act, page_extract, page_screenshot, login, fill_secret]
+services: [open, observe, act, dialog, page_extract, page_screenshot, login, fill_secret]
 capabilities:
   reveal: ["${setting:model_key}"]
 limits: { timeout_s: 600 } # handoff ждёт человека до 9 минут
@@ -63,16 +63,17 @@ actions:
   # сайты — params.sites вызывающего ({mode, domains, blocked}).
   - name: open
     class: read
-    description: "Open a page. Agent: without session starts a browser session (the page stays open between calls until browser.close) and returns its id; with session navigates in it. Connectors: the page of the root call"
+    description: "Open a page. Agent: without session starts a browser session in a tab of its own (the page stays open between calls until browser.close; other agents' sessions are in other tabs) and returns its id; with session navigates in it. A page that asks before leaving (unsaved changes) is left: you asked to go. When the browser is full (sessions of other agents), busy says whose sessions they are, since when and when they close; wait_for_browser waits in the queue. Connectors: the page of the root call"
     input_schema:
       type: object
       properties:
         url: { type: string, format: url }
         session: { type: string, description: "agents: the session from a previous browser.open" }
+        wait_for_browser: { type: string, description: "agents, a new session: how long to wait for a free place in the browser when it is busy with other sessions, e.g. 10m (up to 9m; default 5s, then busy)" }
         wait_for_selector: { type: string, description: "wait until a visible element matches (SPA content loads after the page)" }
         wait_for_text: { type: string, description: "wait until a visible element (of wait_for_selector, or any) contains this text" }
         wait_for_url: { type: string, description: "wait until the address matches: with * — the whole address by the pattern (https://app.example.org/alerting/*), without — the address contains it" }
-        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s, up to 60 s). On timeout the error shows the page state: url, title, ready_state, pending_requests, the start of its text; leaving for a sign-in page ends the wait at once with code redirected" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long the whole action may take, navigation included (0 — 10 s of waiting, 45 s in all; up to 60 s). On timeout the error (code timeout) shows the page state: url, title, ready_state, pending_requests, the start of its text, or the dialog open on it; leaving for a sign-in page ends the wait at once with code redirected" }
       required: [url]
     output_schema:
       type: object
@@ -104,7 +105,7 @@ actions:
         wait_for_selector: { type: string, description: "wait until a visible element matches (SPA content loads after the page)" }
         wait_for_text: { type: string, description: "wait until a visible element (of wait_for_selector, or any) contains this text" }
         wait_for_url: { type: string, description: "wait until the address matches: with * — the whole address by the pattern (https://app.example.org/alerting/*), without — the address contains it" }
-        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s, up to 60 s). On timeout the error shows the page state: url, title, ready_state, pending_requests, the start of its text; leaving for a sign-in page ends the wait at once with code redirected" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long the whole action may take, navigation included (0 — 10 s of waiting, 45 s in all; up to 60 s). On timeout the error (code timeout) shows the page state: url, title, ready_state, pending_requests, the start of its text, or the dialog open on it; leaving for a sign-in page ends the wait at once with code redirected" }
     output_schema:
       type: object
       properties:
@@ -210,7 +211,7 @@ actions:
     example: gate4ai browser act --session s-… --selector textarea[name=text] --method fill --value_file article.md
   - name: reload
     class: read
-    description: "Reload the open page (the address is checked again, as in open)"
+    description: "Reload the open page (the address is checked again, as in open); a page that asks before leaving (unsaved changes) is reloaded: you asked for it"
     input_schema:
       type: object
       properties:
@@ -218,7 +219,7 @@ actions:
         wait_for_selector: { type: string, description: "wait until a visible element matches" }
         wait_for_text: { type: string, description: "wait until a visible element (of wait_for_selector, or any) contains this text" }
         wait_for_url: { type: string, description: "wait until the address matches: with * — the whole address by the pattern (https://app.example.org/alerting/*), without — the address contains it" }
-        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait (0 — 10 s, up to 60 s). On timeout the error shows the page state: url, title, ready_state, pending_requests, the start of its text; leaving for a sign-in page ends the wait at once with code redirected" }
+        timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long the whole action may take, navigation included (0 — 10 s of waiting, 45 s in all; up to 60 s). On timeout the error (code timeout) shows the page state: url, title, ready_state, pending_requests, the start of its text, or the dialog open on it; leaving for a sign-in page ends the wait at once with code redirected" }
       required: [session]
     output_schema:
       type: object
@@ -430,14 +431,35 @@ actions:
         url: { type: string }
       required: [mode, width, height, bytes]
     example: gate4ai browser page_screenshot --session s-… --viewport --out shot.png
+  - name: dialog
+    class: write
+    description: "Answer the JavaScript dialog open on the page (alert, confirm, prompt, or beforeunload — «leave the page?»): while it is open the page does not respond, and every other action answers dialog_open {type, message}. accept presses OK (leave the page, confirm), dismiss — Cancel (stay); text — the answer to a prompt"
+    input_schema:
+      type: object
+      properties:
+        session: { type: string, description: "agents: the session from browser.open" }
+        accept: { type: boolean, description: "OK / leave / confirm" }
+        dismiss: { type: boolean, description: "Cancel / stay" }
+        text: { type: string, description: "prompt: the answer (with accept)" }
+    output_schema:
+      type: object
+      properties:
+        url: { type: string, description: "address after the answer" }
+        dialog:
+          type: object
+          properties: { type: { type: string }, message: { type: string }, url: { type: string }, default_prompt: { type: string } }
+          required: [type, message]
+        accepted: { type: boolean }
+      required: [url, dialog, accepted]
+    example: gate4ai browser dialog --session s-… --dismiss
   - name: close
     class: read
     untrusted: true
-    description: "End the browser session and free the page. Returns {session, closed: true, steps: <number of recorded steps>}; steps: true adds step_list (action, args, status: ok or the error code — without results and page texts); save_steps: true writes the full record ({session, steps} with results) to a file and returns its path in steps_file — a test fixture for a connector (hosttest.LoadFixture, hosttest.Replay). all: true closes every session of yours — this agent in this agent session (a lost id, a stuck session); others' sessions stay open: {closed: true, sessions: N}"
+    description: "End the browser session and free the page. Returns {session, closed: true, steps: <number of recorded steps>}; steps: true adds step_list (action, args, status: ok or the error code — without results and page texts); save_steps: true writes the full record ({session, steps} with results) to a file and returns its path in steps_file — a test fixture for a connector (hosttest.LoadFixture, hosttest.Replay). all: true closes every session you started — this agent in this client (a lost id, a stuck session), not the sessions of other agents or of your other running copies: {closed: true, sessions: N}. A closed session answers not_found with who closed it, when and why (browser.close, idle for 10 minutes, the browser closed or crashed)"
     input_schema:
       type: object
       properties:
         session: { type: string, description: "the session from browser.open" }
-        all: { type: boolean, description: "close all your sessions instead" }
+        all: { type: boolean, description: "close all sessions you started instead (not those of other agents or clients)" }
         steps: { type: boolean, description: "list the steps: action, args (long values cut), status ok or the error code" }
         save_steps: { type: boolean, description: "write the full record ({session, steps} with results) to a file in the gate4ai data folder; its path is steps_file" }

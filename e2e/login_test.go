@@ -101,6 +101,7 @@ profiles:
     connectors: [browser, pagereader]
     rules:
       - { id: browser-ok, action: "browser.*", effect: allow }
+      - { id: login-ok, action: browser.login, effect: allow } # browser.* вход не покрывает
       - { id: cabinet-ok, action: pagereader.cabinet, effect: allow }
 connectors:
   pagereader: { sites: ["127.0.0.1"], login_site: %q, credentials: { site: "@site" } }

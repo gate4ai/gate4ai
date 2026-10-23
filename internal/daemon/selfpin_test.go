@@ -195,8 +195,8 @@ func TestSelfConfigBindSettingsAndVaultAliases(t *testing.T) {
 	if a, _ := d.State.GetApproval(r.ID); !strings.Contains(a.Preview, "ATTENTION: setting imap of connector mail") || !strings.Contains(a.Preview, "evil.example") {
 		t.Fatal(a.Preview)
 	}
-	if r := call(map[string]any{"op": "connector_settings", "connector": "mail", "settings_json": `{"folder":"INBOX"}`}); r.Status != pipeline.StatusOK {
-		t.Fatalf("other settings follow the policy: %+v", r)
+	if r := call(map[string]any{"op": "connector_settings", "connector": "mail", "settings_json": `{"folder":"INBOX"}`}); r.Status != pipeline.StatusPending || strings.Contains(r.Reason, "ATTENTION") {
+		t.Fatalf("other settings: the owner approves, without the warning: %+v", r)
 	}
 	if err := d.Vault.Set("@bank.password", "fake-value"); err != nil {
 		t.Fatal(err)

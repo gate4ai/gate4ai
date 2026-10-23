@@ -68,3 +68,15 @@ func browserManifest(t *testing.T) []byte {
 	}
 	return b
 }
+
+// Установленный навык — обёртка: велит выполнить gate4ai skill и не содержит
+// каталога, который устаревает с версией.
+func TestStub(t *testing.T) {
+	s := Stub()
+	if !strings.HasPrefix(s, "---\nname: gate4ai\n") || !strings.Contains(s, "run `gate4ai skill` and follow what it prints") {
+		t.Fatal(s)
+	}
+	if strings.Contains(s, "## Actions") || strings.Contains(s, "--session") {
+		t.Fatal("the stub has no catalog:", s)
+	}
+}

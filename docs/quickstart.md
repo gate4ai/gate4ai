@@ -166,13 +166,16 @@ gate4ai tools                              # первый раз — код по
 gate4ai pair --here --wait 5m              # ключ только для этой папки, ждать решения владельца
 gate4ai mail send --to landlord@example.com --subject "Аренда" --body "…" --wait 10m
 gate4ai skill > SKILL.md                   # навык для Claude Code / Hermes / OpenClaw
+gate4ai browser page_screenshot --session s-… --selector main --out main.png   # картинка — в файл, путь — result.file
 ```
 
 Скрипты и CI — с токеном: `gate4ai agents token claude-ai` (показывается один раз), `export GATE4AI_TOKEN=g4a_…`.
 
 Коды выхода: `0` ok, `1` прочие ошибки, `2` запрещено политикой (`denied_by_policy`), `3` ждёт подтверждения (`pending_approval`), `4` проверка не прошла (`verification_failed`), `5` неверные аргументы или неизвестное действие, `6` daemon недоступен, `7` вызывающему нельзя: неверный или отозванный ключ / токен (`unauthorized`), команда владельца с ключом агента (`owner_only`), агент на сокете владельца или вызов владельца без `--as` (`agent_required`), подключение отклонено (`pairing_rejected`). Ответ — JSON в едином конверте: `{"status": "ok" | "denied" | "pending" | "verification_failed" | "error", "result": …, "error": {"code", "message", "hint", "detail"}}` — `result` при успехе, `error` в остальных случаях (у `pending` — что делать дальше). Длинный текст аргумента — из файла: `--<имя>_file путь` (`-` — stdin).
 
-Claude Code: подключение в Web UI (Агенты → Claude Code) кладёт ключ агента в каталог ключей gate4ai и правило `"Bash(gate4ai *)"` в `permissions.allow` файла `~/.claude/settings.json` (прежний `env.GATE4AI_TOKEN` убирает); `gate4ai doctor` предупреждает, если агент не подключён своим ключом, правила нет или в `env` остался токен.
+Картинку из ответа CLI не печатает base64: `--out файл.png` сохраняет её в файл, путь — в `result.file` (`page_screenshot` и без `--out` пишет PNG в каталог данных gate4ai, `browser-shots`).
+
+Claude Code: подключение в Web UI (Агенты → Claude Code) кладёт навык `~/.claude/skills/gate4ai/SKILL.md` — короткую обёртку «перед работой выполни `gate4ai skill`»: актуальный текст (действия профиля, правила браузера) агент берёт у установленного бинарника, и навык не устаревает при обновлении; навык прежних версий (полный текст) daemon при старте и `gate4ai skill` заменяют обёрткой. Подключение кладёт и ключ агента в каталог ключей gate4ai и правило `"Bash(gate4ai *)"` в `permissions.allow` файла `~/.claude/settings.json` (прежний `env.GATE4AI_TOKEN` убирает); `gate4ai doctor` предупреждает, если агент не подключён своим ключом, правила нет или в `env` остался токен.
 
 **MCP по stdio** (Claude Code и др.): `{"mcpServers": {"gate4ai": {"command": "gate4ai", "args": ["mcp"], "env": {"GATE4AI_AGENT": "claude-code"}}}}` — секрета нет, ключ CLI найдёт по имени агента (до подтверждения вызовы отвечают кодом подключения).
 

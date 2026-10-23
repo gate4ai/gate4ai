@@ -77,7 +77,10 @@ func TestTabRealChrome(t *testing.T) {
 			if err := s.Engine.Eval(ctx, "document.getElementById('q').value", &v); err != nil || v != "draft" {
 				t.Fatal("the session's field changed:", v, err)
 			}
-			if len(svc.tabsCh()) != 0 {
+			svc.mu.Lock()
+			tabs := svc.tabs
+			svc.mu.Unlock()
+			if tabs != 0 {
 				t.Fatal("the tab is released")
 			}
 		})
