@@ -49,10 +49,10 @@ func TestAgentPairing(t *testing.T) {
 	}
 
 	// Запрос — в журнале daemon, а не во всплывающем уведомлении
-	// (GATE4AI_PAIR_NOTIFY=log в харнессе); каналы уведомляют асинхронно.
+	// (GATE4AI_DESKTOP_NOTIFY=log в харнессе); каналы уведомляют асинхронно.
 	logged := func() bool {
 		l := g.log.String()
-		return strings.Contains(l, "pairing requested") && strings.Contains(l, code)
+		return strings.Contains(l, "desktop notification") && strings.Contains(l, code)
 	}
 	for end := time.Now().Add(5 * time.Second); !logged() && time.Now().Before(end); {
 		time.Sleep(50 * time.Millisecond)

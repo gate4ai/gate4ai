@@ -212,36 +212,48 @@ func TestDesktopCommands(t *testing.T) {
 	}
 }
 
-// Запрос на подключение агента: уведомление по умолчанию; с PairLog (автотесты,
-// стенд) — запись в журнал с данными запроса и без уведомления, а остальные
-// уведомления по-прежнему показываются.
-func TestDesktopPairRequested(t *testing.T) {
-	p := &state.Pairing{ID: "p_1", Agent: "codex", Kind: "codex", Code: "K7Q-4FM", Dir: "/home/u/proj", Via: "agent-socket"}
+// Уведомления показываются по умолчанию; с Log (автотесты, стенд) — запись в
+// журнал с тем же текстом и без окна: подтверждения, запросы на подключение,
+// коды, отказы, передача браузера.
+func TestDesktopLog(t *testing.T) {
+	a := &state.Approval{ID: "a_1", Agent: "codex", Action: "browser.post", PreviewHash: "a3f9c21e00",
+		Args: map[string]any{"url": "https://example.com/form"}}
+	p := &state.Pairing{ID: "p_1", Agent: "codex", Code: "K7Q-4FM", Dir: "/home/u/proj"}
 	var shown []string
 	d := &Desktop{GOOS: "linux", Run: func(env []string, name string, args ...string) error {
 		shown = append(shown, strings.Join(args, " "))
 		return nil
 	}}
 	d.PairRequested(p)
-	if len(shown) != 1 || !strings.Contains(shown[0], "K7Q-4FM") {
+	d.Notify(a)
+	if len(shown) != 2 || !strings.Contains(shown[0], "K7Q-4FM") || !strings.Contains(shown[1], "codex хочет выполнить browser.post") {
 		t.Fatalf("shown = %v", shown)
 	}
 
 	shown = nil
 	var log strings.Builder
-	d.PairLog = slog.New(slog.NewTextHandler(&log, nil))
+	var results int
+	d.Log = slog.New(slog.NewTextHandler(&log, nil))
+	d.Result = func(err error) { results++ }
 	d.PairRequested(p)
-	if len(shown) != 0 {
-		t.Fatalf("pairing notification shown with PairLog: %v", shown)
+	d.Notify(a)
+	d.Asked("a_2", "код с сайта")
+	d.Denied("bot", "email.send", "recipient not in allowlist")
+	d.HandedOff("войдите на сайт")
+	if err := d.Test(); err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{"pairing requested", "id=p_1", "agent=codex", "code=K7Q-4FM", "dir=/home/u/proj"} {
+	if len(shown) != 0 {
+		t.Fatalf("notifications shown with Log: %v", shown)
+	}
+	for _, want := range []string{"K7Q-4FM", "/home/u/proj", "codex хочет выполнить browser.post", "approvals approve a_1",
+		"код с сайта", "recipient not in allowlist", "войдите на сайт", "проверка уведомлений"} {
 		if !strings.Contains(log.String(), want) {
-			t.Errorf("log %q has no %q", log.String(), want)
+			t.Errorf("log has no %q:\n%s", want, log.String())
 		}
 	}
-	d.Denied("bot", "email.send", "no")
-	if len(shown) != 1 {
-		t.Fatalf("other notifications must stay: %v", shown)
+	if n := strings.Count(log.String(), "desktop notification"); n != 6 || results != 6 {
+		t.Errorf("records %d, results %d, want 6", n, results)
 	}
 }
 

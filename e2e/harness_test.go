@@ -196,9 +196,9 @@ func startGate(t *testing.T, extra ...string) *gate {
 	tmp := t.TempDir()
 	g := &gate{t: t, bin: binary(t, "./cmd/gate4ai"), home: filepath.Join(tmp, "gate4ai-home"), user: filepath.Join(tmp, "user")}
 	os.MkdirAll(g.user, 0o755)
-	// Запросы на подключение агента — в журнал daemon, а не во всплывающие
-	// уведомления на машине разработчика.
-	g.env = append(workEnv(t), "GATE4AI_HOME="+g.home, "HOME="+g.user, "GATE4AI_PAIR_NOTIFY=log")
+	// Уведомления daemon (подтверждения, запросы на подключение…) — в его
+	// журнал, а не всплывающими окнами на машине разработчика.
+	g.env = append(workEnv(t), "GATE4AI_HOME="+g.home, "HOME="+g.user, "GATE4AI_DESKTOP_NOTIFY=log")
 	if underAgent {
 		// Тесты запустил агент (Claude Code): иначе сокет владельца отказал бы
 		// харнессу как агенту. Проверку агента ведёт TestAgentPairing — в CI.
