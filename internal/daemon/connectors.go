@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -119,6 +120,28 @@ func (d *Daemon) installPlan(opts store.Options, plan *store.Plan, consent []str
 	}
 	d.Log.Info("connector installed", "connector", info.Connector, "version", info.Version, "trust", info.Trust)
 	return info, warn, nil
+}
+
+// ReinstallConnector ставит установленный коннектор заново из того же источника
+// (Info.ReinstallSource) с прежним согласием и заменяет установленную копию;
+// настройки, учётки и правила в конфигурации и данные коннектора не трогаются.
+// Изменились возможности — ErrConsent и план для показа владельцу.
+func (d *Daemon) ReinstallConnector(ctx context.Context, name string) (store.Info, *store.Plan, string, error) {
+	opts := d.StoreOptions()
+	in, err := opts.Info(name)
+	if err != nil {
+		return store.Info{}, nil, "", fmt.Errorf("%s is not installed", name)
+	}
+	source, dev := in.ReinstallSource()
+	plan, err := opts.Prepare(ctx, source, dev)
+	if err != nil {
+		return store.Info{}, nil, "", err
+	}
+	if plan.Connector != name {
+		return store.Info{}, plan, "", fmt.Errorf("%s now holds connector %s, not %s", source, plan.Connector, name)
+	}
+	info, warn, err := d.installPlan(opts, plan, in.Capabilities)
+	return info, plan, warn, err
 }
 
 // PrepareConnectorDev — план установки (возможности, доверие) без установки;

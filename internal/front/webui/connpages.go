@@ -201,6 +201,38 @@ func (u *UI) installConnector(w http.ResponseWriter, r *http.Request) map[string
 	return redirect("/connectors/"+url.PathEscape(info.Connector), msg)
 }
 
+// reinstallConnector — «Переустановить»: та же версия из того же источника
+// заменяет установленную копию; настройки, учётки и правила остаются.
+func (u *UI) reinstallConnector(w http.ResponseWriter, r *http.Request) map[string]any {
+	name := r.PathValue("name")
+	back := "/connectors"
+	if r.PostForm.Get("from") == "connector" {
+		back = "/connectors/" + url.PathEscape(name)
+	}
+	info, plan, warn, err := u.D.ReinstallConnector(r.Context(), name)
+	if errors.Is(err, store.ErrConsent) {
+		// Возможности изменились (например, папка с исходниками) — обычный экран согласия.
+		in, _ := u.D.StoreOptions().Info(name)
+		src, dev := in.ReinstallSource()
+		again := url.Values{"install": {src}}
+		if plan != nil && plan.Trust == store.TrustLocal {
+			again.Set("local", "1")
+			if dev {
+				again.Set("dev", "1")
+			}
+		}
+		return redirect("/connectors?"+again.Encode(), "What the connector may access has changed — confirm again.")
+	}
+	if err != nil {
+		return redirectErr(back, err)
+	}
+	title := u.connTitle(u.lang(r), info.Connector)
+	if warn != "" {
+		return redirect(back, M("%s %s is reinstalled. Note: %s", title, info.Version, warn))
+	}
+	return redirect(back, M("%s %s is reinstalled.", title, info.Version))
+}
+
 // expandHome — «~/…» в пути на этом компьютере.
 func expandHome(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {

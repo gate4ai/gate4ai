@@ -233,6 +233,8 @@ var ru = map[string]string{
 	"%s %s is installed. Set it up below.":                       "%s %s установлен. Настройте его ниже.", "%s %s is installed. Set it up below. Note: %s": "%s %s установлен. Настройте его ниже. Внимание: %s",
 	"The catalog is updated": "Каталог обновлён", "%s is not installed": "%s не установлен", "Access saved": "Доступ сохранён",
 	"%s is removed.": "%s удалён.", "%s is removed. %s": "%s удалён. %s",
+	"Reinstall": "Переустановить", "%s %s is reinstalled.": "%s %s переустановлен.", "%s %s is reinstalled. Note: %s": "%s %s переустановлен. Внимание: %s",
+	"Download and install the same version again; settings, accounts and rules stay":                            "Скачать и поставить ту же версию заново; настройки, учётки и правила останутся",
 	"the store is not configured: set the store address in Settings → Advanced":                                 "магазин не настроен: задайте его адрес в «Настройки → Расширенные»",
 	"network: connects only to %s from the settings":                                                            "сеть: соединяется только с %s из настроек",
 	"passwords %s — gate4.ai enters them only for the servers from the settings; the connector never sees them": "пароли %s — gate4.ai подставляет их только для серверов из настроек; коннектор их не видит",

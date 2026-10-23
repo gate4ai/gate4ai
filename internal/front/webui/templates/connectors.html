@@ -34,6 +34,7 @@
 <div class="row">
 {{if .Installed}}<a class="btn primary" href="{{$.Base}}/connectors/{{.Name}}">{{T "Set up"}}</a>
 {{if .Update}}<a class="btn" href="{{$.Base}}/connectors?install={{.Name}}">{{T "Update to %s" .Version}}</a>{{end}}
+{{if not .Builtin}}<form method="post" action="{{$.Base}}/connectors/{{.Name}}/reinstall"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button title="{{T "Download and install the same version again; settings, accounts and rules stay"}}">{{T "Reinstall"}}</button></form>{{end}}
 {{else}}<a class="btn primary" href="{{$.Base}}/connectors?install={{.Name}}">{{T "Install"}}</a>{{end}}
 </div></div>
 {{else}}<p class="muted">{{T "The catalog is empty."}}</p>{{end}}
