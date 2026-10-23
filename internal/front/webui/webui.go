@@ -432,6 +432,7 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/connectors/refresh", u.refreshIndex)
 	change("/connectors/{name}/settings", u.saveConnectorSettings)
 	change("/connectors/{name}/remove", u.removeConnector)
+	change("/connectors/{name}/reinstall", u.reinstallConnector)
 	change("/connectors/{name}/decision", u.saveActionDecision)
 	change("/policy", u.savePolicy)
 	change("/policy/rollback", u.rollback)

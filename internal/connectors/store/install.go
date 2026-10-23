@@ -37,6 +37,16 @@ type Info struct {
 	InstalledAt  time.Time `json:"installed_at"`
 }
 
+// ReinstallSource — откуда поставить заново ту же установку: из registry — та же
+// версия (имя@версия), из папки с исходниками — пересборка (dev), из файла или
+// по адресу — тот же пакет; dev — своя сборка без доверенной подписи.
+func (i Info) ReinstallSource() (source string, dev bool) {
+	if s, ok := strings.CutPrefix(i.Source, "registry:"); ok {
+		return s, false
+	}
+	return i.Source, i.Trust == TrustLocal
+}
+
 // Options — установка коннекторов.
 type Options struct {
 	Dir          string   // каталог установленных коннекторов

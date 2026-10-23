@@ -383,3 +383,20 @@ func TestCredentialSlotsInConsent(t *testing.T) {
 		t.Fatal("slot without bind")
 	}
 }
+
+func TestReinstallSource(t *testing.T) {
+	for _, c := range []struct {
+		in     Info
+		source string
+		dev    bool
+	}{
+		{Info{Source: "registry:mail@1.2.0", Trust: "verified"}, "mail@1.2.0", false},
+		{Info{Source: SourceDir + "/src/bank", Trust: TrustLocal}, SourceDir + "/src/bank", true},
+		{Info{Source: "https://example.com/bank.g4c", Trust: TrustLocal}, "https://example.com/bank.g4c", true},
+		{Info{Source: "/tmp/bank.g4c", Trust: "publisher"}, "/tmp/bank.g4c", false},
+	} {
+		if s, dev := c.in.ReinstallSource(); s != c.source || dev != c.dev {
+			t.Errorf("%+v: %q %v", c.in, s, dev)
+		}
+	}
+}

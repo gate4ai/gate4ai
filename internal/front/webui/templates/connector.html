@@ -60,7 +60,8 @@
 <details class="adv card"><summary>{{T "About the connector"}}</summary>
 {{if not $d.Builtin}}<ul>{{range $d.Info.Capabilities}}<li>{{capRu .}} <span class="muted"><code>{{.}}</code></span></li>{{else}}<li class="muted">{{T "nothing"}}</li>{{end}}</ul>
 <p class="help">{{T "Publisher %s · trust %s · source %s · installed %s" (or $d.Info.Publisher "—") $d.Info.Trust $d.Info.Source (ts $d.Info.InstalledAt)}}</p>
-<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/remove" data-confirm="{{T "Remove %s? Rules with its actions are removed too (you can roll back in the policy versions)." $d.Title}}" style="margin-top:.6rem"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger small">{{T "Remove the connector"}}</button></form>
+<div class="row" style="margin-top:.6rem"><form method="post" action="{{.Base}}/connectors/{{$d.Name}}/reinstall"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="from" value="connector"><button class="small" title="{{T "Download and install the same version again; settings, accounts and rules stay"}}">{{T "Reinstall"}}</button></form>
+<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/remove" data-confirm="{{T "Remove %s? Rules with its actions are removed too (you can roll back in the policy versions)." $d.Title}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger small">{{T "Remove the connector"}}</button></form></div>
 {{else}}<p class="help">{{T "Built into gate4.ai; version %s." $m.Version}}</p>{{end}}
 </details>
 {{template "foot"}}

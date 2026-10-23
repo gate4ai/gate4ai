@@ -3,11 +3,15 @@
 package webui
 
 import (
+	"context"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gate4ai/gate4ai/internal/config"
+	"github.com/gate4ai/gate4ai/internal/connectors/store"
 )
 
 // Защита входа: кнопки в строках и окна вместо полей под таблицей.
@@ -191,5 +195,60 @@ func TestRuleSentenceForm(t *testing.T) {
 		"when_part": {`text.size() < 100`, `text.contains("hello")`}})
 	if r := d.Config.Current().Profiles["p"].Rules[0]; r.When != rs[0].When || r.Effect != "deny" {
 		t.Fatal("edit changed the condition", r)
+	}
+}
+
+// «Переустановить» ставит тот же пакет из того же источника заново и заменяет
+// установленную копию; настройки и учётки коннектора остаются.
+func TestReinstallConnector(t *testing.T) {
+	u, d, _, base := setup(t)
+	_, _, post, get := loginAs(t, u, base)
+	const man = "connector: kvx\nversion: \"1\"\nruntime: wasm\ncapabilities: { storage: { quota_mb: 1 } }\nactions:\n  - { name: get, class: read }\n"
+	b, err := store.Pack([]byte(man), []byte("\x00asm\x01\x00\x00\x00"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg := filepath.Join(t.TempDir(), "kvx.g4c")
+	_ = os.WriteFile(pkg, b, 0o644)
+	plan, err := d.PrepareConnectorDev(context.Background(), pkg, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := d.InstallConnectorDev(context.Background(), pkg, plan.Capabilities, true); err != nil {
+		t.Fatal(err)
+	}
+	d.Config.Edit(owner, "kvx settings", func(c *config.Config) error {
+		c.SetConnectorSettings("kvx", map[string]any{"host": "example.com"})
+		return nil
+	})
+	_ = d.Vault.Set("@kvx.token", "t0ken")
+
+	if p := get("/connectors"); !strings.Contains(p, `/connectors/kvx/reinstall"`) || !strings.Contains(p, ">Переустановить</button>") {
+		t.Fatal("no reinstall button", p)
+	}
+	module := filepath.Join(d.ConnectorsDir, "kvx", store.ModuleFile)
+	_ = os.Remove(module)
+	if p := post("/connectors/kvx/reinstall", url.Values{}); !strings.Contains(p, "переустановлен") {
+		t.Fatal("no result message", p)
+	}
+	if _, err := os.Stat(module); err != nil {
+		t.Fatal("installed copy not replaced:", err)
+	}
+	if s := d.Config.Current().Connectors["kvx"]; s["host"] != "example.com" {
+		t.Fatal("settings lost", s)
+	}
+	if v, _ := d.Vault.Get("@kvx.token"); v != "t0ken" {
+		t.Fatal("account lost")
+	}
+	// Источника больше нет — ошибка, установленная копия остаётся.
+	_ = os.Remove(pkg)
+	if p := post("/connectors/kvx/reinstall", url.Values{}); !strings.Contains(p, "data-error") {
+		t.Fatal("missing source must be an error", p)
+	}
+	if _, err := os.Stat(module); err != nil {
+		t.Fatal("failed reinstall removed the connector:", err)
+	}
+	if p := post("/connectors/nope/reinstall", url.Values{}); !strings.Contains(p, "data-error") {
+		t.Fatal("unknown connector must be an error", p)
 	}
 }
