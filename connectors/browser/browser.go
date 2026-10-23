@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -100,14 +101,34 @@ func settings(r abi.ExecRequest) worker.Settings {
 	if alias := str(s, "model_key"); alias != "" {
 		st.ModelKey = r.Revealed[alias]
 	}
-	if n, ok := s["max_text_chars"].(float64); ok {
-		st.MaxTextChars = int(n)
-	}
+	st.MaxTextChars = num(s, "max_text_chars")
 	st.RedactParams = strs(s["redact_params"])
 	return st
 }
 
-func num(m map[string]any, k string) int { n, _ := m[k].(float64); return int(n) }
+// num — числовой аргумент: float64 из JSON, int / int64 (вызов из Go),
+// json.Number (декодер с UseNumber); иное — 0.
+func num(m map[string]any, k string) int {
+	switch n := m[k].(type) {
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case int32:
+		return int(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return int(i)
+		}
+		f, _ := n.Float64()
+		return int(f)
+	}
+	return 0
+}
 
 // cleanURL — адрес для ответа и журнала: одноразовые коды и токены в query
 // (OAuth ?code=…) скрыты.
@@ -268,13 +289,13 @@ func (b *Browser) agent(ctx context.Context, r abi.ExecRequest) (abi.ExecResult,
 	page.URL = cleanURL(page.URL) // адрес после редиректов: в нём бывают токены
 	switch r.Action {
 	case "read":
-		if raw, ok, err := s.Raw(ctx, 0); err != nil {
+		if raw, ok, err := s.Raw(ctx, num(r.Args, "max_chars")); err != nil {
 			return abi.ExecResult{}, err
 		} else if ok {
 			// JSON, текст: тело как прислал сервер, без просмотрщика Chrome.
 			return abi.ExecResult{Structured: rawResult(page.URL, page.Title, raw), Content: []abi.Content{abi.Text(raw.Body)}, ResultRef: page.URL, Source: "web:" + page.URL}, nil
 		}
-		p, err := s.Observe(ctx, 0)
+		p, err := s.Observe(ctx, num(r.Args, "max_chars"))
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
@@ -828,8 +849,7 @@ func loginForm(r abi.ExecRequest) (worker.LoginForm, error) {
 	if err != nil {
 		return worker.LoginForm{}, err
 	}
-	t, _ := r.Args["timeout_ms"].(float64)
-	form := worker.LoginForm{Bind: acc.Bind, SuccessPrefix: acc.Success, Timeout: time.Duration(t) * time.Millisecond}
+	form := worker.LoginForm{Bind: acc.Bind, SuccessPrefix: acc.Success, Timeout: time.Duration(num(r.Args, "timeout_ms")) * time.Millisecond}
 	if acc.Submit != nil {
 		form.SubmitSelector, form.SubmitPress = acc.Submit.Selector, acc.Submit.Press
 	}

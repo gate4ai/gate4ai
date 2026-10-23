@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,8 @@ type fakeEngine struct {
 	hooks   int
 	json    string   // верхний документ — JSON с этим телом
 	fetches []string // запросы со страницы: метод и адрес
+	reply   string   // тело ответа запроса со страницы ("" — короткий JSON)
+	jsMax   float64  // предел тела, с которым запрос ушёл на страницу
 	tabs    int      // открытые временные вкладки (NewTab)
 	closed  int      // закрытые вкладки (Close)
 	parent  *fakeEngine
@@ -78,6 +81,16 @@ func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 		var args []any
 		json.Unmarshal([]byte(expr[strings.LastIndex(expr, "(...")+4:len(expr)-1]), &args)
 		f.fetches = append(f.fetches, args[1].(string)+" "+args[0].(string))
+		f.jsMax, _ = args[4].(float64)
+		if f.reply != "" { // как fetchJS: тело до max+1 символов и его длина
+			body := f.reply
+			if len(body) > int(f.jsMax)+1 {
+				body = body[:int(f.jsMax)+1]
+			}
+			b, _ := json.Marshal(map[string]any{"status": 200, "url": args[0], "headers": map[string]string{"content-type": "application/json"},
+				"size": len(f.reply), "chars": len(f.reply), "body": body})
+			return json.Unmarshal(b, out)
+		}
 		return json.Unmarshal([]byte(`{"status":200,"url":"`+args[0].(string)+`","headers":{"content-type":"application/json","set-cookie":"x","x-total":"1"},"size":30,"body":"{\"uid\":\"a1\",\"token\":\"t0k\"}"}`), out)
 	case strings.Contains(expr, "XMLHttpRequest.prototype.send ="): // перехват запросов
 		f.hooks++
@@ -712,6 +725,85 @@ func TestAgentFetch(t *testing.T) {
 	if st := res["step_list"].([]map[string]any); len(st) != 4 || st[2]["action"] != "delete" || st[2]["status"] != "ok" || st[3]["status"] != abi.CodeCapabilityDenied {
 		t.Fatalf("%+v", st)
 	}
+}
+
+// num принимает любые числовые типы аргументов: float64 из JSON, int и int64
+// из Go, json.Number от декодера с UseNumber.
+func TestNum(t *testing.T) {
+	for _, v := range []any{200000.0, float32(200000), 200000, int64(200000), int32(200000), json.Number("200000"), json.Number("200000.0")} {
+		if n := num(map[string]any{"max_chars": v}, "max_chars"); n != 200000 {
+			t.Errorf("%T %v: %d", v, v, n)
+		}
+	}
+	for _, v := range []any{nil, "200000", true, json.Number("x")} {
+		if n := num(map[string]any{"max_chars": v}, "max_chars"); n != 0 {
+			t.Errorf("%T %v: %d", v, v, n)
+		}
+	}
+	for _, v := range []any{200000.0, 200000, int64(200000), json.Number("200000")} {
+		fr, err := fetchRequest(abi.ExecRequest{Action: "get", Args: map[string]any{"url": "https://a.example.com/", "max_chars": v}})
+		if err != nil || fr.Max != 200000 {
+			t.Errorf("%T: FetchRequest.Max %d, %v", v, fr.Max, err)
+		}
+	}
+}
+
+// JSON-ответ больше max_text_chars (35 КБ при 30000): по умолчанию и с
+// max_chars 200000 — разобранный json без truncated; явный max_chars меньше
+// ответа — тело с подсказкой, какой max_chars вернёт его целиком.
+func TestFetchLargeJSON(t *testing.T) {
+	_, b, eng := setup(t, nil)
+	items := make([]string, 0, 1000)
+	for i := range 1000 {
+		items = append(items, `{"id":`+strconv.Itoa(i)+`,"name":"rule number `+strconv.Itoa(i)+`"}`)
+	}
+	eng.reply = `{"rules":[` + strings.Join(items, ",") + `]}`
+	if len(eng.reply) < 35000 {
+		t.Fatal(len(eng.reply))
+	}
+	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	for _, max := range []any{nil, 200000.0, json.Number("200000"), 200000} {
+		args := map[string]any{"session": id, "url": "https://a.example.com/api/rules"}
+		want := float64(worker.DefaultJSONChars)
+		if max != nil {
+			args["max_chars"] = max
+			want = 200000
+		}
+		out, err := agentExec(t, b, "get", args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out["truncated"] != nil || out["body"] != nil || out["hint"] != nil || len(out["json"].(map[string]any)["rules"].([]any)) != 1000 || eng.jsMax != want {
+			t.Fatalf("max_chars %v: page max %v, %v", max, eng.jsMax, out["truncated"])
+		}
+	}
+	out, err := agentExec(t, b, "get", map[string]any{"session": id, "url": "https://a.example.com/api/rules", "max_chars": 1000.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := strconv.Itoa(len(eng.reply))
+	if out["truncated"] != true || out["json"] != nil || len(out["body"].(string)) != 1000 ||
+		out["hint"] != "json not parsed: body truncated at 1000 of "+full+" chars, pass max_chars ≥ "+full {
+		t.Fatalf("%v %v", out["truncated"], out["hint"])
+	}
+	// Больше верхней границы — граница.
+	if _, err := agentExec(t, b, "get", map[string]any{"session": id, "url": "https://a.example.com/api/rules", "max_chars": 5e6}); err != nil || eng.jsMax != worker.MaxResponseChars {
+		t.Fatal(eng.jsMax, err)
+	}
+	// observe JSON-документа: max_chars больше max_text_chars не урезается до него.
+	eng.json = eng.reply
+	if out, err = agentExec(t, b, "observe", map[string]any{"session": id, "max_chars": 200000.0}); err != nil || out["truncated"] != nil || out["body"] != eng.reply {
+		t.Fatal(out["truncated"], err)
+	}
+	if out, err = agentExec(t, b, "observe", map[string]any{"session": id, "max_chars": 100.0}); err != nil || out["truncated"] != true ||
+		out["hint"] != "body truncated at 100 of "+full+" chars, pass max_chars ≥ "+full {
+		t.Fatal(out["hint"], err)
+	}
+	agentExec(t, b, "close", map[string]any{"session": id})
 }
 
 // JSON-страница: observe и read отдают тело как прислал сервер, с типом;

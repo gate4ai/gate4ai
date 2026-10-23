@@ -433,3 +433,21 @@ func TestOpenWaitsForSSOBounce(t *testing.T) {
 		t.Fatal("the page stays off the list:", err)
 	}
 }
+
+// Пределы тела ответа: явный max_chars — как есть до верхней границы; 0 —
+// предел текста настроек, у JSON — не меньше DefaultJSONChars.
+func TestLimits(t *testing.T) {
+	for _, c := range []struct{ max, text, wantText, wantJSON int }{
+		{0, 0, MaxFetchResponse, DefaultJSONChars},
+		{0, 30000, 30000, DefaultJSONChars},
+		{0, 500000, 500000, 500000},
+		{0, 5000000, MaxResponseChars, MaxResponseChars},
+		{200000, 30000, 200000, 200000},
+		{10, 30000, 10, 10},
+		{5000000, 30000, MaxResponseChars, MaxResponseChars},
+	} {
+		if tx, js := Limits(c.max, c.text); tx != c.wantText || js != c.wantJSON {
+			t.Errorf("Limits(%d, %d) = %d, %d", c.max, c.text, tx, js)
+		}
+	}
+}
