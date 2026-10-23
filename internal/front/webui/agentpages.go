@@ -3,7 +3,6 @@
 package webui
 
 import (
-	"encoding/json"
 	"maps"
 	"net/http"
 	"net/url"
@@ -17,7 +16,6 @@ import (
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/front/skill"
 	"github.com/gate4ai/gate4ai/internal/platform/agentkeys"
-	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/state"
 )
 
@@ -194,14 +192,6 @@ func (u *UI) clientTiles() []clientTile {
 	return out
 }
 
-// skillMD — SKILL.md для агента (его каталог).
-func (u *UI) skillMD(agent string) string {
-	var tools []skill.Tool
-	b, _ := json.Marshal(u.D.Tools(auth.AgentVia(agent, "webui")))
-	_ = json.Unmarshal(b, &tools)
-	return skill.Generate(tools)
-}
-
 func (u *UI) agentPageWith(r *http.Request, extra map[string]any) map[string]any {
 	_, d, err := u.agentPage(r)
 	maps.Copy(d, extra)
@@ -304,7 +294,7 @@ func (u *UI) autoConnect(name, client string) (agentsetup.Result, error) {
 		_, _ = u.D.State.RevokeLabel(name, "auto:"+client)
 		return agentsetup.Result{}, err
 	}
-	res, err := u.Clients.Connect(client, u.bin(), name, u.skillMD(name))
+	res, err := u.Clients.Connect(client, u.bin(), name, skill.Stub())
 	if err != nil {
 		_, _ = u.D.State.RevokeLabel(name, "auto:"+client)
 		agentkeys.Remove(u.KeyDir, name)

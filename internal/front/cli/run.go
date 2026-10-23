@@ -191,10 +191,7 @@ func (e *Env) doctor(ctx context.Context) int {
 	})
 	clients := agentsetup.Default()
 	env.ClaudeSettings, env.SkillPath = clients.ClaudeSettingsPath(), clients.SkillPath()
-	env.Skill = func() (string, error) {
-		tools, err := e.Tools(ctx, "")
-		return skill.Generate(tools), err
-	}
+	env.Skill = func() (string, error) { return skill.Stub(), nil } // установленный навык — обёртка «gate4ai skill»
 	if k, ok := e.findKey(); ok {
 		env.AgentKey, env.KeyPending = k.Agent, k.Pairing != ""
 	}

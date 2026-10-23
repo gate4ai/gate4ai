@@ -391,6 +391,24 @@ func rewrite(p string, f func(old []byte) ([]byte, error)) (string, error) {
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
+// RefreshSkill переписывает установленный SKILL.md gate4ai текстом stub, если
+// он другой (прежние версии писали туда полный текст каталога, который устаревал
+// вместе с бинарником); чужой файл (без name: gate4ai) и отсутствующий не трогает.
+func (e Env) RefreshSkill(stub string) (bool, error) {
+	p := e.SkillPath()
+	old, err := os.ReadFile(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if string(old) == stub || !strings.Contains(string(old), "\nname: gate4ai\n") {
+		return false, nil
+	}
+	return true, writePrivate(p, []byte(stub))
+}
+
 // SkillPath — SKILL.md gate4ai для Claude Code.
 func (e Env) SkillPath() string { return filepath.Join(e.skillDir(), "SKILL.md") }
 

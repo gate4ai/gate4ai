@@ -178,3 +178,29 @@ func TestConnectReviewFixes(t *testing.T) {
 		}
 	}
 }
+
+// Установленный навык прежней версии (полный каталог) заменяется обёрткой;
+// совпадающий, чужой и отсутствующий файлы не трогаются.
+func TestRefreshSkill(t *testing.T) {
+	e := testEnv(t, "linux")
+	stub := "---\nname: gate4ai\n---\nrun gate4ai skill\n"
+	if ok, err := e.RefreshSkill(stub); ok || err != nil {
+		t.Fatal("no file", ok, err)
+	}
+	p := e.SkillPath()
+	_ = os.MkdirAll(filepath.Dir(p), 0o700)
+	_ = os.WriteFile(p, []byte("---\nname: gate4ai\ndescription: old\n---\n# old catalog: read, screenshot, extract\n"), 0o600)
+	if ok, err := e.RefreshSkill(stub); !ok || err != nil {
+		t.Fatal("old skill", ok, err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != stub {
+		t.Fatal(string(b))
+	}
+	if ok, _ := e.RefreshSkill(stub); ok {
+		t.Fatal("already current")
+	}
+	_ = os.WriteFile(p, []byte("---\nname: mine\n---\n"), 0o600)
+	if ok, _ := e.RefreshSkill(stub); ok {
+		t.Fatal("not ours")
+	}
+}

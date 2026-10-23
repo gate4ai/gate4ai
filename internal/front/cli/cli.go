@@ -21,6 +21,7 @@ import (
 	"syscall"
 
 	"github.com/gate4ai/gate4ai/internal/audit"
+	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/front/skill"
 	"github.com/gate4ai/gate4ai/internal/platform/agentid"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
@@ -60,6 +61,8 @@ type Env struct {
 	// токеном (ключ агента, спаренного с другим компьютером).
 	Pair   func(base string) *Client
 	Remote func(base, token string) *Client
+	// RefreshSkill — обновить установленный SKILL.md агента (обёртку skill.Stub), nil — не трогать.
+	RefreshSkill func()
 
 	selfDone bool // selfC прочитан (первым — в Client, до горутин)
 	selfC    agentid.Caller
@@ -98,8 +101,9 @@ func DefaultEnv() *Env {
 			}
 			return NewSocketClient(paths.FindAgentSocket(), "")
 		},
-		Remote: remote,
-		Extra:  map[string]func(context.Context, *Env, []string) int{}}
+		Remote:       remote,
+		RefreshSkill: func() { _, _ = agentsetup.Default().RefreshSkill(skill.Stub()) },
+		Extra:        map[string]func(context.Context, *Env, []string) int{}}
 }
 
 // Client — клиент к daemon: с токеном из GATE4AI_TOKEN; у агента без токена —
@@ -435,6 +439,9 @@ func (e *Env) skill(ctx context.Context) int {
 		return e.fail(err)
 	}
 	fmt.Fprint(e.Stdout, skill.Generate(tools))
+	if e.RefreshSkill != nil {
+		e.RefreshSkill() // установленный файл прежней версии — на обёртку «выполни gate4ai skill»
+	}
 	return ExitOK
 }
 
