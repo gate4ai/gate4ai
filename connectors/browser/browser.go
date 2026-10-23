@@ -64,6 +64,7 @@ type agentSession struct {
 	callSession
 	id        string
 	agent     string // агент-владелец (ExecRequest.Agent): чужой агент сеанс не видит
+	instance  string // его экземпляр (ExecRequest.AgentInstance): у сессий агента одного типа имя одно
 	steps     []map[string]any
 	truncated bool
 	closed    bool               // страница освобождена (под mu)
@@ -186,7 +187,7 @@ func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (
 	switch r.Action {
 	case "read", "screenshot", "extract":
 		res, err := b.agent(ctx, r)
-		return res, fail(b.busy(siteHint(err)))
+		return res, fail(b.busy(r, siteHint(err)))
 	}
 	if r.Caller != nil && r.Caller.Session != "" {
 		// Вход коннектором входа (via) в сеансе агента: страница — его сеанса.
@@ -219,14 +220,14 @@ func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (
 	}
 	if r.Caller == nil {
 		res, err := b.agentPage(ctx, r)
-		return res, fail(b.busy(siteHint(err)))
+		return res, fail(b.busy(r, siteHint(err)))
 	}
 	res, err := b.service(ctx, r)
-	return res, fail(b.busy(err))
+	return res, fail(b.busy(r, err))
 }
 
 // busy — подсказка, кто держит страницу, и что сделать вместо ожидания.
-func (b *Browser) busy(err error) error {
+func (b *Browser) busy(r abi.ExecRequest, err error) error {
 	if errors.Is(err, worker.ErrTabLimit) {
 		return abi.Errorf(abi.CodeLimit, "%v (%d at most; read, screenshot and extract each use one while they run): try again when they finish, "+
 			"or use your open session: browser.get --session <id> --url <url> (a request with the session's cookies) or "+
@@ -236,8 +237,20 @@ func (b *Browser) busy(err error) error {
 		return err
 	}
 	b.mu.Lock()
-	n := len(b.agents)
+	n, mine := len(b.agents), 0
+	for _, as := range b.agents {
+		if as.ownedBy(r) {
+			mine++
+		}
+	}
 	b.mu.Unlock()
+	if n > 0 && mine == 0 && r.Caller == nil {
+		// Страницу держит чужой сеанс: другой агент или другая сессия этого
+		// же агента (у всех сессий Claude Code имя агента одно).
+		return abi.Errorf(abi.CodeLimit, "%v: the page is held by another browser session (another agent, or another session of this agent; one at a time); "+
+			"wait until it ends (an idle session closes after %s) — meanwhile browser.read / screenshot / extract --url <url> without session work in a temporary tab. "+
+			"browser.close --all closes only your own sessions", err, AgentIdle)
+	}
 	if n > 0 {
 		return abi.Errorf(abi.CodeLimit, "%v: an agent's browser session is open (one at a time); continue in it: browser.open --session <id> --url <url>, "+
 			"or browser.read / screenshot / extract --url <url> without session (a temporary tab); or close it with browser.close (an idle session closes after %s)", err, AgentIdle)
@@ -599,7 +612,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
 	id := str(r.Args, "session")
 	if all, _ := r.Args["all"].(bool); r.Action == "close" && all {
-		return b.closeAll(r.Agent), nil
+		return b.closeAll(r), nil
 	}
 	var as *agentSession
 	if id == "" {
@@ -613,8 +626,8 @@ func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 	} else {
 		b.mu.Lock()
 		as = b.agents[id]
-		if as != nil && as.agent != r.Agent {
-			as = nil // сеанс другого агента: как неизвестный
+		if as != nil && !as.ownedBy(r) {
+			as = nil // сеанс другого агента или другой его сессии: как неизвестный
 		}
 		if as != nil {
 			as.timer.Reset(AgentIdle)
@@ -666,7 +679,7 @@ func (b *Browser) newAgentSession(ctx context.Context, r abi.ExecRequest) (*agen
 	}
 	var raw [8]byte
 	_, _ = rand.Read(raw[:])
-	as := &agentSession{callSession: callSession{s: s, sites: sites}, id: "s-" + hex.EncodeToString(raw[:]), agent: r.Agent}
+	as := &agentSession{callSession: callSession{s: s, sites: sites}, id: "s-" + hex.EncodeToString(raw[:]), agent: r.Agent, instance: r.AgentInstance}
 	id := as.id
 	as.timer = time.AfterFunc(AgentIdle, func() {
 		as.mu.Lock()
@@ -682,20 +695,28 @@ func (b *Browser) newAgentSession(ctx context.Context, r abi.ExecRequest) (*agen
 	return as, nil
 }
 
+// ownedBy — сеанс вызывающего: тот же агент и тот же его экземпляр (сессия
+// Claude Code, процесс агента). Экземпляр вызывающего неизвестен (удалённый
+// вызов, скрипт с токеном, владелец от имени агента) — сеансы всех
+// экземпляров агента.
+func (as *agentSession) ownedBy(r abi.ExecRequest) bool {
+	return as.agent == r.Agent && (r.AgentInstance == "" || as.instance == r.AgentInstance)
+}
+
 // closedErr — сеанса нет: закрыт, неизвестен или принадлежит другому агенту
 // (ответ один и тот же — чужие id не подтверждаются).
 func closedErr(id string) error {
 	return abi.Errorf(abi.CodeNotFound, "browser session %s is closed or unknown; start a new one with browser.open", id)
 }
 
-// closeAll закрывает сеансы агента agent (потерянный id, зависший сеанс):
+// closeAll закрывает сеансы вызывающего (ownedBy; потерянный id, зависший сеанс):
 // идущее действие сеанса отменяется, страница освобождается после его
 // завершения — следующий сеанс не получит её посреди чужого действия.
-func (b *Browser) closeAll(agent string) abi.ExecResult {
+func (b *Browser) closeAll(r abi.ExecRequest) abi.ExecResult {
 	b.mu.Lock()
 	var mine []*agentSession
 	for _, as := range b.agents {
-		if as.agent != agent {
+		if !as.ownedBy(r) {
 			continue
 		}
 		mine = append(mine, as)

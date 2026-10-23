@@ -8,6 +8,7 @@ package approval
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"runtime"
@@ -76,7 +77,16 @@ type Desktop struct {
 	GOOS string
 	// Result — итог показа уведомления (статистика канала); nil — не учитывать.
 	Result func(err error)
+	// PairLog — запросы на подключение агента пишутся сюда вместо уведомления
+	// (автотесты и стенд: PairNotifyEnv=log); nil — показывать уведомление.
+	PairLog *slog.Logger
 }
+
+// PairNotifyEnv — переменная окружения daemon: "log" — запросы на подключение
+// агента только в журнал daemon, без уведомления на компьютере. Её ставят
+// e2e-тесты и стенд, чтобы на машине разработчика не всплывали окна;
+// решение по запросу по-прежнему — в Web UI или Telegram.
+const PairNotifyEnv = "GATE4AI_PAIR_NOTIFY"
 
 // NewDesktop — канал уведомлений для текущей ОС.
 func NewDesktop() *Desktop { return &Desktop{Run: ExecRunner, GOOS: runtime.GOOS} }
@@ -144,6 +154,11 @@ func (d *Desktop) HandedOff(text string) {
 
 // PairRequested — агент просит подключения (gate4ai pair): решение — в Web UI.
 func (d *Desktop) PairRequested(p *state.Pairing) {
+	if d.PairLog != nil {
+		d.PairLog.Info("pairing requested (desktop notification off: "+PairNotifyEnv+"=log)",
+			"id", p.ID, "agent", p.Agent, "kind", p.Kind, "code", p.Code, "dir", p.Dir, "via", p.Via)
+		return
+	}
 	_ = d.show("gate4.ai: агент просит подключения", PairingText(p)+"\nСверьте код с чатом агента и подтвердите в Web UI (gate4ai ui → Агенты).")
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -208,6 +209,39 @@ func TestDesktopCommands(t *testing.T) {
 		if !strings.Contains(strings.Join(got, " "), "recipient not in allowlist") {
 			t.Errorf("%s denied: %v", goos, got)
 		}
+	}
+}
+
+// Запрос на подключение агента: уведомление по умолчанию; с PairLog (автотесты,
+// стенд) — запись в журнал с данными запроса и без уведомления, а остальные
+// уведомления по-прежнему показываются.
+func TestDesktopPairRequested(t *testing.T) {
+	p := &state.Pairing{ID: "p_1", Agent: "codex", Kind: "codex", Code: "K7Q-4FM", Dir: "/home/u/proj", Via: "agent-socket"}
+	var shown []string
+	d := &Desktop{GOOS: "linux", Run: func(env []string, name string, args ...string) error {
+		shown = append(shown, strings.Join(args, " "))
+		return nil
+	}}
+	d.PairRequested(p)
+	if len(shown) != 1 || !strings.Contains(shown[0], "K7Q-4FM") {
+		t.Fatalf("shown = %v", shown)
+	}
+
+	shown = nil
+	var log strings.Builder
+	d.PairLog = slog.New(slog.NewTextHandler(&log, nil))
+	d.PairRequested(p)
+	if len(shown) != 0 {
+		t.Fatalf("pairing notification shown with PairLog: %v", shown)
+	}
+	for _, want := range []string{"pairing requested", "id=p_1", "agent=codex", "code=K7Q-4FM", "dir=/home/u/proj"} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("log %q has no %q", log.String(), want)
+		}
+	}
+	d.Denied("bot", "email.send", "no")
+	if len(shown) != 1 {
+		t.Fatalf("other notifications must stay: %v", shown)
 	}
 }
 
