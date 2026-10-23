@@ -525,4 +525,3 @@ func TestHandoffNotifiesAfterPrecheck(t *testing.T) {
 		t.Fatal(reqs)
 	}
 }
-
