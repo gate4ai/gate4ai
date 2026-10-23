@@ -4,7 +4,6 @@ package worker
 
 import (
 	"context"
-	"github.com/gate4ai/gate4ai/sdk-go/domain"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/gate4ai/gate4ai/sdk-go/domain"
 )
 
 // TestStagehandRealChrome — движок Stagehand подключается к Chrome, запущенному
