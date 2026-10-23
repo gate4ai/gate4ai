@@ -30,7 +30,8 @@ type downloadSite struct{}
 
 const downloadPage = `<!doctype html><title>Docs</title>
 <button id="blob">blob</button><button id="data">data</button><button id="view">view</button>
-<button id="big">big</button><button id="none">none</button><button id="link">link</button>
+<button id="big">big</button><button id="none">none</button><button id="link">link</button><button id="slow">slow</button>
+<iframe id="frame" srcdoc="<button id=inner>inner</button><script>document.getElementById('inner').onclick=()=>{const a=document.createElement('a');a.href='/file.pdf';a.download='';document.body.appendChild(a);a.click();}</script>"></iframe>
 <script>
 const jwt = 'page-secret-jwt';
 async function doc() { return (await fetch('/api/document?id=42', {headers: {'X-Access-JWT': jwt}})).blob(); }
@@ -40,6 +41,7 @@ document.getElementById('data').onclick = async () => { const r = new FileReader
 document.getElementById('view').onclick = async () => { await doc(); };
 document.getElementById('big').onclick = () => save('/big.bin', 'big.bin');
 document.getElementById('link').onclick = () => save('/file.pdf', '');
+document.getElementById('slow').onclick = () => setTimeout(async () => save(URL.createObjectURL(await doc()), 'Анализ мочи'), 1500);
 </script>`
 
 func (downloadSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +90,8 @@ func chromeService(t *testing.T, h http.Handler) (*Session, string, string, cont
 	svc := New()
 	t.Cleanup(func() { svc.Close() })
 	user := filepath.Join(dir, "Downloads")
-	s, err := svc.Acquire(ctx, Settings{Engine: "cdp", ChromePath: wrapper, ProfileDir: filepath.Join(dir, "profile"), DownloadDir: user}, 0)
+	st := Settings{Engine: "cdp", ChromePath: wrapper, ProfileDir: filepath.Join(dir, "profile"), DownloadDir: user}
+	s, err := svc.Acquire(ctx, st, 0)
 	if err != nil {
 		t.Skip("chrome did not start:", err)
 	}
@@ -96,8 +99,15 @@ func chromeService(t *testing.T, h http.Handler) (*Session, string, string, cont
 	if _, err := s.Open(ctx, srv.URL+"/", domain.Sites{Domains: []string{"127.0.0.1"}}); err != nil {
 		t.Fatal(err)
 	}
+	lastService, lastSettings = svc, st
 	return s, srv.URL, user, ctx
 }
+
+// lastService, lastSettings — воркер последнего chromeService: вторая сессия в том же Chrome.
+var (
+	lastService  *Service
+	lastSettings Settings
+)
 
 func TestDownloadRealChrome(t *testing.T) {
 	s, base, user, ctx := chromeService(t, downloadSite{})
@@ -228,5 +238,66 @@ func TestFinishNamesAndTypes(t *testing.T) {
 	}
 	if _, err := finish(File{Name: "a.exe", Data: []byte("MZ")}, DownloadRequest{Types: []string{"application/pdf"}}); !errors.Is(err, ErrFileType) {
 		t.Fatal(err)
+	}
+}
+
+// Загрузки различаются по вкладке сессии: пока одна сессия ждёт свой файл
+// (download), «Скачать» в другой сессии (act) не перехватывается — файл
+// ложится в папку пользователя; загрузка из iframe своей вкладки — своя.
+func TestDownloadPerSessionTab(t *testing.T) {
+	a, base, user, ctx := chromeService(t, downloadSite{})
+	b, err := lastService.Acquire(ctx, lastSettings, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Release()
+	if _, err := b.Open(ctx, base+"/", domain.Sites{Domains: []string{"127.0.0.1"}}); err != nil {
+		t.Fatal(err)
+	}
+	type got struct {
+		f   File
+		err error
+	}
+	ch := make(chan got, 1)
+	go func() {
+		f, err := a.Download(ctx, DownloadRequest{Selector: "#slow"})
+		ch <- got{f, err}
+	}()
+	time.Sleep(300 * time.Millisecond)
+	if _, err := b.Act(ctx, ActRequest{Selector: "#link", Method: "click"}); err != nil {
+		t.Fatal(err)
+	}
+	r := <-ch
+	if r.err != nil || r.f.Name != "Анализ мочи.pdf" || !bytes.Equal(r.f.Data, pdfBytes) {
+		t.Fatalf("session A got %q %v", r.f.Name, r.err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if data, err := os.ReadFile(filepath.Join(user, "result 42.pdf")); err == nil && bytes.Equal(data, pdfBytes) {
+			break
+		}
+		if time.Now().After(deadline) {
+			es, _ := os.ReadDir(user)
+			t.Fatal("the other session's download did not reach the user's folder:", es)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// Кадр iframe своей вкладки — свой, чужой вкладки — нет.
+	ea, eb := a.Executor.Engine.(*CDP), b.Executor.Engine.(*CDP)
+	var tree struct {
+		FrameTree struct {
+			Children []struct {
+				Frame struct {
+					ID string `json:"id"`
+				} `json:"frame"`
+			} `json:"childFrames"`
+		} `json:"frameTree"`
+	}
+	if err := ea.call(ctx, ea.session, "Page.getFrameTree", nil, &tree); err != nil || len(tree.FrameTree.Children) != 1 {
+		t.Fatal(tree, err)
+	}
+	child := tree.FrameTree.Children[0].Frame.ID
+	if !ea.OwnsFrame(ctx, child) || !ea.OwnsFrame(ctx, ea.target) || eb.OwnsFrame(ctx, child) || eb.OwnsFrame(ctx, ea.target) {
+		t.Fatal("frames of a tab")
 	}
 }

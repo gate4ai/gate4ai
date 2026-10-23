@@ -151,7 +151,7 @@ func (ss *Session) clickDownload(ctx context.Context, r DownloadRequest) (File, 
 	var c *capture
 	if d != nil {
 		var err error
-		if c, err = d.begin(ctx); err != nil {
+		if c, err = d.begin(ctx, ss.owner(ctx)); err != nil {
 			return File{}, err
 		}
 		defer c.end()
@@ -191,6 +191,21 @@ func (ss *Session) clickDownload(ctx context.Context, r DownloadRequest) (File, 
 			return File{}, err
 		}
 	}
+}
+
+// frameOwner — движок знает кадры своей вкладки (CDP Page.getFrameTree).
+type frameOwner interface {
+	OwnsFrame(ctx context.Context, frame string) bool
+}
+
+// owner — проверка, что загрузка начата во вкладке сессии; движок без
+// кадров (Stagehand) — nil: своя — первая начавшаяся.
+func (ss *Session) owner(ctx context.Context) func(string) bool {
+	fo, ok := ss.Executor.Engine.(frameOwner)
+	if !ok {
+		return nil
+	}
+	return func(frame string) bool { return frame != "" && fo.OwnsFrame(ctx, frame) }
 }
 
 // fetchFileJS — GET со страницы (её cookies), тело — base64; больше max байт —
@@ -365,18 +380,25 @@ func typeAllowed(f File, types []string) bool {
 }
 
 // Downloads — подключение к браузеру, через которое идут загрузки.
+// Поведение загрузок у Chrome одно на весь браузер, а сессий (вкладок) —
+// несколько: на время browser.download во временную папку попадают и
+// загрузки других вкладок. Своя загрузка — та, что начата в кадре вкладки
+// сессии (frameId из Browser.downloadWillBegin); чужие, когда закончатся,
+// переносятся в папку пользователя — как если бы download не шёл.
 type Downloads struct {
-	c    *CDP
-	dir  string     // папка обычных загрузок (пользователя)
-	busy sync.Mutex // один browser.download за раз
-	mu   sync.Mutex
-	cur  *capture
+	c      *CDP
+	dir    string     // папка обычных загрузок (пользователя)
+	busy   sync.Mutex // один browser.download за раз
+	mu     sync.Mutex
+	cur    *capture
+	active map[string]*dlEntry // загрузки во временных папках: guid → загрузка
 }
 
 // dlEvent — Browser.downloadWillBegin / Browser.downloadProgress.
 type dlEvent struct {
 	method string
 	GUID   string  `json:"guid"`
+	Frame  string  `json:"frameId"`
 	URL    string  `json:"url"`
 	Name   string  `json:"suggestedFilename"`
 	State  string  `json:"state"` // inProgress, completed, canceled
@@ -384,9 +406,17 @@ type dlEvent struct {
 	Got    float64 `json:"receivedBytes"`
 }
 
+// dlEntry — загрузка, начатая во время browser.download (во временной папке cap).
+type dlEntry struct {
+	guid, name, frame string
+	cap               *capture
+	foreign           bool   // загрузка другой вкладки (или вторая) — в папку пользователя
+	state             string // completed, canceled — закончилась
+}
+
 // DialDownloads подключается к браузеру и включает загрузки без диалога в dir.
 func DialDownloads(ctx context.Context, httpURL, dir string) (*Downloads, error) {
-	d := &Downloads{dir: dir}
+	d := &Downloads{dir: dir, active: map[string]*dlEntry{}}
 	c, err := dialBrowser(ctx, httpURL, d.event)
 	if err != nil {
 		return nil, err
@@ -406,6 +436,7 @@ func (d *Downloads) behave(ctx context.Context, behavior, dir string) error {
 	return d.c.call(ctx, "", "Browser.setDownloadBehavior", map[string]any{"behavior": behavior, "downloadPath": dir, "eventsEnabled": true}, nil)
 }
 
+// event — события загрузок (цикл чтения подключения: без вызовов CDP).
 func (d *Downloads) event(m cdpMsg) {
 	if m.Method != "Browser.downloadWillBegin" && m.Method != "Browser.downloadProgress" {
 		return
@@ -416,14 +447,80 @@ func (d *Downloads) event(m cdpMsg) {
 	}
 	e.method = m.Method
 	d.mu.Lock()
-	c := d.cur
-	d.mu.Unlock()
-	if c != nil {
-		select {
-		case c.events <- e:
-		default:
+	defer d.mu.Unlock()
+	if e.method == "Browser.downloadWillBegin" {
+		if d.cur == nil {
+			return // обычная загрузка: в папку пользователя
+		}
+		d.active[e.GUID] = &dlEntry{guid: e.GUID, name: e.Name, frame: e.Frame, cap: d.cur}
+		d.cur.send(e)
+		return
+	}
+	en := d.active[e.GUID]
+	if en == nil {
+		return
+	}
+	if e.State == "completed" || e.State == "canceled" {
+		en.state = e.State
+	}
+	if en.foreign || en.cap.ended {
+		if en.state != "" {
+			d.settle(en)
+		}
+		return
+	}
+	en.cap.send(e)
+}
+
+// settle — чужая загрузка закончилась (под mu): файл — в папку пользователя
+// под своим именем, временная папка закончившегося download — удаляется,
+// когда в ней больше нечего ждать.
+func (d *Downloads) settle(en *dlEntry) {
+	delete(d.active, en.guid)
+	if en.state == "completed" {
+		if err := moveFile(filepath.Join(en.cap.dir, en.guid), d.dir, en.name); err != nil {
+			fmt.Fprintln(os.Stderr, "browser: a download of another tab was not moved to the downloads folder:", err)
 		}
 	}
+	d.sweep(en.cap)
+}
+
+// sweep — временная папка закончившегося download без незаконченных загрузок удаляется (под mu).
+func (d *Downloads) sweep(c *capture) {
+	if !c.ended {
+		return
+	}
+	for _, en := range d.active {
+		if en.cap == c {
+			return
+		}
+	}
+	_ = os.RemoveAll(c.dir)
+}
+
+// moveFile переносит файл в папку dir под именем name (занято — «name (1)»).
+func moveFile(from, dir, name string) error {
+	name = fileName(filepath.Base(name), "")
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	for i := 0; i < 1000; i++ {
+		to := filepath.Join(dir, name)
+		if i > 0 {
+			to = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", base, i, ext))
+		}
+		if _, err := os.Lstat(to); err == nil {
+			continue
+		}
+		if err := os.Rename(from, to); err != nil {
+			data, rerr := os.ReadFile(from)
+			if rerr != nil {
+				return err
+			}
+			return os.WriteFile(to, data, 0o600)
+		}
+		return nil
+	}
+	return errors.New("no free file name")
 }
 
 // Alive — подключение к браузеру живо.
@@ -432,25 +529,36 @@ func (d *Downloads) Alive() bool { return d != nil && !d.c.lost() }
 // Close закрывает подключение (Chrome возвращает своё поведение загрузок).
 func (d *Downloads) Close() { d.c.Close() }
 
-// capture — загрузки одного browser.download: во временной папке под guid.
+// capture — загрузки одного browser.download: во временной папке под guid;
+// своя — первая из кадров вкладки сессии (owns).
 type capture struct {
 	d      *Downloads
 	dir    string
 	events chan dlEvent
-	guid   string // первая начавшаяся загрузка
+	owns   func(frame string) bool
+	ended  bool   // download закончился (под d.mu)
+	guid   string // своя загрузка
 	name   string
 	url    string
 }
 
-// begin — загрузки идут во временную папку (allowAndName), события — в capture.
-func (d *Downloads) begin(ctx context.Context) (*capture, error) {
+func (c *capture) send(e dlEvent) {
+	select {
+	case c.events <- e:
+	default:
+	}
+}
+
+// begin — загрузки идут во временную папку (allowAndName), события — в
+// capture; owns — кадр принадлежит вкладке сессии.
+func (d *Downloads) begin(ctx context.Context, owns func(frame string) bool) (*capture, error) {
 	d.busy.Lock()
 	dir, err := os.MkdirTemp("", "gate4ai-download-")
 	if err != nil {
 		d.busy.Unlock()
 		return nil, err
 	}
-	c := &capture{d: d, dir: dir, events: make(chan dlEvent, 256)}
+	c := &capture{d: d, dir: dir, events: make(chan dlEvent, 256), owns: owns}
 	d.mu.Lock()
 	d.cur = c
 	d.mu.Unlock()
@@ -461,8 +569,9 @@ func (d *Downloads) begin(ctx context.Context) (*capture, error) {
 	return c, nil
 }
 
-// end — незаконченная загрузка отменяется, поведение — обратно к папке
-// пользователя, временная папка удаляется.
+// end — своя незаконченная загрузка отменяется, поведение — обратно к папке
+// пользователя; чужие загрузки доживают во временной папке и переносятся в
+// папку пользователя, а она удаляется после них.
 func (c *capture) end() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -471,15 +580,32 @@ func (c *capture) end() {
 	}
 	_ = c.d.behave(ctx, "allow", c.d.dir)
 	c.d.mu.Lock()
-	c.d.cur = nil
+	if c.d.cur == c {
+		c.d.cur = nil
+	}
+	c.ended = true
+	for _, en := range c.d.active {
+		if en.cap != c {
+			continue
+		}
+		if en.guid == c.guid {
+			delete(c.d.active, en.guid) // своя: отменена или уже прочитана
+			continue
+		}
+		en.foreign = true
+		if en.state != "" {
+			c.d.settle(en)
+		}
+	}
+	c.d.sweep(c)
 	c.d.mu.Unlock()
-	_ = os.RemoveAll(c.dir)
 	c.d.busy.Unlock()
 }
 
 func (c *capture) started() bool { return c.guid != "" }
 
-// poll — события загрузки: done — файл готов (или ошибка).
+// poll — события загрузок: done — своя готова (или ошибка); чужие
+// помечаются и уходят в папку пользователя.
 func (c *capture) poll(ctx context.Context, max int) (File, bool, error) {
 	for {
 		var e dlEvent
@@ -489,9 +615,18 @@ func (c *capture) poll(ctx context.Context, max int) (File, bool, error) {
 			return File{}, false, nil
 		}
 		if e.method == "Browser.downloadWillBegin" {
-			if c.guid == "" {
+			if c.guid == "" && (c.owns == nil || c.owns(e.Frame)) {
 				c.guid, c.name, c.url = e.GUID, e.Name, e.URL
+				continue
 			}
+			c.d.mu.Lock()
+			if en := c.d.active[e.GUID]; en != nil {
+				en.foreign = true
+				if en.state != "" {
+					c.d.settle(en)
+				}
+			}
+			c.d.mu.Unlock()
 			continue
 		}
 		if e.GUID != c.guid {
@@ -513,7 +648,6 @@ func (c *capture) poll(ctx context.Context, max int) (File, bool, error) {
 				return File{}, true, fmt.Errorf("%w: %d bytes, the limit is %d", ErrTooLarge, st.Size(), max)
 			}
 			data, err := os.ReadFile(p)
-			c.guid = ""
 			if err != nil {
 				return File{}, true, err
 			}

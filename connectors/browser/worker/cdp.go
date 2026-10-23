@@ -464,3 +464,40 @@ func (c *CDP) Close() error {
 	c.cancel()
 	return c.conn.Close(websocket.StatusNormalClosure, "")
 }
+
+// OwnsFrame — кадр (верхний или iframe) принадлежит этой вкладке (frameOwner):
+// чья загрузка началась.
+func (c *CDP) OwnsFrame(ctx context.Context, frame string) bool {
+	if frame == c.target {
+		return true // id верхнего кадра — id цели вкладки
+	}
+	var r struct {
+		FrameTree json.RawMessage `json:"frameTree"`
+	}
+	if c.call(ctx, c.session, "Page.getFrameTree", nil, &r) != nil {
+		return false
+	}
+	type tree struct {
+		Frame struct {
+			ID string `json:"id"`
+		} `json:"frame"`
+		Children []tree `json:"childFrames"`
+	}
+	var t tree
+	if json.Unmarshal(r.FrameTree, &t) != nil {
+		return false
+	}
+	var has func(t tree) bool
+	has = func(t tree) bool {
+		if t.Frame.ID == frame {
+			return true
+		}
+		for _, ch := range t.Children {
+			if has(ch) {
+				return true
+			}
+		}
+		return false
+	}
+	return has(t)
+}
