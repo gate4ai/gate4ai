@@ -63,7 +63,7 @@ func (f *fakeEngine) Title(context.Context) (string, error) {
 func (f *fakeEngine) Text(context.Context) (string, error) {
 	return "Задолженность 1 234,56 ₽", nil
 }
-func (f *fakeEngine) Screenshot(_ context.Context, sel string) ([]byte, error) {
+func (f *fakeEngine) Screenshot(context.Context, *worker.Clip, bool) ([]byte, error) {
 	return []byte("\x89PNG-fake"), nil
 }
 func (f *fakeEngine) Extract(context.Context, string) (any, error) {
@@ -102,6 +102,15 @@ func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 	case strings.Contains(expr, "nth-of-type"): // интерактивные элементы
 		return json.Unmarshal([]byte(`[{"selector":"#pay","tag":"button","type":"submit","text":"Оплатить"}]`), out)
 	}
+	if strings.HasPrefix(expr, "((secret, max) =>") { // changesJS: что изменилось после type / press
+		return json.Unmarshal([]byte(`{"added":[{"tag":"span","text":"a"}],"closed":[{"tag":"ul","role":"listbox"}]}`), out)
+	}
+	if strings.Contains(expr, "data-g4-cover") { // coverJS: закрасить поля пароля
+		return json.Unmarshal([]byte("1"), out)
+	}
+	if strings.HasPrefix(expr, "((sel, full) =>") { // shotJS
+		return json.Unmarshal([]byte(`{"box":{"X":0,"Y":0,"W":800,"H":600},"matched":1}`), out)
+	}
 	if strings.Contains(expr, "#missing") {
 		return json.Unmarshal([]byte("null"), out)
 	}
@@ -119,6 +128,10 @@ func (f *fakeEngine) InsertText(_ context.Context, t string) error {
 	return nil
 }
 func (f *fakeEngine) Key(_ context.Context, k string) error { f.keys = append(f.keys, k); return nil }
+func (f *fakeEngine) Type(_ context.Context, t string, _ time.Duration) error {
+	f.keys = append(f.keys, "type:"+t)
+	return nil
+}
 func (f *fakeEngine) Close() error {
 	if p := f.parent; p != nil {
 		p.mu.Lock()

@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
@@ -520,7 +522,56 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 		e.ForceJSON = true
 	}
 	body := map[string]any{"action": tool.Name, "args": vals, "wait": opts.wait, "agent": opts.as}
-	return e.callObject(ctx, e.Client(), "POST", "/v1/call", body, ExitForResult)
+	var res map[string]any
+	if err := e.Client().Do(ctx, "POST", "/v1/call", body, &res); err != nil {
+		return e.fail(err)
+	}
+	if err := saveImage(res, opts.out); err != nil {
+		e.printJSON(res)
+		e.problem(Problem{Code: "io_error", Message: "--out: " + err.Error()})
+		return ExitError
+	}
+	e.printJSON(res)
+	return ExitForResult(res)
+}
+
+// saveImage — изображения ответа (content) в терминал не выводятся: вместо
+// base64 — размер; --out f сохраняет первое из них в файл f на этом
+// компьютере (daemon пишет только в свой каталог данных), путь — в result.file.
+func saveImage(res map[string]any, out string) error {
+	blocks, _ := res["content"].([]any)
+	saved := out == ""
+	for _, b := range blocks {
+		m, _ := b.(map[string]any)
+		data, _ := m["data"].(string)
+		if m["type"] != "image" || data == "" {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			continue
+		}
+		delete(m, "data")
+		m["bytes"] = len(raw)
+		if saved {
+			continue
+		}
+		path, err := filepath.Abs(out)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, raw, 0o644); err != nil {
+			return err
+		}
+		saved, m["file"] = true, path
+		if r, ok := res["result"].(map[string]any); ok {
+			r["file"] = path
+		}
+	}
+	if !saved && res["status"] == "ok" {
+		return errors.New("the result has no image to save")
+	}
+	return nil
 }
 
 // ExitForResult — код выхода по результату pipeline.
@@ -556,7 +607,7 @@ func (e *Env) actionHelp(t skill.Tool) {
 		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, bracket(skill.Limits(p.Schema)))
 	}
 	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n"+
-		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
+		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           save the image of the result (a screenshot) to file f\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
 }
 
 func bracket(s string) string {
@@ -624,7 +675,8 @@ type callOpts struct {
 	wait string
 	as   string
 	help bool
-	json bool // --json без значения: вывод JSON
+	json bool   // --json без значения: вывод JSON
+	out  string // --out f: изображение ответа — в файл f
 }
 
 // MaxArgFile — предел файла аргумента (--<name>_file).
@@ -686,6 +738,13 @@ func parseArgs(t skill.Tool, args []string, stdin io.Reader) (map[string]any, ca
 		_, isArg := types[name]
 		switch {
 		case isArg:
+		case name == "out":
+			v, err := next()
+			if err != nil {
+				return nil, o, err
+			}
+			o.out = v
+			continue
 		case name == "wait" || name == "as":
 			v, err := next()
 			if err != nil {

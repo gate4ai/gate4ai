@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/gate4ai/sdk-go/hosttest"
@@ -43,7 +44,7 @@ func (f *formEngine) Navigate(_ context.Context, u string) error {
 func (f *formEngine) URL(context.Context) (string, error)   { return f.url, nil }
 func (f *formEngine) Title(context.Context) (string, error) { return "Вход", nil }
 func (f *formEngine) Text(context.Context) (string, error)  { return "Логин и пароль", nil }
-func (f *formEngine) Screenshot(context.Context, string) ([]byte, error) {
+func (f *formEngine) Screenshot(context.Context, *worker.Clip, bool) ([]byte, error) {
 	return []byte("\x89PNG"), nil
 }
 func (f *formEngine) Extract(context.Context, string) (any, error) { return "x", nil }
@@ -55,6 +56,8 @@ func (f *formEngine) Eval(_ context.Context, expr string, out any) error {
 	}
 	sel := func() string { s, _ := args[0].(string); return s }
 	switch {
+	case strings.HasPrefix(expr, "((sel, full) =>"): // shotJS
+		v = map[string]any{"box": map[string]any{"X": 1, "Y": 1, "W": 10, "H": 10}, "matched": 1}
 	case strings.Contains(expr, "data-g4-cover"):
 		v = 1
 	case strings.Contains(expr, "defineProperty(window, '__gate4aiSecret'"):
@@ -98,7 +101,10 @@ func (f *formEngine) InsertText(_ context.Context, t string) error {
 	return nil
 }
 func (f *formEngine) Key(context.Context, string) error { return nil }
-func (f *formEngine) Close() error                      { return nil }
+func (f *formEngine) Type(_ context.Context, t string, _ time.Duration) error {
+	return f.InsertText(context.Background(), t)
+}
+func (f *formEngine) Close() error { return nil }
 
 // emias — учётка, как её передаёт хост: форма без значений, значения секретов — в Revealed.
 var emias = abi.Account{Alias: "@emias", Bind: []string{"https://login.example"}, Success: "https://lk.example/",
