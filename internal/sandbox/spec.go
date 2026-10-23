@@ -46,7 +46,7 @@ type Template struct {
 var Templates = map[string]Template{
 	"claude-code": {Command: []string{"claude"}, Image: "node:22-bookworm", ClaudeMCP: true, SandboxAgent: "claude"},
 	"codex":       {Command: []string{"codex"}, Image: "node:22-bookworm", SandboxAgent: "codex"},
-	"openclaw":    {Command: []string{"openclaw"}, Image: "node:22-bookworm"},
+	"openclaw":    {Command: []string{"openclaw"}, Image: "node:24-bookworm"}, // OpenClaw: Node 24.22.1+ или 26
 	"hermes":      {Command: []string{"hermes"}, Image: "python:3.12-bookworm"},
 	"aider":       {Command: []string{"aider"}, Image: "python:3.12-bookworm"},
 }

@@ -56,6 +56,8 @@ type callSession struct {
 	sites  domain.Sites
 	opened bool
 	url    string // адрес страницы после последнего действия
+	sid    string // id сеанса агента ("" — страница вызывающего коннектора): снимки — в файлы
+	shots  int    // снимков сеанса (номер в имени файла)
 	timer  *time.Timer
 	mu     sync.Mutex // действия одной страницы — по очереди
 	owner  string     // кто держит страницу (для текста busy)
@@ -67,7 +69,7 @@ type agentSession struct {
 	callSession
 	id        string
 	agent     string // агент-владелец (ExecRequest.Agent): чужой агент сеанс не видит
-	client    string // экземпляр агента (ExecRequest.Client): close --all — только своих
+	instance  string // его экземпляр (ExecRequest.AgentInstance): у сессий агента одного типа имя одно
 	steps     []map[string]any
 	truncated bool
 	lock      chan struct{} // действия сеанса — по одному (lockAgent)
@@ -110,14 +112,34 @@ func settings(r abi.ExecRequest) worker.Settings {
 	if alias := str(s, "model_key"); alias != "" {
 		st.ModelKey = r.Revealed[alias]
 	}
-	if n, ok := s["max_text_chars"].(float64); ok {
-		st.MaxTextChars = int(n)
-	}
+	st.MaxTextChars = num(s, "max_text_chars")
 	st.RedactParams = strs(s["redact_params"])
 	return st
 }
 
-func num(m map[string]any, k string) int { n, _ := m[k].(float64); return int(n) }
+// num — числовой аргумент: float64 из JSON, int / int64 (вызов из Go),
+// json.Number (декодер с UseNumber); иное — 0.
+func num(m map[string]any, k string) int {
+	switch n := m[k].(type) {
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case int32:
+		return int(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return int(i)
+		}
+		f, _ := n.Float64()
+		return int(f)
+	}
+	return 0
+}
 
 // cleanURL — адрес для ответа и журнала: одноразовые коды и токены в query
 // (OAuth ?code=…) скрыты.
@@ -194,7 +216,7 @@ func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (
 	switch r.Action {
 	case "read", "screenshot", "extract":
 		res, err := b.agent(ctx, r)
-		return res, fail(b.busy(siteHint(err)))
+		return res, fail(b.busy(r, siteHint(err)))
 	}
 	if r.Caller != nil && r.Caller.Session != "" {
 		// Вход коннектором входа (via) в сеансе агента: страница — его сеанса.
@@ -227,10 +249,10 @@ func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (
 	}
 	if r.Caller == nil {
 		res, err := b.agentPage(ctx, r)
-		return res, fail(b.busy(siteHint(err)))
+		return res, fail(b.busy(r, siteHint(err)))
 	}
 	res, err := b.service(ctx, r)
-	return res, fail(b.busy(err))
+	return res, fail(b.busy(r, err))
 }
 
 // agentSites — сайты агента из настроек.
@@ -264,13 +286,13 @@ func (b *Browser) agent(ctx context.Context, r abi.ExecRequest) (abi.ExecResult,
 	page.URL = cleanURL(page.URL) // адрес после редиректов: в нём бывают токены
 	switch r.Action {
 	case "read":
-		if raw, ok, err := s.Raw(ctx, 0); err != nil {
+		if raw, ok, err := s.Raw(ctx, num(r.Args, "max_chars")); err != nil {
 			return abi.ExecResult{}, err
 		} else if ok {
 			// JSON, текст: тело как прислал сервер, без просмотрщика Chrome.
 			return abi.ExecResult{Structured: rawResult(page.URL, page.Title, raw), Content: []abi.Content{abi.Text(raw.Body)}, ResultRef: page.URL, Source: "web:" + page.URL}, nil
 		}
-		p, err := s.Observe(ctx, 0)
+		p, err := s.Observe(ctx, num(r.Args, "max_chars"))
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
@@ -483,7 +505,11 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		}
 		return abi.ExecResult{Structured: res, ResultRef: cleanURL(p.URL), Source: "web:" + cleanURL(p.URL)}, nil
 	case "act":
+		shot, _ := r.Args["screenshot"].(bool)
 		res, err := cs.s.Act(ctx, actRequest(r.Args))
+		if errors.Is(err, worker.ErrNoEffect) || shot && errors.Is(err, worker.ErrNotFound) {
+			return abi.ExecResult{}, cs.failShot(ctx, err)
+		}
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
@@ -492,7 +518,19 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		if res.Value != nil {
 			out["value"] = res.Value
 		}
-		return abi.ExecResult{Structured: out, ResultRef: cleanURL(res.URL)}, nil
+		if res.Changes != nil {
+			out["changes"] = res.Changes
+		}
+		ex := abi.ExecResult{Structured: out, ResultRef: cleanURL(res.URL)}
+		if shot {
+			info, sr, err := cs.capture(ctx, worker.ShotRequest{})
+			if err != nil {
+				return abi.ExecResult{}, err
+			}
+			out["screenshot"] = info
+			ex.Content, ex.Evidence = sr.Content, sr.Evidence
+		}
+		return ex, nil
 	case "reload":
 		u, err := cs.s.Reload(ctx)
 		if err != nil {
@@ -557,15 +595,18 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		return abi.ExecResult{Structured: map[string]any{"data": data}, Source: "web:" + cleanURL(cs.url)}, nil
 	case "page_screenshot":
 		sel := str(r.Args, "selector")
-		png, err := cs.s.ScreenshotElement(ctx, sel)
+		view, _ := r.Args["viewport"].(bool)
+		full, _ := r.Args["full_page"].(bool)
+		if n := btoi(sel != "") + btoi(view) + btoi(full); n > 1 {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "pass one of selector, viewport and full_page")
+		}
+		info, res, err := cs.capture(ctx, worker.ShotRequest{Selector: sel, FullPage: full})
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		// PNG — в content (MCP показывает картинку, CLI пишет её в файл: --out,
-		// путь — result.file) и в доказательства.
-		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(cs.url), "selector": sel, "size": len(png)},
-			Content: []abi.Content{abi.Image("image/png", png)}, ResultRef: cleanURL(cs.url),
-			Evidence: []abi.EvidenceItem{{Name: "element.png", MIME: "image/png", Data: png}}}, nil
+		info["url"] = cleanURL(cs.url)
+		res.Structured = info
+		return res, nil
 	case "dialog":
 		accept, _ := r.Args["accept"].(bool)
 		dismiss, _ := r.Args["dismiss"].(bool)
@@ -715,8 +756,7 @@ func loginForm(r abi.ExecRequest) (worker.LoginForm, error) {
 	if err != nil {
 		return worker.LoginForm{}, err
 	}
-	t, _ := r.Args["timeout_ms"].(float64)
-	form := worker.LoginForm{Bind: acc.Bind, SuccessPrefix: acc.Success, Timeout: time.Duration(t) * time.Millisecond}
+	form := worker.LoginForm{Bind: acc.Bind, SuccessPrefix: acc.Success, Timeout: time.Duration(num(r.Args, "timeout_ms")) * time.Millisecond}
 	if acc.Submit != nil {
 		form.SubmitSelector, form.SubmitPress = acc.Submit.Selector, acc.Submit.Press
 	}
@@ -789,8 +829,15 @@ func secretField(r abi.ExecRequest) ([]string, worker.LoginField, error) {
 func actRequest(a map[string]any) worker.ActRequest {
 	urlChange, _ := a["expect_url_change"].(bool)
 	return worker.ActRequest{Selector: str(a, "selector"), Method: strings.ToLower(str(a, "method")), Text: str(a, "text"),
-		Value: str(a, "value"), TimeoutMS: num(a, "timeout_ms"), ExpectSelector: str(a, "expect_selector"),
-		ExpectText: str(a, "expect_text"), ExpectURLChange: urlChange, ExpectMS: num(a, "expect_timeout_ms")}
+		Value: str(a, "value"), DelayMS: num(a, "delay_ms"), Submit: str(a, "submit"), TimeoutMS: num(a, "timeout_ms"),
+		ExpectSelector: str(a, "expect_selector"), ExpectText: str(a, "expect_text"), ExpectURLChange: urlChange, ExpectMS: num(a, "expect_timeout_ms")}
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func handoffRequest(a map[string]any) worker.HandoffRequest {

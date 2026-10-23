@@ -97,6 +97,8 @@ func (f *loginChrome) eval(expr string) any {
 		return f.url
 	case expr == "document.title":
 		return "Вход"
+	case strings.HasPrefix(expr, "((sel, full) =>"): // shotJS
+		return map[string]any{"box": map[string]any{"X": 1, "Y": 1, "W": 10, "H": 10}, "matched": 1}
 	case strings.Contains(expr, "data-g4-cover"): // coverJS: закрасить поля секрета на снимке
 		if args[0] != nil {
 			f.covered = append(f.covered, args[0])
@@ -363,6 +365,9 @@ func TestStillOnLoginAndSecretOnPage(t *testing.T) {
 	}
 	if _, err := s.Act(ctx, ActRequest{Selector: "#title", Method: ActFill, Value: "x"}); !errors.Is(err, ErrSecretOnPage) {
 		t.Fatal("act fill:", err)
+	}
+	if _, err := s.Act(ctx, ActRequest{Selector: "#title", Method: ActType, Value: "x"}); !errors.Is(err, ErrSecretOnPage) {
+		t.Fatal("act type:", err)
 	}
 	// click, press, wait и fill_secret на той же странице можно.
 	for _, r := range []ActRequest{{Selector: "#login", Method: ActWait}, {Selector: "#password", Method: ActPress, Value: "Tab"}, {Selector: "#bind", Method: ActClick}} {

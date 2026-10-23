@@ -93,11 +93,11 @@ func (f *fakeChrome) ws(w http.ResponseWriter, r *http.Request) {
 				v = f.pages[f.url][0]
 			case strings.Contains(expr, "g4visible(root)") && strings.HasSuffix(expr, "(document.body)"): // текст страницы (visibleTextJS)
 				v = f.pages[f.url][1]
-			case strings.Contains(expr, "querySelector"):
+			case strings.HasPrefix(expr, "((sel, full) =>"): // shotJS
 				if strings.Contains(expr, "#missing") {
-					v = nil
+					v = map[string]any{"matched": 0}
 				} else {
-					v = map[string]any{"X": 10, "Y": 20, "W": 100, "H": 30}
+					v = map[string]any{"box": map[string]any{"X": 10, "Y": 20, "W": 100, "H": 30}, "matched": 1}
 				}
 			}
 			res = map[string]any{"result": map[string]any{"value": v}}
@@ -247,18 +247,19 @@ func TestDomainAllowlist(t *testing.T) {
 
 type stubEngine struct{ url string }
 
-func (s *stubEngine) Navigate(_ context.Context, u string) error         { s.url = u; return nil }
-func (s *stubEngine) URL(context.Context) (string, error)                { return s.url, nil }
-func (s *stubEngine) Title(context.Context) (string, error)              { return "t", nil }
-func (s *stubEngine) Text(context.Context) (string, error)               { return strings.Repeat("я", 50), nil }
-func (s *stubEngine) Screenshot(context.Context, string) ([]byte, error) { return nil, nil }
+func (s *stubEngine) Navigate(_ context.Context, u string) error              { s.url = u; return nil }
+func (s *stubEngine) URL(context.Context) (string, error)                     { return s.url, nil }
+func (s *stubEngine) Title(context.Context) (string, error)                   { return "t", nil }
+func (s *stubEngine) Text(context.Context) (string, error)                    { return strings.Repeat("я", 50), nil }
+func (s *stubEngine) Screenshot(context.Context, *Clip, bool) ([]byte, error) { return nil, nil }
 func (s *stubEngine) Extract(_ context.Context, ins string) (any, error) {
 	return "stub answer for: " + ins, nil // заглушка LLM
 }
-func (s *stubEngine) Close() error                             { return nil }
-func (s *stubEngine) Eval(context.Context, string, any) error  { return nil }
-func (s *stubEngine) InsertText(context.Context, string) error { return nil }
-func (s *stubEngine) Key(context.Context, string) error        { return nil }
+func (s *stubEngine) Close() error                                      { return nil }
+func (s *stubEngine) Eval(context.Context, string, any) error           { return nil }
+func (s *stubEngine) InsertText(context.Context, string) error          { return nil }
+func (s *stubEngine) Key(context.Context, string) error                 { return nil }
+func (s *stubEngine) Type(context.Context, string, time.Duration) error { return nil }
 
 func TestExecutorExtractStub(t *testing.T) {
 	x := &Executor{Engine: &stubEngine{}, Sites: domain.Sites{Domains: []string{"example.com"}}}
@@ -342,14 +343,15 @@ func (e *closableEngine) URL(context.Context) (string, error) {
 	}
 	return "about:blank", nil
 }
-func (e *closableEngine) Title(context.Context) (string, error)              { return "", nil }
-func (e *closableEngine) Text(context.Context) (string, error)               { return "", nil }
-func (e *closableEngine) Screenshot(context.Context, string) ([]byte, error) { return nil, nil }
-func (e *closableEngine) Extract(context.Context, string) (any, error)       { return nil, nil }
-func (e *closableEngine) Eval(context.Context, string, any) error            { return nil }
-func (e *closableEngine) InsertText(context.Context, string) error           { return nil }
-func (e *closableEngine) Key(context.Context, string) error                  { return nil }
-func (e *closableEngine) Close() error                                       { return nil }
+func (e *closableEngine) Title(context.Context) (string, error)                   { return "", nil }
+func (e *closableEngine) Text(context.Context) (string, error)                    { return "", nil }
+func (e *closableEngine) Screenshot(context.Context, *Clip, bool) ([]byte, error) { return nil, nil }
+func (e *closableEngine) Extract(context.Context, string) (any, error)            { return nil, nil }
+func (e *closableEngine) Eval(context.Context, string, any) error                 { return nil }
+func (e *closableEngine) InsertText(context.Context, string) error                { return nil }
+func (e *closableEngine) Key(context.Context, string) error                       { return nil }
+func (e *closableEngine) Type(context.Context, string, time.Duration) error       { return nil }
+func (e *closableEngine) Close() error                                            { return nil }
 
 func TestDeadChromeReconnects(t *testing.T) {
 	var engines []*closableEngine
@@ -431,5 +433,23 @@ func TestOpenWaitsForSSOBounce(t *testing.T) {
 	e.urls = []string{"https://login.example/auth"}
 	if _, err := x.Open(context.Background(), "https://app.example.org/"); !errors.Is(err, ErrDomain) {
 		t.Fatal("the page stays off the list:", err)
+	}
+}
+
+// Пределы тела ответа: явный max_chars — как есть до верхней границы; 0 —
+// предел текста настроек, у JSON — не меньше DefaultJSONChars.
+func TestLimits(t *testing.T) {
+	for _, c := range []struct{ max, text, wantText, wantJSON int }{
+		{0, 0, MaxFetchResponse, DefaultJSONChars},
+		{0, 30000, 30000, DefaultJSONChars},
+		{0, 500000, 500000, 500000},
+		{0, 5000000, MaxResponseChars, MaxResponseChars},
+		{200000, 30000, 200000, 200000},
+		{10, 30000, 10, 10},
+		{5000000, 30000, MaxResponseChars, MaxResponseChars},
+	} {
+		if tx, js := Limits(c.max, c.text); tx != c.wantText || js != c.wantJSON {
+			t.Errorf("Limits(%d, %d) = %d, %d", c.max, c.text, tx, js)
+		}
 	}
 }

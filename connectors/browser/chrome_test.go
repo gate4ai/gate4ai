@@ -38,7 +38,7 @@ func chromeBrowser(t *testing.T, engine string, srvURL string) (*Browser, func(a
 	return b, func(agent, client, action string, args map[string]any) (map[string]any, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
-		res, err := b.Execute(ctx, nil, abi.ExecRequest{Action: action, Args: args, Settings: settings, Agent: agent, Client: client})
+		res, err := b.Execute(ctx, nil, abi.ExecRequest{Action: action, Args: args, Settings: settings, Agent: agent, AgentInstance: client})
 		m, _ := res.Structured.(map[string]any)
 		return m, err
 	}
@@ -133,11 +133,11 @@ func TestTwoAgentsRealChrome(t *testing.T) {
 	srv := formPage()
 	defer srv.Close()
 	b, call := chromeBrowser(t, "cdp", srv.URL)
-	a, err := call("dev", "session A", "open", map[string]any{"url": srv.URL + "/form"})
+	a, err := call("dev", "session:A", "open", map[string]any{"url": srv.URL + "/form"})
 	if err != nil {
 		t.Skip("chrome did not start:", err)
 	}
-	other, err := call("dev", "session B", "open", map[string]any{"url": srv.URL + "/other"})
+	other, err := call("dev", "session:B", "open", map[string]any{"url": srv.URL + "/other"})
 	if err != nil {
 		t.Fatal("a second client of the same agent:", err)
 	}
@@ -145,19 +145,19 @@ func TestTwoAgentsRealChrome(t *testing.T) {
 	if err != nil {
 		t.Fatal("another agent:", err)
 	}
-	if res, err := call("dev", "session A", "observe", map[string]any{"session": a["session"]}); err != nil || res["title"] != "Form" {
+	if res, err := call("dev", "session:A", "observe", map[string]any{"session": a["session"]}); err != nil || res["title"] != "Form" {
 		t.Fatal("A's page is its own:", res, err)
 	}
-	if res, err := call("dev", "session B", "close", map[string]any{"all": true}); err != nil || res["sessions"] != 1 {
+	if res, err := call("dev", "session:B", "close", map[string]any{"all": true}); err != nil || res["sessions"] != 1 {
 		t.Fatal("close --all of B closes only B's session:", res, err)
 	}
-	if res, err := call("dev", "session A", "observe", map[string]any{"session": a["session"]}); err != nil || res["title"] != "Form" {
+	if res, err := call("dev", "session:A", "observe", map[string]any{"session": a["session"]}); err != nil || res["title"] != "Form" {
 		t.Fatal("A survives B's close --all:", res, err)
 	}
 	if res, err := call("bot", "", "observe", map[string]any{"session": third["session"]}); err != nil || res["title"] != "Other" {
 		t.Fatal("the other agent survives:", res, err)
 	}
-	if _, err := call("dev", "session B", "observe", map[string]any{"session": other["session"]}); err == nil ||
+	if _, err := call("dev", "session:B", "observe", map[string]any{"session": other["session"]}); err == nil ||
 		!strings.Contains(err.Error(), "closed by browser.close --all of dev (session B)") {
 		t.Fatal("who closed it:", err)
 	}

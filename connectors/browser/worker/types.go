@@ -26,8 +26,13 @@ type ActRequest struct {
 	// Text — из элементов по селектору берётся первый видимый, чей текст (или
 	// подпись, placeholder, aria-label) содержит Text.
 	Text string `json:"text,omitempty"`
-	// Value — значение для fill / append / paste, клавиша или сочетание для press.
+	// Value — значение для fill / append / paste, текст для type, клавиша или
+	// сочетание для press.
 	Value string `json:"value,omitempty"`
+	// DelayMS — type: пауза между символами (0 — без паузы, предел MaxTypeDelay).
+	DelayMS int `json:"delay_ms,omitempty"`
+	// Submit — type: клавиша или сочетание после текста (Enter, Tab, «,»).
+	Submit string `json:"submit,omitempty"`
 	// TimeoutMS — сколько ждать появления элемента (0 — 10 с, предел MaxActTimeout).
 	TimeoutMS int `json:"timeout_ms,omitempty"`
 	// Expect* — результат действия, которого надо дождаться (иначе ErrNoEffect):
@@ -39,11 +44,14 @@ type ActRequest struct {
 }
 
 // ActResponse — адрес страницы после действия, текст элемента (до 2000
-// символов) и итоговое значение поля после fill / append / paste.
+// символов), итоговое значение поля после fill / append / paste / type /
+// press (у press — поля, где фокус после нажатия) и изменения страницы после
+// type / press.
 type ActResponse struct {
-	URL   string      `json:"url"`
-	Text  string      `json:"text,omitempty"`
-	Value *FieldValue `json:"value,omitempty"`
+	URL     string      `json:"url"`
+	Text    string      `json:"text,omitempty"`
+	Value   *FieldValue `json:"value,omitempty"`
+	Changes *Changes    `json:"changes,omitempty"`
 }
 
 // FieldValue — что записалось в поле: длина и начало (и конец, если длинное).
@@ -67,12 +75,13 @@ const (
 	ActFill   = "fill"   // заменить значение поля (input, textarea, contenteditable) на Value
 	ActAppend = "append" // дописать Value в конец значения поля
 	ActPaste  = "paste"  // заменить значение, вставив Value как из буфера обмена (событие paste: редакторы разбирают разметку)
-	ActPress  = "press"  // клавиша или сочетание Value (Enter, Ctrl+Enter) в элементе
+	ActType   = "type"   // ввести Value посимвольно настоящими нажатиями клавиш (поля тегов, поиск в списках)
+	ActPress  = "press"  // клавиша или сочетание Value (Enter, Ctrl+Enter, «,») в элементе
 	ActWait   = "wait"   // дождаться элемента и вернуть его текст
 )
 
 // ActMethods — методы act по порядку (для --help и ошибок).
-var ActMethods = []string{ActClick, ActFill, ActAppend, ActPaste, ActPress, ActWait}
+var ActMethods = []string{ActClick, ActFill, ActAppend, ActPaste, ActType, ActPress, ActWait}
 
 // writes — метод пишет Value в поле.
 func writes(method string) bool {
@@ -85,6 +94,8 @@ var ErrNotFound = errors.New("element not found")
 // Пределы act.
 const (
 	MaxActValue   = 256 << 10 // символов в value для fill / append / paste
+	MaxTypeValue  = 4096      // символов в value для type (каждый — нажатие клавиши)
+	MaxTypeDelay  = 1000      // мс между символами type
 	MaxActTimeout = 60000
 )
 
@@ -103,6 +114,21 @@ func CheckAct(r ActRequest) error {
 		}
 		if r.Method != ActFill && r.Value == "" {
 			return fmt.Errorf("act: %s needs value", r.Method)
+		}
+	case ActType:
+		if r.Value == "" {
+			return errors.New("act: type needs value")
+		}
+		if n := utf8.RuneCountInString(r.Value); n > MaxTypeValue {
+			return fmt.Errorf("argument \"value\" is too long for type: %d characters, the limit is %d (each is a key press); use fill or paste for a long text", n, MaxTypeValue)
+		}
+		if r.DelayMS < 0 || r.DelayMS > MaxTypeDelay {
+			return fmt.Errorf("act: delay_ms must be 0..%d", MaxTypeDelay)
+		}
+		if r.Submit != "" {
+			if _, err := ParseKey(r.Submit); err != nil {
+				return err
+			}
 		}
 	case ActPress:
 		if _, err := ParseKey(r.Value); err != nil {

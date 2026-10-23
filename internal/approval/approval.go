@@ -8,6 +8,7 @@ package approval
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"runtime"
@@ -76,7 +77,17 @@ type Desktop struct {
 	GOOS string
 	// Result — итог показа уведомления (статистика канала); nil — не учитывать.
 	Result func(err error)
+	// Log — уведомления пишутся сюда вместо показа (автотесты и стенд:
+	// NotifyEnv=log); nil — показывать.
+	Log *slog.Logger
 }
+
+// NotifyEnv — переменная окружения daemon: "log" — уведомления на компьютере
+// (подтверждения, запросы на подключение агента, коды, отказы) только в журнал
+// daemon, без всплывающих окон. Её ставят e2e-тесты и стенд, чтобы на машине
+// разработчика не всплывали окна; решения по запросам — как обычно, в Web UI,
+// Telegram или CLI.
+const NotifyEnv = "GATE4AI_DESKTOP_NOTIFY"
 
 // NewDesktop — канал уведомлений для текущей ОС.
 func NewDesktop() *Desktop { return &Desktop{Run: ExecRunner, GOOS: runtime.GOOS} }
@@ -100,6 +111,13 @@ func (d *Desktop) show(title, body string) error {
 	// NUL в аргументе или переменной окружения не даёт запустить процесс:
 	// агент не должен так гасить уведомление.
 	title, body = strings.ReplaceAll(title, "\x00", ""), strings.ReplaceAll(body, "\x00", "")
+	if d.Log != nil {
+		d.Log.Info("desktop notification (not shown: "+NotifyEnv+"=log)", "title", title, "body", body)
+		if d.Result != nil {
+			d.Result(nil)
+		}
+		return nil
+	}
 	var err error
 	switch d.GOOS {
 	case "darwin":

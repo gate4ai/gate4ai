@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/gate4ai/gate4ai/internal/approval"
@@ -51,7 +52,12 @@ func setup(ctx context.Context, d *daemon.Daemon, log *slog.Logger) error {
 	u.Relay = relayStatus
 	d.AddRoutes(u.OwnerRoutes)
 	d.AddPublic("/ui/", u.RemoteHandler())
-	u.Channels = approval.Attach(ctx, d, approval.NewDesktop(), telegramAPI)
+	desktop := approval.NewDesktop()
+	if os.Getenv(approval.NotifyEnv) == "log" {
+		desktop.Log = log
+		log.Info("desktop notifications go to this log and are not shown", approval.NotifyEnv, "log")
+	}
+	u.Channels = approval.Attach(ctx, d, desktop, telegramAPI)
 	if resetUILogin {
 		if err := u.ResetProtection(); err != nil {
 			return err

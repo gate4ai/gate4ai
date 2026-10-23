@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,8 @@ type fakeEngine struct {
 	hooks   int
 	json    string   // верхний документ — JSON с этим телом
 	fetches []string // запросы со страницы: метод и адрес
+	reply   string   // тело ответа запроса со страницы ("" — короткий JSON)
+	jsMax   float64  // предел тела, с которым запрос ушёл на страницу
 	tabs    int      // открытые временные вкладки (NewTab)
 	closed  int      // закрытые вкладки (Close)
 	parent  *fakeEngine
@@ -60,7 +63,7 @@ func (f *fakeEngine) Title(context.Context) (string, error) {
 func (f *fakeEngine) Text(context.Context) (string, error) {
 	return "Задолженность 1 234,56 ₽", nil
 }
-func (f *fakeEngine) Screenshot(_ context.Context, sel string) ([]byte, error) {
+func (f *fakeEngine) Screenshot(context.Context, *worker.Clip, bool) ([]byte, error) {
 	return []byte("\x89PNG-fake"), nil
 }
 func (f *fakeEngine) Extract(context.Context, string) (any, error) {
@@ -78,6 +81,16 @@ func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 		var args []any
 		json.Unmarshal([]byte(expr[strings.LastIndex(expr, "(...")+4:len(expr)-1]), &args)
 		f.fetches = append(f.fetches, args[1].(string)+" "+args[0].(string))
+		f.jsMax, _ = args[4].(float64)
+		if f.reply != "" { // как fetchJS: тело до max+1 символов и его длина
+			body := f.reply
+			if len(body) > int(f.jsMax)+1 {
+				body = body[:int(f.jsMax)+1]
+			}
+			b, _ := json.Marshal(map[string]any{"status": 200, "url": args[0], "headers": map[string]string{"content-type": "application/json"},
+				"size": len(f.reply), "chars": len(f.reply), "body": body})
+			return json.Unmarshal(b, out)
+		}
 		return json.Unmarshal([]byte(`{"status":200,"url":"`+args[0].(string)+`","headers":{"content-type":"application/json","set-cookie":"x","x-total":"1"},"size":30,"body":"{\"uid\":\"a1\",\"token\":\"t0k\"}"}`), out)
 	case strings.Contains(expr, "XMLHttpRequest.prototype.send ="): // перехват запросов
 		f.hooks++
@@ -88,6 +101,15 @@ func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 			{"kind":"xhr","method":"POST","url":"https://a.example.com/auth/login","status":200,"mime":"application/json","body":"{\"token\":\"t0k\"}","size":15}]`), out)
 	case strings.Contains(expr, "nth-of-type"): // интерактивные элементы
 		return json.Unmarshal([]byte(`[{"selector":"#pay","tag":"button","type":"submit","text":"Оплатить"}]`), out)
+	}
+	if strings.HasPrefix(expr, "((secret, max) =>") { // changesJS: что изменилось после type / press
+		return json.Unmarshal([]byte(`{"added":[{"tag":"span","text":"a"}],"closed":[{"tag":"ul","role":"listbox"}]}`), out)
+	}
+	if strings.Contains(expr, "data-g4-cover") { // coverJS: закрасить поля пароля
+		return json.Unmarshal([]byte("1"), out)
+	}
+	if strings.HasPrefix(expr, "((sel, full) =>") { // shotJS
+		return json.Unmarshal([]byte(`{"box":{"X":0,"Y":0,"W":800,"H":600},"matched":1}`), out)
 	}
 	if strings.Contains(expr, "#missing") {
 		return json.Unmarshal([]byte("null"), out)
@@ -106,6 +128,10 @@ func (f *fakeEngine) InsertText(_ context.Context, t string) error {
 	return nil
 }
 func (f *fakeEngine) Key(_ context.Context, k string) error { f.keys = append(f.keys, k); return nil }
+func (f *fakeEngine) Type(_ context.Context, t string, _ time.Duration) error {
+	f.keys = append(f.keys, "type:"+t)
+	return nil
+}
 func (f *fakeEngine) Close() error {
 	if p := f.parent; p != nil {
 		p.mu.Lock()
@@ -355,7 +381,7 @@ func TestAgentSession(t *testing.T) {
 		t.Fatal("connector while the browser is full:", err)
 	}
 	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"}); err == nil || !strings.Contains(err.Error(), "busy") ||
-		!strings.Contains(err.Error(), "a session of an agent open since") || !strings.Contains(err.Error(), "closes at") ||
+		!strings.Contains(err.Error(), "a session of yours (") || !strings.Contains(err.Error(), "closes at") ||
 		!strings.Contains(err.Error(), "--wait_for_browser 10m") || !strings.Contains(err.Error(), "without session") {
 		t.Fatal("second session, with whose session it is and the alternatives:", err)
 	}
@@ -585,6 +611,55 @@ func TestAgentSessionsPerAgent(t *testing.T) {
 	}
 }
 
+func agentIn(b *Browser, agent, instance, action string, args map[string]any) (map[string]any, error) {
+	res, err := b.Execute(context.Background(), nil, abi.ExecRequest{Action: action, Args: args, Agent: agent, AgentInstance: instance,
+		Settings: map[string]any{"cdp_url": "http://127.0.0.1:1", "allowed_domains": []any{"*.example.com"}}})
+	m, _ := res.Structured.(map[string]any)
+	return m, err
+}
+
+// Две сессии Claude Code — один агент claude-code: сеанс у своей сессии (своя
+// вкладка), close --all второй не закрывает сеанс первой; браузер полон —
+// busy называет чужой сеанс по агенту и сессии, а свой — «yours» с id.
+// Экземпляр неизвестен — сеансы всех экземпляров агента.
+func TestAgentSessionsPerInstance(t *testing.T) {
+	old := AgentWait
+	AgentWait = 50 * time.Millisecond
+	t.Cleanup(func() { AgentWait = old })
+	_, b, _ := setup(t, nil)
+	res, err := agentIn(b, "claude-code", "session:one", "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	oldMax := worker.MaxSessions
+	worker.MaxSessions = 1
+	t.Cleanup(func() { worker.MaxSessions = oldMax })
+	_, err = agentIn(b, "claude-code", "session:two", "open", map[string]any{"url": "https://b.example.com/"})
+	if err == nil || !strings.Contains(err.Error(), "a session of claude-code (session one) open since") || strings.Contains(err.Error(), id) {
+		t.Fatal("the second session's open:", err)
+	}
+	if _, err := agentIn(b, "claude-code", "session:two", "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed or unknown") {
+		t.Fatal("another session of the agent uses the id:", err)
+	}
+	if res, err := agentIn(b, "claude-code", "session:two", "close", map[string]any{"all": true}); err != nil || res["sessions"] != 0 {
+		t.Fatal("close --all of the second session:", res, err)
+	}
+	if _, err := agentIn(b, "claude-code", "session:one", "observe", map[string]any{"session": id}); err != nil {
+		t.Fatal("the first session's browser session survives:", err)
+	}
+	_, err = agentIn(b, "claude-code", "session:one", "open", map[string]any{"url": "https://a.example.com/"})
+	if err == nil || !strings.Contains(err.Error(), "a session of yours ("+id+")") {
+		t.Fatal("the holder's second open names its own session:", err)
+	}
+	if _, err := agentIn(b, "claude-code", "", "observe", map[string]any{"session": id}); err != nil {
+		t.Fatal("an unknown instance of the agent:", err)
+	}
+	if res, err := agentIn(b, "claude-code", "", "close", map[string]any{"all": true}); err != nil || res["sessions"] != 1 {
+		t.Fatal("close --all with an unknown instance:", res, err)
+	}
+}
+
 // close --all отменяет идущее действие сеанса и освобождает страницу только
 // после его завершения: следующий сеанс не получает её посреди действия.
 func TestCloseAllWaitsForAction(t *testing.T) {
@@ -685,6 +760,85 @@ func TestAgentFetch(t *testing.T) {
 	if st := res["step_list"].([]map[string]any); len(st) != 4 || st[2]["action"] != "delete" || st[2]["status"] != "ok" || st[3]["status"] != abi.CodeCapabilityDenied {
 		t.Fatalf("%+v", st)
 	}
+}
+
+// num принимает любые числовые типы аргументов: float64 из JSON, int и int64
+// из Go, json.Number от декодера с UseNumber.
+func TestNum(t *testing.T) {
+	for _, v := range []any{200000.0, float32(200000), 200000, int64(200000), int32(200000), json.Number("200000"), json.Number("200000.0")} {
+		if n := num(map[string]any{"max_chars": v}, "max_chars"); n != 200000 {
+			t.Errorf("%T %v: %d", v, v, n)
+		}
+	}
+	for _, v := range []any{nil, "200000", true, json.Number("x")} {
+		if n := num(map[string]any{"max_chars": v}, "max_chars"); n != 0 {
+			t.Errorf("%T %v: %d", v, v, n)
+		}
+	}
+	for _, v := range []any{200000.0, 200000, int64(200000), json.Number("200000")} {
+		fr, err := fetchRequest(abi.ExecRequest{Action: "get", Args: map[string]any{"url": "https://a.example.com/", "max_chars": v}})
+		if err != nil || fr.Max != 200000 {
+			t.Errorf("%T: FetchRequest.Max %d, %v", v, fr.Max, err)
+		}
+	}
+}
+
+// JSON-ответ больше max_text_chars (35 КБ при 30000): по умолчанию и с
+// max_chars 200000 — разобранный json без truncated; явный max_chars меньше
+// ответа — тело с подсказкой, какой max_chars вернёт его целиком.
+func TestFetchLargeJSON(t *testing.T) {
+	_, b, eng := setup(t, nil)
+	items := make([]string, 0, 1000)
+	for i := range 1000 {
+		items = append(items, `{"id":`+strconv.Itoa(i)+`,"name":"rule number `+strconv.Itoa(i)+`"}`)
+	}
+	eng.reply = `{"rules":[` + strings.Join(items, ",") + `]}`
+	if len(eng.reply) < 35000 {
+		t.Fatal(len(eng.reply))
+	}
+	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	for _, max := range []any{nil, 200000.0, json.Number("200000"), 200000} {
+		args := map[string]any{"session": id, "url": "https://a.example.com/api/rules"}
+		want := float64(worker.DefaultJSONChars)
+		if max != nil {
+			args["max_chars"] = max
+			want = 200000
+		}
+		out, err := agentExec(t, b, "get", args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out["truncated"] != nil || out["body"] != nil || out["hint"] != nil || len(out["json"].(map[string]any)["rules"].([]any)) != 1000 || eng.jsMax != want {
+			t.Fatalf("max_chars %v: page max %v, %v", max, eng.jsMax, out["truncated"])
+		}
+	}
+	out, err := agentExec(t, b, "get", map[string]any{"session": id, "url": "https://a.example.com/api/rules", "max_chars": 1000.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := strconv.Itoa(len(eng.reply))
+	if out["truncated"] != true || out["json"] != nil || len(out["body"].(string)) != 1000 ||
+		out["hint"] != "json not parsed: body truncated at 1000 of "+full+" chars, pass max_chars ≥ "+full {
+		t.Fatalf("%v %v", out["truncated"], out["hint"])
+	}
+	// Больше верхней границы — граница.
+	if _, err := agentExec(t, b, "get", map[string]any{"session": id, "url": "https://a.example.com/api/rules", "max_chars": 5e6}); err != nil || eng.jsMax != worker.MaxResponseChars {
+		t.Fatal(eng.jsMax, err)
+	}
+	// observe JSON-документа: max_chars больше max_text_chars не урезается до него.
+	eng.json = eng.reply
+	if out, err = agentExec(t, b, "observe", map[string]any{"session": id, "max_chars": 200000.0}); err != nil || out["truncated"] != nil || out["body"] != eng.reply {
+		t.Fatal(out["truncated"], err)
+	}
+	if out, err = agentExec(t, b, "observe", map[string]any{"session": id, "max_chars": 100.0}); err != nil || out["truncated"] != true ||
+		out["hint"] != "body truncated at 100 of "+full+" chars, pass max_chars ≥ "+full {
+		t.Fatal(out["hint"], err)
+	}
+	agentExec(t, b, "close", map[string]any{"session": id})
 }
 
 // JSON-страница: observe и read отдают тело как прислал сервер, с типом;

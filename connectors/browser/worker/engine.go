@@ -23,14 +23,18 @@ type Engine interface {
 	URL(ctx context.Context) (string, error)
 	Title(ctx context.Context) (string, error)
 	Text(ctx context.Context) (string, error)
-	// Screenshot — снимок элемента по CSS-селектору (не всей страницы).
-	Screenshot(ctx context.Context, selector string) ([]byte, error)
+	// Screenshot — снимок PNG: clip — прямоугольник от начала документа,
+	// nil — видимое окно; full — clip охватывает всю страницу (за пределами окна).
+	Screenshot(ctx context.Context, clip *Clip, full bool) ([]byte, error)
 	// Extract — извлечение данных по инструкции (LLM внутри движка; только чтение).
 	Extract(ctx context.Context, instruction string) (any, error)
 	// Eval — выражение JS на странице, результат по значению в out.
 	Eval(ctx context.Context, expr string, out any) error
 	// InsertText — ввод текста в элемент в фокусе (как с клавиатуры).
 	InsertText(ctx context.Context, text string) error
+	// Type — ввод текста в элемент в фокусе посимвольно настоящими нажатиями
+	// (keydown, keypress, input, keyup на каждый символ), пауза delay между ними.
+	Type(ctx context.Context, text string, delay time.Duration) error
 	// Key — нажатие клавиши или сочетания в фокусе: запись Key.String
 	// ("Enter", "Control+Enter", "Shift+Tab").
 	Key(ctx context.Context, key string) error
@@ -146,13 +150,11 @@ func (x *Executor) Observe(ctx context.Context, max int) (url, title, text strin
 	return
 }
 
-// Screenshot — снимок элемента текущей страницы; если на ней введён секрет —
-// с закрашенными полями секрета и пароля.
+// Screenshot — снимок элемента текущей страницы (Capture по селектору) с
+// закрашенными полями пароля и секрета.
 func (x *Executor) Screenshot(ctx context.Context, selector string) ([]byte, error) {
-	if x.SecretOnPage(ctx) {
-		return x.coveredScreenshot(ctx, selector)
-	}
-	return x.Engine.Screenshot(ctx, selector)
+	s, err := x.Capture(ctx, ShotRequest{Selector: selector})
+	return s.PNG, err
 }
 
 // Extract — извлечение по инструкции с текущей страницы (Act с естественным
@@ -174,7 +176,7 @@ var ActPoll = 200 * time.Millisecond
 // с самой короткой подписью. Готовит его к методу (click — нажатие мышью:
 // pointerdown, mousedown, pointerup, mouseup, click — самописные списки
 // открываются по mousedown; fill — фокус и выделение содержимого, press —
-// фокус) и возвращает его текст; append — фокус и курсор в конец значения,
+// фокус) и возвращает его текст; append и type — фокус и курсор в конец значения,
 // paste — как fill.
 //
 // Значение поля пароля не читается никогда: ни в подписи (по ней подбирают
@@ -215,14 +217,14 @@ var actJS = `((sel, text, method, secret) => {
     ptr('pointerup'); e.dispatchEvent(new MouseEvent('mouseup', o));
     if (typeof e.click === 'function') e.click(); else e.dispatchEvent(new MouseEvent('click', o)); // у svg нет click()
   }
-  if (['fill', 'paste', 'append', 'press'].includes(method)) {
+  if (['fill', 'paste', 'append', 'press', 'type'].includes(method)) {
     e.focus();
     const edit = typeof e.setSelectionRange === 'function' && typeof e.value === 'string';
     if (method === 'fill' || method === 'paste') {
       if (typeof e.select === 'function') e.select();
       else { const r = document.createRange(); r.selectNodeContents(e); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
     }
-    if (method === 'append') {
+    if (method === 'append' || method === 'type') {
       if (edit) { try { e.setSelectionRange(e.value.length, e.value.length); } catch (_) {} }
       else { const r = document.createRange(); r.selectNodeContents(e); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
     }
@@ -310,7 +312,8 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 	if err != nil {
 		return ActResponse{}, err
 	}
-	if writes(r.Method) {
+	if writes(r.Method) || r.Method == ActType {
+		// Ввод текста на странице с секретом — как fill: нельзя (press можно).
 		if err := x.readable(ctx); err != nil {
 			return ActResponse{}, err
 		}
@@ -339,6 +342,7 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 		}
 	}
 	var value *FieldValue
+	var changes *Changes
 	switch {
 	case writes(r.Method):
 		if err := x.write(ctx, r.Method, r.Value); err != nil {
@@ -347,13 +351,20 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 		if value, err = x.fieldValue(ctx, secret); err != nil {
 			return ActResponse{}, err
 		}
-	case r.Method == ActPress:
-		if err := x.press(ctx, r.Value); err != nil {
+	case r.Method == ActType || r.Method == ActPress:
+		x.watch(ctx)
+		if err := x.keys(ctx, r); err != nil {
 			return ActResponse{}, err
 		}
 	}
 	if err := x.expect(ctx, r, before); err != nil {
 		return ActResponse{}, err
+	}
+	if r.Method == ActType || r.Method == ActPress {
+		// Что стало в поле в фокусе и рядом с ним; страница могла уйти (Enter
+		// отправил форму) — тогда без них.
+		changes = x.changes(ctx, secret)
+		value, _ = x.fieldValue(ctx, secret)
 	}
 	u, err := x.settledURL(ctx)
 	if err != nil && !errors.Is(err, ErrDomain) {
@@ -369,7 +380,21 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 		// только в actJS): это могло быть значение поля.
 		found.Text = ""
 	}
-	return ActResponse{URL: u, Text: found.Text, Value: value}, nil
+	return ActResponse{URL: u, Text: found.Text, Value: value, Changes: changes}, nil
+}
+
+// keys — type (посимвольно, затем клавиша Submit) или press.
+func (x *Executor) keys(ctx context.Context, r ActRequest) error {
+	if r.Method == ActPress {
+		return x.press(ctx, r.Value)
+	}
+	if err := x.Engine.Type(ctx, r.Value, time.Duration(r.DelayMS)*time.Millisecond); err != nil {
+		return err
+	}
+	if r.Submit == "" {
+		return nil
+	}
+	return x.press(ctx, r.Submit)
 }
 
 // TypedMax — до стольких символов fill / append вводятся как с клавиатуры

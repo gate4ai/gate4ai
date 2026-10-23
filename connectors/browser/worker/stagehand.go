@@ -105,22 +105,31 @@ func (s *Stagehand) InsertText(ctx context.Context, text string) error {
 	return s.page.Type(ctx, text, nil)
 }
 
+func (s *Stagehand) Type(ctx context.Context, text string, delay time.Duration) error {
+	ms := float64(delay.Milliseconds())
+	return s.page.Type(ctx, text, &stagehand.PageTypeOptions{Delay: &ms})
+}
+
+// Key — клавиша или сочетание; одиночный символ без модификаторов («,», «ж») —
+// через Type: KeyPress SDK отдаёт странице для него keydown с пустым key.
 func (s *Stagehand) Key(ctx context.Context, key string) error {
+	if k, err := ParseKey(key); err == nil && !k.Ctrl && !k.Alt && !k.Meta && !k.Shift {
+		if _, named := keyCodes[k.Name]; !named {
+			return s.page.Type(ctx, k.Name, nil)
+		}
+	}
 	return s.page.KeyPress(ctx, key, nil)
 }
 
-func (s *Stagehand) Screenshot(ctx context.Context, selector string) ([]byte, error) {
-	sel, _ := json.Marshal(selector)
-	raw, err := s.page.Evaluate(ctx, `(() => { const e = document.querySelector(`+string(sel)+`); if (!e) return null;
-		const r = e.getBoundingClientRect(); return {x: r.x, y: r.y, width: r.width, height: r.height}; })()`)
-	if err != nil {
-		return nil, err
+func (s *Stagehand) Screenshot(ctx context.Context, clip *Clip, full bool) ([]byte, error) {
+	on := true
+	switch {
+	case full:
+		return s.page.Screenshot(ctx, &stagehand.ScreenshotOptions{FullPage: &on})
+	case clip == nil:
+		return s.page.Screenshot(ctx, nil)
 	}
-	var clip stagehand.PageScreenshotClip
-	if err := json.Unmarshal(raw, &clip); err != nil || clip.Width == 0 {
-		return nil, fmt.Errorf("element %s not found", selector)
-	}
-	return s.page.Screenshot(ctx, &stagehand.ScreenshotOptions{Clip: &clip})
+	return s.page.Screenshot(ctx, &stagehand.ScreenshotOptions{Clip: &stagehand.PageScreenshotClip{X: clip.X, Y: clip.Y, Width: clip.W, Height: clip.H}})
 }
 
 type extracted struct {

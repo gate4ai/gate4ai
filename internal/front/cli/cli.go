@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"mime"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -534,72 +533,53 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 	if err := e.Client().Do(ctx, "POST", "/v1/call", body, &res); err != nil {
 		return e.fail(err)
 	}
-	if err := saveContent(res, opts.out, tool.Name); err != nil {
-		e.problem(Problem{Code: "io_error", Message: err.Error(), Hint: "pass --out <file.png> in a folder you can write to"})
+	if err := saveImage(res, opts.out); err != nil {
+		e.printJSON(res)
+		e.problem(Problem{Code: "io_error", Message: "--out: " + err.Error()})
 		return ExitError
 	}
 	e.printJSON(res)
 	return ExitForResult(res)
 }
 
-// saveContent — двоичные блоки ответа (картинка page_screenshot, screenshot)
-// в файлы: в JSON агенту — путь (path) и размер вместо base64. out — файл
-// (несколько блоков: out, out-2, …); "" — временный файл. Путь первого файла —
-// ещё и в result.file.
-func saveContent(res map[string]any, out, action string) error {
+// saveImage — изображения ответа (content) в терминал не выводятся: вместо
+// base64 — размер; --out f сохраняет первое из них в файл f на этом
+// компьютере (daemon пишет только в свой каталог данных), путь — в result.file.
+func saveImage(res map[string]any, out string) error {
 	blocks, _ := res["content"].([]any)
-	n := 0
+	saved := out == ""
 	for _, b := range blocks {
-		m, ok := b.(map[string]any)
-		raw, _ := m["data"].(string)
-		if !ok || raw == "" {
+		m, _ := b.(map[string]any)
+		data, _ := m["data"].(string)
+		if m["type"] != "image" || data == "" {
 			continue
 		}
-		data, err := base64.StdEncoding.DecodeString(raw)
+		raw, err := base64.StdEncoding.DecodeString(data)
 		if err != nil {
 			continue
 		}
-		n++
-		ext := ".bin"
-		if exts, _ := mime.ExtensionsByType(str(m["mime_type"])); len(exts) > 0 {
-			ext = exts[len(exts)-1]
-		}
-		if str(m["mime_type"]) == "image/png" {
-			ext = ".png"
-		}
-		path := out
-		switch {
-		case path == "":
-			f, err := os.CreateTemp("", "gate4ai-"+strings.ReplaceAll(action, ".", "-")+"-*"+ext)
-			if err != nil {
-				return err
-			}
-			path = f.Name()
-			f.Close()
-		case n > 1:
-			path = strings.TrimSuffix(out, filepath.Ext(out)) + fmt.Sprintf("-%d", n) + filepath.Ext(out)
-		}
-		if err := os.WriteFile(path, data, 0o600); err != nil {
-			return fmt.Errorf("--out: %v", err)
-		}
-		if abs, err := filepath.Abs(path); err == nil {
-			path = abs
-		}
 		delete(m, "data")
-		m["path"], m["size"] = path, len(data)
-		if n == 1 {
-			r, _ := res["result"].(map[string]any)
-			if r == nil {
-				r = map[string]any{}
-				res["result"] = r
-			}
+		m["bytes"] = len(raw)
+		if saved {
+			continue
+		}
+		path, err := filepath.Abs(out)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, raw, 0o644); err != nil {
+			return err
+		}
+		saved, m["file"] = true, path
+		if r, ok := res["result"].(map[string]any); ok {
 			r["file"] = path
 		}
 	}
+	if !saved && res["status"] == "ok" {
+		return errors.New("the result has no image to save")
+	}
 	return nil
 }
-
-func str(v any) string { s, _ := v.(string); return s }
 
 // ExitForResult — код выхода по результату pipeline.
 func ExitForResult(res map[string]any) int {
@@ -634,7 +614,7 @@ func (e *Env) actionHelp(t skill.Tool) {
 		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, bracket(skill.Limits(p.Schema)))
 	}
 	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n"+
-		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           an image or file in the answer goes to file f (default: a temporary file); its path is in result.file\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
+		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           save the image of the result (a screenshot) to file f\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
 }
 
 func bracket(s string) string {
@@ -701,9 +681,9 @@ func hoistCallOpts(args []string) (rest, opts []string) {
 type callOpts struct {
 	wait string
 	as   string
-	out  string // файл для картинки или файла из ответа (page_screenshot)
 	help bool
-	json bool // --json без значения: вывод JSON
+	json bool   // --json без значения: вывод JSON
+	out  string // --out f: изображение ответа — в файл f
 }
 
 // MaxArgFile — предел файла аргумента (--<name>_file).
@@ -765,7 +745,14 @@ func parseArgs(t skill.Tool, args []string, stdin io.Reader) (map[string]any, ca
 		_, isArg := types[name]
 		switch {
 		case isArg:
-		case name == "wait" || name == "as" || name == "out":
+		case name == "out":
+			v, err := next()
+			if err != nil {
+				return nil, o, err
+			}
+			o.out = v
+			continue
+		case name == "wait" || name == "as":
 			v, err := next()
 			if err != nil {
 				if name == "wait" {
@@ -773,13 +760,10 @@ func parseArgs(t skill.Tool, args []string, stdin io.Reader) (map[string]any, ca
 				}
 				return nil, o, err
 			}
-			switch name {
-			case "wait":
+			if name == "wait" {
 				o.wait = v
-			case "as":
+			} else {
 				o.as = v
-			default:
-				o.out = v
 			}
 			continue
 		case name == "json" && !hasVal && (i+1 >= len(args) || strings.HasPrefix(args[i+1], "-")):

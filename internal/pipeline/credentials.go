@@ -204,22 +204,22 @@ const ArgPrecheck = "precheck"
 // шаг входа через коннектор входа (результат — в result) без самого входа.
 const ArgRecordOnly = "record_only"
 
-// clientOf — экземпляр агента для браузера: сессия Claude Code или корневой
-// процесс агента ("" — вызывающий неизвестен или агента среди предков нет:
-// тогда последний процесс цепочки — сам вызов CLI, у каждого вызова свой).
-func clientOf(c *audit.Caller) string {
+func denied(f string, a ...any) error { return abi.Errorf(abi.CodeSecretDenied, f, a...) }
+
+// agentInstance — экземпляр агента для сеансов браузера: сессия Claude Code,
+// иначе процесс-корень агента (живёт, пока жив агент). Вызывающий не агент
+// или неизвестен (удалённый CLI, скрипт с токеном) — "".
+func agentInstance(c *audit.Caller) string {
 	switch {
-	case c == nil || c.Kind == "":
+	case c == nil || c.Source != "peer" || c.Kind == "":
 		return ""
 	case c.Session != "":
-		return "session " + c.Session
+		return "session:" + c.Session
 	case len(c.Chain) > 0:
-		return fmt.Sprintf("process %d", c.Chain[len(c.Chain)-1].PID)
+		return fmt.Sprintf("pid:%d", c.Chain[len(c.Chain)-1].PID)
 	}
 	return ""
 }
-
-func denied(f string, a ...any) error { return abi.Errorf(abi.CodeSecretDenied, f, a...) }
 
 // prepareBrowser дополняет запрос к browser учётками вызывающего; для login и
 // fill_secret — формой запрошенной учётки и значениями её полей (Revealed),
@@ -230,7 +230,7 @@ func (p *Pipeline) prepareBrowser(ctx context.Context, agent string, act manifes
 	who := p.accessorOf(ctx, agent)
 	req.Accounts = p.accountsFor(cfg, who)
 	req.Agent = agent // сеансы браузера привязаны к агенту
-	req.Client = clientOf(CallerFrom(ctx))
+	req.AgentInstance = agentInstance(CallerFrom(ctx))
 	if act.Name != ActionLogin && act.Name != ActionFillSecret {
 		return nil, nil
 	}

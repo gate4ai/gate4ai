@@ -173,7 +173,7 @@ gate4ai browser page_screenshot --session s-… --selector main --out main.png  
 
 Коды выхода: `0` ok, `1` прочие ошибки, `2` запрещено политикой (`denied_by_policy`), `3` ждёт подтверждения (`pending_approval`), `4` проверка не прошла (`verification_failed`), `5` неверные аргументы или неизвестное действие, `6` daemon недоступен, `7` вызывающему нельзя: неверный или отозванный ключ / токен (`unauthorized`), команда владельца с ключом агента (`owner_only`), агент на сокете владельца или вызов владельца без `--as` (`agent_required`), подключение отклонено (`pairing_rejected`). Ответ — JSON в едином конверте: `{"status": "ok" | "denied" | "pending" | "verification_failed" | "error", "result": …, "error": {"code", "message", "hint", "detail"}}` — `result` при успехе, `error` в остальных случаях (у `pending` — что делать дальше). Длинный текст аргумента — из файла: `--<имя>_file путь` (`-` — stdin).
 
-Картинку из ответа (`page_screenshot`, `screenshot`) CLI пишет в файл: `--out файл.png`, без него — во временный файл; в JSON — путь (`result.file`, `content[].path`) вместо base64.
+Картинку из ответа CLI не печатает base64: `--out файл.png` сохраняет её в файл, путь — в `result.file` (`page_screenshot` и без `--out` пишет PNG в каталог данных gate4ai, `browser-shots`).
 
 Claude Code: подключение в Web UI (Агенты → Claude Code) кладёт навык `~/.claude/skills/gate4ai/SKILL.md` — короткую обёртку «перед работой выполни `gate4ai skill`»: актуальный текст (действия профиля, правила браузера) агент берёт у установленного бинарника, и навык не устаревает при обновлении; навык прежних версий (полный текст) daemon при старте и `gate4ai skill` заменяют обёрткой. Подключение кладёт и ключ агента в каталог ключей gate4ai и правило `"Bash(gate4ai *)"` в `permissions.allow` файла `~/.claude/settings.json` (прежний `env.GATE4AI_TOKEN` убирает); `gate4ai doctor` предупреждает, если агент не подключён своим ключом, правила нет или в `env` остался токен.
 
@@ -240,7 +240,7 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 
 ## Тесты
 
-`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из спецификации на собранных бинарниках и настоящих коннекторах — `e2e/` (`./scripts/ci.sh e2e`).
+`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из спецификации на собранных бинарниках и настоящих коннекторах — `e2e/` (`./scripts/ci.sh e2e`). Daemon в e2e и на стенде (`dev/scripts/stand.sh`) запускается с `GATE4AI_DESKTOP_NOTIFY=log`: уведомления daemon на рабочем столе (запросы подтверждения вроде «codex хочет выполнить browser.post», запросы агента на подключение, коды, отказы) не всплывают, а пишутся в журнал daemon (`desktop notification` с заголовком и текстом); решения — как обычно, в Web UI, Telegram или CLI.
 
 ## Тестовый стенд
 
@@ -249,6 +249,7 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 ```sh
 mkdir -p /tmp/g4stand
 export GATE4AI_HOME=$PWD/.stand GATE4AI_SOCKET=/tmp/g4stand/owner.sock GATE4AI_AGENT_SOCKET=/tmp/g4stand/agent.sock
+export GATE4AI_DESKTOP_NOTIFY=log   # уведомления daemon — в его журнал, без всплывающих окон
 # стенд, который запускает сам агент (Claude Code): сборка go build -tags gate4ai_devstand ./cmd/gate4ai
 # и GATE4AI_OWNER_CHECK=off — сокет владельца не отличает агента от человека (в выпуске переменная не действует)
 gate4ai daemon --ui 127.0.0.1:7531 --keystore file &       # ключи в файле, а не в связке ОС

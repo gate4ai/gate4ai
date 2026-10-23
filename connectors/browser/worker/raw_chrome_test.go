@@ -5,6 +5,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -60,12 +61,17 @@ func (a *apiSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.deleted = append(a.deleted, strings.TrimPrefix(r.URL.Path, "/api/v1/provisioning/alert-rules/"))
 		a.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
+	case r.URL.Path == "/api/big": // JSON в 35+ КБ — больше max_text_chars по умолчанию
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(bigJSON))
 	case r.URL.Path == "/api/moved":
 		http.Redirect(w, r, "/api/v1/provisioning/alert-rules", http.StatusTemporaryRedirect)
 	default:
 		http.NotFound(w, r)
 	}
 }
+
+var bigJSON = `{"rules":[` + strings.Repeat(`{"title":"rule with a long enough name"},`, 1000) + `{"title":"last"}]}`
 
 // docOnly — CDP без тела ответа документа: текст JSON-страницы — из DOM
 // (как у Stagehand), без просмотрщика Chrome.
@@ -85,25 +91,25 @@ func TestRawAndFetchRealChrome(t *testing.T) {
 	}
 	for _, e := range []Engine{eng, docOnly{eng}} {
 		x.Engine = e
-		b, ok, err := x.RawDocument(ctx, 10000)
+		b, ok, err := x.RawDocument(ctx, 10000, 0)
 		if err != nil || !ok || b.ContentType != "application/json" || b.Body != `[{"api_token":"***","title":"High CPU","uid":"a1"}]` || b.JSON != nil {
 			t.Fatalf("%T: %+v %v %v", e, b, ok, err)
 		}
 	}
 	x.Engine = eng
-	if b, _, _ := x.RawDocument(ctx, 5); !b.Truncated || len([]rune(b.Body)) != 5 {
+	if b, _, _ := x.RawDocument(ctx, 5, 0); !b.Truncated || len([]rune(b.Body)) != 5 {
 		t.Fatal("max chars:", b)
 	}
 	if _, err := x.Open(ctx, base+"/text"); err != nil {
 		t.Fatal(err)
 	}
-	if b, ok, _ := x.RawDocument(ctx, 100); !ok || b.Body != "plain\nlines" || !strings.HasPrefix(b.ContentType, "text/plain") {
+	if b, ok, _ := x.RawDocument(ctx, 100, 0); !ok || b.Body != "plain\nlines" || !strings.HasPrefix(b.ContentType, "text/plain") {
 		t.Fatal(b)
 	}
 	if _, err := x.Open(ctx, base+"/"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := x.RawDocument(ctx, 100); ok {
+	if _, ok, _ := x.RawDocument(ctx, 100, 0); ok {
 		t.Fatal("an HTML page is read as text")
 	}
 
@@ -131,6 +137,19 @@ func TestRawAndFetchRealChrome(t *testing.T) {
 	}
 	if res, err = x.Fetch(ctx, FetchRequest{Method: "GET", URL: base + "/api/moved"}); err != nil || res.Status != 200 || !strings.HasSuffix(res.URL, "/alert-rules") {
 		t.Fatal("a read follows redirects:", res, err)
+	}
+	// Большой JSON: по умолчанию и с max_chars 200000 — разобран целиком; max_chars
+	// меньше — тело с подсказкой о полной длине.
+	for _, max := range []int{0, 200000} {
+		res, err = x.Fetch(ctx, FetchRequest{Method: "GET", URL: base + "/api/big", Max: max, TextMax: MaxFetchResponse})
+		if r, _ := res.JSON.(map[string]any)["rules"].([]any); err != nil || res.Truncated || len(r) != 1001 {
+			t.Fatalf("max_chars %d: %d rules, truncated %v, %v", max, len(r), res.Truncated, err)
+		}
+	}
+	res, err = x.Fetch(ctx, FetchRequest{Method: "GET", URL: base + "/api/big", Max: 1000})
+	if full := fmt.Sprint(len(bigJSON)); err != nil || !res.Truncated || res.JSON != nil || len(res.Body.Body) != 1000 ||
+		res.Hint != "json not parsed: body truncated at 1000 of "+full+" chars, pass max_chars ≥ "+full {
+		t.Fatalf("%q %v", res.Hint, err)
 	}
 	if _, err = x.Fetch(ctx, FetchRequest{Method: "DELETE", URL: "https://evil.example/api"}); !errors.Is(err, ErrDomain) {
 		t.Fatal("site list:", err)

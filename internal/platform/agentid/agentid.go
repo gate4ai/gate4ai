@@ -17,14 +17,19 @@ import (
 )
 
 // envMarkers — переменные окружения, которые агент ставит своим дочерним
-// процессам (shell, MCP-серверы), → тип агента.
-var envMarkers = []struct{ Key, Agent string }{
-	{"CLAUDECODE", "claude-code"},
-	{"CLAUDE_CODE_ENTRYPOINT", "claude-code"},
-	{"CODEX_SANDBOX", "codex"},
-	{"CODEX_MANAGED_BY_NPM", "codex"},
-	{"GEMINI_CLI", "gemini"},
-	{"CURSOR_AGENT", "cursor"},
+// процессам (shell, MCP-серверы), → тип агента. Value — нужное значение
+// ("" — любое непустое).
+type envMarker struct{ Key, Value, Agent string }
+
+var envMarkers = []envMarker{
+	{"CLAUDECODE", "", "claude-code"},
+	{"CLAUDE_CODE_ENTRYPOINT", "", "claude-code"},
+	{"CODEX_SANDBOX", "", "codex"},
+	{"CODEX_MANAGED_BY_NPM", "", "codex"},
+	{"GEMINI_CLI", "", "gemini"},
+	{"CURSOR_AGENT", "", "cursor"},
+	// Инструмент exec агента OpenClaw; tui-local и acp-client — команды человека.
+	{"OPENCLAW_SHELL", "exec", "openclaw"},
 }
 
 // procNames — имена процессов агентов → тип агента.
@@ -40,6 +45,9 @@ var procNames = map[string]string{
 // SessionKey — идентификатор сессии Claude Code в окружении её процессов.
 const SessionKey = "CLAUDE_CODE_SESSION_ID"
 
+// match — значение переменной — признак агента.
+func (m envMarker) match(v string) bool { return v != "" && (m.Value == "" || v == m.Value) }
+
 // Keys — переменные окружения, которые нужно читать у процессов.
 func Keys() []string {
 	out := []string{SessionKey}
@@ -52,7 +60,7 @@ func Keys() []string {
 // FromEnv — тип агента по окружению этого процесса ("" — признаков агента нет).
 func FromEnv(getenv func(string) string) string {
 	for _, m := range envMarkers {
-		if getenv(m.Key) != "" {
+		if m.match(getenv(m.Key)) {
 			return m.Agent
 		}
 	}
@@ -99,7 +107,7 @@ func FromChain(chain []procinfo.Proc, cwd func(int) string) Caller {
 			continue
 		}
 		for _, m := range envMarkers {
-			if p.Env[m.Key] == "" {
+			if !m.match(p.Env[m.Key]) {
 				continue
 			}
 			// Признак ставит агент своим детям: агент — родитель процесса
