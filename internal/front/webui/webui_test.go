@@ -3,7 +3,9 @@
 package webui
 
 import (
+	"bytes"
 	"context"
+	"html"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -87,13 +89,58 @@ func body(t *testing.T, r *http.Response) string {
 
 var csrfRe = regexp.MustCompile(`name="csrf" value="([0-9a-f]+)"`)
 
+var refreshRe = regexp.MustCompile(`http-equiv="refresh" content="0;url=([^"]+)"`)
+
+// metaRefresh — транспорт тестового клиента: как браузер, идёт по
+// <meta http-equiv="refresh"> (так ссылка входа уводит в UI, sameSiteRedirect).
+type metaRefresh struct{}
+
+func (metaRefresh) RoundTrip(req *http.Request) (*http.Response, error) {
+	r, err := http.DefaultTransport.RoundTrip(req)
+	if err != nil || r.StatusCode != 200 || !strings.HasPrefix(r.Header.Get("Content-Type"), "text/html") {
+		return r, err
+	}
+	b, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	if m := refreshRe.FindSubmatch(b); m != nil {
+		r.StatusCode, r.Status = http.StatusSeeOther, "303 See Other"
+		r.Header.Set("Location", html.UnescapeString(string(m[1])))
+	}
+	return r, nil
+}
+
+// Ссылка входа уводит в UI своей страницей, а не 303: открытая с чужого сайта
+// (страница-передатчик file:// у `gate4ai ui`), она иначе давала межсайтовый
+// редирект, на котором браузер не шлёт новую cookie с SameSite=Strict, и
+// автоматически открытое окно просило вызвать `gate4ai ui` ещё раз.
+func TestLoginLinkLeavesBySameSitePage(t *testing.T) {
+	u, _, _, _ := setup(t)
+	r, err := http.Get(u.LoginURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := body(t, r)
+	var sess bool
+	for _, c := range r.Cookies() {
+		sess = sess || c.Name == "g4a_session" && c.SameSite == http.SameSiteStrictMode
+	}
+	if r.StatusCode != 200 || !sess || r.Header.Get("Location") != "" ||
+		!strings.Contains(p, `http-equiv="refresh" content="0;url=/"`) || r.Header.Get("Referrer-Policy") != "no-referrer" {
+		t.Fatal(r.StatusCode, r.Header, p)
+	}
+}
+
 func TestWebUI(t *testing.T) {
 	u, d, n, base := setup(t)
 	if _, err := u.Listen("0.0.0.0:0"); err == nil {
 		t.Fatal("must refuse non-loopback")
 	}
 	jar, _ := cookiejar.New(nil)
-	c := &http.Client{Jar: jar}
+	c := &http.Client{Jar: jar, Transport: metaRefresh{}}
 
 	r, _ := c.Get(base + "/")
 	if r.StatusCode != 401 || !strings.Contains(body(t, r), "gate4ai ui") {
@@ -110,7 +157,7 @@ func TestWebUI(t *testing.T) {
 	page := body(t, r)
 	csrf := csrfRe.FindStringSubmatch(page)[1]
 	// Повторное использование ссылки входа.
-	c2 := &http.Client{}
+	c2 := &http.Client{Transport: metaRefresh{}}
 	if r, _ := c2.Get(login); r.StatusCode != 401 {
 		t.Fatal("login link reused")
 	}
@@ -289,7 +336,7 @@ func TestTrayContract(t *testing.T) {
 func TestAccountsAndQuestions(t *testing.T) {
 	u, d, _, base := setup(t)
 	jar, _ := cookiejar.New(nil)
-	c := &http.Client{Jar: jar}
+	c := &http.Client{Jar: jar, Transport: metaRefresh{}}
 	r, _ := c.Get(u.LoginURL())
 	csrf := csrfRe.FindStringSubmatch(body(t, r))[1]
 	acc := cfg + `credentials:
@@ -338,7 +385,7 @@ func TestAccountsAndQuestions(t *testing.T) {
 func TestLiveApprovals(t *testing.T) {
 	u, d, _, base := setup(t)
 	jar, _ := cookiejar.New(nil)
-	c := &http.Client{Jar: jar}
+	c := &http.Client{Jar: jar, Transport: metaRefresh{}}
 	if r, _ := c.Get(base + "/approvals/live"); r.StatusCode != 401 {
 		t.Fatal("live without session", r.StatusCode)
 	}

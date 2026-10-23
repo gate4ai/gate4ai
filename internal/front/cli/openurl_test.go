@@ -62,3 +62,16 @@ func TestHelpContractFixture(t *testing.T) {
 		t.Fatal("usage without restart")
 	}
 }
+
+// Страница-передатчик переходит по одноразовой ссылке один раз: meta refresh —
+// только без скрипта, иначе второй переход мог отменить первый, когда токен
+// уже израсходован.
+func TestHandoffPageNavigatesOnce(t *testing.T) {
+	p := handoffPage("http://127.0.0.1:7777/login?t=x")
+	before, rest, ok := strings.Cut(p, "<noscript>")
+	inside, after, ok2 := strings.Cut(rest, "</noscript>")
+	if !ok || !ok2 || !strings.Contains(inside, `http-equiv="refresh"`) ||
+		strings.Contains(before+after, `http-equiv="refresh"`) || !strings.Contains(after, "location.replace(") {
+		t.Fatal(p)
+	}
+}

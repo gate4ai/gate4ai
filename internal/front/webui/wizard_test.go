@@ -56,7 +56,7 @@ func TestEnglishByDefault(t *testing.T) {
 	}
 	// Переключатель: cookie и возврат на ту же страницу; чужой адрес — на главную.
 	jar, _ := cookiejar.New(nil)
-	c := &http.Client{Jar: jar}
+	c := &http.Client{Jar: jar, Transport: metaRefresh{}}
 	c.Get(u.LoginURL())
 	r, err := c.Get(base + "/lang?l=ru&back=" + url.QueryEscape("/agents"))
 	if err != nil || r.Request.URL.Path != "/agents" {

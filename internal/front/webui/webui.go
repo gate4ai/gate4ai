@@ -530,7 +530,7 @@ func (u *UI) login(m mount) http.HandlerFunc {
 				p := u.Protection()
 				if !p.Extra() {
 					u.startSession(w, m, false)
-					http.Redirect(w, r, m.base+"/", http.StatusSeeOther)
+					sameSiteRedirect(w, m.base+"/")
 					return
 				}
 				u.mu.Lock()
@@ -538,7 +538,7 @@ func (u *UI) login(m mount) http.HandlerFunc {
 				u.mu.Unlock()
 				u.setAttemptCookie(w, m, id)
 				// Без токена в адресе: дальше попытка живёт только в cookie этого браузера.
-				http.Redirect(w, r, m.base+"/login", http.StatusSeeOther)
+				sameSiteRedirect(w, m.base+"/login")
 				return
 			}
 		}
@@ -551,6 +551,19 @@ func (u *UI) login(m mount) http.HandlerFunc {
 		}
 		u.loginPage(w, r, m)
 	}
+}
+
+// sameSiteRedirect уводит со ссылки входа страницей этого же сайта, а не
+// 303: ссылку открывают и с чужого сайта (страница-передатчик file:// у
+// `gate4ai ui`, мессенджер), и тогда браузер считает весь редирект
+// межсайтовым и не шлёт на следующий адрес только что поставленную
+// cookie с SameSite=Strict — вход терялся. Переход, начатый своей
+// страницей, уже same-site. Токен в Referer не уходит.
+func sameSiteRedirect(w http.ResponseWriter, to string) {
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	q := template.HTMLEscapeString(to)
+	fmt.Fprint(w, `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=`+q+`"><title>gate4.ai</title><a href="`+q+`">gate4.ai</a>`)
 }
 
 type view struct {

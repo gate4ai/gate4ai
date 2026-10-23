@@ -99,11 +99,13 @@ func writeHandoff(u string) (string, error) {
 }
 
 // handoffPage — страница, которая сразу переходит по ссылке (без истории).
+// Переход один: ссылка одноразовая, и второй (meta refresh вдогонку скрипту)
+// мог бы отменить первый, когда сервер уже израсходовал токен.
 func handoffPage(u string) string {
 	q := html.EscapeString(u)
 	js := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "<", `\x3c`, ">", `\x3e`, "\n", "", "\r", "").Replace(u)
 	return `<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer">` +
-		`<meta http-equiv="refresh" content="0;url=` + q + `"><title>gate4.ai</title>` +
+		`<noscript><meta http-equiv="refresh" content="0;url=` + q + `"></noscript><title>gate4.ai</title>` +
 		`<script>location.replace("` + js + `")</script><a href="` + q + `">Open gate4.ai</a>`
 }
 
