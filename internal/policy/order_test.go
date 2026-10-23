@@ -136,3 +136,63 @@ func TestGlobRealPath(t *testing.T) {
 		t.Fatal("case-sensitive FS")
 	}
 }
+
+// Агентский профиль с browser.* → allow и change_policy → allow: правка
+// политики всё равно у владельца, запись на сайтах и вход — только по правилу,
+// которое называет действие; deny действует как прежде.
+func TestOwnerOnlyAndExplicitOnly(t *testing.T) {
+	y := `
+agents: {a: {profile: connector-dev}, b: {profile: strict}}
+profiles:
+  connector-dev:
+    connectors: [browser]
+    rules:
+      - {id: dev-browser-allow, action: "browser.*", effect: allow}
+      - {id: gate4ai-change_policy-allow, action: gate4ai.change_policy, effect: allow}
+      - {id: get-named, action: browser.delete, when: 'domain_matches(url, ["api.example"])', effect: allow}
+  strict:
+    connectors: [browser]
+    rules:
+      - {id: all, action: "*", effect: allow}
+      - {id: no-self, action: gate4ai.change_policy, effect: deny}
+`
+	e := mustEngine(t, y, nil)
+	dec := func(agent, action, class string, args map[string]any) Decision {
+		if args == nil {
+			args = map[string]any{}
+		}
+		return e.Decide(Request{Agent: agent, Action: action, Class: class, Args: args}, fakeCounters{})
+	}
+	if d := dec("a", "gate4ai.change_policy", ClassWrite, nil); d.Effect != config.EffectAsk || !strings.Contains(d.Reason, "always needs the owner") {
+		t.Fatalf("change_policy: %+v", d)
+	}
+	if d := dec("b", "gate4ai.change_policy", ClassWrite, nil); d.Effect != config.EffectDeny {
+		t.Fatalf("deny still forbids: %+v", d)
+	}
+	for _, act := range []string{"browser.post", "browser.put", "browser.patch", "browser.delete", "browser.login", "browser.fill_secret"} {
+		if d := dec("a", act, ClassWrite, map[string]any{"url": "https://other.example/x"}); d.Effect != config.EffectAsk || !strings.Contains(d.Reason, "does not cover") {
+			t.Fatalf("%s under browser.*: %+v", act, d)
+		}
+		if d := dec("b", act, ClassWrite, map[string]any{"url": "https://other.example/x"}); d.Effect != config.EffectAsk {
+			t.Fatalf("%s under *: %+v", act, d)
+		}
+	}
+	if d := dec("a", "browser.delete", ClassWrite, map[string]any{"url": "https://api.example/items/1"}); d.Effect != config.EffectAllow || d.RuleIDs[0] != "get-named" {
+		t.Fatalf("a rule that names the action allows it: %+v", d)
+	}
+	for _, act := range []string{"browser.get", "browser.act", "browser.open"} {
+		if d := dec("a", act, ClassWrite, map[string]any{"url": "https://x.example/"}); d.Effect != config.EffectAllow {
+			t.Fatalf("%s still allowed by browser.*: %+v", act, d)
+		}
+	}
+	ws := strings.Join(Warnings(e.Config()), "\n")
+	for _, want := range []string{"profiles.connector-dev rule gate4ai-change_policy-allow: allow has no effect on gate4ai.change_policy",
+		"profiles.connector-dev rule dev-browser-allow: browser.* does not cover browser.delete", "profiles.strict rule all: * does not cover"} {
+		if !strings.Contains(ws, want) {
+			t.Fatalf("warnings %q lack %q", ws, want)
+		}
+	}
+	if strings.Contains(ws, "rule get-named") || strings.Contains(ws, "rule no-self") {
+		t.Fatal(ws)
+	}
+}

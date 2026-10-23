@@ -141,8 +141,8 @@ func TestInstallDevConnectorByAgent(t *testing.T) {
 	}
 }
 
-// Своя сборка — новый код в daemon: даже при правиле allow на change_policy
-// её ставит только человек; обычные правки allow пропускает.
+// Своя сборка — новый код в daemon: её ставит только человек; правило allow
+// на change_policy не действует и на обычные правки (policy.OwnerOnly).
 func TestInstallDevAlwaysAsks(t *testing.T) {
 	c, _ := connectors.NewInProcess(&notes{})
 	conf := cfg + "      - { id: self-allow, action: gate4ai.change_policy, effect: allow }\n"
@@ -160,13 +160,16 @@ func TestInstallDevAlwaysAsks(t *testing.T) {
 	}
 	r = d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "gate4ai.change_policy", Args: map[string]any{
 		"summary": "list", "changes": []any{map[string]any{"op": "add_list_items", "list": "x", "items": []any{"a"}}}}})
-	if r.Status != pipeline.StatusOK {
-		t.Fatalf("allow still allows ordinary changes: %+v", r)
+	if r.Status != pipeline.StatusPending || !strings.Contains(r.Reason, "self-allow (allow) does not apply") {
+		t.Fatalf("allow on change_policy has no effect: %+v", r)
+	}
+	if w := PolicySummary(d.Config.Current(), "bot")["warnings"]; w == nil {
+		t.Fatal("policy_summary warns about the rule")
 	}
 }
 
 // Сайты агента и учётки — без правки YAML: владелец — gate4ai sites, агент —
-// add_setting_items (под политикой) и add_credential (всегда с подтверждением).
+// add_setting_items и add_credential (всегда с подтверждением владельца).
 func TestSitesAndCredentialChanges(t *testing.T) {
 	c, _ := connectors.NewInProcess(&notes{})
 	conf := cfg + "      - { id: self-allow, action: gate4ai.change_policy, effect: allow }\nconnectors:\n  browser: { allowed_domains: [lk.example], model_key: \"@llm.key\" }\n  notes: { root: \"~/n\" }\n"
@@ -188,8 +191,12 @@ func TestSitesAndCredentialChanges(t *testing.T) {
 	if st := sum["settings"].(map[string]map[string]any); st["notes"]["root"] != "~/n" {
 		t.Fatalf("%+v", sum["settings"])
 	}
-	if r := call(map[string]any{"op": "add_setting_items", "connector": "browser", "key": "allowed_domains", "items": []any{"login.example", "lk.example"}}); r.Status != pipeline.StatusOK {
-		t.Fatalf("%+v", r)
+	r := call(map[string]any{"op": "add_setting_items", "connector": "browser", "key": "allowed_domains", "items": []any{"login.example", "lk.example"}})
+	if r.Status != pipeline.StatusPending {
+		t.Fatalf("sites: the owner approves: %+v", r)
+	}
+	if res, err := d.Pipeline.Decide(ctx, r.ID, true, "webui", "owner"); err != nil || res.Status != "ok" {
+		t.Fatal(res, err)
 	}
 	if got := d.Config.Current().SettingList("browser", "allowed_domains"); len(got) != 2 || got[1] != "login.example" {
 		t.Fatal(got)
@@ -198,7 +205,7 @@ func TestSitesAndCredentialChanges(t *testing.T) {
 		t.Fatalf("secrets via settings: %+v", r)
 	}
 	cred := `{"bind":["https://login.example"],"form":{"fields":[{"selector":"#p","secret":"@site.password"}],"submit":{"press":"Enter"}},"use":["p"]}`
-	r := call(map[string]any{"op": "add_credential", "account": "@site", "credential_json": cred})
+	r = call(map[string]any{"op": "add_credential", "account": "@site", "credential_json": cred})
 	if r.Status != pipeline.StatusPending || !strings.Contains(r.Reason, "always needs the owner") {
 		t.Fatalf("add_credential always asks: %+v", r)
 	}

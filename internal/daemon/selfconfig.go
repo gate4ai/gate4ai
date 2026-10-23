@@ -19,13 +19,14 @@ import (
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
+	"github.com/gate4ai/gate4ai/internal/policy"
 )
 
 // SelfConnector — внутренний коннектор самонастройки: вместо внешнего сервиса
 // его действия меняют политику самого gate4ai. Это обычные действия под обычной
 // политикой (спецификация, «Безопасность самого шлюза»): change_policy — класс
-// write, по умолчанию с подтверждением владельца в любом канале; правила могут
-// его разрешить или запретить. Значения секретов через него не задаются; новая
+// write, всегда с подтверждением владельца (policy.OwnerOnly: правило allow
+// его не разрешает, deny — запрещает). Значения секретов через него не задаются; новая
 // учётка (add_credential, только с новыми алиасами в своём пространстве имён),
 // своя сборка и настройки, от которых зависит, куда уходят секреты, — только
 // с подтверждением человека (alwaysAskSelf).
@@ -293,8 +294,20 @@ func PolicySummary(cfg *config.Config, agent string) map[string]any {
 			settings[conn][k] = v
 		}
 	}
-	return map[string]any{"agent": agent, "profile": a.Profile, "connectors": p.Connectors, "rules": rules, "limits": limits, "settings": settings,
-		"lists": lists, "other_profiles": others, "defaults": "no rule matched: read → allow; write / external / money → ask; deny beats ask beats allow"}
+	out := map[string]any{"agent": agent, "profile": a.Profile, "connectors": p.Connectors, "rules": rules, "limits": limits, "settings": settings,
+		"lists": lists, "other_profiles": others, "defaults": "no rule matched: read → allow; write / external / money → ask; deny beats ask beats allow; " +
+			"gate4ai.change_policy always asks the owner; browser.post / put / patch / delete / login / fill_secret are allowed only by a rule that names them (not browser.*)"}
+	pre := "profiles." + a.Profile + " "
+	var warns []string
+	for _, w := range policy.Warnings(cfg) {
+		if strings.HasPrefix(w, pre) {
+			warns = append(warns, strings.TrimPrefix(w, pre))
+		}
+	}
+	if len(warns) > 0 {
+		out["warnings"] = warns
+	}
+	return out
 }
 
 // devManifest — манифест своей сборки в папке и его байты: только WASM

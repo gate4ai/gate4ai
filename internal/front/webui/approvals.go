@@ -18,6 +18,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
+	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/internal/state"
 )
 
@@ -129,6 +130,9 @@ func reasonText(l, s string) string {
 
 // alwaysScope — что разрешит «Разрешать всегда»: «in ~/notes», «on github.com».
 func (u *UI) alwaysScope(a *state.Approval) (Msg, []Cond, bool) {
+	if policy.OwnerOnly[a.Action] {
+		return Msg{}, nil, false // правило allow на него не действует
+	}
 	t, ok := toolSchema(u.tools(), a.Action)
 	if !ok {
 		return Msg{}, nil, false

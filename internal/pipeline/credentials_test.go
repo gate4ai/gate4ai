@@ -140,6 +140,8 @@ profiles:
     connectors: [browser, lk_emias, slotted, stranger, bank_login]
     rules:
       - { id: login-ok, action: "browser.*", effect: allow }
+      - { id: login-named, action: browser.login, effect: allow }
+      - { id: fill-named, action: browser.fill_secret, effect: allow }
       - { id: lk-ok, action: "lk_emias.*", effect: allow }
       - { id: slotted-ok, action: "slotted.*", effect: allow }
       - { id: stranger-ok, action: "stranger.*", effect: allow }
@@ -147,6 +149,8 @@ profiles:
     connectors: [browser]
     rules:
       - { id: login-ok, action: "browser.*", effect: allow }
+      - { id: login-named, action: browser.login, effect: allow }
+      - { id: fill-named, action: browser.fill_secret, effect: allow }
 connectors:
   slotted: { credentials: { login: "@emias" } }
 credentials:
