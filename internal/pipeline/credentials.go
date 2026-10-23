@@ -205,10 +205,11 @@ const ArgPrecheck = "precheck"
 const ArgRecordOnly = "record_only"
 
 // clientOf — экземпляр агента для браузера: сессия Claude Code или корневой
-// процесс агента ("" — вызывающий неизвестен).
+// процесс агента ("" — вызывающий неизвестен или агента среди предков нет:
+// тогда последний процесс цепочки — сам вызов CLI, у каждого вызова свой).
 func clientOf(c *audit.Caller) string {
 	switch {
-	case c == nil:
+	case c == nil || c.Kind == "":
 		return ""
 	case c.Session != "":
 		return "session " + c.Session

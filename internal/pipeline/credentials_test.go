@@ -503,3 +503,23 @@ func TestHandoffNotifiesAfterPrecheck(t *testing.T) {
 		t.Fatal(reqs)
 	}
 }
+
+// Экземпляр агента для браузера: сессия Claude Code, иначе корневой процесс
+// агента; без агента среди предков — "" (иначе у каждого вызова CLI был бы
+// свой «клиент», и close --all не закрыл бы ни одного сеанса).
+func TestClientOf(t *testing.T) {
+	chain := []audit.CallerProc{{PID: 10, Name: "gate4ai"}, {PID: 7, Name: "claude"}}
+	for _, c := range []struct {
+		in   *audit.Caller
+		want string
+	}{
+		{nil, ""},
+		{&audit.Caller{Chain: chain[:1]}, ""},
+		{&audit.Caller{Kind: "claude-code", Session: "abc", Chain: chain}, "session abc"},
+		{&audit.Caller{Kind: "claude-code", Chain: chain}, "process 7"},
+	} {
+		if got := clientOf(c.in); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.in, got, c.want)
+		}
+	}
+}
