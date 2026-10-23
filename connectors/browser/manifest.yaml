@@ -17,6 +17,7 @@ actions:
       type: object
       properties:
         url: { type: string, format: url }
+        max_chars: { type: integer, minimum: 0, maximum: 1000000, description: "characters of the page text or of a non-HTML body, up to 1000000 (0 — the default: the browser's max_text_chars, 30000 by default; a JSON body — 200000); a truncated body comes with hint: its full length and the max_chars to pass" }
       required: [url]
     output_schema:
       type: object
@@ -27,6 +28,7 @@ actions:
         content_type: { type: string, description: "a page that is not HTML: its type" }
         body: { type: string, description: "a page that is not HTML (JSON, text): the body as the server sent it, up to the limit (tokens and the owner's redact_params hidden)" }
         size: { type: integer, description: "a page that is not HTML: bytes in the body" }
+        hint: { type: string, description: "a truncated body: its full length in characters and the max_chars that returns it whole" }
       required: [url, title]
     example: gate4ai browser read --url https://app.example.org/
   - name: screenshot
@@ -94,7 +96,7 @@ actions:
       type: object
       properties:
         session: { type: string, description: "agents: the session from browser.open" }
-        max_chars: { type: integer, minimum: 0, description: "0 — the browser's limit" }
+        max_chars: { type: integer, minimum: 0, maximum: 1000000, description: "characters of the page text or of a non-HTML body, up to 1000000 (0 — the default: the browser's max_text_chars, 30000 by default; a JSON body — 200000); a truncated body comes with hint: its full length and the max_chars to pass" }
         selector: { type: string, description: "only inside this element: a dialog, a card, a list" }
         elements: { type: boolean, description: "add visible fields, buttons and links with a unique CSS selector each (up to 300; ads and trackers are skipped); fields show the start of their value (200 characters) and value_length" }
         kinds: { type: array, items: { type: string, enum: [fields, buttons, links] }, description: "only these kinds of elements (implies elements), e.g. fields,buttons" }
@@ -113,6 +115,7 @@ actions:
         content_type: { type: string, description: "a page that is not HTML: its type" }
         body: { type: string, description: "a page that is not HTML (JSON, text): the body as the server sent it, up to max_chars (tokens and the owner's redact_params hidden)" }
         size: { type: integer, description: "a page that is not HTML: bytes in the body" }
+        hint: { type: string, description: "a truncated body: its full length in characters and the max_chars that returns it whole" }
         elements:
           type: array
           items:
@@ -265,7 +268,7 @@ actions:
         session: { type: string, description: "the session from browser.open: the request goes from its page (its origin and cookies)" }
         url: { type: string, format: url, description: "an address on the allowed sites" }
         headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
-        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+        max_chars: { type: integer, minimum: 0, maximum: 1000000, description: "the start of the response body to return, up to 1000000 characters (0 — the default: 200000 for JSON, for other text the browser's max_text_chars, 30000 by default); a truncated body comes with truncated: true and hint: its full length and the max_chars to pass (a truncated JSON is not parsed)" }
       required: [session, url]
   - name: head
     class: read
@@ -277,7 +280,7 @@ actions:
         session: { type: string, description: "the session from browser.open: the request goes from its page (its origin and cookies)" }
         url: { type: string, format: url, description: "an address on the allowed sites" }
         headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
-        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+        max_chars: { type: integer, minimum: 0, maximum: 1000000, description: "the start of the response body to return, up to 1000000 characters (0 — the default: 200000 for JSON, for other text the browser's max_text_chars, 30000 by default); a truncated body comes with truncated: true and hint: its full length and the max_chars to pass (a truncated JSON is not parsed)" }
       required: [session, url]
   - name: post
     class: write
@@ -290,7 +293,7 @@ actions:
         url: { type: string, format: url, description: "an address on the allowed sites" }
         headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
         body: { type: string, maxLength: 262144, description: "the request body (a JSON body gets Content-Type: application/json unless headers set it; CLI: --body_file <path>)" }
-        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+        max_chars: { type: integer, minimum: 0, maximum: 1000000, description: "the start of the response body to return, up to 1000000 characters (0 — the default: 200000 for JSON, for other text the browser's max_text_chars, 30000 by default); a truncated body comes with truncated: true and hint: its full length and the max_chars to pass (a truncated JSON is not parsed)" }
       required: [session, url]
   - name: put
     class: write
@@ -303,7 +306,7 @@ actions:
         url: { type: string, format: url, description: "an address on the allowed sites" }
         headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
         body: { type: string, maxLength: 262144, description: "the request body (a JSON body gets Content-Type: application/json unless headers set it; CLI: --body_file <path>)" }
-        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+        max_chars: { type: integer, minimum: 0, maximum: 1000000, description: "the start of the response body to return, up to 1000000 characters (0 — the default: 200000 for JSON, for other text the browser's max_text_chars, 30000 by default); a truncated body comes with truncated: true and hint: its full length and the max_chars to pass (a truncated JSON is not parsed)" }
       required: [session, url]
   - name: patch
     class: write
@@ -316,7 +319,7 @@ actions:
         url: { type: string, format: url, description: "an address on the allowed sites" }
         headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
         body: { type: string, maxLength: 262144, description: "the request body (a JSON body gets Content-Type: application/json unless headers set it; CLI: --body_file <path>)" }
-        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+        max_chars: { type: integer, minimum: 0, maximum: 1000000, description: "the start of the response body to return, up to 1000000 characters (0 — the default: 200000 for JSON, for other text the browser's max_text_chars, 30000 by default); a truncated body comes with truncated: true and hint: its full length and the max_chars to pass (a truncated JSON is not parsed)" }
       required: [session, url]
   - name: delete
     class: write
@@ -328,7 +331,7 @@ actions:
         session: { type: string, description: "the session from browser.open: the request goes from its page (its origin and cookies)" }
         url: { type: string, format: url, description: "an address on the allowed sites" }
         headers: { type: string, description: "JSON object of request headers, e.g. {\"Accept\":\"application/json\"}" }
-        max_chars: { type: integer, minimum: 0, description: "the start of the response body to return (0 — the browser's limit)" }
+        max_chars: { type: integer, minimum: 0, maximum: 1000000, description: "the start of the response body to return, up to 1000000 characters (0 — the default: 200000 for JSON, for other text the browser's max_text_chars, 30000 by default); a truncated body comes with truncated: true and hint: its full length and the max_chars to pass (a truncated JSON is not parsed)" }
       required: [session, url]
   # Вход по учётке владельца (credentials в конфигурации gate4ai): значения
   # секретов хост передаёт пакету только для этих двух действий, агенту и

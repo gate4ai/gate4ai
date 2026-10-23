@@ -22,6 +22,9 @@ type Body struct {
 	Body        string `json:"body,omitempty"`      // иначе текст (до предела символов)
 	Size        int    `json:"size"`                // байт в ответе
 	Truncated   bool   `json:"truncated,omitempty"` // body обрезан
+	// Hint — у обрезанного тела: сколько символов в нём целиком и какой
+	// max_chars вернёт его полностью (JSON — разобранным).
+	Hint string `json:"hint,omitempty"`
 }
 
 // docInfoJS — тип верхнего документа и его текст без просмотрщика Chrome:
@@ -39,8 +42,9 @@ type docBodier interface {
 }
 
 // RawDocument — верхний документ не HTML (JSON, текст): его тело как есть до
-// max символов; ok — false у HTML-страницы.
-func (x *Executor) RawDocument(ctx context.Context, max int) (b Body, ok bool, err error) {
+// max символов (0 — по умолчанию, см. Limits; text — предел текста по
+// умолчанию); ok — false у HTML-страницы.
+func (x *Executor) RawDocument(ctx context.Context, max, text int) (b Body, ok bool, err error) {
 	u, err := x.settledURL(ctx)
 	if err != nil {
 		return Body{}, false, err
@@ -62,19 +66,52 @@ func (x *Executor) RawDocument(ctx context.Context, max int) (b Body, ok bool, e
 			body = raw
 		}
 	}
-	return x.body(u, info.Type, body, len(body), max, false), true, nil
+	textMax, jsonMax := Limits(max, text)
+	return x.body(u, info.Type, body, len(body), 0, textMax, jsonMax, false), true, nil
+}
+
+// MaxFetchResponse — предел тела ответа не JSON по умолчанию (символов).
+const MaxFetchResponse = 30000
+
+// DefaultJSONChars — предел тела ответа JSON по умолчанию (символов):
+// обрезанный JSON не разбирается, поэтому предел у него выше.
+const DefaultJSONChars = 200000
+
+// MaxResponseChars — верхняя граница max_chars (символов).
+const MaxResponseChars = 1000000
+
+// Limits — пределы тела ответа для текста и для JSON: n — явный max_chars
+// (больше верхней границы — граница), 0 — по умолчанию: text (предел
+// max_text_chars настроек, 0 — MaxFetchResponse) и не меньше DefaultJSONChars у JSON.
+func Limits(n, text int) (textMax, jsonMax int) {
+	if n > 0 {
+		n = min(n, MaxResponseChars)
+		return n, n
+	}
+	if text <= 0 {
+		text = MaxFetchResponse
+	}
+	text = min(text, MaxResponseChars)
+	return text, min(MaxResponseChars, max(text, DefaultJSONChars))
 }
 
 // body — ответ для агента: секреты скрыты (RedactBody, redact_params); parse
-// — JSON разобран, если он целиком в пределах max символов; иначе текст до max.
-func (x *Executor) body(u, ct, raw string, size, max int, parse bool) Body {
+// — JSON разобран, если он целиком в пределах jsonMax символов; иначе текст
+// до предела (textMax, у JSON — jsonMax) с подсказкой, сколько в нём
+// символов (chars — длина до обрезки на странице, 0 — raw целиком).
+func (x *Executor) body(u, ct, raw string, size, chars, textMax, jsonMax int, parse bool) Body {
 	b := Body{ContentType: ct, Size: size}
 	if raw == "" {
 		return b
 	}
 	text := x.redactValues(RedactBody(x.redactURL(u), raw))
-	if max > 0 && utf8.RuneCountInString(text) > max {
-		b.Body, b.Truncated = string([]rune(text)[:max]), true
+	lim := textMax
+	if jsonMIME(ct) {
+		lim = jsonMax
+	}
+	if n := utf8.RuneCountInString(text); lim > 0 && n > lim {
+		b.Body, b.Truncated = string([]rune(text)[:lim]), true
+		b.Hint = truncHint(lim, max(n, chars), parse && jsonMIME(ct))
 		return b
 	}
 	var v any
@@ -84,6 +121,19 @@ func (x *Executor) body(u, ct, raw string, size, max int, parse bool) Body {
 	}
 	b.Body = text
 	return b
+}
+
+// truncHint — подсказка у обрезанного тела: обрезано на lim из total символов
+// и какой max_chars нужен для полного ответа (больше верхней границы — сузить запрос).
+func truncHint(lim, total int, json bool) string {
+	h := fmt.Sprintf("body truncated at %d of %d chars, pass max_chars ≥ %d", lim, total, total)
+	if total > MaxResponseChars {
+		h = fmt.Sprintf("body truncated at %d of %d chars, more than the max_chars limit %d: narrow the request (filters, paging)", lim, total, MaxResponseChars)
+	}
+	if json {
+		h = "json not parsed: " + h
+	}
+	return h
 }
 
 func jsonMIME(ct string) bool { return strings.Contains(strings.ToLower(ct), "json") }
@@ -101,7 +151,8 @@ type FetchRequest struct {
 	URL     string
 	Headers map[string]string
 	Body    *string // nil — без тела (GET, HEAD)
-	Max     int     // символов тела ответа
+	Max     int     // символов тела ответа (max_chars; 0 — по умолчанию, см. Limits)
+	TextMax int     // предел текста по умолчанию (max_text_chars; 0 — MaxFetchResponse)
 }
 
 // FetchResponse — ответ запроса: статус, адрес после редиректов, заголовки
@@ -118,9 +169,6 @@ type FetchResponse struct {
 
 // Fetch-методы: GET и HEAD — чтение, остальные меняют данные.
 var FetchMethods = []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}
-
-// MaxFetchResponse — предел тела ответа по умолчанию (символов).
-const MaxFetchResponse = 30000
 
 // MaxFetchBody — предел тела запроса (символов), как у value в act.
 const MaxFetchBody = MaxActValue
@@ -141,6 +189,7 @@ const fetchJS = `(async (url, method, headers, body, max) => {
     const ct = hs['content-type'] || '';
     if (ct === '' || /json|javascript|xml|x-www-form-urlencoded|^text\//i.test(ct)) {
       const t = new TextDecoder().decode(buf);
+      out.chars = t.length;
       out.body = t.length > max + 1 ? t.slice(0, max + 1) : t;
     }
     return out;
@@ -170,9 +219,7 @@ func (x *Executor) Fetch(ctx context.Context, r FetchRequest) (FetchResponse, er
 	if err := x.CheckURL(r.URL); err != nil {
 		return FetchResponse{}, err
 	}
-	if r.Max <= 0 {
-		r.Max = MaxFetchResponse
-	}
+	textMax, jsonMax := Limits(r.Max, r.TextMax)
 	page, err := x.settledURL(ctx)
 	if err != nil {
 		return FetchResponse{}, err
@@ -187,10 +234,11 @@ func (x *Executor) Fetch(ctx context.Context, r FetchRequest) (FetchResponse, er
 	var out struct {
 		FetchResponse
 		Size  int    `json:"size"`
+		Chars int    `json:"chars"`
 		Body  string `json:"body"`
 		Error string `json:"error"`
 	}
-	if err := x.Engine.Eval(ctx, call(fetchJS, r.URL, r.Method, r.Headers, body, r.Max), &out); err != nil {
+	if err := x.Engine.Eval(ctx, call(fetchJS, r.URL, r.Method, r.Headers, body, jsonMax), &out); err != nil {
 		return FetchResponse{}, err
 	}
 	if out.Error != "" {
@@ -210,7 +258,7 @@ func (x *Executor) Fetch(ctx context.Context, r FetchRequest) (FetchResponse, er
 		}
 	}
 	res.Headers = hs
-	res.Body = x.body(res.URL, res.Headers["content-type"], out.Body, out.Size, r.Max, true)
+	res.Body = x.body(res.URL, res.Headers["content-type"], out.Body, out.Size, out.Chars, textMax, jsonMax, true)
 	if out.Body == "" && out.Size > 0 && !readableMIME(res.Headers["content-type"]) {
 		res.Body.Body = "" // картинка, архив: только тип и размер
 	}

@@ -63,10 +63,16 @@ type harness struct {
 
 func start(t *testing.T) *harness {
 	t.Helper()
+	c, _ := connectors.NewInProcess(mailFake{})
+	return startWith(t, policy, c)
+}
+
+// startWith — daemon с этой политикой и коннекторами.
+func startWith(t *testing.T, policy string, conns ...connectors.Client) *harness {
+	t.Helper()
 	home, _ := os.MkdirTemp("", "g4acli")
 	t.Cleanup(func() { os.RemoveAll(home) })
-	c, _ := connectors.NewInProcess(mailFake{})
-	d, err := daemon.New(daemon.Options{Home: filepath.Join(home, "d"), InitialConfig: []byte(policy), Keys: keys.NewMemory(), Connectors: []connectors.Client{c}})
+	d, err := daemon.New(daemon.Options{Home: filepath.Join(home, "d"), InitialConfig: []byte(policy), Keys: keys.NewMemory(), Connectors: conns})
 	if err != nil {
 		t.Fatal(err)
 	}

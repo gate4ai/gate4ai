@@ -65,7 +65,7 @@ func TestStagehandRealChrome(t *testing.T) {
 	if _, err := x.Open(ctx, srv.URL+"/api"); err != nil {
 		t.Fatal(err)
 	}
-	if b, ok, err := x.RawDocument(ctx, 100); err != nil || !ok || b.Body != `{"ok":true}` {
+	if b, ok, err := x.RawDocument(ctx, 100, 0); err != nil || !ok || b.Body != `{"ok":true}` {
 		t.Fatal(b, ok, err)
 	}
 }

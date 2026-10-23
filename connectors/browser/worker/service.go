@@ -308,30 +308,25 @@ func (ss *Session) Open(ctx context.Context, url string, sites domain.Sites) (Pa
 	return Page{URL: final, Title: title, StillLoading: ss.Executor.StillLoading}, nil
 }
 
-// Observe — адрес, заголовок и текст страницы (до max символов).
+// Observe — адрес, заголовок и текст страницы (до max символов: 0 — предел
+// настроек, больше MaxResponseChars — граница).
 func (ss *Session) Observe(ctx context.Context, max int) (Page, error) {
-	if max <= 0 || max > ss.max {
-		max = ss.max
-	}
+	max, _ = Limits(max, ss.max)
 	u, title, text, trunc, err := ss.Executor.Observe(ctx, max)
 	return Page{URL: u, Title: title, Text: text, Truncated: trunc}, err
 }
 
 // Raw — верхний документ не HTML (JSON, текст): его тело до max символов
-// (0 и больше предела — предел настроек); ok — false у HTML-страницы.
+// (0 — по умолчанию: текст — предел настроек, JSON — не меньше
+// DefaultJSONChars; больше MaxResponseChars — граница); ok — false у HTML-страницы.
 func (ss *Session) Raw(ctx context.Context, max int) (Body, bool, error) {
-	if max <= 0 || max > ss.max {
-		max = ss.max
-	}
-	return ss.Executor.RawDocument(ctx, max)
+	return ss.Executor.RawDocument(ctx, max, ss.max)
 }
 
-// FetchPage — запрос со страницы сеанса; тело ответа — до Max символов (0 и
-// больше предела — предел настроек).
+// FetchPage — запрос со страницы сеанса; тело ответа — до Max символов (0 —
+// по умолчанию, как у Raw).
 func (ss *Session) FetchPage(ctx context.Context, r FetchRequest) (FetchResponse, error) {
-	if r.Max <= 0 || r.Max > ss.max {
-		r.Max = ss.max
-	}
+	r.TextMax = ss.max
 	return ss.Executor.Fetch(ctx, r)
 }
 

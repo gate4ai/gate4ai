@@ -36,6 +36,9 @@ func bodyFields(out map[string]any, b worker.Body) {
 	if b.Truncated {
 		out["truncated"] = true
 	}
+	if b.Hint != "" {
+		out["hint"] = b.Hint
+	}
 }
 
 // rawResult — документ не HTML (JSON, текст) в ответе read / observe.
