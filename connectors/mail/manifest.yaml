@@ -1,6 +1,6 @@
 connector: email
 description: Email over IMAP/SMTP
-version: "0.7.6"
+version: "0.7.7"
 runtime: wasm
 capabilities:
   network:
