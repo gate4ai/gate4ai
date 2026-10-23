@@ -154,15 +154,18 @@ actions:
       required: [url, title]
   - name: act
     class: write
-    description: "Act on the open page by CSS selector (and visible text): click; fill — replace the value of a field (input, textarea, rich editor), append — add to its end, paste — replace it as pasted from the clipboard (editors parse Markdown or HTML); press — a key or a combination; wait — for an element. fill / append / paste return the value that ended up in the field (length, start, end). value: up to 262144 characters (256 KB); a long text from a file: --value_file <path>"
+    description: "Act on the open page by CSS selector (and visible text): click; fill — replace the value of a field (input, textarea, rich editor), append — add to its end, paste — replace it as pasted from the clipboard (editors parse Markdown or HTML); type — type the text key by key (real keydown / keypress / input / keyup for each character: tag fields that make a tag on a comma or Enter, search in dropdowns), then submit (a key) if given; press — a key, any single character (\",\", \";\") or a combination; wait — for an element. fill / append / paste / type / press return the value that ended up in the focused field (length, start, end); type / press also return changes: elements that appeared or disappeared next to the field (a new tag, the options of a list), lists, menus and dialogs that opened or closed. screenshot: true adds a screenshot of the window (file in the answer); a failed expect_* answers not_found with the path of a screenshot. value: up to 262144 characters (256 KB), type — up to 4096; a long text from a file: --value_file <path>"
     input_schema:
       type: object
       properties:
         session: { type: string, description: "agents: the session from browser.open" }
         selector: { type: string, description: CSS selector }
-        method: { type: string, enum: [click, fill, append, paste, press, wait] }
+        method: { type: string, enum: [click, fill, append, paste, type, press, wait] }
         text: { type: string, description: "the first visible element whose text, label, placeholder or aria-label contains it" }
-        value: { type: string, maxLength: 262144, description: "fill / append / paste: the text, up to 262144 characters (CLI: --value_file <path> reads it from a file; leading and trailing spaces are trimmed); press: Enter, Tab, Escape, Backspace, Delete, Space, Home, End, PageUp, PageDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, a–z, 0–9 with modifiers Ctrl, Shift, Alt, Meta joined by + (Ctrl+A selects all, Ctrl+Z undoes, Ctrl+Enter, Shift+Tab). The system clipboard is not used: Ctrl+C / Ctrl+X / Ctrl+V are refused — paste a text with method paste" }
+        value: { type: string, maxLength: 262144, description: "fill / append / paste: the text, up to 262144 characters (CLI: --value_file <path> reads it from a file; leading and trailing spaces are trimmed); type: the text, up to 4096 characters, typed as is (commas and spaces are keys too, the text is not split); press: Enter, Tab, Escape, Backspace, Delete, Space, Home, End, PageUp, PageDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight or any single character (a, 7, \",\", \";\", ж) with modifiers Ctrl, Shift, Alt, Meta joined by + (Ctrl+A selects all, Ctrl+Z undoes, Ctrl+Enter, Shift+Tab). The system clipboard is not used: Ctrl+C / Ctrl+X / Ctrl+V are refused — paste a text with method paste" }
+        delay_ms: { type: integer, minimum: 0, maximum: 1000, description: "type: pause between characters (0 — none; for pages that drop fast input)" }
+        submit: { type: string, description: "type: a key or a combination to press after the text, as in press (Enter, Tab, \",\")" }
+        screenshot: { type: boolean, description: "agents: add a screenshot of the window after the action (screenshot.file in the answer)" }
         timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait for the element (0 — 10 s)" }
         expect_selector: { type: string, description: "the action must make a visible element match it (a dialog, the next list), else not_found: no effect" }
         expect_text: { type: string, description: "the action must make visible text appear (in expect_selector, or anywhere)" }
@@ -176,13 +179,33 @@ actions:
         text: { type: string, description: text of the element (up to 2000 characters) }
         value:
           type: object
-          description: "fill / append / paste: what ended up in the field; hidden for a password or after a secret was entered on the page"
+          description: "fill / append / paste / type / press: what ended up in the focused field; hidden for a password or after a secret was entered on the page"
           properties:
             length: { type: integer, description: characters }
             start: { type: string, description: "the first 1000 characters" }
             end: { type: string, description: "the last 200 characters, when longer" }
             hidden: { type: boolean }
           required: [length, start]
+        changes:
+          type: object
+          description: "type / press: what changed on the page — each list has elements {tag, role, text} (up to 10; more — how many were left out); none when nothing changed"
+          properties:
+            added: { type: array, description: "elements that appeared (a tag, a hint, the selected value)", items: { type: object, properties: { tag: { type: string }, role: { type: string }, text: { type: string } } } }
+            removed: { type: array, description: "elements that disappeared", items: { type: object, properties: { tag: { type: string }, role: { type: string }, text: { type: string } } } }
+            opened: { type: array, description: "lists, menus, dialogs that opened (role listbox, menu, dialog) with their text", items: { type: object, properties: { tag: { type: string }, role: { type: string }, text: { type: string } } } }
+            closed: { type: array, description: "lists, menus, dialogs that closed", items: { type: object, properties: { tag: { type: string }, role: { type: string }, text: { type: string } } } }
+            expanded: { type: array, description: "elements whose aria-expanded became true (a combobox opened)", items: { type: object, properties: { tag: { type: string }, role: { type: string }, text: { type: string } } } }
+            collapsed: { type: array, description: "elements whose aria-expanded became false", items: { type: object, properties: { tag: { type: string }, role: { type: string }, text: { type: string } } } }
+            more: { type: integer }
+        screenshot:
+          type: object
+          description: "screenshot: true — the screenshot of the window"
+          properties:
+            file: { type: string, description: "the PNG file in the gate4ai data folder (browser-shots)" }
+            mode: { type: string }
+            width: { type: integer }
+            height: { type: integer }
+            bytes: { type: integer }
       required: [url]
     example: gate4ai browser act --session s-… --selector textarea[name=text] --method fill --value_file article.md
   - name: reload
@@ -413,13 +436,27 @@ actions:
       required: [instruction]
   - name: page_screenshot
     class: read
-    description: Screenshot of one element of the open page (PNG in content)
+    evidence: png
+    description: "Screenshot of the open page: an element (selector — the first visible match), the visible window (viewport, the default) or the whole page (full_page). The PNG is stored as evidence (password fields are blacked out) and returned in content; agents also get it as a file: file in the result (the gate4ai data folder, browser-shots; CLI: --out <path> saves it where you say). An element that is not found is explained: whether the selector matched anything and why the matches are hidden (display:none, zero size, outside the page)"
     input_schema:
       type: object
       properties:
         session: { type: string, description: "agents: the session from browser.open" }
-        selector: { type: string, description: CSS selector }
-      required: [selector]
+        selector: { type: string, description: "CSS selector of the element (the first visible one)" }
+        viewport: { type: boolean, description: "the visible window (the default without selector)" }
+        full_page: { type: boolean, description: "the whole page, beyond the window" }
+    output_schema:
+      type: object
+      properties:
+        file: { type: string, description: "agents: the PNG file (gate4ai data folder, browser-shots; with CLI --out — that path)" }
+        mode: { type: string, enum: [element, viewport, full_page] }
+        selector: { type: string }
+        width: { type: integer, description: pixels }
+        height: { type: integer, description: pixels }
+        bytes: { type: integer, description: size of the PNG }
+        url: { type: string }
+      required: [mode, width, height, bytes]
+    example: gate4ai browser page_screenshot --session s-… --viewport --out shot.png
   - name: close
     class: read
     untrusted: true

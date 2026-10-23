@@ -55,6 +55,8 @@ type callSession struct {
 	sites  domain.Sites
 	opened bool
 	url    string // адрес страницы после последнего действия
+	sid    string // id сеанса агента ("" — страница вызывающего коннектора): снимки — в файлы
+	shots  int    // снимков сеанса (номер в имени файла)
 	timer  *time.Timer
 	mu     sync.Mutex // действия одной страницы — по очереди
 }
@@ -521,7 +523,11 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		}
 		return abi.ExecResult{Structured: res, ResultRef: cleanURL(p.URL), Source: "web:" + cleanURL(p.URL)}, nil
 	case "act":
+		shot, _ := r.Args["screenshot"].(bool)
 		res, err := cs.s.Act(ctx, actRequest(r.Args))
+		if errors.Is(err, worker.ErrNoEffect) || shot && errors.Is(err, worker.ErrNotFound) {
+			return abi.ExecResult{}, cs.failShot(ctx, err)
+		}
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
@@ -530,7 +536,19 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		if res.Value != nil {
 			out["value"] = res.Value
 		}
-		return abi.ExecResult{Structured: out, ResultRef: cleanURL(res.URL)}, nil
+		if res.Changes != nil {
+			out["changes"] = res.Changes
+		}
+		ex := abi.ExecResult{Structured: out, ResultRef: cleanURL(res.URL)}
+		if shot {
+			info, sr, err := cs.capture(ctx, worker.ShotRequest{})
+			if err != nil {
+				return abi.ExecResult{}, err
+			}
+			out["screenshot"] = info
+			ex.Content, ex.Evidence = sr.Content, sr.Evidence
+		}
+		return ex, nil
 	case "reload":
 		u, err := cs.s.Reload(ctx)
 		if err != nil {
@@ -602,11 +620,19 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		}
 		return abi.ExecResult{Structured: map[string]any{"data": data}, Source: "web:" + cleanURL(cs.url)}, nil
 	case "page_screenshot":
-		png, err := cs.s.ScreenshotElement(ctx, str(r.Args, "selector"))
+		sel := str(r.Args, "selector")
+		view, _ := r.Args["viewport"].(bool)
+		full, _ := r.Args["full_page"].(bool)
+		if n := btoi(sel != "") + btoi(view) + btoi(full); n > 1 {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "pass one of selector, viewport and full_page")
+		}
+		info, res, err := cs.capture(ctx, worker.ShotRequest{Selector: sel, FullPage: full})
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		return abi.ExecResult{Content: []abi.Content{abi.Image("image/png", png)}}, nil
+		info["url"] = cleanURL(cs.url)
+		res.Structured = info
+		return res, nil
 	case "login":
 		if rec, _ := r.Args["record_only"].(bool); rec {
 			// Вход через коннектор входа уже прошёл (хост): шаг для записи сеанса.
@@ -717,8 +743,8 @@ func (b *Browser) newAgentSession(ctx context.Context, r abi.ExecRequest) (*agen
 	}
 	var raw [8]byte
 	_, _ = rand.Read(raw[:])
-	as := &agentSession{callSession: callSession{s: s, sites: sites}, id: "s-" + hex.EncodeToString(raw[:]), agent: r.Agent, instance: r.AgentInstance}
-	id := as.id
+	id := "s-" + hex.EncodeToString(raw[:])
+	as := &agentSession{callSession: callSession{s: s, sites: sites, sid: id}, id: id, agent: r.Agent, instance: r.AgentInstance}
 	as.timer = time.AfterFunc(AgentIdle, func() {
 		as.mu.Lock()
 		defer as.mu.Unlock()
@@ -960,8 +986,15 @@ func secretField(r abi.ExecRequest) ([]string, worker.LoginField, error) {
 func actRequest(a map[string]any) worker.ActRequest {
 	urlChange, _ := a["expect_url_change"].(bool)
 	return worker.ActRequest{Selector: str(a, "selector"), Method: strings.ToLower(str(a, "method")), Text: str(a, "text"),
-		Value: str(a, "value"), TimeoutMS: num(a, "timeout_ms"), ExpectSelector: str(a, "expect_selector"),
-		ExpectText: str(a, "expect_text"), ExpectURLChange: urlChange, ExpectMS: num(a, "expect_timeout_ms")}
+		Value: str(a, "value"), DelayMS: num(a, "delay_ms"), Submit: str(a, "submit"), TimeoutMS: num(a, "timeout_ms"),
+		ExpectSelector: str(a, "expect_selector"), ExpectText: str(a, "expect_text"), ExpectURLChange: urlChange, ExpectMS: num(a, "expect_timeout_ms")}
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func handoffRequest(a map[string]any) worker.HandoffRequest {

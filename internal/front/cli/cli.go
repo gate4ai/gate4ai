@@ -522,58 +522,61 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 		e.ForceJSON = true
 	}
 	body := map[string]any{"action": tool.Name, "args": vals, "wait": opts.wait, "agent": opts.as}
-	if opts.out == "" {
-		return e.callObject(ctx, e.Client(), "POST", "/v1/call", body, ExitForResult)
-	}
 	var res map[string]any
 	if err := e.Client().Do(ctx, "POST", "/v1/call", body, &res); err != nil {
 		return e.fail(err)
 	}
-	if res["status"] == "ok" {
-		if err := saveContent(res, opts.out); err != nil {
-			e.printJSON(res)
-			e.problem(Problem{Code: "io_error", Message: "--out " + opts.out + ": " + err.Error()})
-			return ExitError
-		}
+	if err := saveImage(res, opts.out); err != nil {
+		e.printJSON(res)
+		e.problem(Problem{Code: "io_error", Message: "--out: " + err.Error()})
+		return ExitError
 	}
 	e.printJSON(res)
 	return ExitForResult(res)
 }
 
-// saveContent пишет содержимое ответа в файл path: первый двоичный блок
-// (resource, картинка), иначе текстовый; в ответе вместо данных — saved_to и
-// size (файл в сотни КБ base64 агенту в выводе не нужен).
-func saveContent(res map[string]any, path string) error {
+// saveImage — изображения ответа (content) в терминал не выводятся: вместо
+// base64 — размер; --out f сохраняет первое изображение или файл (двоичный
+// resource: browser.download, files.read) в файл f на этом компьютере (daemon
+// пишет только в свой каталог данных), путь — в result.file и у блока.
+func saveImage(res map[string]any, out string) error {
 	blocks, _ := res["content"].([]any)
-	var pick map[string]any
-	var data []byte
+	saved := out == ""
 	for _, b := range blocks {
-		c, _ := b.(map[string]any)
-		if d, _ := c["data"].(string); d != "" {
-			raw, err := base64.StdEncoding.DecodeString(d)
-			if err != nil {
-				return fmt.Errorf("content data: %w", err)
-			}
-			pick, data = c, raw
-			break
+		m, _ := b.(map[string]any)
+		data, _ := m["data"].(string)
+		if (m["type"] != "image" && (m["type"] != "resource" || out == "" || saved)) || data == "" {
+			continue
 		}
-		if t, _ := c["text"].(string); t != "" && pick == nil {
-			pick, data = c, []byte(t)
+		raw, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			continue
+		}
+		delete(m, "data")
+		m["bytes"] = len(raw)
+		if saved {
+			continue
+		}
+		path, err := filepath.Abs(out)
+		if err != nil {
+			return err
+		}
+		// Файл (PDF анализа, выписка) — только владельцу файла.
+		mode := os.FileMode(0o644)
+		if m["type"] == "resource" {
+			mode = 0o600
+		}
+		if err := os.WriteFile(path, raw, mode); err != nil {
+			return err
+		}
+		saved, m["file"] = true, path
+		if r, ok := res["result"].(map[string]any); ok {
+			r["file"] = path
 		}
 	}
-	if pick == nil {
-		return errors.New("the result has no content to write (see its fields)")
+	if !saved && res["status"] == "ok" {
+		return errors.New("the result has no image or file to save")
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
-	}
-	delete(pick, "data")
-	delete(pick, "text")
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		abs = path
-	}
-	pick["saved_to"], pick["size"] = abs, len(data)
 	return nil
 }
 
@@ -610,7 +613,7 @@ func (e *Env) actionHelp(t skill.Tool) {
 		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, bracket(skill.Limits(p.Schema)))
 	}
 	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n"+
-		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           write the file from the result (browser.download, files.read, a screenshot) to f; the output shows saved_to instead of the data\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
+		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           save the image or the file of the result (page_screenshot, browser.download, files.read) to file f\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
 }
 
 func bracket(s string) string {
@@ -677,9 +680,9 @@ func hoistCallOpts(args []string) (rest, opts []string) {
 type callOpts struct {
 	wait string
 	as   string
-	out  string // файл для содержимого ответа (двоичный resource, картинка или текст)
 	help bool
-	json bool // --json без значения: вывод JSON
+	json bool   // --json без значения: вывод JSON
+	out  string // --out f: изображение или файл ответа — в файл f
 }
 
 // MaxArgFile — предел файла аргумента (--<name>_file).
@@ -744,7 +747,7 @@ func parseArgs(t skill.Tool, args []string, stdin io.Reader) (map[string]any, ca
 		case name == "out":
 			v, err := next()
 			if err != nil {
-				return nil, o, errors.New("--out needs a file, e.g. --out result.pdf")
+				return nil, o, err
 			}
 			o.out = v
 			continue

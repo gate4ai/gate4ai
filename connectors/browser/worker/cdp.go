@@ -328,6 +328,26 @@ func (c *CDP) Key(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	return c.key(ctx, k)
+}
+
+// Type — каждый символ отдельным нажатием (keydown, keypress, input, keyup),
+// между символами — пауза delay.
+func (c *CDP) Type(ctx context.Context, text string, delay time.Duration) error {
+	for i, r := range []rune(text) {
+		if i > 0 && delay > 0 {
+			if err := wait(ctx, delay); err != nil {
+				return err
+			}
+		}
+		if err := c.key(ctx, charKey(r)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *CDP) key(ctx context.Context, k Key) error {
 	key, code, vk, text, mods := k.cdpKey()
 	down := map[string]any{"type": "rawKeyDown", "key": key, "code": code, "windowsVirtualKeyCode": vk, "modifiers": mods}
 	if text != "" {
@@ -357,21 +377,19 @@ func (c *CDP) Text(ctx context.Context) (string, error) {
 	return s, err
 }
 
-func (c *CDP) Screenshot(ctx context.Context, selector string) ([]byte, error) {
-	sel, _ := json.Marshal(selector)
-	var box struct{ X, Y, W, H float64 }
-	if err := c.Eval(ctx, `(() => { const e = document.querySelector(`+string(sel)+`); if (!e) return null;
-		const r = e.getBoundingClientRect(); return {X: r.x + scrollX, Y: r.y + scrollY, W: r.width, H: r.height}; })()`, &box); err != nil {
-		return nil, err
-	}
-	if box.W == 0 || box.H == 0 {
-		return nil, fmt.Errorf("element %s not found or empty", selector)
+func (c *CDP) Screenshot(ctx context.Context, clip *Clip, full bool) ([]byte, error) {
+	p := map[string]any{"format": "png"}
+	if clip != nil {
+		if clip.W <= 0 || clip.H <= 0 {
+			return nil, errors.New("screenshot: empty area")
+		}
+		p["captureBeyondViewport"] = true // элемент и страница могут быть больше окна
+		p["clip"] = map[string]any{"x": clip.X, "y": clip.Y, "width": clip.W, "height": clip.H, "scale": 1}
 	}
 	var r struct {
 		Data string `json:"data"`
 	}
-	if err := c.call(ctx, c.session, "Page.captureScreenshot", map[string]any{"format": "png", "captureBeyondViewport": true,
-		"clip": map[string]any{"x": box.X, "y": box.Y, "width": box.W, "height": box.H, "scale": 1}}, &r); err != nil {
+	if err := c.call(ctx, c.session, "Page.captureScreenshot", p, &r); err != nil {
 		return nil, err
 	}
 	return base64.StdEncoding.DecodeString(r.Data)

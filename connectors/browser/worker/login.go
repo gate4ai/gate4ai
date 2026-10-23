@@ -204,7 +204,8 @@ func (x *Executor) fill(ctx context.Context, f LoginField) error {
 }
 
 // coverJS закрывает чёрными блоками поля с введённым секретом и все поля
-// пароля (снимок страницы с секретом); "" — убрать блоки.
+// пароля (любой снимок страницы); sels null — убрать блоки. Блоки — от начала
+// документа: снимок всей страницы выходит за окно.
 const coverJS = `((sels, tag) => {
   document.querySelectorAll('[data-g4-cover="' + tag + '"]').forEach(e => e.remove());
   if (!sels) return 0;
@@ -216,23 +217,24 @@ const coverJS = `((sels, tag) => {
     if (r.width === 0 || r.height === 0) continue;
     const c = document.createElement('div');
     c.setAttribute('data-g4-cover', tag);
-    c.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;background:#000;left:' + r.left + 'px;top:' + r.top + 'px;width:' + r.width + 'px;height:' + r.height + 'px';
+    c.style.cssText = 'position:absolute;z-index:2147483647;pointer-events:none;background:#000;left:' + (r.left + scrollX) + 'px;top:' + (r.top + scrollY) + 'px;width:' + r.width + 'px;height:' + r.height + 'px';
     document.documentElement.appendChild(c); n++;
   }
   return n;
 })`
 
-// coveredScreenshot — снимок страницы, где введён секрет: поля закрашены.
-func (x *Executor) coveredScreenshot(ctx context.Context, selector string) ([]byte, error) {
+// covered — снимок shot с закрашенными полями пароля и полями, куда введён
+// секрет; блоки снимаются после снимка.
+func (x *Executor) covered(ctx context.Context, shot func() ([]byte, error)) ([]byte, error) {
 	var raw [8]byte
 	_, _ = rand.Read(raw[:])
 	tag := hex.EncodeToString(raw[:])
 	var n int
-	if err := x.Engine.Eval(ctx, call(coverJS, x.secretSel, tag), &n); err != nil {
+	if err := x.Engine.Eval(ctx, call(coverJS, append([]string{}, x.secretSel...), tag), &n); err != nil {
 		return nil, err
 	}
 	defer func() { var z int; _ = x.Engine.Eval(context.WithoutCancel(ctx), call(coverJS, nil, tag), &z) }()
-	return x.Engine.Screenshot(ctx, selector)
+	return shot()
 }
 
 // FillSecret вводит одно поле учётки на странице входа (без отправки):

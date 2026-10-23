@@ -5,12 +5,14 @@ package worker
 import (
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Key — клавиша или сочетание для act press: модификаторы и клавиша.
 type Key struct {
 	Ctrl, Shift, Alt, Meta bool
-	Name                   string // Enter, ArrowDown, a, 7
+	Name                   string // Enter, ArrowDown, a, 7, «,», «ж»
 }
 
 // keyCodes — клавиши press: имя → (code, windowsVirtualKeyCode).
@@ -24,8 +26,26 @@ var keyCodes = map[string]struct {
 	"ArrowUp": {"ArrowUp", 38}, "ArrowDown": {"ArrowDown", 40}, "ArrowLeft": {"ArrowLeft", 37}, "ArrowRight": {"ArrowRight", 39},
 }
 
-// KeyNames — клавиши press для --help и ошибок (ещё: буквы a–z и цифры 0–9).
-const KeyNames = "Enter, Tab, Escape, Backspace, Delete, Space, Home, End, PageUp, PageDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, a–z, 0–9; with modifiers Ctrl, Shift, Alt, Meta joined by +: Ctrl+A, Ctrl+Enter, Shift+Tab"
+// charCodes — символы американской раскладки вне букв и цифр: символ →
+// (code, windowsVirtualKeyCode, нужен ли Shift). Обработчики полей тегов
+// сверяют и key (","), и устаревший keyCode (188).
+var charCodes = map[rune]struct {
+	code  string
+	vk    int
+	shift bool
+}{
+	',': {"Comma", 188, false}, '<': {"Comma", 188, true}, '.': {"Period", 190, false}, '>': {"Period", 190, true},
+	';': {"Semicolon", 186, false}, ':': {"Semicolon", 186, true}, '/': {"Slash", 191, false}, '?': {"Slash", 191, true},
+	'-': {"Minus", 189, false}, '_': {"Minus", 189, true}, '=': {"Equal", 187, false}, '+': {"Equal", 187, true},
+	'[': {"BracketLeft", 219, false}, '{': {"BracketLeft", 219, true}, ']': {"BracketRight", 221, false}, '}': {"BracketRight", 221, true},
+	'\\': {"Backslash", 220, false}, '|': {"Backslash", 220, true}, '\'': {"Quote", 222, false}, '"': {"Quote", 222, true},
+	'`': {"Backquote", 192, false}, '~': {"Backquote", 192, true},
+	'!': {"Digit1", '1', true}, '@': {"Digit2", '2', true}, '#': {"Digit3", '3', true}, '$': {"Digit4", '4', true}, '%': {"Digit5", '5', true},
+	'^': {"Digit6", '6', true}, '&': {"Digit7", '7', true}, '*': {"Digit8", '8', true}, '(': {"Digit9", '9', true}, ')': {"Digit0", '0', true},
+}
+
+// KeyNames — клавиши press для --help и ошибок.
+const KeyNames = "Enter, Tab, Escape, Backspace, Delete, Space, Home, End, PageUp, PageDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight or any single character (a, 7, «,», «;», «ж»); with modifiers Ctrl, Shift, Alt, Meta joined by +: Ctrl+A, Ctrl+Enter, Shift+Tab, Ctrl+,"
 
 // ErrClipboard — сочетание обращается к системному буферу обмена: он общий с
 // человеком (Ctrl+V вставил бы на сайт то, что человек скопировал, — например,
@@ -35,9 +55,22 @@ var ErrClipboard = fmt.Errorf("act: the system clipboard belongs to the user and
 // ParseKey разбирает клавишу press: "Enter", "ctrl+a", "Control+Shift+Enter".
 func ParseKey(s string) (Key, error) {
 	var k Key
-	parts := strings.Split(strings.TrimSpace(s), "+")
+	t := strings.TrimSpace(s)
+	if t == "" && s != "" {
+		t = " " // одиночный пробел — клавиша Space
+	}
+	parts := strings.Split(t, "+")
+	if strings.HasSuffix(t, "+") && (t == "+" || strings.HasSuffix(t, "++")) {
+		// сама клавиша «+»: "+", "Ctrl++"
+		parts = append(strings.Split(strings.TrimSuffix(t, "++"), "+"), "+")
+		if t == "+" {
+			parts = []string{"+"}
+		}
+	}
 	for i, p := range parts {
-		p = strings.TrimSpace(p)
+		if p != " " {
+			p = strings.TrimSpace(p)
+		}
 		if i == len(parts)-1 {
 			k.Name = keyName(p)
 			break
@@ -81,11 +114,11 @@ func keyName(p string) string {
 	case " ":
 		return "Space"
 	}
-	if len(p) == 1 {
-		c := strings.ToLower(p)[0]
-		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
-			return string(c)
+	if r, n := utf8.DecodeRuneInString(p); n == len(p) && r != utf8.RuneError && unicode.IsPrint(r) {
+		if r < utf8.RuneSelf && unicode.IsLetter(r) {
+			r = unicode.ToLower(r) // латиница — клавиша (Shift+a — «A»); прочие символы — как есть
 		}
+		return string(r)
 	}
 	return ""
 }
@@ -152,18 +185,41 @@ func (k Key) cdpKey() (key, code string, vk int, text string, mods int) {
 		}
 		return
 	}
-	c := k.Name[0]
+	c, _ := utf8.DecodeRuneInString(k.Name)
 	key = k.Name
-	if c >= 'a' && c <= 'z' {
+	switch cc, ok := charCodes[c]; {
+	case c >= 'a' && c <= 'z':
 		code, vk = "Key"+strings.ToUpper(k.Name), int(c-'a'+'A')
 		if k.Shift {
 			key = strings.ToUpper(k.Name)
 		}
-	} else {
+	case c >= '0' && c <= '9':
 		code, vk = "Digit"+k.Name, int(c)
+	case ok:
+		code, vk = cc.code, cc.vk
 	}
 	if plain {
 		text = key
 	}
 	return
+}
+
+// charKey — клавиша, которой вводится символ при type: буква в верхнем
+// регистре и символы над цифрами — с Shift; перевод строки — Enter; прочие
+// символы (кириллица, эмодзи) — key и text без кода клавиши.
+func charKey(r rune) Key {
+	switch {
+	case r == '\n' || r == '\r':
+		return Key{Name: "Enter"}
+	case r == '\t':
+		return Key{Name: "Tab"}
+	case r == ' ':
+		return Key{Name: "Space"}
+	case r >= 'A' && r <= 'Z':
+		return Key{Shift: true, Name: string(unicode.ToLower(r))}
+	}
+	if cc, ok := charCodes[r]; ok {
+		return Key{Shift: cc.shift, Name: string(r)}
+	}
+	return Key{Name: string(r)}
 }

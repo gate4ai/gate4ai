@@ -237,7 +237,7 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 
 ## Тесты
 
-`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из спецификации на собранных бинарниках и настоящих коннекторах — `e2e/` (`./scripts/ci.sh e2e`). Daemon в e2e и на стенде (`dev/scripts/stand.sh`) запускается с `GATE4AI_PAIR_NOTIFY=log`: запрос агента на подключение не всплывает уведомлением на рабочем столе, а пишется в журнал daemon (`pairing requested` с агентом, кодом и каталогом); подтверждение — как обычно, в Web UI или Telegram. Остальные уведомления переменная не меняет.
+`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из спецификации на собранных бинарниках и настоящих коннекторах — `e2e/` (`./scripts/ci.sh e2e`). Daemon в e2e и на стенде (`dev/scripts/stand.sh`) запускается с `GATE4AI_DESKTOP_NOTIFY=log`: уведомления daemon на рабочем столе (запросы подтверждения вроде «codex хочет выполнить browser.post», запросы агента на подключение, коды, отказы) не всплывают, а пишутся в журнал daemon (`desktop notification` с заголовком и текстом); решения — как обычно, в Web UI, Telegram или CLI.
 
 ## Тестовый стенд
 
@@ -246,7 +246,7 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 ```sh
 mkdir -p /tmp/g4stand
 export GATE4AI_HOME=$PWD/.stand GATE4AI_SOCKET=/tmp/g4stand/owner.sock GATE4AI_AGENT_SOCKET=/tmp/g4stand/agent.sock
-export GATE4AI_PAIR_NOTIFY=log   # запросы на подключение агента — в журнал daemon, без всплывающих уведомлений
+export GATE4AI_DESKTOP_NOTIFY=log   # уведомления daemon — в его журнал, без всплывающих окон
 # стенд, который запускает сам агент (Claude Code): сборка go build -tags gate4ai_devstand ./cmd/gate4ai
 # и GATE4AI_OWNER_CHECK=off — сокет владельца не отличает агента от человека (в выпуске переменная не действует)
 gate4ai daemon --ui 127.0.0.1:7531 --keystore file &       # ключи в файле, а не в связке ОС

@@ -5,9 +5,11 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -38,6 +40,9 @@ func (b *browserFake) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecRes
 		res.Structured = map[string]any{"session": "s1", "url": "https://a.example.com/", "title": "t"}
 	case "act":
 		res.Structured = map[string]any{"url": "https://a.example.com/"}
+	case "page_screenshot":
+		res.Structured = map[string]any{"mode": "viewport", "width": 1, "height": 1, "bytes": len(fakePNG), "file": "/daemon/browser-shots/s1-1.png"}
+		res.Content = []abi.Content{abi.Image("image/png", fakePNG)}
 	case "download":
 		res.Structured = map[string]any{"name": "a.pdf", "mime_type": "application/pdf", "size": len(pdfFile), "sha256": "x", "via": "download"}
 		res.Content = []abi.Content{abi.Resource("download:a.pdf", "application/pdf", "", pdfFile)}
@@ -46,6 +51,58 @@ func (b *browserFake) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecRes
 }
 func (b *browserFake) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{Status: abi.Verified}, nil
+}
+
+var fakePNG = []byte("\x89PNG\r\n\x1a\n-fake-image")
+
+// --out сохраняет изображение ответа в файл на стороне CLI, путь — в
+// result.file; base64 изображения в вывод не попадает.
+func TestScreenshotOut(t *testing.T) {
+	src, err := os.ReadFile("../../../connectors/browser/manifest.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	man, err := manifest.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := connectors.NewInProcess(&browserFake{man: man, args: map[string]map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := startWith(t, `
+agents:
+  a: { profile: web }
+profiles:
+  web:
+    connectors: [browser]
+    rules:
+      - { id: all, action: "browser.*", effect: allow }
+`, c)
+	_, out := h.run(t, "", "agents", "token", "a")
+	tok := jsonOf(t, out)["token"].(string)
+	path := filepath.Join(t.TempDir(), "shot.png")
+	code, out := h.run(t, tok, "browser", "page_screenshot", "--session", "s1", "--viewport", "--out", path)
+	if code != ExitOK {
+		t.Fatal(code, out)
+	}
+	if b, err := os.ReadFile(path); err != nil || !bytes.Equal(b, fakePNG) {
+		t.Fatal("the file:", err)
+	}
+	res := jsonOf(t, out)
+	if res["result"].(map[string]any)["file"] != path || strings.Contains(out, base64.StdEncoding.EncodeToString(fakePNG)) {
+		t.Fatal(out)
+	}
+	// Без --out — путь от коннектора, изображение — только размером.
+	code, out = h.run(t, tok, "browser", "page_screenshot", "--session", "s1")
+	if code != ExitOK || jsonOf(t, out)["result"].(map[string]any)["file"] != "/daemon/browser-shots/s1-1.png" ||
+		strings.Contains(out, base64.StdEncoding.EncodeToString(fakePNG)) || !strings.Contains(out, `"bytes": 19`) {
+		t.Fatal(code, out)
+	}
+	// Изображения в ответе нет — --out сообщает об ошибке.
+	if code, out := h.run(t, tok, "browser", "observe", "--session", "s1", "--out", path+"2"); code == ExitOK {
+		t.Fatal(out)
+	}
 }
 
 // Числовые аргументы CLI (--max_chars, --timeout_ms) доходят до коннектора
@@ -107,7 +164,7 @@ profiles:
 var pdfFile = []byte("%PDF-1.4\n\x00\xff\xfe binary\n%%EOF")
 
 // --out пишет файл из ответа (двоичный resource) на диск агента; в выводе —
-// saved_to и размер вместо base64.
+// file и bytes вместо base64.
 func TestOutWritesContent(t *testing.T) {
 	src, err := os.ReadFile("../../../connectors/browser/manifest.yaml")
 	if err != nil {
@@ -140,16 +197,21 @@ profiles:
 	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, pdfFile) {
 		t.Fatalf("%q %v", got, err)
 	}
-	blocks, _ := jsonOf(t, out)["content"].([]any)
-	if len(blocks) != 1 || blocks[0].(map[string]any)["saved_to"] != path || blocks[0].(map[string]any)["data"] != nil || blocks[0].(map[string]any)["size"] != float64(len(pdfFile)) {
+	res := jsonOf(t, out)
+	blocks, _ := res["content"].([]any)
+	if len(blocks) != 1 || blocks[0].(map[string]any)["file"] != path || blocks[0].(map[string]any)["data"] != nil ||
+		blocks[0].(map[string]any)["bytes"] != float64(len(pdfFile)) || res["result"].(map[string]any)["file"] != path {
 		t.Fatal(out)
 	}
-	// Перед именем действия — тоже опция вызова; текстовый ответ — текстом.
-	text := filepath.Join(t.TempDir(), "page.txt")
-	if code, out := h.run(t, tok, "browser", "--out", text, "read", "--url", "https://a.example.com/"); code != ExitOK {
+	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatal("a downloaded file is the owner's only:", st.Mode(), err)
+	}
+	// Перед именем действия — тоже опция вызова.
+	path2 := filepath.Join(t.TempDir(), "b.pdf")
+	if code, out := h.run(t, tok, "browser", "--out", path2, "download", "--session", "s1", "--url", "https://a.example.com/a.pdf"); code != ExitOK {
 		t.Fatal(code, out)
 	}
-	if got, _ := os.ReadFile(text); string(got) != "ok" {
+	if got, _ := os.ReadFile(path2); !bytes.Equal(got, pdfFile) {
 		t.Fatalf("%q", got)
 	}
 }
