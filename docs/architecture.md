@@ -5,7 +5,7 @@
 | Компонент [спецификации](specification.md) | Пакет |
 |---|---|
 | Модель конфигурации, Config Store (версии, откат, права владельца) | `internal/config` |
-| Policy Engine (CEL, deny > ask > allow, умолчания по классу, лимиты) | `internal/policy` |
+| Policy Engine (CEL, deny > ask > allow, умолчания по классу, лимиты); действия, которые правило allow не разрешает (`OwnerOnly`: `gate4ai.change_policy` — всегда владелец) и которые шаблон `browser.*` / `*` не покрывает (`ExplicitOnly`: `browser.post` / `put` / `patch` / `delete` / `login` / `fill_secret`), предупреждения о таких правилах (`Warnings`: `policy set`, Web UI, `policy_summary`) | `internal/policy` |
 | Action Pipeline (8 шагов) | `internal/pipeline` |
 | Перед исполнением (и одобренного действия): повторное решение PDP и резерв лимита атомарно (`admit`), квитанция-намерение (`execution.status: started`) до исполнения — без журнала действие не исполняется; восстановление прерванных действий при старте (`Recover`) | `internal/pipeline/pipeline.go`, `internal/pipeline/approval.go`, `internal/pipeline/recover.go` |
 | State Store (счётчики, очередь подтверждений, метки происхождения, токены) | `internal/state` |
@@ -21,6 +21,7 @@
 | Вызовы между коннекторами (`service_call`): маршрутизация через Action Pipeline (политика агента корневого действия, квитанция с `parent`, глубина, циклы), `end_call` | `internal/pipeline/nested.go`, `internal/daemon/services.go`; контракты — `sdk-go/contract`, CLI `gate4ai contract gen|diff` — `internal/front/cli/contract.go` |
 | Встроенные коннекторы на PDK (`runtime: builtin`, тот же код и те же функции хоста, что у WASM): файлы | `internal/connectors/builtin/files`, адаптер — `internal/connectors/wasm/builtin.go` (`Engine.Builtin`) |
 | Коннекторы (AGPL-3.0): почта (WASM), браузер — нативный пакет (воркер: Chrome, CDP, Stagehand, Executor — `worker/`) | `connectors/mail`, `connectors/browser` |
+| Браузер: вкладка на сессию и очередь (`worker/service.go`), JS-диалоги и `browser.dialog` (`worker/dialog.go`), срок действия, `session_blocked`, `close --all` по клиенту агента, кто закрыл сеанс (`sessions.go`); клиент агента — `ExecRequest.Client` из `pipeline.clientOf` | `connectors/browser`, `internal/pipeline/credentials.go` |
 | daemon, API на сокетах владельца и агентов | `internal/daemon`, `internal/platform/ipc` |
 | Опознание агента по процессу: признаки в окружении, процессы-предки, корень агента и его каталог запуска (Linux `/proc`, macOS `sysctl` + `lsof`, Windows — снимок процессов); сокет владельца отвечает агенту `agent_required`; ключ с привязкой к каталогу — только от агента из этого каталога; вызывающий (каталог, сессия, процессы) — в квитанции и запросе подтверждения | `internal/platform/procinfo`, `internal/platform/agentid`, `Daemon.identify` / `checkBinding` в `internal/daemon/api.go`, `pipeline.WithCaller`, `audit.Caller` |
 | Спаривание агента по коду: `POST /v1/pair`, `GET /v1/pair/{id}` (сокет агентов и публичный адрес), решение — `Daemon.DecidePairing` (Web UI, Telegram); каталог ключей агентов и выбор ключа в CLI (`gate4ai pair`, автоспаривание при первой команде агента) | `internal/daemon/pairing.go`, `internal/state/pairing.go`, `internal/platform/agentkeys`, `internal/front/cli/agentkey.go`, `internal/front/webui/pairings.go`, `Telegram.PairRequested` в `internal/approval/telegram.go` |
@@ -30,7 +31,7 @@
 | Маскирование одноразовых кодов и токенов в адресах (результаты, журнал) | `internal/pipeline/urlmask.go` |
 | Отмена вызова нативного пакета (`cancel`, срок вызова в процессе) | `sdk-go/native/serve.go`, `internal/connectors/native/native.go` |
 | Публичный адрес устройства: один обработчик для relay и прямого HTTPS (`--public`), разделение по путям — MCP (`POST`/`DELETE` на корень) и OAuth (`resource` — адрес устройства), `/v1/{whoami,tools,call,status}` (удалённый CLI), `/ui/` (удалённый Web UI), `/telegram` (вебхук); у каждого пути своя аутентификация, API владельца нет | `internal/daemon` (`PublicHandler`, `AddPublic`, `ServePublic`), `cmd/gate4ai/setup.go`, тест изоляции `cmd/gate4ai/public_test.go` |
-| CLI, skill | `internal/front/cli`, `internal/front/skill`; ошибки для человека и агента (`hint`, `detail`) — `errors.go`; `gate4ai daemon start/stop/status` — `daemonctl.go`; автозапуск `gate4ai service` — `service.go` поверх `internal/platform/autostart`; UX путей пользователя — [cli-ux.md](cli-ux.md) |
+| CLI, skill (установленный SKILL.md агента — обёртка `skill.Stub` «выполни `gate4ai skill`», устаревший daemon при старте и `gate4ai skill` заменяют ею — `agentsetup.RefreshSkill`; картинки ответа — в файлы, `--out`) | `internal/front/cli`, `internal/front/skill`; ошибки для человека и агента (`hint`, `detail`) — `errors.go`; `gate4ai daemon start/stop/status` — `daemonctl.go`; автозапуск `gate4ai service` — `service.go` поверх `internal/platform/autostart`; UX путей пользователя — [cli-ux.md](cli-ux.md) |
 | MCP Front (stdio, Streamable HTTP), OAuth 2.1 | `internal/front/mcp`, `internal/front/mcpcli`, `internal/front/oauth` |
 | Relay — сервер (туннель, passthrough, DNS/ACME, свидетель) | `relay/`, `relay/cmd/gate4ai-relay` |
 | Relay — клиент устройства | `internal/relayclient` |
@@ -40,7 +41,7 @@
 | Защита входа в Web UI: способы на выбор — одноразовая ссылка, пароль (argon2id), подтверждение в Telegram-боте; настройки — kv `ui.login` State Store, не в конфигурации; с паролем/Telegram ссылка даёт только попытку входа; сброс `gate4ai daemon --reset-ui-login` | `internal/front/webui/protect.go` (тесты `protect_test.go`), `internal/approval/telegram.go` (`ConfirmLogin`), `cmd/gate4ai/setup.go` |
 | Автоподключение клиентов MCP (Claude Code, Claude Desktop, Cursor, VS Code, Codex CLI, Gemini CLI) | `internal/front/agentsetup` |
 | Структурные правки конфигурации, модель правок `gate4ai.change_policy` | `internal/config/edit.go`, `internal/config/change.go` |
-| Самонастройка: встроенный коннектор `gate4ai` (`change_policy` — класс write под обычной политикой, `policy_summary`); проверка и текст запроса подтверждения — хук `Pipeline.Describe` | `internal/daemon/selfconfig.go` |
+| Самонастройка: встроенный коннектор `gate4ai` (`change_policy` — класс write, всегда с подтверждением владельца, `policy_summary`); проверка и текст запроса подтверждения — хук `Pipeline.Describe` | `internal/daemon/selfconfig.go` |
 | Каналы подтверждений для Web UI: состояние, статистика, мастер Telegram; браузерный push (Web Push, VAPID, RFC 8291) | `internal/approval/channels.go`, `internal/approval/webpush.go` |
 | Автозапуск (systemd --user / XDG, LaunchAgent, HKCU Run) — общий для `gate4ai service` и Web UI | `internal/platform/autostart` |
 | Трей (бинарник `gate4ai-tray`) | `cmd/gate4ai-tray` (меню, fyne.io/systray), `internal/front/tray` (состояние, решения, уведомления) |
