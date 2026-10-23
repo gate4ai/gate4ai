@@ -9,6 +9,7 @@
 | `TestRelayDNSForACME` | DNS собранного `gate4ai-relay` годится для ACME DNS-01: certmagic находит зону relay и её NS (иначе сертификат устройства не выпускается, и ссылки на `<id>.relay.gate4.ai` висят до таймаута) |
 | `TestRemoteLinkThroughRelay` | daemon подключается к локальному relay; ссылка «Вход с телефона» из Настроек открывает Web UI устройства через relay (TLS до устройства), второй раз не открывается (срок ссылки проверяет unit-тест ядра `TestLoginLinkExpires` со сдвигом часов) |
 | `TestConnectorFromSourceFolder` | коннектор ставится из папки с исходниками (копия `connectors/mail`), `update` пересобирает из неё, `--watch` переставляет после правки манифеста |
+| `TestBrowserTypeAndScreenshot` | агент через CLI в headless Chrome: `act --method type --value "a, b, c" --submit Enter` создаёт три тега в поле, реагирующем на keydown (ответ — `changes.added`), `press --value ","` — ещё один; `page_screenshot` с `--out`, окно, вся страница, элемент — валидные PNG; скрытый элемент объяснён (`display:none`); клик без ожидаемого результата — `not_found` с путём к снимку; в доказательствах журнала поле пароля закрашено |
 | `TestRemoteLoginQR` | в headless Chrome (chromedp): «Настройки → Показать ссылку и QR-код» — картинка загрузилась, QR расшифровывается (gozxing) в ту же ссылку, что на странице |
 
 ## Запуск

@@ -52,7 +52,7 @@ func TestGenerateBrowser(t *testing.T) {
 			t.Errorf("SKILL.md lacks browser.%s", a.Name)
 		}
 	}
-	for _, want := range []string{"## Browser sessions", "--session", "handoff", "one of: click, fill, append, paste, press, wait", "up to 262144 characters",
+	for _, want := range []string{"## Browser sessions", "--session", "handoff", "one of: click, fill, append, paste, type, press, wait", "up to 262144 characters",
 		"Ctrl+Enter", "--value_file", "of: fields, buttons, links", "close --all"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("SKILL.md lacks %q", want)

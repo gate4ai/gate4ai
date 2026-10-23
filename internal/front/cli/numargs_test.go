@@ -3,9 +3,13 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -36,11 +40,66 @@ func (b *browserFake) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecRes
 		res.Structured = map[string]any{"session": "s1", "url": "https://a.example.com/", "title": "t"}
 	case "act":
 		res.Structured = map[string]any{"url": "https://a.example.com/"}
+	case "page_screenshot":
+		res.Structured = map[string]any{"mode": "viewport", "width": 1, "height": 1, "bytes": len(fakePNG), "file": "/daemon/browser-shots/s1-1.png"}
+		res.Content = []abi.Content{abi.Image("image/png", fakePNG)}
 	}
 	return res, nil
 }
 func (b *browserFake) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{Status: abi.Verified}, nil
+}
+
+var fakePNG = []byte("\x89PNG\r\n\x1a\n-fake-image")
+
+// --out сохраняет изображение ответа в файл на стороне CLI, путь — в
+// result.file; base64 изображения в вывод не попадает.
+func TestScreenshotOut(t *testing.T) {
+	src, err := os.ReadFile("../../../connectors/browser/manifest.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	man, err := manifest.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := connectors.NewInProcess(&browserFake{man: man, args: map[string]map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := startWith(t, `
+agents:
+  a: { profile: web }
+profiles:
+  web:
+    connectors: [browser]
+    rules:
+      - { id: all, action: "browser.*", effect: allow }
+`, c)
+	_, out := h.run(t, "", "agents", "token", "a")
+	tok := jsonOf(t, out)["token"].(string)
+	path := filepath.Join(t.TempDir(), "shot.png")
+	code, out := h.run(t, tok, "browser", "page_screenshot", "--session", "s1", "--viewport", "--out", path)
+	if code != ExitOK {
+		t.Fatal(code, out)
+	}
+	if b, err := os.ReadFile(path); err != nil || !bytes.Equal(b, fakePNG) {
+		t.Fatal("the file:", err)
+	}
+	res := jsonOf(t, out)
+	if res["result"].(map[string]any)["file"] != path || strings.Contains(out, base64.StdEncoding.EncodeToString(fakePNG)) {
+		t.Fatal(out)
+	}
+	// Без --out — путь от коннектора, изображение — только размером.
+	code, out = h.run(t, tok, "browser", "page_screenshot", "--session", "s1")
+	if code != ExitOK || jsonOf(t, out)["result"].(map[string]any)["file"] != "/daemon/browser-shots/s1-1.png" ||
+		strings.Contains(out, base64.StdEncoding.EncodeToString(fakePNG)) || !strings.Contains(out, `"bytes": 19`) {
+		t.Fatal(code, out)
+	}
+	// Изображения в ответе нет — --out сообщает об ошибке.
+	if code, out := h.run(t, tok, "browser", "observe", "--session", "s1", "--out", path+"2"); code == ExitOK {
+		t.Fatal(out)
+	}
 }
 
 // Числовые аргументы CLI (--max_chars, --timeout_ms) доходят до коннектора
