@@ -48,6 +48,18 @@ func TestFromChain(t *testing.T) {
 		t.Fatalf("detached: %+v", c)
 	}
 
+	// OpenClaw: признак есть только у shell инструмента exec; shell, который
+	// человек запустил из TUI (tui-local), агентом не считается.
+	ocExec := procinfo.Proc{PID: 20, Name: "bash", Env: map[string]string{"OPENCLAW_SHELL": "exec"}}
+	c = FromChain([]procinfo.Proc{cli, ocExec, node, term}, dirs)
+	if c.Agent != "openclaw" || c.Dir != "/proj" {
+		t.Fatalf("openclaw exec: %+v", c)
+	}
+	ocTUI := procinfo.Proc{PID: 20, Name: "bash", Env: map[string]string{"OPENCLAW_SHELL": "tui-local"}}
+	if c = FromChain([]procinfo.Proc{cli, ocTUI, node, term}, dirs); c.IsAgent() {
+		t.Fatalf("openclaw tui-local: %+v", c)
+	}
+
 	// Человек в терминале: агента нет, каталог — свой.
 	c = FromChain([]procinfo.Proc{cli, {PID: 20, Name: "bash"}, term}, dirs)
 	if c.IsAgent() || c.Dir != "/proj/sub" || len(c.Chain) != 1 {
@@ -68,6 +80,11 @@ func TestFromEnv(t *testing.T) {
 	env := map[string]string{"CLAUDECODE": "1"}
 	if FromEnv(func(k string) string { return env[k] }) != "claude-code" || FromEnv(func(string) string { return "" }) != "" {
 		t.Fatal("FromEnv")
+	}
+	for v, want := range map[string]string{"exec": "openclaw", "tui-local": "", "acp-client": ""} {
+		if got := FromEnv(func(k string) string { return map[string]string{"OPENCLAW_SHELL": v}[k] }); got != want {
+			t.Fatalf("OPENCLAW_SHELL=%s: %q, want %q", v, got, want)
+		}
 	}
 }
 
