@@ -4,8 +4,7 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -28,25 +27,28 @@ var SessionIdle = 2 * time.Minute
 // AgentIdle — сеанс агента без действий закрывается сам (агент забыл close).
 var AgentIdle = 10 * time.Minute
 
-// AgentWait — сколько действие агента ждёт страницу, занятую другим сеансом
-// (дольше — ошибка busy с подсказкой, а не зависание до таймаута вызова).
+// AgentWait — сколько вызов ждёт без --wait_for_browser: место в браузере,
+// занятом другими сеансами, или свой сеанс, пока в нём идёт другое действие
+// (дольше — ошибка busy или session_blocked с тем, кто занял, а не зависание).
 var AgentWait = 5 * time.Second
 
 // MaxSteps — предел записанных шагов сеанса агента (для фикстур тестов).
 const MaxSteps = 500
 
 // Browser — коннектор: действия агента без сеанса (read, screenshot, extract —
-// временная вкладка на время действия: открытый сеанс агента они не трогают), сеанс агента (open → observe / act / network /
-// page_extract / page_screenshot → close; сайты — из настроек) и те же
-// действия для других коннекторов через service_call (страница на корневое
-// действие, сайты — params.sites вызывающего).
+// временная вкладка на время действия: открытые сеансы они не трогают), сеансы
+// агентов (open → observe / act / network / page_extract / page_screenshot →
+// close; у каждого своя вкладка; сайты — из настроек) и те же действия для
+// других коннекторов через service_call (страница на корневое действие,
+// сайты — params.sites вызывающего).
 type Browser struct {
 	W *worker.Service
 
 	mu       sync.Mutex
 	sessions map[string]*callSession  // корневое действие → страница
 	agents   map[string]*agentSession // сеанс агента → страница
-	create   sync.Mutex               // создание страниц по очереди (воркер — одна сессия за раз)
+	closed   map[string]closedInfo    // недавно закрытые сеансы агентов: кто и почему
+	create   sync.Mutex               // страница корневого действия создаётся один раз
 }
 
 type callSession struct {
@@ -56,6 +58,8 @@ type callSession struct {
 	url    string // адрес страницы после последнего действия
 	timer  *time.Timer
 	mu     sync.Mutex // действия одной страницы — по очереди
+	owner  string     // кто держит страницу (для текста busy)
+	since  time.Time
 }
 
 // agentSession — страница агента между его вызовами и записанные шаги.
@@ -63,10 +67,17 @@ type agentSession struct {
 	callSession
 	id        string
 	agent     string // агент-владелец (ExecRequest.Agent): чужой агент сеанс не видит
+	client    string // экземпляр агента (ExecRequest.Client): close --all — только своих
 	steps     []map[string]any
 	truncated bool
-	closed    bool               // страница освобождена (под mu)
-	cancel    context.CancelFunc // отмена идущего действия (под Browser.mu)
+	lock      chan struct{} // действия сеанса — по одному (lockAgent)
+
+	// под Browser.mu
+	closed  bool               // страница освобождена
+	cancel  context.CancelFunc // отмена идущего действия
+	running string             // идущее действие ("" — нет)
+	started time.Time          // когда оно началось
+	last    time.Time          // последнее действие: сеанс закроется в last + AgentIdle
 }
 
 // New — коннектор с воркером по умолчанию.
@@ -131,8 +142,19 @@ func sitesOf(m map[string]any, domainsKey string) (domain.Sites, error) {
 	return domain.Sites{Domains: strs(m[domainsKey])}, nil
 }
 
-// CodeRedirected — пока ждали (wait_for_*), страница ушла на страницу или сайт входа.
-const CodeRedirected = "redirected"
+// Коды ошибок браузера сверх abi.
+const (
+	CodeRedirected = "redirected" // пока ждали (wait_for_*), страница ушла на страницу или сайт входа
+	// CodeDialogOpen — на странице открыт JS-диалог (alert, confirm, prompt,
+	// beforeunload): сообщение начинается с {type, message}; ответ — browser.dialog.
+	CodeDialogOpen = "dialog_open"
+	// CodeTimeout — действие не закончилось за свой срок (timeout_ms или
+	// значение по умолчанию); в сообщении — состояние страницы.
+	CodeTimeout = "timeout"
+	// CodeSessionBlocked — в сеансе ещё идёт другое действие (или оно зависло):
+	// кто, с какого времени, что делать.
+	CodeSessionBlocked = "session_blocked"
+)
 
 // fail — ошибка воркера в коде ABI.
 func fail(err error) error {
@@ -145,6 +167,13 @@ func fail(err error) error {
 		return abi.Errorf(abi.CodeNotFound, "%v", err)
 	case errors.Is(err, context.Canceled):
 		return abi.Errorf(abi.CodeCancelled, "%v", err)
+	case errors.Is(err, worker.ErrNoDialog):
+		return abi.Errorf(abi.CodeNotFound, "%v", err)
+	case errors.As(err, new(*worker.DialogError)):
+		var de *worker.DialogError
+		errors.As(err, &de)
+		d, _ := json.Marshal(de.Dialog)
+		return abi.Errorf(CodeDialogOpen, "%s — %v", d, de)
 	case errors.Is(err, worker.ErrRedirected):
 		return abi.Errorf(CodeRedirected, "%s", strings.TrimPrefix(err.Error(), worker.ErrRedirected.Error()+": "))
 	}
@@ -202,26 +231,6 @@ func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (
 	}
 	res, err := b.service(ctx, r)
 	return res, fail(b.busy(err))
-}
-
-// busy — подсказка, кто держит страницу, и что сделать вместо ожидания.
-func (b *Browser) busy(err error) error {
-	if errors.Is(err, worker.ErrTabLimit) {
-		return abi.Errorf(abi.CodeLimit, "%v (%d at most; read, screenshot and extract each use one while they run): try again when they finish, "+
-			"or use your open session: browser.get --session <id> --url <url> (a request with the session's cookies) or "+
-			"browser.open --session <id> --url <url> then browser.observe / page_screenshot / page_extract", err, worker.MaxTabs)
-	}
-	if !errors.Is(err, worker.ErrBusy) {
-		return err
-	}
-	b.mu.Lock()
-	n := len(b.agents)
-	b.mu.Unlock()
-	if n > 0 {
-		return abi.Errorf(abi.CodeLimit, "%v: an agent's browser session is open (one at a time); continue in it: browser.open --session <id> --url <url>, "+
-			"or browser.read / screenshot / extract --url <url> without session (a temporary tab); or close it with browser.close (an idle session closes after %s)", err, AgentIdle)
-	}
-	return abi.Errorf(abi.CodeLimit, "%v: a connector's action is using the page; try again when it ends", err)
 }
 
 // agentSites — сайты агента из настроек.
@@ -315,7 +324,7 @@ func (b *Browser) session(ctx context.Context, r abi.ExecRequest) (*callSession,
 	if err != nil {
 		return nil, err
 	}
-	cs := &callSession{s: s, sites: sites}
+	cs := &callSession{s: s, sites: sites, owner: "connector " + r.Caller.Connector, since: time.Now()}
 	call := r.Caller.Call
 	cs.timer = time.AfterFunc(SessionIdle, func() { b.EndCall(call) })
 	b.mu.Lock()
@@ -344,7 +353,23 @@ func (cs *callSession) page(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 		return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "call browser.open first")
 	}
 	cs.s.SetLoginOrigins(loginOrigins(r.Accounts))
-	res, err := cs.do(ctx, r)
+	var res abi.ExecResult
+	var err error
+	switch r.Action {
+	case "dialog", "handoff":
+		// Ответ на диалог — при открытом диалоге; handoff ждёт человека, который
+		// в окне Chrome сам ответит на диалог.
+		res, err = cs.do(ctx, r)
+	default:
+		// Открытый диалог отвечает dialog_open сразу, открывшийся во время
+		// действия прерывает его; beforeunload при open / reload, о которых
+		// просит вызывающий, принимается.
+		err = cs.s.Run(ctx, r.Action == "open" || r.Action == "reload", func(ctx context.Context) error {
+			var err error
+			res, err = cs.do(ctx, r)
+			return err
+		})
+	}
 	if errors.Is(err, worker.ErrRedirected) {
 		if u, uerr := cs.s.Engine.URL(ctx); uerr == nil {
 			cs.url = u
@@ -485,6 +510,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			// хост проверяет до уведомления человека: сеанс и страница есть
 			return abi.ExecResult{Structured: map[string]any{"url": cleanURL(cs.url)}}, worker.CheckHandoff(hr)
 		}
+		cs.s.Activate(ctx) // человек видит вкладку сеанса
 		res, err := cs.s.Handoff(ctx, hr)
 		if err != nil {
 			return abi.ExecResult{}, err
@@ -530,11 +556,30 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		}
 		return abi.ExecResult{Structured: map[string]any{"data": data}, Source: "web:" + cleanURL(cs.url)}, nil
 	case "page_screenshot":
-		png, err := cs.s.ScreenshotElement(ctx, str(r.Args, "selector"))
+		sel := str(r.Args, "selector")
+		png, err := cs.s.ScreenshotElement(ctx, sel)
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		return abi.ExecResult{Content: []abi.Content{abi.Image("image/png", png)}}, nil
+		// PNG — в content (MCP показывает картинку, CLI пишет её в файл: --out,
+		// путь — result.file) и в доказательства.
+		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(cs.url), "selector": sel, "size": len(png)},
+			Content: []abi.Content{abi.Image("image/png", png)}, ResultRef: cleanURL(cs.url),
+			Evidence: []abi.EvidenceItem{{Name: "element.png", MIME: "image/png", Data: png}}}, nil
+	case "dialog":
+		accept, _ := r.Args["accept"].(bool)
+		dismiss, _ := r.Args["dismiss"].(bool)
+		if accept == dismiss {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "dialog: pass --accept or --dismiss")
+		}
+		d, u, err := cs.s.HandleDialog(ctx, accept, str(r.Args, "text"))
+		if err != nil {
+			return abi.ExecResult{}, err
+		}
+		if u != "" {
+			cs.url = u
+		}
+		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(cs.url), "dialog": d, "accepted": accept}, ResultRef: d.Type}, nil
 	case "login":
 		if rec, _ := r.Args["record_only"].(bool); rec {
 			// Вход через коннектор входа уже прошёл (хост): шаг для записи сеанса.
@@ -568,143 +613,6 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(res.URL), "origin": res.Origin}, ResultRef: res.Origin}, nil
 	}
 	return abi.ExecResult{}, fmt.Errorf("unknown action %s", r.Action)
-}
-
-// agentPage — сеанс агента: open без session начинает сеанс (страница
-// занята, пока агент не вызовет close или сеанс не простоит AgentIdle), с
-// session — переходит на его странице; остальные действия — на странице
-// сеанса. Каждое действие записывается шагом: close отдаёт шаги для фикстур
-// тестов коннектора (hosttest.Replay).
-func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, error) {
-	id := str(r.Args, "session")
-	if all, _ := r.Args["all"].(bool); r.Action == "close" && all {
-		return b.closeAll(r.Agent), nil
-	}
-	var as *agentSession
-	if id == "" {
-		if r.Action != "open" {
-			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "pass session from browser.open (it starts a browser session)")
-		}
-		var err error
-		if as, err = b.newAgentSession(ctx, r); err != nil {
-			return abi.ExecResult{}, err
-		}
-	} else {
-		b.mu.Lock()
-		as = b.agents[id]
-		if as != nil && as.agent != r.Agent {
-			as = nil // сеанс другого агента: как неизвестный
-		}
-		if as != nil {
-			as.timer.Reset(AgentIdle)
-		}
-		b.mu.Unlock()
-		if as == nil {
-			return abi.ExecResult{}, closedErr(id)
-		}
-	}
-	as.mu.Lock()
-	defer as.mu.Unlock()
-	if as.closed {
-		// close --all или простой закрыли сеанс, пока действие ждало страницу.
-		return abi.ExecResult{}, closedErr(as.id)
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	b.mu.Lock()
-	as.cancel = cancel
-	b.mu.Unlock()
-	if r.Action == "close" {
-		b.closeAgent(as)
-		return as.closeResult(r.Args)
-	}
-	res, err := as.page(ctx, r)
-	as.record(r, res, err)
-	if err != nil {
-		if id == "" {
-			b.closeAgent(as) // сеанс не начался
-		}
-		return abi.ExecResult{}, err
-	}
-	if r.Action == "open" {
-		res.Structured.(map[string]any)["session"] = as.id
-	}
-	return res, nil
-}
-
-func (b *Browser) newAgentSession(ctx context.Context, r abi.ExecRequest) (*agentSession, error) {
-	sites, err := agentSites(r)
-	if err != nil {
-		return nil, err
-	}
-	b.create.Lock()
-	defer b.create.Unlock()
-	s, err := b.W.Acquire(ctx, settings(r), AgentWait)
-	if err != nil {
-		return nil, err
-	}
-	var raw [8]byte
-	_, _ = rand.Read(raw[:])
-	as := &agentSession{callSession: callSession{s: s, sites: sites}, id: "s-" + hex.EncodeToString(raw[:]), agent: r.Agent}
-	id := as.id
-	as.timer = time.AfterFunc(AgentIdle, func() {
-		as.mu.Lock()
-		defer as.mu.Unlock()
-		b.closeAgent(as)
-	})
-	b.mu.Lock()
-	if b.agents == nil {
-		b.agents = map[string]*agentSession{}
-	}
-	b.agents[id] = as
-	b.mu.Unlock()
-	return as, nil
-}
-
-// closedErr — сеанса нет: закрыт, неизвестен или принадлежит другому агенту
-// (ответ один и тот же — чужие id не подтверждаются).
-func closedErr(id string) error {
-	return abi.Errorf(abi.CodeNotFound, "browser session %s is closed or unknown; start a new one with browser.open", id)
-}
-
-// closeAll закрывает сеансы агента agent (потерянный id, зависший сеанс):
-// идущее действие сеанса отменяется, страница освобождается после его
-// завершения — следующий сеанс не получит её посреди чужого действия.
-func (b *Browser) closeAll(agent string) abi.ExecResult {
-	b.mu.Lock()
-	var mine []*agentSession
-	for _, as := range b.agents {
-		if as.agent != agent {
-			continue
-		}
-		mine = append(mine, as)
-		if as.cancel != nil {
-			as.cancel()
-		}
-	}
-	b.mu.Unlock()
-	for _, as := range mine {
-		as.mu.Lock()
-		b.closeAgent(as)
-		as.mu.Unlock()
-	}
-	return abi.ExecResult{Structured: map[string]any{"closed": true, "sessions": len(mine)}}
-}
-
-// closeAgent освобождает страницу сеанса агента (close, close --all, простой,
-// неудачный open); вызывающий держит as.mu — действий сеанса в этот момент нет.
-func (b *Browser) closeAgent(as *agentSession) {
-	b.mu.Lock()
-	if b.agents[as.id] == as {
-		delete(b.agents, as.id)
-	}
-	b.mu.Unlock()
-	if as.closed {
-		return
-	}
-	as.closed = true
-	as.timer.Stop()
-	as.s.Release()
 }
 
 // record — шаг сеанса в форме hosttest.Step: действие, аргументы без session,

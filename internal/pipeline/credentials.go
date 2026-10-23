@@ -204,6 +204,20 @@ const ArgPrecheck = "precheck"
 // шаг входа через коннектор входа (результат — в result) без самого входа.
 const ArgRecordOnly = "record_only"
 
+// clientOf — экземпляр агента для браузера: сессия Claude Code или корневой
+// процесс агента ("" — вызывающий неизвестен).
+func clientOf(c *audit.Caller) string {
+	switch {
+	case c == nil:
+		return ""
+	case c.Session != "":
+		return "session " + c.Session
+	case len(c.Chain) > 0:
+		return fmt.Sprintf("process %d", c.Chain[len(c.Chain)-1].PID)
+	}
+	return ""
+}
+
 func denied(f string, a ...any) error { return abi.Errorf(abi.CodeSecretDenied, f, a...) }
 
 // prepareBrowser дополняет запрос к browser учётками вызывающего; для login и
@@ -215,6 +229,7 @@ func (p *Pipeline) prepareBrowser(ctx context.Context, agent string, act manifes
 	who := p.accessorOf(ctx, agent)
 	req.Accounts = p.accountsFor(cfg, who)
 	req.Agent = agent // сеансы браузера привязаны к агенту
+	req.Client = clientOf(CallerFrom(ctx))
 	if act.Name != ActionLogin && act.Name != ActionFillSecret {
 		return nil, nil
 	}

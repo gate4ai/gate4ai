@@ -168,10 +168,14 @@ func (x *Executor) Extract(ctx context.Context, instruction string) (any, error)
 var ActPoll = 200 * time.Millisecond
 
 // actJS ищет видимый элемент по селектору, чей текст (подписи, placeholder,
-// aria-label, value) содержит нужный текст без учёта регистра и «ё»; из
-// нескольких берёт элемент с самой короткой подписью. Готовит его к методу
-// (click — клик, fill — фокус и выделение содержимого, press — фокус) и
-// возвращает его текст; append — фокус и курсор в конец значения, paste — как fill.
+// aria-label, value) содержит нужный текст без учёта регистра и «ё»: самый
+// внутренний из таких и вложенных в них (кнопка, а не её контейнер; при
+// селекторе-контейнере — ul, div — вложенный элемент с этим текстом); из нескольких —
+// с самой короткой подписью. Готовит его к методу (click — нажатие мышью:
+// pointerdown, mousedown, pointerup, mouseup, click — самописные списки
+// открываются по mousedown; fill — фокус и выделение содержимого, press —
+// фокус) и возвращает его текст; append — фокус и курсор в конец значения,
+// paste — как fill.
 //
 // Значение поля пароля не читается никогда: ни в подписи (по ней подбирают
 // текст и expect_text / wait_for_text), ни в ответе. Пока на странице введён
@@ -190,12 +194,27 @@ var actJS = `((sel, text, method, secret) => {
   const label = e => [txt(e), val(e), e.placeholder, e.getAttribute('aria-label'), e.getAttribute('title'),
     e.labels ? [...e.labels].map(l => txt(l)).join(' ') : ''].filter(Boolean).join(' ');
   const want = norm(text);
-  // из подходящих — с самой короткой подписью: кнопка, а не её контейнер
-  const e = [...document.querySelectorAll(sel)].filter(e => vis(e) && (!want || norm(label(e)).includes(want)))
-    .sort((a, b) => norm(label(a)).length - norm(label(b)).length)[0];
+  const has = e => !want || norm(label(e)).includes(want);
+  const matches = [...document.querySelectorAll(sel)].filter(vis);
+  let found = matches.filter(has);
+  if (want) {
+    // текст — и у вложенных элементов: селектор мог назвать контейнер (ul, div)
+    const all = new Set(found);
+    for (const m of found) for (const d of m.querySelectorAll('*')) if (!all.has(d) && vis(d) && has(d)) all.add(d);
+    found = [...all];
+    found = found.filter(e => !found.some(o => o !== e && e.contains(o))); // самый внутренний
+  }
+  const e = found.sort((a, b) => norm(label(a)).length - norm(label(b)).length)[0];
   if (!e) return null;
   e.scrollIntoView({block: 'center'});
-  if (method === 'click') e.click();
+  if (method === 'click') {
+    const r = e.getBoundingClientRect();
+    const o = {bubbles: true, cancelable: true, composed: true, view: window, button: 0, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2};
+    const ptr = t => { try { e.dispatchEvent(new PointerEvent(t, Object.assign({pointerId: 1, pointerType: 'mouse', isPrimary: true}, o))); } catch (_) {} };
+    ptr('pointerdown'); e.dispatchEvent(new MouseEvent('mousedown', Object.assign({buttons: 1}, o)));
+    ptr('pointerup'); e.dispatchEvent(new MouseEvent('mouseup', o));
+    if (typeof e.click === 'function') e.click(); else e.dispatchEvent(new MouseEvent('click', o)); // у svg нет click()
+  }
   if (['fill', 'paste', 'append', 'press'].includes(method)) {
     e.focus();
     const edit = typeof e.setSelectionRange === 'function' && typeof e.value === 'string';
@@ -210,6 +229,73 @@ var actJS = `((sel, text, method, secret) => {
   }
   return {text: secret ? '' : (txt(e) || val(e) || '').slice(0, 2000)};
 })`
+
+// candidatesJS — act не нашёл элемент: видимые элементы с этим текстом (самые
+// внутренние) и их селекторы, иначе — сколько элементов по селектору есть и
+// сколько из них видно.
+var candidatesJS = `((sel, text, max) => {
+  const vt = ` + visibleTextJS + `;
+  const css = ` + selectorJS + `;
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase().replace(/ё/g, 'е');
+  const vis = e => { const r = e.getBoundingClientRect(), st = getComputedStyle(e);
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'; };
+  let all = [];
+  try { all = [...document.querySelectorAll(sel)]; } catch (_) {}
+  const out = {matches: all.length, visible: all.filter(vis).length, candidates: []};
+  const want = norm(text);
+  if (!want) return out;
+  const hit = [...document.body.querySelectorAll('*')].filter(e => !['script', 'style'].includes(e.localName) && norm(vt(e) + ' ' +
+    (e.getAttribute('aria-label') || '') + ' ' + (e.getAttribute('title') || '') + ' ' + (e.placeholder || '')).includes(want) && vis(e));
+  for (const e of hit.filter(e => !hit.some(o => o !== e && e.contains(o))).slice(0, max)) {
+    out.candidates.push({selector: css(e), tag: e.localName, text: vt(e).replace(/\s+/g, ' ').trim().slice(0, 80)});
+  }
+  return out;
+})`
+
+// MaxCandidates — сколько кандидатов act перечисляет, когда элемент не найден.
+const MaxCandidates = 5
+
+// notFound — act не нашёл элемент: ErrNotFound с кандидатами (элементы с этим
+// текстом и их селекторы) или с тем, что по селектору есть, но не видно.
+func (x *Executor) notFound(ctx context.Context, r ActRequest) error {
+	what := r.Selector
+	if r.Text != "" {
+		what += " with text " + fmt.Sprintf("%q", r.Text)
+	}
+	var c struct {
+		Matches    int `json:"matches"`
+		Visible    int `json:"visible"`
+		Candidates []struct {
+			Selector string `json:"selector"`
+			Tag      string `json:"tag"`
+			Text     string `json:"text"`
+		} `json:"candidates"`
+	}
+	text := r.Text
+	if x.SecretOnPage(ctx) {
+		text = "" // кандидаты показывают текст страницы, а на ней введён секрет
+	}
+	if err := x.Engine.Eval(ctx, call(candidatesJS, r.Selector, text, MaxCandidates), &c); err != nil {
+		return fmt.Errorf("%w: %s", ErrNotFound, what)
+	}
+	var hints []string
+	if c.Matches > 0 && c.Visible == 0 {
+		hints = append(hints, fmt.Sprintf("%d elements match %s, none is visible", c.Matches, r.Selector))
+	}
+	if len(c.Candidates) > 0 {
+		var cs []string
+		for _, k := range c.Candidates {
+			cs = append(cs, fmt.Sprintf("%s %q — selector %s", k.Tag, k.Text, k.Selector))
+		}
+		hints = append(hints, "visible elements with this text: "+strings.Join(cs, "; ")+" (act --selector <one of them> or a container of it with --text)")
+	} else if r.Text != "" && text != "" {
+		hints = append(hints, "no visible element has this text: look with observe --elements")
+	}
+	if len(hints) == 0 {
+		return fmt.Errorf("%w: %s", ErrNotFound, what)
+	}
+	return fmt.Errorf("%w: %s; %s", ErrNotFound, what, strings.Join(hints, "; "))
+}
 
 // actExpr — вызов actJS; secret — на странице введён секрет (SecretOnPage).
 func (x *Executor) actExpr(ctx context.Context, sel, text, method string) (expr string, secret bool) {
@@ -246,11 +332,7 @@ func (x *Executor) Act(ctx context.Context, r ActRequest) (ActResponse, error) {
 			break
 		}
 		if time.Now().After(deadline) {
-			what := r.Selector
-			if r.Text != "" {
-				what += " with text " + fmt.Sprintf("%q", r.Text)
-			}
-			return ActResponse{}, fmt.Errorf("%w: %s", ErrNotFound, what)
+			return ActResponse{}, x.notFound(ctx, r)
 		}
 		if err := wait(ctx, ActPoll); err != nil {
 			return ActResponse{}, err

@@ -37,20 +37,25 @@ func DefaultEngine(ctx context.Context, s Settings, cdpURL string) (Engine, erro
 	return DialStagehand(ctx, StagehandConfig{CDPURL: cdpURL, ModelName: s.Model, APIKey: s.ModelKey})
 }
 
-// Service — браузерный воркер: один движок между вызовами, одна сессия за
-// раз — страница не делится между вызовами; одноразовые вызовы — во временных
-// вкладках того же Chrome (Tab), не дольше MaxTabs одновременно.
+// Service — браузерный воркер: один Chrome и движок между вызовами. Сессии
+// (сеанс агента, корневой вызов коннектора) не делят страницу: первая
+// занимает стартовую вкладку движка, следующие — свои вкладки того же Chrome
+// и профиля, не больше MaxSessions одновременно; одноразовые вызовы — во
+// временных вкладках (Tab), не больше MaxTabs.
 type Service struct {
 	NewEngine EngineFactory
 	Launch    func(ctx context.Context, chrome, profile string, extra ...string) (string, *os.Process, error)
 
-	mu   sync.Mutex
-	slot chan struct{} // одна сессия за раз
-	tabs chan struct{} // временные вкладки одноразовых вызовов (MaxTabs)
-	exec *Executor
-	key  string
-	cdp  string // адрес DevTools текущего Chrome
-	proc *os.Process
+	mu       sync.Mutex
+	exec     *Executor
+	key      string
+	cdp      string // адрес DevTools текущего Chrome
+	proc     *os.Process
+	gen      int           // поколение Chrome: растёт при каждом подключении заново
+	mainBusy bool          // стартовую вкладку держит сессия
+	sessions int           // открытые сессии (стартовая вкладка и свои)
+	tabs     int           // временные вкладки одноразовых вызовов
+	freed    chan struct{} // закрывается, когда освобождается сессия или вкладка
 }
 
 // New — воркер с движками по умолчанию.
@@ -75,9 +80,14 @@ func settingsKey(st Settings) string {
 	return fmt.Sprint(st.CDPURL, st.ChromePath, st.ProfileDir, st.Engine, st.Model, st.ModelKey)
 }
 
-func (s *Service) executor(ctx context.Context, st Settings) (*Executor, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// ErrSettingsChanged — настройки браузера сменили, пока открыты сессии или
+// вкладки на прежнем Chrome: перезапуск оборвал бы их.
+var ErrSettingsChanged = errors.New("the browser settings changed while sessions are open on the browser started with the old ones")
+
+// executor — движок стартовой вкладки (через него открываются остальные);
+// Chrome запускается или подключается заново, если его нет или он не
+// отвечает. others — кроме вызывающего, открыты сессии или вкладки. Под s.mu.
+func (s *Service) executor(ctx context.Context, st Settings, others bool) (*Executor, error) {
 	key := settingsKey(st)
 	reuse := ""
 	if s.exec != nil && s.key == key {
@@ -87,11 +97,14 @@ func (s *Service) executor(ctx context.Context, st Settings) (*Executor, error) 
 		// Вкладку или окно Chrome закрыли, Chrome упал: подключение мёртвое.
 		// Сначала — к тому же Chrome (закрыта только вкладка), иначе запуск заново.
 		reuse = s.cdp
+	} else if s.exec != nil && others {
+		return nil, ErrSettingsChanged
 	}
 	if s.exec != nil {
 		_ = s.exec.Engine.Close()
 		s.exec = nil
 	}
+	s.gen++ // прежние вкладки сессий — у прежнего подключения
 	if reuse != "" {
 		if eng, err := s.NewEngine(ctx, st, reuse); err == nil {
 			s.exec = &Executor{Engine: eng}
@@ -108,8 +121,8 @@ func (s *Service) executor(ctx context.Context, st Settings) (*Executor, error) 
 			}
 		}
 		if s.proc != nil {
-			// Chrome запущен с другими настройками (движок, профиль): профиль
-			// занят им, новый запуск передал бы адрес ему и закрылся.
+			// Chrome запущен с другими настройками (движок, профиль) или не
+			// отвечает: профиль занят им, новый запуск передал бы адрес ему и закрылся.
 			StopChrome(s.proc, 3*time.Second)
 			s.proc = nil
 		}
@@ -128,99 +141,116 @@ func (s *Service) executor(ctx context.Context, st Settings) (*Executor, error) 
 	return s.exec, nil
 }
 
-// ErrBusy — страницу держит другая сессия дольше, чем вызов готов ждать.
-var ErrBusy = errors.New("the browser is busy with another session")
+// ErrBusy — все MaxSessions сессий заняты дольше, чем вызов готов ждать.
+var ErrBusy = errors.New("the browser is busy with other sessions")
 
-func (s *Service) slotCh() chan struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.slot == nil {
-		s.slot = make(chan struct{}, 1)
-	}
-	return s.slot
-}
+// MaxSessions — сколько сессий (вкладок сессий) открыто одновременно.
+var MaxSessions = 4
 
 // MaxTabs — сколько временных вкладок (одноразовые read / screenshot /
-// extract) открыто одновременно, кроме страницы сессии.
+// extract) открыто одновременно, кроме вкладок сессий.
 var MaxTabs = 4
 
 // ErrTabLimit — все временные вкладки заняты дольше, чем вызов готов ждать.
 var ErrTabLimit = errors.New("too many temporary browser tabs are open")
 
-// Tabber — движок умеет открыть временную вкладку того же Chrome.
+// Tabber — движок умеет открыть ещё одну вкладку того же Chrome
+// (background — в фоне).
 type Tabber interface {
-	NewTab(ctx context.Context) (Engine, error)
+	NewTab(ctx context.Context, background bool) (Engine, error)
 }
 
-func (s *Service) tabsCh() chan struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.tabs == nil {
-		s.tabs = make(chan struct{}, MaxTabs)
+// pinger — движок проверяет, что Chrome жив, запросом к браузеру, а не к
+// странице (открытый на ней диалог не мешает).
+type pinger interface{ Ping(ctx context.Context) error }
+
+// activator — движок выводит свою вкладку вперёд.
+type activator interface{ Activate(ctx context.Context) error }
+
+// freedCh — канал освобождения (под s.mu).
+func (s *Service) freedCh() chan struct{} {
+	if s.freed == nil {
+		s.freed = make(chan struct{})
 	}
-	return s.tabs
+	return s.freed
 }
 
-// Tab — временная вкладка того же Chrome и профиля для одноразового вызова:
-// страницу сессии (слот Acquire) не занимает и не трогает; Release закрывает
-// вкладку. Пока заняты все MaxTabs вкладок, ждёт не дольше wait (ErrTabLimit;
-// 0 — до конца ctx).
-func (s *Service) Tab(ctx context.Context, st Settings, wait time.Duration) (*Session, error) {
-	tabs := s.tabsCh()
+// release — сессия или вкладка освобождена: ждущие пробуют снова.
+func (s *Service) release(f func()) {
+	s.mu.Lock()
+	f()
+	close(s.freedCh())
+	s.freed = make(chan struct{})
+	s.mu.Unlock()
+}
+
+// reserve ждёт места (ok(s) под s.mu — есть место, и занимает его), не дольше
+// wait (0 — до конца ctx); иначе full.
+func (s *Service) reserve(ctx context.Context, wait time.Duration, full error, ok func() bool) error {
 	var timeout <-chan time.Time
 	if wait > 0 {
 		t := time.NewTimer(wait)
 		defer t.Stop()
 		timeout = t.C
 	}
-	select {
-	case tabs <- struct{}{}:
-	case <-timeout:
-		return nil, ErrTabLimit
-	case <-ctx.Done():
-		return nil, fmt.Errorf("%w: %v", ErrTabLimit, ctx.Err())
+	for {
+		s.mu.Lock()
+		if ok() {
+			s.mu.Unlock()
+			return nil
+		}
+		ch := s.freedCh()
+		s.mu.Unlock()
+		select {
+		case <-ch:
+		case <-timeout:
+			return full
+		case <-ctx.Done():
+			return fmt.Errorf("%w: %v", full, ctx.Err())
+		}
 	}
-	st = normalize(st)
-	main, err := s.mainEngine(ctx, st)
-	if err != nil {
-		<-tabs
-		return nil, err
-	}
-	t, ok := main.(Tabber)
-	if !ok {
-		<-tabs
-		return nil, errors.New("the browser engine cannot open a temporary tab")
-	}
-	eng, err := t.NewTab(ctx)
-	if err != nil {
-		<-tabs
-		return nil, err
-	}
-	return &Session{Executor: &Executor{Engine: eng, RedactParams: st.RedactParams}, s: s, max: st.MaxTextChars, tab: tabs}, nil
 }
 
-// mainEngine — движок страницы сессии, от которого открываются вкладки.
-// Страница свободна — Chrome запускается или переподключается как в Acquire;
-// занята сессией — берётся её движок как есть (перезапуск оборвал бы сессию).
-func (s *Service) mainEngine(ctx context.Context, st Settings) (Engine, error) {
-	slot := s.slotCh()
-	select {
-	case slot <- struct{}{}:
-		defer func() { <-slot }()
-		x, err := s.executor(ctx, st)
-		if err != nil {
-			return nil, err
-		}
-		return x.Engine, nil
-	default:
-	}
+// newTab — ещё одна вкладка того же Chrome от движка стартовой вкладки.
+func (s *Service) newTab(ctx context.Context, st Settings, background bool) (Engine, int, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.exec == nil || s.key != settingsKey(st) {
-		// Сессия открыта с другими настройками браузера (их сменили на ходу).
-		return nil, ErrBusy
+	x, err := s.executor(ctx, st, true)
+	gen := s.gen
+	s.mu.Unlock()
+	if err != nil {
+		return nil, 0, err
 	}
-	return s.exec.Engine, nil
+	t, ok := x.Engine.(Tabber)
+	if !ok {
+		return nil, 0, errors.New("the browser engine cannot open another tab")
+	}
+	eng, err := t.NewTab(ctx, background)
+	return eng, gen, err
+}
+
+// Tab — временная вкладка того же Chrome и профиля для одноразового вызова:
+// вкладки сессий не занимает и не трогает; Release закрывает её. Пока заняты
+// все MaxTabs вкладок, ждёт не дольше wait (ErrTabLimit; 0 — до конца ctx).
+func (s *Service) Tab(ctx context.Context, st Settings, wait time.Duration) (*Session, error) {
+	if err := s.reserve(ctx, wait, ErrTabLimit, func() bool {
+		if s.tabs >= MaxTabs {
+			return false
+		}
+		s.tabs++
+		return true
+	}); err != nil {
+		return nil, err
+	}
+	st = normalize(st)
+	eng, gen, err := s.newTab(ctx, st, true)
+	if err != nil {
+		s.release(func() { s.tabs-- })
+		return nil, err
+	}
+	if d, ok := eng.(Dialoger); ok {
+		d.AutoDialogs() // во временной вкладке спросить некого: диалоги закрываются сами
+	}
+	return &Session{Executor: &Executor{Engine: eng, RedactParams: st.RedactParams}, s: s, max: st.MaxTextChars, kind: tabTemp, gen: gen}, nil
 }
 
 // ProbeTimeout — сколько ждать ответа Chrome при проверке, что он жив.
@@ -230,36 +260,56 @@ var ProbeTimeout = 3 * time.Second
 func alive(ctx context.Context, e Engine) bool {
 	ctx, cancel := context.WithTimeout(ctx, ProbeTimeout)
 	defer cancel()
+	if p, ok := e.(pinger); ok {
+		return p.Ping(ctx) == nil
+	}
 	_, err := e.URL(ctx)
 	return err == nil
 }
 
-// Acquire — сессия (одна за раз) с настройками st; Release освобождает её.
-// Пока страницу держит другая сессия, ждёт не дольше wait (ErrBusy; 0 — до
-// конца ctx).
+// Acquire — сессия с настройками st: стартовая вкладка, если она свободна,
+// иначе своя вкладка; Release освобождает её. Пока открыты MaxSessions
+// сессий, ждёт не дольше wait (ErrBusy; 0 — до конца ctx).
 func (s *Service) Acquire(ctx context.Context, st Settings, wait time.Duration) (*Session, error) {
-	slot := s.slotCh()
-	var timeout <-chan time.Time
-	if wait > 0 {
-		t := time.NewTimer(wait)
-		defer t.Stop()
-		timeout = t.C
-	}
-	select {
-	case slot <- struct{}{}:
-	case <-timeout:
-		return nil, ErrBusy
-	case <-ctx.Done():
-		return nil, fmt.Errorf("%w: %v", ErrBusy, ctx.Err())
+	main := false
+	if err := s.reserve(ctx, wait, ErrBusy, func() bool {
+		if s.sessions >= MaxSessions {
+			return false
+		}
+		s.sessions++
+		main = !s.mainBusy
+		s.mainBusy = s.mainBusy || main
+		return true
+	}); err != nil {
+		return nil, err
 	}
 	st = normalize(st)
-	x, err := s.executor(ctx, st)
+	undo := func() {
+		s.release(func() {
+			s.sessions--
+			if main {
+				s.mainBusy = false
+			}
+		})
+	}
+	if !main {
+		eng, gen, err := s.newTab(ctx, st, false)
+		if err != nil {
+			undo()
+			return nil, err
+		}
+		return &Session{Executor: &Executor{Engine: eng, RedactParams: st.RedactParams}, s: s, max: st.MaxTextChars, kind: tabSession, gen: gen}, nil
+	}
+	s.mu.Lock()
+	x, err := s.executor(ctx, st, s.sessions > 1 || s.tabs > 0)
+	gen := s.gen
+	s.mu.Unlock()
 	if err != nil {
-		<-slot
+		undo()
 		return nil, err
 	}
 	x.RedactParams = st.RedactParams
-	return &Session{Executor: x, s: s, max: st.MaxTextChars}, nil
+	return &Session{Executor: x, s: s, max: st.MaxTextChars, gen: gen}, nil
 }
 
 // Close закрывает движок и Chrome, который воркер запустил сам (чужой Chrome
@@ -286,6 +336,13 @@ func (s *Service) Close() error {
 	return nil
 }
 
+// Вид страницы сессии.
+const (
+	tabMain    = iota // стартовая вкладка движка
+	tabSession        // своя вкладка сессии
+	tabTemp           // временная вкладка одноразового вызова
+)
+
 // Session — страница одного вызова: действия Executor (Act, Extract, Network,
 // Login…) и освобождение страницы.
 type Session struct {
@@ -293,7 +350,32 @@ type Session struct {
 	s    *Service
 	max  int
 	done bool
-	tab  chan struct{} // временная вкладка (Tab): Release закрывает её
+	kind int
+	gen  int // поколение Chrome, в котором открыта страница
+}
+
+// Gone — Chrome сессии закрыт или упал (её вкладки больше нет): действия
+// бесполезны, сессию надо закрыть.
+func (ss *Session) Gone(ctx context.Context) bool {
+	ss.s.mu.Lock()
+	gen := ss.s.gen
+	ss.s.mu.Unlock()
+	return gen != ss.gen || !alive(ctx, ss.Executor.Engine)
+}
+
+// Activate — вкладка сессии впереди (handoff: человек видит её).
+func (ss *Session) Activate(ctx context.Context) {
+	if a, ok := ss.Executor.Engine.(activator); ok {
+		_ = a.Activate(ctx)
+	}
+}
+
+// Dialog — открытый на странице диалог (nil — нет).
+func (ss *Session) Dialog() *Dialog {
+	if d, ok := ss.Executor.Engine.(Dialoger); ok {
+		return d.OpenDialog()
+	}
+	return nil
 }
 
 // Open переходит по URL; sites — разрешённые сайты, итоговый адрес после
@@ -349,19 +431,31 @@ func (ss *Session) Present(ctx context.Context, sel string) bool {
 	return err == nil && ok
 }
 
-// Release освобождает сессию.
+// Release освобождает сессию: своя и временная вкладки закрываются,
+// стартовая остаётся (диалог на ней закрывается — следующей сессии он не
+// достанется).
 func (ss *Session) Release() {
 	if ss.done {
 		return
 	}
 	ss.done = true
-	if ss.tab != nil {
-		_ = ss.Executor.Engine.Close()
-		<-ss.tab
-		return
+	if d, ok := ss.Executor.Engine.(Dialoger); ok {
+		d.AutoDialogs()
 	}
-	ss.Executor.Sites, ss.Executor.LoginOrigins = domain.Sites{}, nil
-	<-ss.s.slotCh()
+	switch ss.kind {
+	case tabTemp:
+		_ = ss.Executor.Engine.Close()
+		ss.s.release(func() { ss.s.tabs-- })
+	case tabSession:
+		_ = ss.Executor.Engine.Close()
+		ss.s.release(func() { ss.s.sessions-- })
+	default:
+		if d, ok := ss.Executor.Engine.(interface{ ManualDialogs() }); ok {
+			d.ManualDialogs() // стартовая вкладка остаётся: диалоги снова ждут ответа
+		}
+		ss.Executor.Sites, ss.Executor.LoginOrigins = domain.Sites{}, nil
+		ss.s.release(func() { ss.s.sessions--; ss.s.mainBusy = false })
+	}
 }
 
 // chromeFlags — флаги запуска Chrome под движок. Расширение Stagehand

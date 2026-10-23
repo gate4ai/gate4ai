@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	stagehand "github.com/browserbase/stagehand/packages/sdk-go/v4"
 )
@@ -17,11 +18,17 @@ import (
 // телеметрия не задана. Act с естественным языком не используется — в нём нет точки
 // перехвата политикой; изменения на страницах — только browser_act по селектору
 // (Executor.Act).
+//
+// JS-диалоги SDK не показывает, а переход при открытом beforeunload в нём
+// висит: вкладку дополнительно слушает прямое подключение CDP (aux, по id
+// страницы — это id цели CDP) — диалоги, переключение вкладки, проверка Chrome.
 type Stagehand struct {
 	browser *stagehand.Browser
 	client  *stagehand.Stagehand
 	page    *stagehand.Page
-	tab     bool // временная вкладка (NewTab): Close закрывает только её
+	tab     bool   // вкладка NewTab: Close закрывает только её
+	http    string // адрес DevTools
+	aux     *CDP   // прямое подключение к вкладке (nil — не удалось)
 }
 
 // StagehandConfig — модель для extract.
@@ -58,7 +65,18 @@ func DialStagehand(ctx context.Context, cfg StagehandConfig) (*Stagehand, error)
 	if err != nil || len(pages) == 0 {
 		return nil, errors.New("stagehand: no page in the browser context")
 	}
-	return &Stagehand{browser: b, client: cl, page: pages[0]}, nil
+	sh := &Stagehand{browser: b, client: cl, page: pages[0], http: cfg.CDPURL}
+	sh.attach(ctx)
+	return sh, nil
+}
+
+// attach — прямое подключение CDP к вкладке страницы (диалоги) и перехват
+// обработчиков click для observe.
+func (s *Stagehand) attach(ctx context.Context) {
+	_ = s.page.AddInitScript(ctx, clickHookJS)
+	if aux, err := AttachCDP(ctx, s.http, s.page.PageID()); err == nil {
+		s.aux = aux
+	}
 }
 
 func (s *Stagehand) Navigate(ctx context.Context, url string) error {
@@ -118,9 +136,10 @@ func (s *Stagehand) Extract(ctx context.Context, instruction string) (any, error
 	return r.Data.Answer, nil
 }
 
-// NewTab — временная вкладка того же Chrome (тот же профиль и cookie) на
-// общем подключении SDK; Close закрывает только её.
-func (s *Stagehand) NewTab(ctx context.Context) (Engine, error) {
+// NewTab — ещё одна вкладка того же Chrome (тот же профиль и cookie) на
+// общем подключении SDK; Close закрывает только её. background SDK не
+// поддерживает: вкладка открывается впереди.
+func (s *Stagehand) NewTab(ctx context.Context, _ bool) (Engine, error) {
 	bc, err := s.browser.Context()
 	if err != nil {
 		return nil, err
@@ -129,13 +148,79 @@ func (s *Stagehand) NewTab(ctx context.Context) (Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("stagehand: new tab: %w", err)
 	}
-	return &Stagehand{browser: s.browser, client: s.client, page: p, tab: true}, nil
+	t := &Stagehand{browser: s.browser, client: s.client, page: p, tab: true, http: s.http}
+	t.attach(ctx)
+	return t, nil
 }
 
+// CloseTimeout — сколько ждать закрытия вкладки или SDK.
+var CloseTimeout = 5 * time.Second
+
 func (s *Stagehand) Close() error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), CloseTimeout)
+	defer cancel()
+	if s.aux != nil {
+		s.aux.AutoDialogs() // beforeunload при закрытии не держит вкладку
+		defer s.aux.Close()
+	}
 	if s.tab {
 		return s.page.Close(ctx)
 	}
 	return errors.Join(s.client.Close(ctx), s.browser.Close(ctx))
+}
+
+// Диалоги, проверка и переключение — через прямое подключение к вкладке.
+
+func (s *Stagehand) OpenDialog() *Dialog {
+	if s.aux == nil {
+		return nil
+	}
+	return s.aux.OpenDialog()
+}
+
+func (s *Stagehand) DialogOpened() <-chan struct{} {
+	if s.aux == nil {
+		return nil
+	}
+	return s.aux.DialogOpened()
+}
+
+func (s *Stagehand) HandleDialog(ctx context.Context, accept bool, text string) error {
+	if s.aux == nil {
+		return ErrNoDialog
+	}
+	return s.aux.HandleDialog(ctx, accept, text)
+}
+
+func (s *Stagehand) AcceptUnload(on bool) {
+	if s.aux != nil {
+		s.aux.AcceptUnload(on)
+	}
+}
+
+func (s *Stagehand) AutoDialogs() {
+	if s.aux != nil {
+		s.aux.AutoDialogs()
+	}
+}
+
+func (s *Stagehand) ManualDialogs() {
+	if s.aux != nil {
+		s.aux.ManualDialogs()
+	}
+}
+
+func (s *Stagehand) Ping(ctx context.Context) error {
+	if s.aux == nil {
+		_, err := s.page.URL(ctx)
+		return err
+	}
+	return s.aux.Ping(ctx)
+}
+
+func (s *Stagehand) Activate(ctx context.Context) error {
+	if s.aux == nil {
+		return nil
+	}
+	return s.aux.Activate(ctx)
 }

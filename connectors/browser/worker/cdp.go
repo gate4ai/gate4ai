@@ -33,6 +33,7 @@ type CDP struct {
 	net     netLog
 	owned   bool   // вкладку открыл движок: закрыть её в Close
 	http    string // адрес DevTools (http://127.0.0.1:<port>) — для NewTab
+	dialogs        // JS-диалоги вкладки (Dialoger)
 }
 
 type cdpMsg struct {
@@ -65,15 +66,34 @@ func BrowserWSURL(ctx context.Context, httpURL string) (string, error) {
 }
 
 // DialCDP подключается к браузеру и открывает новую вкладку.
-func DialCDP(ctx context.Context, httpURL string) (*CDP, error) { return dialCDP(ctx, httpURL, false) }
+func DialCDP(ctx context.Context, httpURL string) (*CDP, error) {
+	return dialCDP(ctx, httpURL, tabOpts{})
+}
 
-// NewTab — временная вкладка того же Chrome (тот же профиль и cookie) со своим
-// подключением; Close закрывает её. Вкладка открывается в фоне: страница
-// сессии остаётся впереди.
-func (c *CDP) NewTab(ctx context.Context) (Engine, error) { return dialCDP(ctx, c.http, true) }
+// NewTab — ещё одна вкладка того же Chrome (тот же профиль и cookie) со своим
+// подключением; Close закрывает её. background — в фоне (временная вкладка
+// одноразового вызова: страница сессии остаётся впереди), иначе — впереди
+// (вкладка сеанса: человек видит, что в ней происходит).
+func (c *CDP) NewTab(ctx context.Context, background bool) (Engine, error) {
+	return dialCDP(ctx, c.http, tabOpts{new: true, background: background})
+}
 
-// dialCDP — подключение к вкладке: tab — всегда новая фоновая вкладка.
-func dialCDP(ctx context.Context, httpURL string, tab bool) (*CDP, error) {
+// AttachCDP — подключение к уже открытой вкладке targetID (её ведёт другой
+// движок): диалоги вкладки, переключение на неё, проверка, что Chrome жив.
+// Вкладку Close не закрывает.
+func AttachCDP(ctx context.Context, httpURL, targetID string) (*CDP, error) {
+	return dialCDP(ctx, httpURL, tabOpts{target: targetID})
+}
+
+// tabOpts — к какой вкладке подключаться: new — новая (background — в фоне),
+// target — к этой; иначе — пустая стартовая вкладка Chrome или новая.
+type tabOpts struct {
+	new, background bool
+	target          string
+}
+
+// dialCDP — подключение к вкладке.
+func dialCDP(ctx context.Context, httpURL string, o tabOpts) (*CDP, error) {
 	ws, err := BrowserWSURL(ctx, httpURL)
 	if err != nil {
 		return nil, err
@@ -84,7 +104,14 @@ func dialCDP(ctx context.Context, httpURL string, tab bool) (*CDP, error) {
 	}
 	conn.SetReadLimit(64 << 20)
 	cctx, cancel := context.WithCancel(context.Background())
-	c := &CDP{conn: conn, pending: map[int64]chan cdpMsg{}, events: make(chan cdpMsg, 256), ctx: cctx, cancel: cancel, http: httpURL}
+	c := &CDP{conn: conn, pending: map[int64]chan cdpMsg{}, events: make(chan cdpMsg, 256), ctx: cctx, cancel: cancel, http: httpURL, target: o.target}
+	c.dialogs.answer = func(ctx context.Context, accept bool, text string) error {
+		p := map[string]any{"accept": accept}
+		if text != "" {
+			p["promptText"] = text
+		}
+		return c.call(ctx, c.session, "Page.handleJavaScriptDialog", p, nil)
+	}
 	go c.readLoop()
 	// Пустая стартовая вкладка запущенного Chrome — рабочая: вторая вкладка не
 	// нужна. Нет такой (чужой Chrome по cdp_url) или вкладка временная — своя.
@@ -96,7 +123,7 @@ func dialCDP(ctx context.Context, httpURL string, tab bool) (*CDP, error) {
 			Attached bool   `json:"attached"`
 		} `json:"targetInfos"`
 	}
-	if !tab && c.call(ctx, "", "Target.getTargets", nil, &list) == nil {
+	if !o.new && o.target == "" && c.call(ctx, "", "Target.getTargets", nil, &list) == nil {
 		for _, t := range list.TargetInfos {
 			if t.Type == "page" && t.URL == "about:blank" && !t.Attached {
 				c.target = t.TargetID
@@ -108,7 +135,7 @@ func dialCDP(ctx context.Context, httpURL string, tab bool) (*CDP, error) {
 		var t struct {
 			TargetID string `json:"targetId"`
 		}
-		if err := c.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank", "background": tab}, &t); err != nil {
+		if err := c.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank", "background": o.background}, &t); err != nil {
 			c.Close()
 			return nil, err
 		}
@@ -129,6 +156,11 @@ func dialCDP(ctx context.Context, httpURL string, tab bool) (*CDP, error) {
 		c.Close()
 		return nil, err
 	}
+	if o.target != "" {
+		return c, nil // вкладку ведёт другой движок: сеть и перехват он ставит сам
+	}
+	// Обработчики click страницы — для observe (до её скриптов, в каждом документе).
+	_ = c.call(ctx, c.session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": clickHookJS}, nil)
 	c.net.reset()
 	if err := c.call(ctx, c.session, "Network.enable", map[string]any{"maxResourceBufferSize": 4 << 20}, nil); err != nil {
 		c.Close()
@@ -167,6 +199,12 @@ func (c *CDP) readLoop() {
 		if strings.HasPrefix(m.Method, "Network.") {
 			if m.SessionID == "" || m.SessionID == c.session {
 				c.net.handle(m)
+			}
+			continue
+		}
+		if strings.HasPrefix(m.Method, "Page.javascriptDialog") {
+			if m.SessionID == c.session {
+				c.dialogs.event(m)
 			}
 			continue
 		}
@@ -336,6 +374,17 @@ func (c *CDP) Screenshot(ctx context.Context, selector string) ([]byte, error) {
 
 func (c *CDP) Extract(context.Context, string) (any, error) {
 	return nil, errors.New("extract needs engine: stagehand and a model configured by the user")
+}
+
+// Ping — Chrome отвечает (запрос к браузеру, а не к странице: открытый на
+// ней диалог не мешает).
+func (c *CDP) Ping(ctx context.Context) error {
+	return c.call(ctx, "", "Browser.getVersion", nil, nil)
+}
+
+// Activate — вкладка впереди (handoff: человек видит её).
+func (c *CDP) Activate(ctx context.Context) error {
+	return c.call(ctx, "", "Target.activateTarget", map[string]any{"targetId": c.target}, nil)
 }
 
 // QuitBrowser закрывает Chrome штатно (Browser.close): профиль и cookies

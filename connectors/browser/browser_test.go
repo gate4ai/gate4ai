@@ -33,7 +33,7 @@ type fakeEngine struct {
 }
 
 // NewTab — временная вкладка: своя страница (адрес), тот же тип документа.
-func (f *fakeEngine) NewTab(context.Context) (worker.Engine, error) {
+func (f *fakeEngine) NewTab(context.Context, bool) (worker.Engine, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.tabs++
@@ -215,7 +215,15 @@ func TestServiceActions(t *testing.T) {
 		// после ухода со списка страница закрыта (about:blank)
 		t.Fatal("observe after leaving the list:", res)
 	}
-	// Страница — одна на корневое действие: другой корень ждёт end_call.
+	// Страница — одна на корневое действие; другой корень — в своей вкладке.
+	if _, err := exec(b, "open", map[string]any{"url": "https://www.tbank-online.com/"}, &abi.Caller{Connector: "tbank", Call: "root2", Params: caller.Params}); err != nil || eng.tabs != 1 {
+		t.Fatal("a second root call gets a tab of its own:", eng.tabs, err)
+	}
+	b.EndCall("root2")
+	// Браузер полон (MaxSessions): другой корень ждёт end_call.
+	oldMax := worker.MaxSessions
+	worker.MaxSessions = 1
+	defer func() { worker.MaxSessions = oldMax }()
 	done := make(chan error, 1)
 	go func() {
 		_, err := exec(b, "open", map[string]any{"url": "https://www.tbank-online.com/"}, &abi.Caller{Connector: "tbank", Call: "root2", Params: caller.Params})
@@ -328,18 +336,28 @@ func TestAgentSession(t *testing.T) {
 		t.Fatalf("tokens and sign-in responses are hidden: %+v", reqs)
 	}
 
-	// Страница сеанса занята: коннектор и второй сеанс получают busy с
-	// подсказкой, а не ждут таймаута (read — во временной вкладке, см. TestReadDuringSession).
-	old := AgentWait
-	AgentWait = 20 * time.Millisecond
-	defer func() { AgentWait = old }()
+	// Страница коннектора — своя вкладка: страница сеанса не меняется.
 	caller := &abi.Caller{Connector: "site", Call: "root1", Params: map[string]any{"domains": []any{"*.example.com"}}}
+	if _, err := exec(b, "open", map[string]any{"url": "https://b.example.com/x"}, caller); err != nil || eng.tabs != 1 {
+		t.Fatal("connector while a session is open:", eng.tabs, err)
+	}
+	if res, err := agentExec(t, b, "observe", map[string]any{"session": id}); err != nil || res["url"] != "https://a.example.com/" {
+		t.Fatal("the session's page:", res, err)
+	}
+	b.EndCall("root1")
+	// Браузер полон: коннектор и второй сеанс получают busy — чей сеанс, с
+	// какого времени, когда закроется — а не ждут таймаута (read — во
+	// временной вкладке, см. TestReadDuringSession).
+	old, oldMax := AgentWait, worker.MaxSessions
+	AgentWait, worker.MaxSessions = 20*time.Millisecond, 1
+	defer func() { AgentWait, worker.MaxSessions = old, oldMax }()
 	if _, err := exec(b, "open", map[string]any{"url": "https://a.example.com/"}, caller); err == nil || !strings.Contains(err.Error(), "browser.close") {
-		t.Fatal("connector while a session is open:", err)
+		t.Fatal("connector while the browser is full:", err)
 	}
 	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"}); err == nil || !strings.Contains(err.Error(), "busy") ||
-		!strings.Contains(err.Error(), "browser.open --session <id>") || !strings.Contains(err.Error(), "without session") {
-		t.Fatal("second session, with the alternatives:", err)
+		!strings.Contains(err.Error(), "a session of an agent open since") || !strings.Contains(err.Error(), "closes at") ||
+		!strings.Contains(err.Error(), "--wait_for_browser 10m") || !strings.Contains(err.Error(), "without session") {
+		t.Fatal("second session, with whose session it is and the alternatives:", err)
 	}
 
 	// close: по умолчанию коротко; --steps — шаги без ответов; save_steps —
@@ -350,7 +368,7 @@ func TestAgentSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	brief := res["step_list"].([]map[string]any)
-	if len(brief) != 5 || brief[0]["action"] != "open" || brief[3]["status"] != abi.CodeNotFound || brief[1]["status"] != "ok" || brief[1]["result"] != nil {
+	if len(brief) != 6 || brief[0]["action"] != "open" || brief[3]["status"] != abi.CodeNotFound || brief[1]["status"] != "ok" || brief[1]["result"] != nil {
 		t.Fatalf("brief steps: %+v", brief)
 	}
 	if _, ok := brief[0]["args"].(map[string]any)["session"]; ok {
@@ -361,11 +379,11 @@ func TestAgentSession(t *testing.T) {
 		t.Fatal("steps file in the data dir:", res)
 	}
 	fx, err := hosttest.LoadFixture(path)
-	if err != nil || len(fx.Steps) != 5 || fx.Steps[3].Error.Code != abi.CodeNotFound || fx.Steps[1].Result["text"] == nil {
+	if err != nil || len(fx.Steps) != 6 || fx.Steps[3].Error.Code != abi.CodeNotFound || fx.Steps[1].Result["text"] == nil {
 		t.Fatalf("fixture: %+v %v", fx, err)
 	}
-	if _, err := agentExec(t, b, "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed or unknown") {
-		t.Fatal("closed session:", err)
+	if _, err := agentExec(t, b, "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "was closed at") || !strings.Contains(err.Error(), "closed by browser.close") {
+		t.Fatal("closed session, who closed it:", err)
 	}
 	if _, err := exec(b, "open", map[string]any{"url": "https://a.example.com/"}, caller); err != nil {
 		t.Fatal("the page is free after close:", err)
@@ -598,7 +616,7 @@ func TestCloseAllWaitsForAction(t *testing.T) {
 	if time.Since(start) > 5*time.Second {
 		t.Fatal("close --all waited for the action's timeout")
 	}
-	if _, err := agentExec(t, b, "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed or unknown") {
+	if _, err := agentExec(t, b, "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed by browser.close --all") {
 		t.Fatal(err)
 	}
 }
