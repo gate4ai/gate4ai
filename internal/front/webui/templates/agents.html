@@ -1,6 +1,7 @@
 {{template "head" .}}
 <div class="row between"><h2>{{T "Agents"}}</h2><a class="btn primary" href="{{.Base}}/setup">+ {{T "Connect an AI assistant"}}</a></div>
 <p class="muted">{{T "An agent is a program (Claude Code, Cursor, Claude.ai…) that reaches gate4.ai with its own token. What it may do is set on its page."}}</p>
+{{template "pairings" (dict "V" . "List" .Data.Pairings "Back" "/agents")}}
 {{range .Data.Rows}}
 <div class="card">
 <div class="row between"><div><a href="{{$.Base}}/agents/{{.Name}}"><b style="font-size:1.1rem">{{.Name}}</b></a>{{if .Clients}} <span class="muted">· {{join .Clients ", "}}</span>{{end}}

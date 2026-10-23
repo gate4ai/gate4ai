@@ -19,7 +19,7 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
-func (p *Pipeline) requestApproval(agent, action string, act manifest.Action, args map[string]any, prov map[string][]string, dec policy.Decision) (*state.Approval, error) {
+func (p *Pipeline) requestApproval(ctx context.Context, agent, action string, act manifest.Action, args map[string]any, prov map[string][]string, dec policy.Decision) (*state.Approval, error) {
 	now := p.Now()
 	timeout := p.cfg().Approvals.Timeout.D()
 	if timeout <= 0 {
@@ -41,10 +41,24 @@ func (p *Pipeline) requestApproval(agent, action string, act manifest.Action, ar
 		// Подвызовы покрываются этим подтверждением: человек должен их видеть.
 		a.Preview += "\nalso runs: " + act.CallsText()
 	}
+	caller := CallerFrom(ctx)
+	if caller != nil && caller.Dir != "" {
+		// Откуда пришёл запрос: человек видит каталог агента.
+		a.Preview += "\nfrom: " + caller.Dir
+		if caller.Source != "peer" {
+			a.Preview += " (as reported by the agent)"
+		}
+	}
 	canon, _ := audit.Canonicalize(map[string]any{"id": a.ID, "agent": agent, "action": action, "args": p.maskArgs(act, args)})
 	a.PreviewHash = audit.HashBytes(canon)
 	if err := p.State.PutApproval(a); err != nil {
 		return nil, err
+	}
+	if caller != nil {
+		b, _ := json.Marshal(caller)
+		if err := p.State.SetApprovalCaller(a.ID, b); err != nil {
+			p.Log.Warn("approval caller", "id", a.ID, "err", err)
+		}
 	}
 	if p.Notifier != nil {
 		p.Notifier.Notify(a)
@@ -196,6 +210,8 @@ func (p *Pipeline) decide(ctx context.Context, id, status, channel, who string) 
 
 // finish исполняет или отклоняет запрос после решения и сохраняет итог.
 func (p *Pipeline) finish(ctx context.Context, a *state.Approval, status, channel, who string) Result {
+	// Квитанция — с вызывающим запроса, а не того, кто одобрил.
+	ctx = WithCaller(ctx, p.approvalCaller(a.ID))
 	appr := &audit.Approval{Channel: channel, Who: who, At: a.DecidedAt.UTC(), Result: status, PreviewHash: a.PreviewHash}
 	var res Result
 	cli, act, ok := p.Registry.Lookup(a.Action)
@@ -206,7 +222,7 @@ func (p *Pipeline) finish(ctx context.Context, a *state.Approval, status, channe
 		if dec, revoked := p.revoked(a); revoked {
 			// Доступ агента отозван после запроса: «отзыв в один клик»
 			// останавливает и поставленные в очередь действия.
-			res = p.deny(a.Agent, act, a.Action, a.Args, dec, appr, "")
+			res = p.deny(ctx, a.Agent, act, a.Action, a.Args, dec, appr, "")
 			break
 		}
 		// Действие исполняется не в контексте того, кто одобрил: HTTP-запрос
@@ -215,7 +231,7 @@ func (p *Pipeline) finish(ctx context.Context, a *state.Approval, status, channe
 		// профиль проверяются заново перед исполнением (execute → admit).
 		res = p.run(context.WithoutCancel(ctx), a.Agent, a.Action, cli, act, a.Args, a.Decision, appr)
 	default:
-		res = p.deny(a.Agent, act, a.Action, a.Args, a.Decision, appr, "")
+		res = p.deny(ctx, a.Agent, act, a.Action, a.Args, a.Decision, appr, "")
 	}
 	res.ID = a.ID
 	if err := p.State.SetResult(a.ID, res); err != nil {
@@ -235,6 +251,19 @@ func (p *Pipeline) finish(ctx context.Context, a *state.Approval, status, channe
 	delete(p.waiters, a.ID)
 	p.mu.Unlock()
 	return res
+}
+
+// approvalCaller — вызывающий, сохранённый с запросом подтверждения.
+func (p *Pipeline) approvalCaller(id string) *audit.Caller {
+	raw := p.State.ApprovalCaller(id)
+	if raw == nil {
+		return nil
+	}
+	var c audit.Caller
+	if json.Unmarshal(raw, &c) != nil {
+		return nil
+	}
+	return &c
 }
 
 // revoked — владелец отозвал доступ агента после того, как запрос был создан

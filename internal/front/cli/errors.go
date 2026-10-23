@@ -56,11 +56,11 @@ func Explain(err error, agent bool) Problem {
 		}
 		switch ae.Code {
 		case "unauthorized":
-			p.Hint = "the agent token is invalid or revoked: the owner issues a new one with gate4ai agents token <agent>"
+			p.Hint = "the agent token is invalid or revoked: the owner connects the agent again (Web UI → Agents) or issues a new token with gate4ai agents token <agent>"
 		case "owner_only":
 			p.Hint = "this command is for the owner: run it without GATE4AI_TOKEN on the computer with the daemon"
 		case "agent_required":
-			p.Hint = "an agent calls gate4ai with its own token: the owner runs gate4ai agents token <agent> and puts it into the agent's GATE4AI_TOKEN (gate4ai doctor checks it); the owner runs an action with an agent's profile: --as <agent>"
+			p.Hint = "an agent calls gate4ai with a key of its own (it connects itself: the command shows a code, the owner approves it in the Web UI) or a token (GATE4AI_TOKEN); the owner runs an action with an agent's profile: --as <agent>"
 		}
 		return p
 	}
@@ -111,6 +111,10 @@ func pick(cond bool, a, b string) string {
 // fail печатает ошибку JSON-ом (stdout) и, если stderr — терминал, подсказку
 // для человека; возвращает код выхода.
 func (e *Env) fail(err error) int {
+	var pe *PairingError
+	if errors.As(err, &pe) {
+		return e.failPairing(pe)
+	}
 	code := ExitError
 	var ae *APIError
 	switch {
@@ -124,10 +128,19 @@ func (e *Env) fail(err error) int {
 			code = ExitUsage
 		}
 	}
-	p := Explain(err, e.Getenv("GATE4AI_TOKEN") != "")
-	if p.Code == "owner_only" && len(e.cmdline) > 0 {
+	p := Explain(err, e.AgentMode())
+	switch {
+	case (p.Code == "owner_only" || p.Code == "agent_required" && e.ownerCmd) && len(e.cmdline) > 0:
 		// Готовая команда для владельца: агент передаёт её человеку как есть.
-		p.Hint = "this command is for the owner: ask the owner to run it in their own terminal: env -u GATE4AI_TOKEN gate4ai " + shellJoin(e.cmdline)
+		p.Hint = "this command is for the owner: ask the owner to run it in their own terminal: gate4ai " + shellJoin(e.cmdline)
+		if e.Getenv("GATE4AI_TOKEN") != "" {
+			p.Hint = "this command is for the owner: ask the owner to run it in their own terminal: env -u GATE4AI_TOKEN gate4ai " + shellJoin(e.cmdline)
+		}
+	case p.Code == "unauthorized" && e.usedKey != nil:
+		p.Hint = fmt.Sprintf("the key of %s (%s) is revoked, unknown or does not fit this directory: tell the user; a new connection: gate4ai pair --name %s after removing that file",
+			e.usedKey.Agent, e.keyPath(e.usedKey.Agent), e.usedKey.Agent)
+	case p.Code == "agent_required" && e.AgentMode():
+		p.Hint = "gate4ai sees an agent: the agent connects with a key of its own — run the command from the agent's shell (gate4ai pairs it and shows a code), or name the agent: GATE4AI_AGENT=<agent>"
 	}
 	e.problem(p)
 	return code

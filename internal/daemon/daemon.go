@@ -26,6 +26,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 	"github.com/gate4ai/gate4ai/internal/front/oauth"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
+	"github.com/gate4ai/gate4ai/internal/platform/agentid"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
@@ -72,6 +73,10 @@ type Daemon struct {
 	// Wasm — среда исполнения коннекторов; ConnectorsDir — установленные коннекторы.
 	Wasm          *wasm.Engine
 	ConnectorsDir string
+	// Callers — кто стоит за процессом-собеседником локального сокета (агент,
+	// его каталог); nil — не проверяется: тогда сокет владельца не отличает
+	// агента от человека и ключи с привязкой к каталогу не принимаются.
+	Callers func(pid int) agentid.Caller
 
 	mu        sync.Mutex
 	installMu sync.Mutex    // установка коннекторов: владелец и коннекторы по умолчанию

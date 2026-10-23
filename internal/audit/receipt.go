@@ -21,6 +21,8 @@ type Receipt struct {
 	ID    string    `json:"id"`
 	TS    time.Time `json:"ts"`
 	Agent string    `json:"agent"`
+	// Caller — откуда агент вызвал действие: каталог и процессы.
+	Caller *Caller `json:"caller,omitempty"`
 	// Parent — квитанция действия, которое вызвало это через service_call.
 	Parent string `json:"parent,omitempty"`
 	// Intent — квитанция-намерение этого действия (execution.status "started"),
@@ -34,6 +36,25 @@ type Receipt struct {
 	Execution    Execution      `json:"execution"`
 	Verification Verification   `json:"verification"`
 	PrevHash     string         `json:"prev_hash"`
+}
+
+// Caller — откуда пришёл вызов агента. Локально (сокет) daemon узнаёт его
+// сам по процессу-собеседнику (source "peer"); удалённый CLI сообщает каталог
+// сам (source "reported").
+type Caller struct {
+	Kind    string       `json:"kind,omitempty"` // тип агента: claude-code, codex…
+	Dir     string       `json:"dir,omitempty"`  // каталог запуска агента
+	Source  string       `json:"source"`         // peer | reported
+	Session string       `json:"session,omitempty"`
+	Chain   []CallerProc `json:"chain,omitempty"` // от собеседника до корня агента
+}
+
+// CallerProc — процесс в цепочке вызывающего.
+type CallerProc struct {
+	PID  int    `json:"pid"`
+	Name string `json:"name,omitempty"`
+	Exe  string `json:"exe,omitempty"`
+	Cwd  string `json:"cwd,omitempty"`
 }
 
 // Decision — решение PDP.

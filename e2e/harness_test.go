@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gate4ai/gate4ai/internal/platform/agentid"
 )
 
 // binDir — каталог бинарников, собранных один раз на прогон (TestMain).
@@ -68,7 +70,13 @@ func binary(t *testing.T, pkg string) string {
 			b.err = err
 			return
 		}
-		cmd := exec.Command("go", "build", "-o", b.path, pkg)
+		args := []string{"build", "-o", b.path}
+		if underAgent {
+			// Тесты запустил агент: GATE4AI_OWNER_CHECK=off нужен стенду, а
+			// действует он только в сборке с этим тегом.
+			args = append(args, "-tags", "gate4ai_devstand")
+		}
+		cmd := exec.Command("go", append(args, pkg)...)
 		cmd.Dir, cmd.Env = "..", env
 		if out, err := cmd.CombinedOutput(); err != nil {
 			b.err = fmt.Errorf("build %s: %v\n%s", pkg, err, out)
@@ -148,6 +156,9 @@ func (c cliResult) json(t *testing.T) map[string]any {
 	return m
 }
 
+// underAgent — тесты запущены агентом (среди предков — Claude Code и т.п.).
+var underAgent = agentid.Identify(os.Getpid()).IsAgent()
+
 // gate — бинарник gate4ai и запущенный daemon во временном GATE4AI_HOME.
 type gate struct {
 	t    *testing.T
@@ -167,6 +178,11 @@ func startGate(t *testing.T, extra ...string) *gate {
 	g := &gate{t: t, bin: binary(t, "./cmd/gate4ai"), home: filepath.Join(tmp, "gate4ai-home"), user: filepath.Join(tmp, "user")}
 	os.MkdirAll(g.user, 0o755)
 	g.env = append(workEnv(t), "GATE4AI_HOME="+g.home, "HOME="+g.user)
+	if underAgent {
+		// Тесты запустил агент (Claude Code): иначе сокет владельца отказал бы
+		// харнессу как агенту. Проверку агента ведёт TestAgentPairing — в CI.
+		g.env = append(g.env, "GATE4AI_OWNER_CHECK=off")
+	}
 
 	var dlog bytes.Buffer
 	d := exec.Command(g.bin, append([]string{"daemon", "--home", g.home, "--keystore", "file", "--ui", ""}, extra...)...)

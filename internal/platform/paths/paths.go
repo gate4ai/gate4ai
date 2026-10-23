@@ -131,5 +131,9 @@ func runDirCandidates() []string {
 	return append(out, filepath.Join(Home(), "run"))
 }
 
+// AgentKeys — ключи агентов этого компьютера (gate4ai pair): по файлу на
+// агента, читает их CLI агента. GATE4AI_HOME переопределяет вместе с Home.
+func AgentKeys() string { return filepath.Join(Home(), "agents") }
+
 // DaemonLog — журнал daemon, запущенного в фоне (`gate4ai daemon start`, автозапуск).
 func DaemonLog() string { return filepath.Join(Home(), "daemon.log") }

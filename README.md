@@ -97,30 +97,34 @@ printf %s 'пароль-приложения' | gate4ai vault set mail.work
 
 ### 3. Подключение агента
 
-**Агент с shell (Claude Code, Hermes, OpenClaw) — CLI + skill:**
+**Агент с shell (Claude Code, Codex, Hermes, OpenClaw) — CLI + skill.** Токен вписывать не нужно: агент подключается сам. Первая же его команда `gate4ai` отвечает кодом подключения (выход `3`, `pairing_required`), агент показывает код вам в чате, а вы сверяете его с запросом в Web UI (**Агенты** или **Главная**) или в Telegram-боте и нажимаете «Разрешить подключение». После этого агент сразу работает своим ключом, перезапускать его не нужно. Ключ лежит в каталоге данных gate4ai (`agents/<агент>.json`, права 0600), daemon хранит только его хэш.
 
 ```sh
-gate4ai agents token my-agent          # токен показывается один раз
-export GATE4AI_TOKEN=g4a_…
-gate4ai tools                          # что разрешено профилю
+gate4ai tools                          # первый вызов: код подключения; после подтверждения — что разрешено профилю
+gate4ai pair --wait 5m                 # то же явно, с ожиданием решения
+gate4ai pair --here                    # отдельный ключ только для агента из этой папки проекта (свой профиль)
 gate4ai files read --path ~/Documents/notes/todo.md
 gate4ai skill > SKILL.md               # инструкция для агента
 ```
 
-Коды выхода: `0` ok, `1` прочие ошибки, `2` запрещено политикой (`denied_by_policy`), `3` ждёт подтверждения (`pending_approval`), `4` проверка не прошла (`verification_failed`), `5` неверные аргументы или неизвестное действие, `6` daemon недоступен, `7` вызывающему нельзя: неверный или отозванный токен (`unauthorized`), команда владельца с токеном агента (`owner_only`), вызов владельца без `--as` (`agent_required`). Агенты и скрипты получают JSON. Ответ — JSON в едином конверте: `{"status": "ok" | "denied" | "pending" | "verification_failed" | "error", "result": …, "error": {"code", "message", "hint", "detail"}}` — `result` при успехе, `error` в остальных случаях (у `pending` — что делать дальше). Длинный строковый аргумент — из файла: `--<имя>_file путь` (`-` — stdin), например `gate4ai browser act … --method fill --value_file article.md`; `--help` действия показывает допустимые значения и пределы аргументов. Человеку в терминале (stdout — терминал) списки и состояние показываются таблицей, а ошибки — текстом; JSON и там — `--json` или `GATE4AI_OUTPUT=json`.
+Агента CLI узнаёт по признакам, которые агент ставит своим процессам (`CLAUDECODE=1` и т.п.), и по процессам-предкам; имя можно задать и явно — `GATE4AI_AGENT=<агент>`. По умолчанию все сессии одного агента — один агент (`claude-code`) с одним профилем. Ключ, выпущенный `gate4ai pair --here`, принимается только от агента, запущенного в этой папке (или вложенной): daemon сам смотрит каталог запуска агента, `cd` в его shell этого не меняет. В журнал пишется папка, из которой агент выполнял действие. Агенту, которого узнал gate4ai, сокет владельца отвечает `agent_required`: свои же запросы он не одобрит. Граница честная: процесс того же пользователя ОС, отвязанный от агента и без его признаков, так не опознаётся. Изоляцию даёт только `gate4ai run` (ниже).
 
-**Claude Code.** Подключите его в Web UI (**Агенты → Claude Code**): gate4.ai впишет MCP-сервер в `~/.claude.json`, SKILL.md в `~/.claude/skills/gate4ai/`, а в `~/.claude/settings.json` — токен агента в `env.GATE4AI_TOKEN` (его получают и команды Bash: `gate4ai` из Bash работает с правами агента, а не владельца, и не может одобрить свои же запросы) и правило `"Bash(gate4ai *)"` в `permissions.allow`. Правило снимает второй вопрос о том же действии: решает политика gate4.ai, а Claude Code не спрашивает про каждую команду `gate4ai` отдельно. Вручную — то же в `~/.claude/settings.json`:
+Скрипт или CI работают с токеном: `gate4ai agents token my-agent` (показывается один раз), затем `export GATE4AI_TOKEN=g4a_…`.
+
+Коды выхода: `0` ok, `1` прочие ошибки, `2` запрещено политикой (`denied_by_policy`), `3` ждёт подтверждения (`pending_approval`), `4` проверка не прошла (`verification_failed`), `5` неверные аргументы или неизвестное действие, `6` daemon недоступен, `7` вызывающему нельзя: неверный или отозванный ключ / токен (`unauthorized`), команда владельца с ключом агента (`owner_only`), агент на сокете владельца или вызов владельца без `--as` (`agent_required`), владелец отклонил подключение (`pairing_rejected`). Код `3` — и ожидание подключения агента (`pairing_required`, в ответе — `code`). Агенты и скрипты получают JSON. Ответ — JSON в едином конверте: `{"status": "ok" | "denied" | "pending" | "verification_failed" | "error", "result": …, "error": {"code", "message", "hint", "detail"}}` — `result` при успехе, `error` в остальных случаях (у `pending` — что делать дальше). Длинный строковый аргумент — из файла: `--<имя>_file путь` (`-` — stdin), например `gate4ai browser act … --method fill --value_file article.md`; `--help` действия показывает допустимые значения и пределы аргументов. Человеку в терминале (stdout — терминал) списки и состояние показываются таблицей, а ошибки — текстом; JSON и там — `--json` или `GATE4AI_OUTPUT=json`.
+
+**Claude Code.** Подключите его в Web UI (**Агенты → Claude Code**): gate4.ai впишет MCP-сервер в `~/.claude.json`, SKILL.md в `~/.claude/skills/gate4ai/`, ключ агента — в свой каталог ключей (кода тогда сверять не нужно: подключаете вы сами), а в `~/.claude/settings.json` — правило `"Bash(gate4ai *)"` в `permissions.allow`. Правило снимает второй вопрос о том же действии: решает политика gate4.ai, а Claude Code не спрашивает про каждую команду `gate4ai` отдельно. Токен в `env` больше не нужен: из Bash `gate4ai` сам находит ключ агента и работает с его правами, а не с правами владельца, — и в уже открытой сессии тоже. Прежний `GATE4AI_TOKEN` из `env` подключение убирает. Вручную — то же правило в `~/.claude/settings.json`:
 
 ```json
-{"env": {"GATE4AI_TOKEN": "g4a_…"}, "permissions": {"allow": ["Bash(gate4ai *)"]}}
+{"permissions": {"allow": ["Bash(gate4ai *)"]}}
 ```
 
-`gate4ai doctor` проверяет это: предупреждает, если агент (Claude Code, Codex, Gemini CLI) вызывает `gate4ai` без своего токена — с правами владельца, — если в настройках Claude Code нет токена или правила и если SKILL.md отстал от каталога действий (`gate4ai skill > ~/.claude/skills/gate4ai/SKILL.md`).
+`gate4ai doctor` проверяет это: подключён ли агент (Claude Code, Codex, Gemini CLI) своим ключом или его подключение ждёт подтверждения, есть ли правило в настройках Claude Code, не остался ли там прежний токен и не отстал ли SKILL.md от каталога действий (`gate4ai skill > ~/.claude/skills/gate4ai/SKILL.md`).
 
-**MCP по stdio** (Claude Code, Claude Desktop и др.):
+**MCP по stdio** (Claude Code, Claude Desktop и др.) — секрета в конфигурации нет, только имя агента:
 
 ```json
-{"mcpServers": {"gate4ai": {"command": "gate4ai", "args": ["mcp"], "env": {"GATE4AI_TOKEN": "g4a_…"}}}}
+{"mcpServers": {"gate4ai": {"command": "gate4ai", "args": ["mcp"], "env": {"GATE4AI_AGENT": "claude-code"}}}}
 ```
 
 **Изолированный локальный агент** — сеть и файлы только через gate4ai:

@@ -20,6 +20,8 @@ import (
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
+	"github.com/gate4ai/gate4ai/internal/platform/agentid"
+	"github.com/gate4ai/gate4ai/internal/platform/agentkeys"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/platform/version"
@@ -90,27 +92,104 @@ func WithPrincipal(ctx context.Context, p auth.Principal) context.Context {
 }
 
 // identify: на сокете владельца проверенный собеседник — владелец, если не
-// предъявил токен агента; на сокете агентов нужен токен, прав владельца нет.
-func (d *Daemon) identify(r *http.Request, ownerSock bool) (auth.Principal, error) {
-	if bearer(r) != "" {
+// предъявил токен агента и среди его предков нет агента; на сокете агентов
+// нужен токен (ключ агента), прав владельца нет. Ключ, привязанный к каталогу,
+// принимается только от агента, запущенного в этом каталоге. Возвращает и
+// вызывающего (каталог, процессы) — для квитанций.
+func (d *Daemon) identify(r *http.Request, ownerSock bool) (auth.Principal, *audit.Caller, error) {
+	who, known := d.peerCaller(r)
+	if tok := bearer(r); tok != "" {
 		via := map[bool]string{true: "socket", false: "agent-socket"}[ownerSock]
 		// Клиент сообщает, кто он (gate4ai mcp — "mcp"); на права это не влияет.
 		seen := via
 		if c := r.Header.Get(ClientHeader); c == "mcp" || c == "cli" {
 			seen = c
 		}
-		agent, err := d.tokenAgent(r, seen)
+		agent, err := d.agentByToken(tok)
 		if err != nil {
-			return auth.Principal{}, err
+			return auth.Principal{}, nil, err
 		}
-		return auth.AgentVia(agent, via), nil
+		if err := d.checkBinding(tok, agent, who, known); err != nil {
+			return auth.Principal{}, nil, err
+		}
+		d.State.Seen(agent, seen, tok)
+		return auth.AgentVia(agent, via), callerOf(who, known), nil
 	}
 	if ownerSock {
 		if _, ok := ipc.PeerFrom(r.Context()); ok {
-			return auth.OwnerVia("socket"), nil
+			if known && who.IsAgent() {
+				return auth.Principal{}, nil, &authError{http.StatusForbidden, "agent_required", fmt.Sprintf(
+					"this socket is the owner's, and gate4ai is called by an agent (%s in %s): an agent calls gate4ai with its own key — gate4ai connects it by itself (the command shows a code, the owner approves it in the Web UI); owner commands are for the owner's own terminal",
+					who.Agent, who.Dir)}
+			}
+			return auth.OwnerVia("socket"), callerOf(who, known), nil
 		}
 	}
-	return auth.Principal{}, errors.New("authentication required: pass an agent token (GATE4AI_TOKEN)")
+	return auth.Principal{}, nil, errors.New("authentication required: an agent connects with its own key (gate4ai pair) or token (GATE4AI_TOKEN)")
+}
+
+// authError — отказ опознания со своим кодом и статусом.
+type authError struct {
+	status    int
+	code, msg string
+}
+
+func (e *authError) Error() string { return e.msg }
+
+// writeAuthError — ответ на отказ опознания.
+func writeAuthError(w http.ResponseWriter, err error) {
+	var ae *authError
+	if errors.As(err, &ae) {
+		WriteError(w, ae.status, ae.code, ae.msg)
+		return
+	}
+	WriteError(w, http.StatusUnauthorized, "unauthorized", err.Error())
+}
+
+// peerCaller — кто стоит за собеседником локального сокета (false — не
+// проверяется или собеседник неизвестен).
+func (d *Daemon) peerCaller(r *http.Request) (agentid.Caller, bool) {
+	if d.Callers == nil {
+		return agentid.Caller{}, false
+	}
+	peer, ok := ipc.PeerFrom(r.Context())
+	if !ok || peer.PID <= 0 {
+		return agentid.Caller{}, false
+	}
+	return d.Callers(peer.PID), true
+}
+
+// checkBinding — ключ, привязанный к каталогу, принимается только от агента,
+// запущенного в этом каталоге (каталог запуска корня агента; cd в его shell
+// этого не меняет). Удалённо (без собеседника сокета) — никогда.
+func (d *Daemon) checkBinding(tok, agent string, who agentid.Caller, known bool) error {
+	dir := d.State.TokenDir(tok)
+	if dir == "" {
+		return nil
+	}
+	if !known {
+		return fmt.Errorf("this key of %s works only on this computer, for an agent started in %s", agent, dir)
+	}
+	if !agentkeys.WithinDir(who.Dir, dir) {
+		where := who.Dir
+		if where == "" {
+			where = "an unknown directory"
+		}
+		return fmt.Errorf("this key of %s works only for an agent started in %s; this call comes from %s", agent, dir, where)
+	}
+	return nil
+}
+
+// callerOf — вызывающий для квитанции.
+func callerOf(who agentid.Caller, known bool) *audit.Caller {
+	if !known {
+		return nil
+	}
+	c := &audit.Caller{Kind: who.Agent, Dir: who.Dir, Source: "peer", Session: who.Session}
+	for _, p := range who.Chain {
+		c.Chain = append(c.Chain, audit.CallerProc{PID: p.PID, Name: p.Name, Exe: p.Exe, Cwd: p.Cwd})
+	}
+	return c
 }
 
 // ClientHeader — заголовок, которым тонкий клиент называет себя (cli | mcp) —
@@ -182,12 +261,12 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 	mux := http.NewServeMux()
 	anyp := func(h func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			p, err := d.identify(r, owner)
+			p, caller, err := d.identify(r, owner)
 			if err != nil {
-				WriteError(w, http.StatusUnauthorized, "unauthorized", err.Error())
+				writeAuthError(w, err)
 				return
 			}
-			h(w, r.WithContext(WithPrincipal(r.Context(), p)), p)
+			h(w, r.WithContext(pipeline.WithCaller(WithPrincipal(r.Context(), p), caller)), p)
 		}
 	}
 	own := func(h func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
@@ -221,6 +300,9 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 		d.RequestStop()
 	}))
 	d.agentRoutes(mux, anyp)
+	if !owner {
+		d.pairRoutes(mux, true)
+	}
 
 	// ---- Только владелец ----
 	mux.HandleFunc("GET /v1/log", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -396,6 +478,19 @@ func (d *Daemon) Handler(owner bool) http.Handler {
 			toks = []state.TokenInfo{}
 		}
 		WriteJSON(w, 200, map[string]any{"agents": d.Config.Current().Agents, "tokens": toks})
+	}))
+	// Запросы на подключение — только список: решение принимается в Web UI
+	// или Telegram, не командой с этого сокета.
+	mux.HandleFunc("GET /v1/pairings", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		ps, err := d.State.PendingPairings()
+		if err != nil {
+			WriteError(w, 500, "pairings", err.Error())
+			return
+		}
+		if ps == nil {
+			ps = []*state.Pairing{}
+		}
+		WriteJSON(w, 200, ps)
 	}))
 	mux.HandleFunc("POST /v1/agents/{name}/token", own(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		name := r.PathValue("name")
@@ -580,7 +675,7 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 		agent := p.Agent
 		if p.IsOwner() {
 			if req.Agent == "" {
-				WriteError(w, 400, "agent_required", "this call has the owner's rights, not an agent's: an agent calls with its own token (the owner gives it: gate4ai agents token <agent> → GATE4AI_TOKEN); the owner names the agent whose profile applies: --as <agent>")
+				WriteError(w, 400, "agent_required", "this call has the owner's rights, not an agent's: an agent calls with a key of its own (it connects itself: gate4ai pair, the owner approves the code in the Web UI) or a token (GATE4AI_TOKEN); the owner names the agent whose profile applies: --as <agent>")
 				return
 			}
 			agent = req.Agent

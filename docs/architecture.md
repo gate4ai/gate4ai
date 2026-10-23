@@ -22,6 +22,8 @@
 | Встроенные коннекторы на PDK (`runtime: builtin`, тот же код и те же функции хоста, что у WASM): файлы | `internal/connectors/builtin/files`, адаптер — `internal/connectors/wasm/builtin.go` (`Engine.Builtin`) |
 | Коннекторы (AGPL-3.0): почта (WASM), браузер — нативный пакет (воркер: Chrome, CDP, Stagehand, Executor — `worker/`) | `connectors/mail`, `connectors/browser` |
 | daemon, API на сокетах владельца и агентов | `internal/daemon`, `internal/platform/ipc` |
+| Опознание агента по процессу: признаки в окружении, процессы-предки, корень агента и его каталог запуска (Linux `/proc`, macOS `sysctl` + `lsof`, Windows — снимок процессов); сокет владельца отвечает агенту `agent_required`; ключ с привязкой к каталогу — только от агента из этого каталога; вызывающий (каталог, сессия, процессы) — в квитанции и запросе подтверждения | `internal/platform/procinfo`, `internal/platform/agentid`, `Daemon.identify` / `checkBinding` в `internal/daemon/api.go`, `pipeline.WithCaller`, `audit.Caller` |
+| Спаривание агента по коду: `POST /v1/pair`, `GET /v1/pair/{id}` (сокет агентов и публичный адрес), решение — `Daemon.DecidePairing` (Web UI, Telegram); каталог ключей агентов и выбор ключа в CLI (`gate4ai pair`, автоспаривание при первой команде агента) | `internal/daemon/pairing.go`, `internal/state/pairing.go`, `internal/platform/agentkeys`, `internal/front/cli/agentkey.go`, `internal/front/webui/pairings.go`, `Telegram.PairRequested` в `internal/approval/telegram.go` |
 | Лог по коннектору (кольцевой буфер записей slog с атрибутом `connector`), `gate4ai connectors logs`, поле `log` в ответе своей сборки | `internal/daemon/connlog.go`, `Pipeline.ConnectorLog` |
 | Заготовка коннектора к сайту (`gate4ai connectors new`) | `internal/front/cli/scaffold.go`; как писать — [connector-authoring.md](connector-authoring.md) |
 | Обезличивание фикстур (`gate4ai fixture scrub`) | `internal/front/cli/fixture.go` |
@@ -43,7 +45,7 @@
 | Автозапуск (systemd --user / XDG, LaunchAgent, HKCU Run) — общий для `gate4ai service` и Web UI | `internal/platform/autostart` |
 | Трей (бинарник `gate4ai-tray`) | `cmd/gate4ai-tray` (меню, fyne.io/systray), `internal/front/tray` (состояние, решения, уведомления) |
 | Магазин: пакеты .g4c, индекс registry, установка с согласием, отзыв | `internal/connectors/store`; индекс — отдельный репозиторий `gate4ai/registry` ([repo-structure.md](repo-structure.md)); формат индекса и его подпись — `sdk-go/registry` (те же правила у сайта gate4.ai) |
-| Изоляция: Egress Proxy, `gate4ai run`, `doctor` (в том числе агент с правами владельца, токен и правило `Bash(gate4ai *)` в настройках Claude Code, устаревший SKILL.md) | `internal/hostsvc/egress`, `internal/sandbox` (`doctor.go`); настройки Claude Code при подключении — `internal/front/agentsetup` |
+| Изоляция: Egress Proxy, `gate4ai run`, `doctor` (в том числе агент без своего ключа, ждущее подключение, прежний токен в env и правило `Bash(gate4ai *)` в настройках Claude Code, устаревший SKILL.md) | `internal/hostsvc/egress`, `internal/sandbox` (`doctor.go`); настройки Claude Code при подключении — `internal/front/agentsetup` |
 | Сквозной тест (хост, relay и настоящие коннекторы из того же коммита) | `e2e/` |
 | CI, направление зависимостей, SPDX, проверка истории на секреты; выпуск — [publishing.md](publishing.md) | `scripts/ci.sh`, `scripts/deps-check.sh`, `scripts/spdx.sh`, `scripts/secret-scan.sh`, `.github/workflows/` |
 

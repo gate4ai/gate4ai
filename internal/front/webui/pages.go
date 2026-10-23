@@ -146,7 +146,7 @@ func (u *UI) overview(m mount) func(r *http.Request) (string, map[string]any, er
 		pend, err := u.D.State.ListApprovals(state.Pending, 50)
 		recent, _ := u.D.Journal.List(audit.Filter{Limit: 8, Desc: true})
 		seen, _ := u.D.State.LastSeen()
-		data := map[string]any{"Pending": u.approvalViews(l, pend), "Recent": u.entryViews(l, recent), "Seen": seen}
+		data := map[string]any{"Pending": u.approvalViews(l, pend), "Recent": u.entryViews(l, recent), "Seen": seen, "Pairings": u.pairingViews()}
 		if m.remote {
 			return "overview", data, err
 		}

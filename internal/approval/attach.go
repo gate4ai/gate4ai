@@ -86,6 +86,11 @@ func (s *switchable) HandedOff(text string) {
 		s.async(func() { h.HandedOff(text) })
 	}
 }
+func (s *switchable) PairRequested(p *state.Pairing) {
+	if c, ok := s.get().(daemon.Pairer); ok {
+		s.async(func() { c.PairRequested(p) })
+	}
+}
 func (s *switchable) Asked(id, text string) {
 	if a, ok := s.get().(daemon.Asker); ok {
 		s.async(func() { a.Asked(id, text) })
@@ -161,6 +166,10 @@ func Attach(ctx context.Context, d *daemon.Daemon, desktop *Desktop, telegramBas
 		tg := NewTelegram(&BotAPI{Base: telegramBase, Token: token}, c.Approvals.Telegram.OwnerID, d.Pipeline, d.State)
 		tg.Log = d.Log
 		tg.Answer = d.Answer
+		tg.Pairs = func(ctx context.Context, id string, approve bool) error {
+			_, err := d.DecidePairing(ctx, id, approve, "", "telegram")
+			return err
+		}
 		tg.Webhook = hook
 		tctx, cancel := context.WithCancel(ctx)
 		stopTG = cancel

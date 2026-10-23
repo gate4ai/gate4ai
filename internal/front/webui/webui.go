@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -54,6 +55,7 @@ var funcs = template.FuncMap{
 		return string(b)
 	},
 	"join":      strings.Join,
+	"base":      filepath.Base,
 	"isCode":    func(w string) bool { _, ok := DescribeWhen(w); return !ok },
 	"has":       slices.Contains[[]string],
 	"accAnchor": AccountAnchor,
@@ -149,6 +151,9 @@ type UI struct {
 	Relay func() relayclient.Status
 	// Clients — окружение пользователя для автоподключения агентов.
 	Clients agentsetup.Env
+	// KeyDir — каталог ключей агентов (agentkeys): автоподключение кладёт туда
+	// ключ, CLI агента находит его сам.
+	KeyDir string
 	// Bin — бинарник gate4ai для конфигурации клиентов ("" — os.Executable).
 	Bin string
 	// Autostart — включение автозапуска (подменяется в тестах).
@@ -203,7 +208,7 @@ func (m mount) cookie() string {
 // New создаёт Web UI.
 func New(d *daemon.Daemon) *UI {
 	return &UI{D: d, Now: time.Now, logins: map[string]login{}, sessions: map[string]session{}, attempts: map[string]*attempt{},
-		notes: map[string]note{}, Clients: agentsetup.Default(), Autostart: systemAutostart{}}
+		notes: map[string]note{}, Clients: agentsetup.Default(), Autostart: systemAutostart{}, KeyDir: filepath.Join(d.Home, "agents")}
 }
 
 func random() string {
@@ -415,6 +420,7 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/vault/account", u.addAccount)
 	change("/settings/self", u.saveSelfConfig)
 	change("/agents", u.createAgent)
+	change("/pairings/{id}", u.decidePairing)
 	change("/agents/{name}/token", u.token)
 	change("/agents/{name}/connect", u.connect)
 	change("/agents/{name}/revoke", u.revoke)

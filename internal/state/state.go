@@ -62,7 +62,7 @@ func Open(path string, ks keys.Store) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema + uiSchema); err != nil {
+	if _, err := db.Exec(schema + uiSchema + pairSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -353,12 +353,14 @@ type TokenInfo struct {
 	ID      string    `json:"id"` // первые 12 символов хэша
 	// LastUsed — последнее использование (с точностью до 10 с); нулевое — не использовался.
 	LastUsed time.Time `json:"last_used,omitempty"`
+	// Dir — токен (ключ спаривания) работает только для агента из этого каталога.
+	Dir string `json:"dir,omitempty"`
 }
 
 // Tokens — токены всех агентов.
 func (s *Store) Tokens() ([]TokenInfo, error) {
-	rows, err := s.db.Query(`SELECT t.hash,t.agent,t.label,t.kind,t.created,t.revoked,COALESCE(s.ts,0) FROM tokens t
-		LEFT JOIN token_seen s ON s.hash=t.hash ORDER BY t.created`)
+	rows, err := s.db.Query(`SELECT t.hash,t.agent,t.label,t.kind,t.created,t.revoked,COALESCE(s.ts,0),COALESCE(d.dir,'') FROM tokens t
+		LEFT JOIN token_seen s ON s.hash=t.hash LEFT JOIN token_dirs d ON d.hash=t.hash ORDER BY t.created`)
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +371,7 @@ func (s *Store) Tokens() ([]TokenInfo, error) {
 		var h string
 		var c, lu int64
 		var r int
-		if err := rows.Scan(&h, &t.Agent, &t.Label, &t.Kind, &c, &r, &lu); err != nil {
+		if err := rows.Scan(&h, &t.Agent, &t.Label, &t.Kind, &c, &r, &lu, &t.Dir); err != nil {
 			return nil, err
 		}
 		t.ID, t.Created, t.Revoked = h[:12], time.Unix(0, c), r != 0

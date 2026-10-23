@@ -19,6 +19,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
+	"github.com/gate4ai/gate4ai/internal/platform/agentkeys"
 	"github.com/gate4ai/gate4ai/internal/relayclient"
 )
 
@@ -109,16 +110,21 @@ func TestFirstRunPaths(t *testing.T) {
 	if cfg := d.Config.Current(); cfg.Agents["cli2"].Profile != "cursor" || len(cfg.Profiles["cursor"].Rules) != 1 {
 		t.Fatalf("%+v", cfg.Agents["cli2"])
 	}
-	// Автоподключение: токен в ~/.cursor/mcp.json, агент работает этим токеном.
+	// Автоподключение: в ~/.cursor/mcp.json — только имя агента, ключ — в
+	// каталоге ключей gate4ai, агент работает этим ключом.
 	p = post("/agents/cursor/client", url.Values{"client": {"cursor"}})
 	if !strings.Contains(p, "Cursor подключён") {
 		t.Fatal(p)
 	}
 	b, err := os.ReadFile(filepath.Join(home, ".cursor", "mcp.json"))
-	if err != nil || !strings.Contains(string(b), "/opt/gate4ai/gate4ai") {
+	if err != nil || !strings.Contains(string(b), "/opt/gate4ai/gate4ai") || !strings.Contains(string(b), `"GATE4AI_AGENT": "cursor"`) || strings.Contains(string(b), "g4a_") {
 		t.Fatal(string(b), err)
 	}
-	tok := strings.Split(strings.Split(string(b), `"GATE4AI_TOKEN": "`)[1], `"`)[0]
+	keys := agentkeys.Load(u.KeyDir)
+	if len(keys) != 1 || keys[0].Agent != "cursor" || keys[0].Kind != "cursor" {
+		t.Fatalf("key store: %+v", keys)
+	}
+	tok := keys[0].Key
 	if a, err := d.State.AgentByToken(tok); err != nil || a != "cursor" {
 		t.Fatal("token", a, err)
 	}
@@ -131,6 +137,9 @@ func TestFirstRunPaths(t *testing.T) {
 	post("/agents/cursor/client/remove", url.Values{"client": {"cursor"}})
 	if _, err := d.State.AgentByToken(tok); err == nil {
 		t.Fatal("token not revoked")
+	}
+	if len(agentkeys.Load(u.KeyDir)) != 0 {
+		t.Fatal("key file left")
 	}
 
 	// Конструктор правила: блоки → CEL.

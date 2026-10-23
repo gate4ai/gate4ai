@@ -22,7 +22,7 @@ func (p *Pipeline) Recover() (int, error) {
 	var errs []error
 	for _, e := range intents {
 		r := e.Receipt
-		fin := &audit.Receipt{Agent: r.Agent, Parent: r.Parent, Intent: r.ID, Action: r.Action, Class: r.Class, Args: r.Args,
+		fin := &audit.Receipt{Agent: r.Agent, Caller: r.Caller, Parent: r.Parent, Intent: r.ID, Action: r.Action, Class: r.Class, Args: r.Args,
 			Decision: r.Decision, Approval: r.Approval,
 			Execution:    audit.Execution{Status: audit.ExecInterrupted, Error: "gate4ai stopped while the action ran; it may or may not have taken effect"},
 			Verification: audit.Verification{Status: "unverified"}}
@@ -45,7 +45,7 @@ func (p *Pipeline) Recover() (int, error) {
 		} else {
 			// Намерения нет — до исполнения не дошло.
 			_, act, _ := p.Registry.Lookup(a.Action)
-			r := &audit.Receipt{Agent: a.Agent, Action: a.Action, Class: a.Class, Args: p.maskArgs(act, a.Args),
+			r := &audit.Receipt{Agent: a.Agent, Caller: p.approvalCaller(a.ID), Action: a.Action, Class: a.Class, Args: p.maskArgs(act, a.Args),
 				Decision:     receiptDecision(a.Decision.Effect, a.Decision),
 				Approval:     &audit.Approval{Channel: a.Channel, Who: a.Who, At: a.DecidedAt.UTC(), Result: state.Approved, PreviewHash: a.PreviewHash},
 				Execution:    audit.Execution{Status: audit.ExecInterrupted, Error: "gate4ai stopped before the approved action started; it was not run"},

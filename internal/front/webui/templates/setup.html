@@ -61,7 +61,7 @@
 {{else}}<p class="warn">{{T "Internet access is not on yet."}} <a href="{{.Base}}/settings/internet">{{T "Internet access →"}}</a></p>{{end}}
 {{else if eq $d.Client "cli"}}
 <h1>{{T "The agent %s is created" $d.Agent}}</h1>
-<p>{{T "Give it a token on the agent page: it shows the command and the token once."}} <a class="btn" href="{{.Base}}/agents/{{$d.Agent}}?client=cli">{{T "Agent page →"}}</a></p>
+<p>{{TH "An agent with a shell on this computer connects itself: its first <code>gate4ai</code> command shows a code — approve it on the Agents page. A script or an agent on another computer gets a token on the agent page."}} <a class="btn" href="{{.Base}}/agents/{{$d.Agent}}?client=cli">{{T "Agent page →"}}</a></p>
 {{else}}
 <h1>{{T "%s is connected ✓" $d.ClientTitle}}</h1>
 <p class="muted">{{with $d.Restart}}{{T .}} {{end}}{{T "Then ask it:"}}</p>

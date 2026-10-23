@@ -356,7 +356,7 @@ func (p *Pipeline) loginVia(ctx context.Context, agent string, info callInfo, pr
 	}
 	dec := p.Engine().Decide(policy.Request{Agent: agent, Action: full, Class: act.Class, Args: args, Now: p.Now(), Nested: true}, p.State.Counters())
 	if dec.Effect == config.EffectDeny {
-		p.deny(agent, act, full, args, dec, nil, info.ID)
+		p.deny(ctx, agent, act, full, args, dec, nil, info.ID)
 		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "%s denied by policy: %s", full, dec.Reason)
 	}
 	// Коннектор входа работает через browser: в цепочке вызовов его нет.

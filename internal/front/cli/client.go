@@ -51,6 +51,13 @@ type Client struct {
 	Err error
 	// Kind — кто клиент для «последнего обращения» в Web UI: "cli" (по умолчанию) или "mcp".
 	Kind string
+	// Lazy — клиент выбирается при первом запросе (ключ агента, который ещё
+	// ждёт подтверждения владельца): долгоживущий gate4ai mcp начинает
+	// работать, как только владелец подтвердил подключение.
+	Lazy func() (*Client, error)
+	// Dir — каталог агента для журнала: удалённому daemon его сообщает сам
+	// клиент (локально daemon узнаёт каталог по собеседнику сокета).
+	Dir string
 }
 
 // ErrUnavailable — daemon недоступен («устройство офлайн»).
@@ -70,6 +77,14 @@ func (e *APIError) Error() string { return e.Code + ": " + e.Message }
 func (c *Client) Do(ctx context.Context, method, path string, body, out any) error {
 	if c.Err != nil {
 		return c.Err
+	}
+	if c.Lazy != nil {
+		inner, err := c.Lazy()
+		if err != nil {
+			return err
+		}
+		inner.Kind = c.Kind
+		return inner.Do(ctx, method, path, body, out)
 	}
 	var rd io.Reader
 	if body != nil {
@@ -95,6 +110,9 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 			kind = "cli"
 		}
 		req.Header.Set("X-Gate4ai-Client", kind)
+		if c.Base != "" && c.Dir != "" {
+			req.Header.Set("X-Gate4ai-Dir", c.Dir)
+		}
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/front/skill"
+	"github.com/gate4ai/gate4ai/internal/platform/agentkeys"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/state"
 )
@@ -78,7 +79,7 @@ func (u *UI) agentRows(l string) []agentRow {
 }
 
 func (u *UI) agents(r *http.Request) (string, map[string]any, error) {
-	return "agents", map[string]any{"Rows": u.agentRows(u.lang(r))}, nil
+	return "agents", map[string]any{"Rows": u.agentRows(u.lang(r)), "Pairings": u.pairingViews()}, nil
 }
 
 // createAgent — агент с профилем (для форм и сценариев без мастера).
@@ -162,7 +163,7 @@ func (u *UI) agentPage(r *http.Request) (string, map[string]any, error) {
 		"FilesHome": filesWholeHome(cfg)}
 	if c, ok := agentsetup.Find(client); ok {
 		data["ClientInfo"] = c
-		p, snippet := u.Clients.Snippet(client, u.bin(), "<token>")
+		p, snippet := u.Clients.Snippet(client, u.bin(), name)
 		data["SnippetPath"], data["Snippet"] = p, snippet
 	}
 	return "agent", data, nil
@@ -223,7 +224,7 @@ func (u *UI) token(w http.ResponseWriter, r *http.Request) map[string]any {
 	extra := map[string]any{"NewToken": tok}
 	if c := r.PostForm.Get("client"); c != "" {
 		if _, ok := agentsetup.Find(c); ok {
-			p, snippet := u.Clients.Snippet(c, u.bin(), tok)
+			p, snippet := u.Clients.Snippet(c, u.bin(), name)
 			extra["NewSnippetPath"], extra["NewSnippet"] = p, snippet
 		}
 	}
@@ -283,17 +284,34 @@ func (u *UI) connectClient(w http.ResponseWriter, r *http.Request) map[string]an
 	if _, ok := u.D.Config.Current().Agents[name]; !ok {
 		return redirectErr("/agents", M("Unknown agent %s", name))
 	}
-	_, _ = u.D.State.RevokeLabel(name, "auto:"+client) // прежний токен этого клиента
-	tok, err := u.D.State.IssueToken(name, "auto:"+client, "agent")
+	res, err := u.autoConnect(name, client)
 	if err != nil {
-		return redirectErr(back, err)
-	}
-	res, err := u.Clients.Connect(client, u.bin(), tok, u.skillMD(name))
-	if err != nil {
-		_, _ = u.D.State.RevokeLabel(name, "auto:"+client)
 		return redirectErr(back, err)
 	}
 	return redirectDetail(back, M("%s is connected. %s", c.Title, Word(c.Restart)), connectDetail(res))
+}
+
+// autoConnect — автоподключение клиента: ключ агента (вместо прежнего ключа
+// этого клиента) — в каталог ключей, сервер gate4ai — в конфигурацию клиента.
+// Владелец подключает сам, поэтому кода для сверки не нужно.
+func (u *UI) autoConnect(name, client string) (agentsetup.Result, error) {
+	_, _ = u.D.State.RevokeLabel(name, "auto:"+client)
+	tok, err := u.D.State.IssueToken(name, "auto:"+client, "agent")
+	if err != nil {
+		return agentsetup.Result{}, err
+	}
+	if err := agentkeys.Save(u.KeyDir, agentkeys.Key{Agent: name, Kind: client, Key: tok}); err != nil {
+		_, _ = u.D.State.RevokeLabel(name, "auto:"+client)
+		return agentsetup.Result{}, err
+	}
+	res, err := u.Clients.Connect(client, u.bin(), name, u.skillMD(name))
+	if err != nil {
+		_, _ = u.D.State.RevokeLabel(name, "auto:"+client)
+		agentkeys.Remove(u.KeyDir, name)
+		return res, err
+	}
+	res.Notes = append(res.Notes, "key: "+agentkeys.Path(u.KeyDir, name))
+	return res, nil
 }
 
 func (u *UI) disconnectClient(w http.ResponseWriter, r *http.Request) map[string]any {
@@ -304,5 +322,10 @@ func (u *UI) disconnectClient(w http.ResponseWriter, r *http.Request) map[string
 		return redirectErr(back, err)
 	}
 	n, _ := u.D.State.RevokeLabel(name, "auto:"+client)
+	for _, k := range agentkeys.Load(u.KeyDir) {
+		if k.Agent == name && k.Kind == client {
+			agentkeys.Remove(u.KeyDir, name)
+		}
+	}
 	return redirectDetail(back, M("gate4ai is removed from %s; tokens revoked: %d", clientTitle(client), n), res.Path)
 }

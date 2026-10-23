@@ -362,3 +362,38 @@ func TestVerificationFailedAndErrors(t *testing.T) {
 }
 
 func toString(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+// Вызывающий (каталог агента) — в квитанциях отказа, разрешения и
+// подтверждённого действия и в запросе подтверждения.
+func TestCallerInReceipts(t *testing.T) {
+	e := newEnv(t)
+	who := &audit.Caller{Kind: "claude-code", Dir: "/home/u/proj", Source: "peer", Session: "s1",
+		Chain: []audit.CallerProc{{PID: 10, Name: "gate4ai"}, {PID: 30, Name: "claude", Cwd: "/home/u/proj"}}}
+	cctx := WithCaller(ctx, who)
+	r := e.p.Execute(cctx, Call{Agent: "claude-ai", Action: "email.send", Args: map[string]any{"to": "landlord@example.com", "subject": "rent"}})
+	ent, _ := e.j.Find(r.Receipt)
+	if ent.Receipt.Caller == nil || ent.Receipt.Caller.Dir != "/home/u/proj" || len(ent.Receipt.Caller.Chain) != 2 {
+		t.Fatalf("allow receipt: %+v", ent.Receipt.Caller)
+	}
+	r = e.p.Execute(cctx, Call{Agent: "drafts", Action: "email.send", Args: map[string]any{"to": "landlord@example.com", "subject": "x"}})
+	if ent, _ = e.j.Find(r.Receipt); ent.Receipt.Caller == nil || ent.Receipt.Caller.Session != "s1" {
+		t.Fatalf("deny receipt: %+v", ent.Receipt.Caller)
+	}
+	r = e.p.Execute(cctx, Call{Agent: "claude-ai", Action: "email.send", Args: map[string]any{"to": "stranger@example.org", "subject": "hi"}})
+	if a := e.n.asked[len(e.n.asked)-1]; !strings.Contains(a.Preview, "from: /home/u/proj") {
+		t.Fatal(a.Preview)
+	}
+	// Одобряет владелец из Web UI (другой контекст): квитанция — с каталогом агента.
+	res, err := e.p.Decide(ctx, r.ID, true, "webui", "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ent, _ = e.j.Find(res.Receipt); ent.Receipt.Caller == nil || ent.Receipt.Caller.Dir != "/home/u/proj" {
+		t.Fatalf("approved receipt: %+v", ent.Receipt)
+	}
+	// Без вызывающего — без поля (старые квитанции не меняются).
+	r = e.p.Execute(ctx, Call{Agent: "claude-ai", Action: "email.send", Args: map[string]any{"to": "landlord@example.com", "subject": "rent"}})
+	if ent, _ = e.j.Find(r.Receipt); ent.Receipt.Caller != nil {
+		t.Fatal("caller without context")
+	}
+}

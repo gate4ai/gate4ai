@@ -15,10 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/front/mcp"
 	"github.com/gate4ai/gate4ai/internal/front/oauth"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
+	"github.com/gate4ai/gate4ai/internal/platform/agentid"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 )
 
@@ -156,11 +158,25 @@ func (d *Daemon) PublicHandler() http.Handler {
 
 // tokenAgent — агент по токену запроса; seen — откуда он обратился («последнее
 // обращение» в Web UI).
+// Здесь собеседника сокета нет: ключ, привязанный к каталогу, не принимается.
 func (d *Daemon) tokenAgent(r *http.Request, seen string) (string, error) {
 	tok := bearer(r)
 	if tok == "" {
 		return "", errors.New("authorization required")
 	}
+	agent, err := d.agentByToken(tok)
+	if err != nil {
+		return "", err
+	}
+	if err := d.checkBinding(tok, agent, agentid.Caller{}, false); err != nil {
+		return "", err
+	}
+	d.State.Seen(agent, seen, tok)
+	return agent, nil
+}
+
+// agentByToken — агент по токену; агент должен быть в конфигурации.
+func (d *Daemon) agentByToken(tok string) (string, error) {
 	agent, err := d.State.AgentByToken(tok)
 	if err != nil {
 		return "", err
@@ -168,7 +184,6 @@ func (d *Daemon) tokenAgent(r *http.Request, seen string) (string, error) {
 	if _, ok := d.Config.Current().Agents[agent]; !ok {
 		return "", fmt.Errorf("agent %q is not in the configuration", agent)
 	}
-	d.State.Seen(agent, seen, tok)
 	return agent, nil
 }
 
@@ -176,6 +191,7 @@ func (d *Daemon) buildPublic() http.Handler {
 	as := d.EnableOAuth(nil)
 	mux := http.NewServeMux()
 	as.Routes(mux)
+	d.pairRoutes(mux, false)
 	d.agentRoutes(mux, func(h func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			agent, err := d.tokenAgent(r, "https")
@@ -185,7 +201,12 @@ func (d *Daemon) buildPublic() http.Handler {
 				return
 			}
 			p := auth.AgentVia(agent, "https")
-			h(w, r.WithContext(WithPrincipal(r.Context(), p)), p)
+			ctx := WithPrincipal(r.Context(), p)
+			if dir := strings.TrimSpace(r.Header.Get(DirHeader)); dir != "" && len(dir) <= 4096 {
+				// Удалённый CLI: каталог — со слов агента (в журнале так и помечен).
+				ctx = pipeline.WithCaller(ctx, &audit.Caller{Dir: dir, Source: "reported"})
+			}
+			h(w, r.WithContext(ctx), p)
 		}
 	})
 	d.mu.Lock()

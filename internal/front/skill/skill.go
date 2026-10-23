@@ -51,9 +51,11 @@ Output is JSON in one envelope: ` + "`{\"status\": \"ok\" | \"denied\" | \"pendi
 
 ## Connection and identity
 
-` + "`gate4ai`" + ` reads your agent token from ` + "`GATE4AI_TOKEN`" + `. If gate4ai runs on another computer, ` + "`GATE4AI_URL`" + ` holds its address (` + "`https://…`" + `); the commands are the same. Exit code ` + "`6`" + ` then usually means the device is asleep or offline: retry later.
+You connect to gate4ai with a key of your own; ` + "`gate4ai`" + ` finds it by itself. On your first call it may answer ` + "`pairing_required`" + ` (exit ` + "`3`" + `) with a ` + "`code`" + ` such as ` + "`K7Q-4FM`" + `: **show this code to the user in the chat** and ask them to approve the connection in gate4.ai (Web UI → Agents, or the Telegram bot) if the codes match; then run the command again (or ` + "`gate4ai pair --wait 5m`" + `). Never approve it yourself and never look for the key file. ` + "`pairing_rejected`" + ` — the user refused: do not retry. A key only for the project folder you were started in: ` + "`gate4ai pair --here`" + `.
 
-If a call answers ` + "`agent_required`" + ` (exit ` + "`7`" + `), you are using the owner's access instead of your own token. Do not add ` + "`--as`" + ` and never run owner commands (` + "`approvals`" + `, ` + "`vault`" + `, ` + "`agents`" + `, ` + "`sites`" + `, ` + "`policy`" + `): tell the user to give you your token — ` + "`gate4ai agents token <agent>`" + ` into ` + "`GATE4AI_TOKEN`" + ` (` + "`gate4ai doctor`" + ` checks it).
+A token in ` + "`GATE4AI_TOKEN`" + ` (scripts, CI) works too. If gate4ai runs on another computer, ` + "`GATE4AI_URL`" + ` holds its address (` + "`https://…`" + `); the commands are the same. Exit code ` + "`6`" + ` then usually means the device is asleep or offline: retry later.
+
+If a call answers ` + "`agent_required`" + ` (exit ` + "`7`" + `), gate4ai sees an agent on the owner's access. Do not add ` + "`--as`" + ` and never run owner commands (` + "`approvals`" + `, ` + "`vault`" + `, ` + "`agents`" + `, ` + "`sites`" + `, ` + "`policy`" + `): connect with your own key — ` + "`gate4ai pair`" + ` (name yourself with ` + "`GATE4AI_AGENT=<agent>`" + ` if gate4ai does not recognise you) — or pass the owner the command from ` + "`hint`" + `.
 
 ## Discovering actions and asking for access
 
