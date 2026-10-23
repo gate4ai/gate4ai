@@ -2,6 +2,7 @@
 {{$d := .Data}}
 <h2>{{T "Waiting for your decision"}}</h2>
 <div data-live-pending data-back="/">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/")}}</div>
+{{template "pairings" (dict "V" . "List" .Data.Pairings "Back" "/")}}
 
 {{if not .Remote}}
 {{if $d.StepsLeft}}

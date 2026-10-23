@@ -124,7 +124,7 @@ func TestSetupWizard(t *testing.T) {
 	if !as.on {
 		t.Fatal("autostart")
 	}
-	if b, err := os.ReadFile(filepath.Join(home, ".cursor", "mcp.json")); err != nil || !strings.Contains(string(b), "GATE4AI_TOKEN") {
+	if b, err := os.ReadFile(filepath.Join(home, ".cursor", "mcp.json")); err != nil || !strings.Contains(string(b), "GATE4AI_AGENT") {
 		t.Fatal("client config", string(b), err)
 	}
 	// Решения на странице агента — те же группы.

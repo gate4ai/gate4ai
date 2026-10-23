@@ -3,7 +3,9 @@
 // Package agentsetup — подключение локальных агентов к gate4ai из Web UI:
 // где лежит конфигурация MCP каждого клиента, ручная инструкция и запись
 // сервера `gate4ai` (command — бинарник gate4ai, args — [mcp], env —
-// GATE4AI_TOKEN) в его файл с резервной копией и сохранением прочих настроек.
+// GATE4AI_AGENT: имя агента, не секрет) в его файл с резервной копией и
+// сохранением прочих настроек. Ключ агента лежит в каталоге ключей gate4ai
+// (agentkeys): CLI находит его сам, в файлы клиента он не пишется.
 package agentsetup
 
 import (
@@ -188,22 +190,24 @@ func serversKey(format string) string {
 	return "mcpServers"
 }
 
-// entry — описание сервера gate4ai для клиента.
-func entry(format, bin, token string) map[string]any {
-	e := map[string]any{"command": bin, "args": []string{"mcp"}, "env": map[string]string{"GATE4AI_TOKEN": token}}
+// entry — описание сервера gate4ai для клиента: имя агента в env, ключ CLI
+// найдёт в каталоге ключей по нему.
+func entry(format, bin, agent string) map[string]any {
+	e := map[string]any{"command": bin, "args": []string{"mcp"}, "env": map[string]string{"GATE4AI_AGENT": agent}}
 	if format == FormatVSCode {
 		e["type"] = "stdio"
 	}
 	return e
 }
 
-// Snippet — ручная инструкция: файл и фрагмент для вставки.
-func (e Env) Snippet(id, bin, token string) (path, text string) {
+// Snippet — ручная инструкция: файл и фрагмент для вставки (секрета в нём
+// нет: агент подключится сам по коду при первом вызове).
+func (e Env) Snippet(id, bin, agent string) (path, text string) {
 	c, _ := Find(id)
 	if c.Format == FormatTOML {
-		return e.ConfigPath(id), tomlBlock(bin, token)
+		return e.ConfigPath(id), tomlBlock(bin, agent)
 	}
-	return e.ConfigPath(id), strings.TrimSpace(string(marshal(map[string]any{serversKey(c.Format): map[string]any{ServerName: entry(c.Format, bin, token)}})))
+	return e.ConfigPath(id), strings.TrimSpace(string(marshal(map[string]any{serversKey(c.Format): map[string]any{ServerName: entry(c.Format, bin, agent)}})))
 }
 
 // Result — что сделано с файлом клиента.
@@ -213,21 +217,21 @@ type Result struct {
 	Notes  []string `json:"notes,omitempty"`
 }
 
-// Connect записывает сервер gate4ai в конфигурацию клиента.
-func (e Env) Connect(id, bin, token, skillMD string) (Result, error) {
+// Connect записывает сервер gate4ai агента agent в конфигурацию клиента.
+func (e Env) Connect(id, bin, agent, skillMD string) (Result, error) {
 	c, ok := Find(id)
 	if !ok {
 		return Result{}, fmt.Errorf("unknown client %q", id)
 	}
-	if bin == "" || token == "" {
-		return Result{}, errors.New("binary and token are required")
+	if bin == "" || agent == "" {
+		return Result{}, errors.New("binary and agent are required")
 	}
 	p := e.ConfigPath(id)
 	res := Result{Path: p}
 	var err error
 	res.Backup, err = rewrite(p, func(old []byte) ([]byte, error) {
 		if c.Format == FormatTOML {
-			return []byte(tomlSet(string(old), tomlBlock(bin, token))), nil
+			return []byte(tomlSet(string(old), tomlBlock(bin, agent))), nil
 		}
 		m := map[string]any{}
 		if len(strings.TrimSpace(string(old))) > 0 {
@@ -240,7 +244,7 @@ func (e Env) Connect(id, bin, token, skillMD string) (Result, error) {
 		if servers == nil {
 			servers = map[string]any{}
 		}
-		servers[ServerName] = entry(c.Format, bin, token)
+		servers[ServerName] = entry(c.Format, bin, agent)
 		m[key] = servers
 		return marshal(m), nil
 	})
@@ -254,13 +258,13 @@ func (e Env) Connect(id, bin, token, skillMD string) (Result, error) {
 		}
 	}
 	if id == "claude-code" {
-		// Команды gate4ai из Bash — с токеном агента (не правами владельца), и
-		// решает политика gate4ai: Claude Code их не переспрашивает.
+		// Команды gate4ai из Bash решает политика gate4ai: Claude Code их не
+		// переспрашивает. Ключ агента CLI находит сам (CLAUDECODE=1 в Bash).
 		sp := e.ClaudeSettingsPath()
-		if _, err := rewrite(sp, func(old []byte) ([]byte, error) { return claudeSettings(old, token) }); err != nil {
+		if _, err := rewrite(sp, func(old []byte) ([]byte, error) { return claudeSettings(old, true) }); err != nil {
 			res.Notes = append(res.Notes, "settings: "+sp+": "+err.Error())
 		} else {
-			res.Notes = append(res.Notes, "settings: "+sp+" (GATE4AI_TOKEN for Bash, permission "+BashRule+")")
+			res.Notes = append(res.Notes, "settings: "+sp+" (permission "+BashRule+")")
 		}
 	}
 	return res, nil
@@ -278,31 +282,30 @@ func (e Env) ClaudeSettingsPath() string {
 	return filepath.Join(e.Home, ".claude", "settings.json")
 }
 
-// claudeSettings — настройки Claude Code с токеном агента в env (его получают
-// и команды Bash) и правилом BashRule в permissions.allow; token "" — убрать
-// и то и другое.
-func claudeSettings(old []byte, token string) ([]byte, error) {
+// claudeSettings — настройки Claude Code с правилом BashRule в
+// permissions.allow (add) или без него. Токен агента в env (прежняя схема:
+// он попадал в сессию только при её запуске) убирается в обоих случаях —
+// ключ агента CLI находит сам.
+func claudeSettings(old []byte, add bool) ([]byte, error) {
 	m := map[string]any{}
 	if len(bytes.TrimSpace(old)) > 0 {
 		if err := decodeJSON(old, &m); err != nil {
-			return nil, fmt.Errorf("not valid JSON (%v): add GATE4AI_TOKEN to env and %q to permissions.allow by hand", err, BashRule)
+			return nil, fmt.Errorf("not valid JSON (%v): add %q to permissions.allow by hand", err, BashRule)
 		}
 	}
 	env, _ := m["env"].(map[string]any)
 	perms, _ := m["permissions"].(map[string]any)
-	if token == "" {
-		delete(env, "GATE4AI_TOKEN")
+	delete(env, "GATE4AI_TOKEN")
+	if env != nil && len(env) == 0 {
+		delete(m, "env")
+	}
+	if !add {
 		if perms != nil {
 			allow, _ := perms["allow"].([]any)
 			perms["allow"] = slices.DeleteFunc(allow, func(x any) bool { return x == BashRule })
 		}
 		return marshal(m), nil
 	}
-	if env == nil {
-		env = map[string]any{}
-		m["env"] = env
-	}
-	env["GATE4AI_TOKEN"] = token
 	if perms == nil {
 		perms = map[string]any{}
 		m["permissions"] = perms
@@ -347,7 +350,7 @@ func (e Env) Disconnect(id string) (Result, error) {
 	}
 	if id == "claude-code" {
 		if sp := e.ClaudeSettingsPath(); fileExists(sp) {
-			_, _ = rewrite(sp, func(old []byte) ([]byte, error) { return claudeSettings(old, "") })
+			_, _ = rewrite(sp, func(old []byte) ([]byte, error) { return claudeSettings(old, false) })
 		}
 	}
 	return res, nil
@@ -431,7 +434,7 @@ func backup(p string, old []byte) (string, error) {
 	return b, err
 }
 
-// writePrivate пишет файл атомарно; токен внутри — права 0600.
+// writePrivate пишет файл атомарно, права не шире 0600.
 func writePrivate(p string, b []byte) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
@@ -473,8 +476,8 @@ func tomlQuote(s string) string {
 	return string(b)
 }
 
-func tomlBlock(bin, token string) string {
-	return "[mcp_servers." + ServerName + "]\ncommand = " + tomlQuote(bin) + "\nargs = [\"mcp\"]\nenv = { GATE4AI_TOKEN = " + tomlQuote(token) + " }\n"
+func tomlBlock(bin, agent string) string {
+	return "[mcp_servers." + ServerName + "]\ncommand = " + tomlQuote(bin) + "\nargs = [\"mcp\"]\nenv = { GATE4AI_AGENT = " + tomlQuote(agent) + " }\n"
 }
 
 // Ключ gate4ai вне секции [mcp_servers.gate4ai]: в таблице [mcp_servers]

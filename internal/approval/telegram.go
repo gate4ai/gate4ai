@@ -160,12 +160,15 @@ type Telegram struct {
 	// Answer — ответ владельца на вопрос с вводом (код из SMS для входа на
 	// сайт); значение идёт сразу в поле страницы.
 	Answer func(id, value string) error
+	// Pairs — решение по запросу агента на подключение (gate4ai pair).
+	Pairs func(ctx context.Context, id string, approve bool) error
 
 	mu       sync.Mutex
 	question string           // вопрос с вводом, ждущий ответа (последний)
 	qmsg     int64            // его сообщение
 	msgs     map[string]int64 // approval id → message id
 	logins   map[string]loginReq
+	pairs    map[string]loginReq // ключ кнопки → запрос на подключение (text — id запроса в pairID)
 	secret   string // секрет вебхука (заголовок X-Telegram-Bot-Api-Secret-Token)
 	lastErr  string // последняя ошибка получения обновлений ("" — работает)
 	mode     string // polling | webhook
@@ -186,14 +189,60 @@ func (t *Telegram) setStatus(mode, err string) {
 
 // NewTelegram создаёт канал.
 func NewTelegram(api TelegramAPI, owner int64, d Decider, st *state.Store) *Telegram {
-	return &Telegram{API: api, OwnerID: owner, Decider: d, State: st, Log: slog.Default(), msgs: map[string]int64{}, logins: map[string]loginReq{}}
+	return &Telegram{API: api, OwnerID: owner, Decider: d, State: st, Log: slog.Default(), msgs: map[string]int64{}, logins: map[string]loginReq{}, pairs: map[string]loginReq{}}
 }
 
-// loginReq — запрос подтверждения входа в Web UI.
+// loginReq — запрос подтверждения входа в Web UI (или подключения агента: id — запрос).
 type loginReq struct {
 	msg  int64
 	text string
 	done func(ok bool)
+	id   string
+}
+
+// PairRequested — агент просит подключения: код для сверки и кнопки. В
+// callback_data — случайный ключ, не id запроса.
+func (t *Telegram) PairRequested(p *state.Pairing) {
+	if t.Pairs == nil {
+		return
+	}
+	ctx, cancel := botCtx(context.Background())
+	defer cancel()
+	key := randomSecret()[:32]
+	text := "🔑 " + PairingText(p) + "\nРазрешайте, только если агент показал в чате ровно этот код."
+	kb := [][]Button{{{Text: "Разрешить подключение", Data: "pa:" + key}, {Text: "Отклонить", Data: "pr:" + key}}}
+	msg, err := t.API.SendMessage(ctx, t.OwnerID, text, kb)
+	if err != nil {
+		t.Log.Warn("telegram pairing request", "err", err)
+		return
+	}
+	t.mu.Lock()
+	t.pairs[key] = loginReq{msg: msg, text: text, id: p.ID}
+	t.mu.Unlock()
+}
+
+// pairCallback — нажатие кнопки запроса на подключение.
+func (t *Telegram) pairCallback(ctx context.Context, cbID, data string) {
+	ok, key := strings.HasPrefix(data, "pa:"), data[3:]
+	t.mu.Lock()
+	req, found := t.pairs[key]
+	delete(t.pairs, key)
+	t.mu.Unlock()
+	if !found {
+		_ = t.API.AnswerCallback(ctx, cbID, "Запрос не найден или уже решён")
+		return
+	}
+	res := map[bool]string{true: "✅ Подключение разрешено", false: "❌ Подключение отклонено"}[ok]
+	switch err := t.Pairs(ctx, req.id, ok); {
+	case errors.Is(err, state.ErrAlreadyDecided):
+		res = "Решение уже принято"
+	case errors.Is(err, state.ErrExpired):
+		res = "Срок запроса истёк"
+	case err != nil:
+		res = "Ошибка: " + err.Error()
+	}
+	_ = t.API.AnswerCallback(ctx, cbID, res)
+	_ = t.API.EditMessage(ctx, t.OwnerID, req.msg, req.text+"\n"+res)
 }
 
 // botCtx — срок одного обращения к Bot API (отправка, правка, проверка).
@@ -516,6 +565,10 @@ func previewText(a *state.Approval) string {
 func (t *Telegram) callback(ctx context.Context, cbID, data string) {
 	if strings.HasPrefix(data, "la:") || strings.HasPrefix(data, "lr:") {
 		t.loginCallback(ctx, cbID, data)
+		return
+	}
+	if strings.HasPrefix(data, "pa:") || strings.HasPrefix(data, "pr:") {
+		t.pairCallback(ctx, cbID, data)
 		return
 	}
 	parts := strings.Split(data, ":")

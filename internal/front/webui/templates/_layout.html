@@ -133,5 +133,28 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 </div>
 {{end}}{{end}}
 
+{{/* pairings — запросы агентов на подключение: код сверяется с кодом в чате агента. */}}
+{{define "pairings"}}{{$v := .V}}{{$back := .Back}}{{if .List}}<h2 id="pairings">{{T "Agents asking to connect"}}</h2>
+{{range .List}}<div class="card ask-card" data-pairing="{{.ID}}">
+  <div class="row between"><div class="what"><b>{{.Agent}}</b> {{T "asks to connect to gate4.ai"}}</div><span class="muted" title="{{ts .Expires}}">{{left .Expires}}</span></div>
+  <p>{{T "Code:"}} <b style="font-size:1.4rem;letter-spacing:.1em"><code>{{.Code}}</code></b></p>
+  <p class="help">{{T "Allow only if the agent shows exactly this code in its chat. A different code — another program is asking: deny."}}</p>
+  {{if .Same}}<p class="warn">{{T "%d more requests from %s are waiting: compare the codes carefully." .Same .Agent}}</p>{{end}}
+  {{if .Revoked}}<p class="warn">{{T "You revoked the access of %s before." .Agent}}</p>{{end}}
+  {{with .Dir}}<p>{{TH "The key works only for the agent started in <code>%s</code>." .}}</p>{{else}}<p class="help">{{T "The key works for this agent from any folder."}}</p>{{end}}
+  {{if .Chain}}<p class="help">{{T "Processes:"}} <code>{{.Chain}}</code>{{if .Session}} · {{T "session"}} <code>{{.Session}}</code>{{end}}</p>{{end}}
+  {{if $v.Remote}}<p class="help">{{T "Approve on the computer itself or in the Telegram bot."}}</p>{{else}}
+  <form method="post" action="{{$v.Base}}/pairings/{{.ID}}" class="row" style="margin-top:.5rem">
+    <input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$back}}">
+    {{if .Exists}}<span class="help">{{T "Permissions:"}} <b>{{.Profile}}</b></span>{{else}}
+    <label class="inline" for="pp-{{.ID}}">{{T "Permissions"}}</label><select id="pp-{{.ID}}" name="profile">
+      {{$cur := .Profile}}<option value="_new"{{if not $cur}} selected{{end}}>{{T "new — nothing allowed yet"}}</option>
+      {{range .Profiles}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.}}</option>{{end}}</select>{{end}}
+    <button class="primary" name="decision" value="approve">{{T "Allow the connection"}}</button>
+    <span class="sp"></span>
+    <button class="danger" name="decision" value="reject">{{T "Deny"}}</button>
+  </form>{{end}}
+</div>{{end}}{{end}}{{end}}
+
 {{/* entry_line — действие из журнала одной строкой. */}}
 {{define "entry_line"}}{{.Title}}{{with .Target}} · <code>{{.}}</code>{{end}}{{with .Receipt.Execution.Status}}{{if and (ne . "ok") (ne . "") (ne . "skipped")}} · <span class="bad">{{T "not done"}}: {{T .}}</span>{{end}}{{end}}{{end}}

@@ -142,6 +142,20 @@ func (d *Desktop) HandedOff(text string) {
 	_ = d.show("gate4.ai: агент ждёт вас в Chrome", text)
 }
 
+// PairRequested — агент просит подключения (gate4ai pair): решение — в Web UI.
+func (d *Desktop) PairRequested(p *state.Pairing) {
+	_ = d.show("gate4.ai: агент просит подключения", PairingText(p)+"\nСверьте код с чатом агента и подтвердите в Web UI (gate4ai ui → Агенты).")
+}
+
+// PairingText — запрос на подключение одним абзацем: агент, код, каталог.
+func PairingText(p *state.Pairing) string {
+	s := fmt.Sprintf("%s просит подключиться к gate4.ai. Код: %s", p.Agent, p.Code)
+	if p.Dir != "" {
+		s += "\nКлюч — только для агента из " + p.Dir
+	}
+	return s
+}
+
 // Denied — агенту отказано политикой; пользователь узнаёт об этом.
 func (d *Desktop) Denied(agent, action, reason string) {
 	_ = d.show("gate4.ai: действие запрещено", fmt.Sprintf("%s: %s — %s", agent, action, reason))

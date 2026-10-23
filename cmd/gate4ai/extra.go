@@ -19,8 +19,8 @@ func register(env *cli.Env) {
 		return sandbox.Shim(ctx, args, e.Stdin, e.Stdout, e.Stderr)
 	}
 	env.Extra["mcp"] = func(ctx context.Context, e *cli.Env, args []string) int {
-		if e.Getenv("GATE4AI_TOKEN") == "" {
-			fmt.Fprintln(e.Stderr, "gate4ai mcp: set GATE4AI_TOKEN to the agent token (gate4ai agents token <agent>)")
+		if !e.AgentMode() {
+			fmt.Fprintln(e.Stderr, "gate4ai mcp: name the agent: GATE4AI_AGENT=<agent> in the server's env (it connects itself: the first call shows a code to approve in the Web UI), or GATE4AI_TOKEN=<token>")
 			return cli.ExitUsage
 		}
 		c := e.Client()

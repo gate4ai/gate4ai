@@ -174,7 +174,7 @@ func TestDaemonSockets(t *testing.T) {
 	// Владелец без --as: agent_required с понятным сообщением.
 	var ar map[string]any
 	if code := owner.do(t, "POST", "/v1/call", map[string]any{"action": "notes.append", "args": map[string]any{"text": "x"}}, &ar); code != 400 ||
-		errOf(ar)["code"] != "agent_required" || !strings.Contains(errOf(ar)["message"].(string), "gate4ai agents token") {
+		errOf(ar)["code"] != "agent_required" || !strings.Contains(errOf(ar)["message"].(string), "--as <agent>") {
 		t.Fatal(code, ar)
 	}
 	var pend []map[string]any

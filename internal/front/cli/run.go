@@ -195,6 +195,10 @@ func (e *Env) doctor(ctx context.Context) int {
 		tools, err := e.Tools(ctx, "")
 		return skill.Generate(tools), err
 	}
+	if k, ok := e.findKey(); ok {
+		env.AgentKey, env.KeyPending = k.Agent, k.Pairing != ""
+	}
+	env.Agent = e.self().Agent
 	checks := sandbox.Doctor(env)
 	e.printJSON(checks)
 	for _, c := range checks {

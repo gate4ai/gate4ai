@@ -257,7 +257,7 @@ func TestApprovalShowsCalls(t *testing.T) {
 	m := b.Manifest()
 	act, _ := m.Find("look")
 	act.CallReasons = map[string]string{"web.act": "раскрыть список"}
-	a, err := p.requestApproval("bot", "bank.look", act, map[string]any{}, nil, policy.Decision{Effect: config.EffectAsk})
+	a, err := p.requestApproval(context.Background(), "bot", "bank.look", act, map[string]any{}, nil, policy.Decision{Effect: config.EffectAsk})
 	if err != nil || !strings.Contains(a.Preview, "also runs: web.open, web.act (раскрыть список)") {
 		t.Fatal(a, err)
 	}

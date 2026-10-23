@@ -178,24 +178,40 @@ func TestDoctorAgentAccess(t *testing.T) {
 	agent := base
 	agent.Environ = []string{"CLAUDECODE=1"}
 	files["/home/u/.claude/skills/gate4ai/SKILL.md"] = "old skill"
+	files["/home/u/.claude/settings.json"] = `{"env": {"GATE4AI_TOKEN": "g4a_old"}}`
 	got := check(agent)
 	for _, id := range []string{"agent-token", "claude-code-token", "claude-code-permission", "skill"} {
 		if got[id].Status != "warn" || got[id].Fix == "" {
 			t.Errorf("%s: %+v", id, got[id])
 		}
 	}
-	if !strings.Contains(got["agent-token"].Detail, "approve its own requests") || !strings.Contains(got["claude-code-permission"].Fix, BashRule) {
+	if !strings.Contains(got["agent-token"].Detail, "not connected yet") || !strings.Contains(got["agent-token"].Fix, "shows a code") ||
+		!strings.Contains(got["claude-code-permission"].Fix, BashRule) || !strings.Contains(got["claude-code-token"].Fix, "remove GATE4AI_TOKEN") {
 		t.Fatal(got)
 	}
-	agent.Environ = []string{"CLAUDECODE=1", "GATE4AI_TOKEN=g4a_x"}
-	files["/home/u/.claude/settings.json"] = `{"env": {"GATE4AI_TOKEN": "g4a_x"}, "permissions": {"allow": ["Bash(gate4ai *)"]}}`
+	agent.AgentKey, agent.KeyPending = "claude-code", true
+	if c := check(agent)["agent-token"]; c.Status != "warn" || !strings.Contains(c.Detail, "waits for the owner") {
+		t.Fatal(c)
+	}
+	// Подключён своим ключом, правило есть, токена в env нет.
+	agent.KeyPending = false
+	files["/home/u/.claude/settings.json"] = `{"permissions": {"allow": ["Bash(gate4ai *)"]}}`
 	files["/home/u/.claude/skills/gate4ai/SKILL.md"] = "new skill"
-	for id, c := range check(agent) {
+	got = check(agent)
+	if _, ok := got["claude-code-token"]; ok {
+		t.Error("claude-code-token without a token in env")
+	}
+	for id, c := range got {
 		if strings.HasPrefix(id, "claude-code") || id == "agent-token" || id == "skill" {
 			if c.Status != "ok" {
 				t.Errorf("%s: %+v", id, c)
 			}
 		}
+	}
+	agent.Environ = []string{"CLAUDECODE=1", "GATE4AI_TOKEN=g4a_x"}
+	agent.AgentKey = ""
+	if c := check(agent)["agent-token"]; c.Status != "ok" {
+		t.Fatal(c)
 	}
 }
 

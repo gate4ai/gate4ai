@@ -133,7 +133,7 @@ func TestCLIFlow(t *testing.T) {
 	}
 	// Владелец без --as: agent_required — код 7 и подсказка про токен агента.
 	if code, out := h.run(t, "", "mail", "send", "--to", "landlord@example.com", "--subject", "x"); code != ExitAuth ||
-		errOf(jsonOf(t, out))["code"] != "agent_required" || !strings.Contains(errOf(jsonOf(t, out))["hint"].(string), "gate4ai agents token") {
+		errOf(jsonOf(t, out))["code"] != "agent_required" || !strings.Contains(errOf(jsonOf(t, out))["hint"].(string), "--as <agent>") {
 		t.Fatal("agent_required:", code, out)
 	}
 	// Строковый аргумент из файла (--<name>_file) и из stdin (-).

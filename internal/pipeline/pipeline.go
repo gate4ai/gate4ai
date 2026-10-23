@@ -252,10 +252,10 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 	}
 	switch dec.Effect {
 	case config.EffectDeny:
-		return p.deny(c.Agent, act, c.Action, args, dec, nil, "")
+		return p.deny(ctx, c.Agent, act, c.Action, args, dec, nil, "")
 	case config.EffectAsk:
 		// 4. Подтверждение.
-		a, err := p.requestApproval(c.Agent, c.Action, act, args, prov, dec)
+		a, err := p.requestApproval(ctx, c.Agent, c.Action, act, args, prov, dec)
 		if err != nil {
 			res.Status, res.Code, res.Message = StatusError, CodeExecution, err.Error()
 			return res
@@ -282,8 +282,8 @@ func (p *Pipeline) decidePolicy(req policy.Request) policy.Decision {
 // Отказ политики при исполнении уже одобренного действия (политика, лимиты
 // или доступ агента изменились после запроса) — denied_by_policy, а не
 // «отклонено человеком».
-func (p *Pipeline) deny(agent string, act manifest.Action, action string, args map[string]any, dec policy.Decision, appr *audit.Approval, parent string) Result {
-	r := &audit.Receipt{Agent: agent, Action: action, Class: act.Class, Args: p.maskArgs(act, args), Parent: parent,
+func (p *Pipeline) deny(ctx context.Context, agent string, act manifest.Action, action string, args map[string]any, dec policy.Decision, appr *audit.Approval, parent string) Result {
+	r := &audit.Receipt{Agent: agent, Caller: CallerFrom(ctx), Action: action, Class: act.Class, Args: p.maskArgs(act, args), Parent: parent,
 		Decision:     receiptDecision(config.EffectDeny, dec),
 		Approval:     appr,
 		Execution:    audit.Execution{Status: "skipped"},
@@ -336,7 +336,7 @@ func (p *Pipeline) admit(ctx context.Context, agent, action string, act manifest
 	defer p.admitMu.Unlock()
 	dec := p.decidePolicy(req)
 	if dec.Effect == config.EffectDeny {
-		r := p.deny(agent, act, action, args, dec, appr, parentID)
+		r := p.deny(ctx, agent, act, action, args, dec, appr, parentID)
 		return 0, &r
 	}
 	// ask и allow: человек уже подтвердил или правило разрешает.
@@ -344,13 +344,30 @@ func (p *Pipeline) admit(ctx context.Context, agent, action string, act manifest
 	if err != nil {
 		dec := policy.Decision{Effect: config.EffectDeny, RuleIDs: []string{policy.RuleStateUnavailable},
 			Reason: "state store unavailable, limits cannot be checked: " + err.Error()}
-		r := p.deny(agent, act, action, args, dec, appr, parentID)
+		r := p.deny(ctx, agent, act, action, args, dec, appr, parentID)
 		return 0, &r
 	}
 	return id, nil
 }
 
 type agentKey struct{}
+
+type callerKey struct{}
+
+// WithCaller — откуда агент вызвал действие (каталог, процессы): в квитанции
+// и запросе подтверждения.
+func WithCaller(ctx context.Context, c *audit.Caller) context.Context {
+	if c == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, callerKey{}, c)
+}
+
+// CallerFrom — вызывающий действия (nil — неизвестен).
+func CallerFrom(ctx context.Context) *audit.Caller {
+	c, _ := ctx.Value(callerKey{}).(*audit.Caller)
+	return c
+}
 
 // WithAgent — агент, от имени которого исполняется действие (для встроенных
 // коннекторов хоста; WASM-коннекторы его не получают).
@@ -420,7 +437,7 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 	// подставляет хост только в функциях хоста и только для адресов привязки.
 	settings := p.cfg().Connectors[conn]
 	// 6. Исполнение.
-	receipt := &audit.Receipt{ID: audit.NewID(), Agent: agent, Action: action, Class: act.Class, Args: p.maskArgs(act, args),
+	receipt := &audit.Receipt{ID: audit.NewID(), Agent: agent, Caller: CallerFrom(ctx), Action: action, Class: act.Class, Args: p.maskArgs(act, args),
 		Decision: receiptDecision(config.EffectAllow, dec), Approval: appr}
 	if appr != nil {
 		receipt.Decision.Effect = config.EffectAsk

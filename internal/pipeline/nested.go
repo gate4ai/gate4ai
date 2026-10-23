@@ -96,7 +96,7 @@ func (p *Pipeline) ExecuteNested(ctx context.Context, caller string, rule manife
 	req := policy.Request{Agent: parent.Agent, Action: full, Class: act.Class, Args: args, Provenance: prov, Now: p.Now(), Nested: true, StateError: perr}
 	dec := p.decidePolicy(req)
 	if dec.Effect == config.EffectDeny {
-		p.deny(parent.Agent, act, full, args, dec, nil, parent.ID)
+		p.deny(ctx, parent.Agent, act, full, args, dec, nil, parent.ID)
 		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "service_call %s denied by policy: %s", full, dec.Reason)
 	}
 	ctx = context.WithValue(ctx, nestedKey{}, nestedCall{caller: caller, params: rule.Params})

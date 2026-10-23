@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gate4ai/gate4ai/internal/daemon"
+	"github.com/gate4ai/gate4ai/internal/platform/agentid"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/platform/paths"
 	"github.com/gate4ai/gate4ai/internal/platform/version"
@@ -116,6 +117,14 @@ func daemonMain(args []string, tty bool) error {
 	d, err := daemon.New(daemon.Options{Home: *home, InitialConfig: initial, DefaultConnectors: defaults, Keys: ks, ConnectorsDir: *connDir, Log: log})
 	if err != nil {
 		return err
+	}
+	// Агент на сокете владельца получает agent_required, ключи с привязкой к
+	// каталогу проверяются по каталогу агента. GATE4AI_OWNER_CHECK=off —
+	// только для тестовых стендов, которые сами запущены агентом.
+	if os.Getenv("GATE4AI_OWNER_CHECK") == "off" {
+		log.Warn("GATE4AI_OWNER_CHECK=off: agents on the owner socket are not told apart from the owner; keys bound to a directory are refused")
+	} else {
+		d.Callers = agentid.Identify
 	}
 	// Порядок остановки: сначала отмена ctx (relay, Telegram, установка по
 	// умолчанию, тикер), потом серверы и базы — не наоборот.

@@ -6,6 +6,7 @@
 <table>
 <tr><th>{{T "When"}}</th><td>{{ts .TS}} <span class="muted">({{ago .TS}})</span></td></tr>
 <tr><th>{{T "Agent"}}</th><td>{{if $.Remote}}{{.Agent}}{{else}}<a href="{{$.Base}}/agents/{{.Agent}}">{{.Agent}}</a>{{end}}</td></tr>
+{{with .Caller}}{{if .Dir}}<tr><th>{{T "Folder"}}</th><td><code>{{.Dir}}</code>{{if ne .Source "peer"}} <span class="muted">({{T "as reported by the agent"}})</span>{{end}}{{with .Session}}<div class="help">{{T "session"}} <code>{{.}}</code></div>{{end}}</td></tr>{{end}}{{end}}
 <tr><th>{{T "Action"}}</th><td>{{$d.Title}}{{with $d.Target}} · <code>{{.}}</code>{{end}} <span class="badge">{{class .Class}}</span><div class="help"><code>{{.Action}}</code>{{with $d.Desc}} — {{.}}{{end}}</div></td></tr>
 <tr><th>{{T "Decision"}}</th><td class="{{.Decision.Effect}}"><b>{{effect .Decision.Effect}}</b> — {{reason .Decision.Reason}}{{if .Decision.RuleIDs}} <span class="muted">({{join .Decision.RuleIDs ", "}})</span>{{end}}</td></tr>
 {{with .Approval}}<tr><th>{{T "Approval"}}</th><td>{{if eq .Who "owner"}}{{T "you"}}{{else}}{{.Who}}{{end}}, {{channel .Channel}}, {{ts .At}}</td></tr>{{end}}

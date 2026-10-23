@@ -426,16 +426,9 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 		}
 	}
 	if c, ok := agentsetup.Find(client); ok {
-		_, _ = u.D.State.RevokeLabel(name, "auto:"+client)
-		tok, err := u.D.State.IssueToken(name, "auto:"+client, "agent")
+		res, err := u.autoConnect(name, client)
 		if err == nil {
-			var res agentsetup.Result
-			res, err = u.Clients.Connect(client, u.bin(), tok, u.skillMD(name))
-			if err == nil {
-				detail = connectDetail(res)
-			} else {
-				_, _ = u.D.State.RevokeLabel(name, "auto:"+client)
-			}
+			detail = connectDetail(res)
 		}
 		if err != nil {
 			notes = append(notes, M("%s was not connected automatically: %s. Use the manual instructions on the agent page.", c.Title, err))

@@ -159,21 +159,22 @@ gate4ai browser login --session s-… --account @site     # logged_in | submitte
 
 ## 3. Агенты
 
-**С shell (CLI + skill):**
+**С shell (CLI + skill):** агент подключается сам — первая команда отвечает кодом (выход `3`, `pairing_required`), агент показывает его в чате, владелец сверяет код и разрешает подключение в Web UI (Агенты) или Telegram; дальше агент работает своим ключом (каталог данных → `agents/<агент>.json`) без перезапуска. По умолчанию — один агент на тип (`claude-code`); `gate4ai pair --here` — отдельный ключ только для агента из этой папки, со своим профилем. Сокет владельца отвечает узнанному агенту `agent_required`; в журнал пишется папка агента.
 
 ```sh
-gate4ai agents token claude-ai            # токен показывается один раз
-export GATE4AI_TOKEN=g4a_…
-gate4ai tools                              # что доступно профилю
+gate4ai tools                              # первый раз — код подключения, потом — что доступно профилю
+gate4ai pair --here --wait 5m              # ключ только для этой папки, ждать решения владельца
 gate4ai mail send --to landlord@example.com --subject "Аренда" --body "…" --wait 10m
 gate4ai skill > SKILL.md                   # навык для Claude Code / Hermes / OpenClaw
 ```
 
-Коды выхода: `0` ok, `1` прочие ошибки, `2` запрещено политикой (`denied_by_policy`), `3` ждёт подтверждения (`pending_approval`), `4` проверка не прошла (`verification_failed`), `5` неверные аргументы или неизвестное действие, `6` daemon недоступен, `7` вызывающему нельзя: неверный или отозванный токен (`unauthorized`), команда владельца с токеном агента (`owner_only`), вызов владельца без `--as` (`agent_required`). Ответ — JSON в едином конверте: `{"status": "ok" | "denied" | "pending" | "verification_failed" | "error", "result": …, "error": {"code", "message", "hint", "detail"}}` — `result` при успехе, `error` в остальных случаях (у `pending` — что делать дальше). Длинный текст аргумента — из файла: `--<имя>_file путь` (`-` — stdin).
+Скрипты и CI — с токеном: `gate4ai agents token claude-ai` (показывается один раз), `export GATE4AI_TOKEN=g4a_…`.
 
-Claude Code: подключение в Web UI (Агенты → Claude Code) пишет токен агента в `env.GATE4AI_TOKEN` и правило `"Bash(gate4ai *)"` в `permissions.allow` файла `~/.claude/settings.json`; `gate4ai doctor` предупреждает, если агент работает с правами владельца (без своего токена) или правила нет.
+Коды выхода: `0` ok, `1` прочие ошибки, `2` запрещено политикой (`denied_by_policy`), `3` ждёт подтверждения (`pending_approval`), `4` проверка не прошла (`verification_failed`), `5` неверные аргументы или неизвестное действие, `6` daemon недоступен, `7` вызывающему нельзя: неверный или отозванный ключ / токен (`unauthorized`), команда владельца с ключом агента (`owner_only`), агент на сокете владельца или вызов владельца без `--as` (`agent_required`), подключение отклонено (`pairing_rejected`). Ответ — JSON в едином конверте: `{"status": "ok" | "denied" | "pending" | "verification_failed" | "error", "result": …, "error": {"code", "message", "hint", "detail"}}` — `result` при успехе, `error` в остальных случаях (у `pending` — что делать дальше). Длинный текст аргумента — из файла: `--<имя>_file путь` (`-` — stdin).
 
-**MCP по stdio** (Claude Code и др.): `{"mcpServers": {"gate4ai": {"command": "gate4ai", "args": ["mcp"], "env": {"GATE4AI_TOKEN": "g4a_…"}}}}`.
+Claude Code: подключение в Web UI (Агенты → Claude Code) кладёт ключ агента в каталог ключей gate4ai и правило `"Bash(gate4ai *)"` в `permissions.allow` файла `~/.claude/settings.json` (прежний `env.GATE4AI_TOKEN` убирает); `gate4ai doctor` предупреждает, если агент не подключён своим ключом, правила нет или в `env` остался токен.
+
+**MCP по stdio** (Claude Code и др.): `{"mcpServers": {"gate4ai": {"command": "gate4ai", "args": ["mcp"], "env": {"GATE4AI_AGENT": "claude-code"}}}}` — секрета нет, ключ CLI найдёт по имени агента (до подтверждения вызовы отвечают кодом подключения).
 
 **Изолированный локальный агент:**
 
@@ -196,12 +197,13 @@ gate4ai agents connect claude-ai          # одноразовый код под
 
 Добавьте `mcp_url` как custom connector и введите код на странице авторизации.
 
-**Агент с shell на другом компьютере (CLI + skill):** те же команды, адрес устройства — в `GATE4AI_URL`:
+**Агент с shell на другом компьютере (CLI + skill):** те же команды, адрес устройства — в `GATE4AI_URL`; подключение — тем же кодом (ключ запоминает адрес, дальше `GATE4AI_URL` не нужен; привязки к папке удалённо нет) или токеном:
 
 ```sh
-export GATE4AI_TOKEN=g4a_…                          # gate4ai agents token <agent> на устройстве
 export GATE4AI_URL=https://<device-id>.relay.gate4.ai
+gate4ai pair --name laptop-claude --wait 5m        # код → владелец подтверждает в Web UI или Telegram
 gate4ai tools
+# или: export GATE4AI_TOKEN=g4a_…                  # gate4ai agents token <agent> на устройстве
 ```
 
 **Без relay** (свой сертификат или reverse proxy на этом компьютере):
@@ -244,6 +246,7 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 ```sh
 mkdir -p /tmp/g4stand
 export GATE4AI_HOME=$PWD/.stand GATE4AI_SOCKET=/tmp/g4stand/owner.sock GATE4AI_AGENT_SOCKET=/tmp/g4stand/agent.sock
+# стенд, который запускает сам агент (Claude Code): GATE4AI_OWNER_CHECK=off — сокет владельца не отличает агента от человека
 gate4ai daemon --ui 127.0.0.1:7531 --keystore file &       # ключи в файле, а не в связке ОС
 gate4ai connectors install connectors/mail --yes --watch   # коннектор из каталога исходников, пересобирается при правках
 gate4ai ui --print                                         # одноразовая ссылка на Web UI (2 минуты)

@@ -38,6 +38,13 @@ type DoctorEnv struct {
 	// ("" — не проверять).
 	SkillPath string
 	Skill     func() (string, error)
+	// Agent — агент, которого CLI узнал по процессам и окружению ("" — по
+	// признакам в Environ).
+	Agent string
+	// AgentKey — ключ, с которым CLI ходит от имени этого агента (имя агента;
+	// "" — ключа нет); KeyPending — ключ ещё ждёт решения владельца.
+	AgentKey   string
+	KeyPending bool
 }
 
 // BashRule — правило Claude Code, которое отдаёт решения о командах gate4ai
@@ -94,19 +101,27 @@ func Doctor(e DoctorEnv) []Check {
 			"start agents with `gate4ai run <agent> --workspace <dir>` (sandbox-runtime), --container or --microvm")
 	}
 
-	agent := ""
+	agent := e.Agent
 	for _, k := range agentEnv {
+		if agent != "" {
+			break
+		}
 		if env[k] != "" {
 			agent = k
 			break
 		}
 	}
 	switch {
-	case agent != "" && env["GATE4AI_TOKEN"] == "":
-		add("agent-token", "warn", "this shell belongs to an agent ("+agent+") and has no GATE4AI_TOKEN: its gate4ai commands run with the owner's rights — it could approve its own requests (gate4ai approvals approve) and change the policy",
-			"give the agent its own token: Web UI → Agents → connect Claude Code (writes the token into ~/.claude/settings.json), or gate4ai agents token <agent> and put it into GATE4AI_TOKEN of the agent's environment")
 	case env["GATE4AI_TOKEN"] != "":
 		add("agent-token", "ok", "GATE4AI_TOKEN is set: gate4ai commands run with the agent's profile, owner commands are refused", "")
+	case agent != "" && e.AgentKey != "" && e.KeyPending:
+		add("agent-token", "warn", "this shell belongs to an agent ("+agent+"); its connection as "+e.AgentKey+" waits for the owner's approval",
+			"the owner approves it in the Web UI (Agents) or the Telegram bot if the code matches the one the agent showed")
+	case agent != "" && e.AgentKey != "":
+		add("agent-token", "ok", "this shell belongs to an agent ("+agent+"): gate4ai commands run with the key of "+e.AgentKey+", owner commands are refused", "")
+	case agent != "":
+		add("agent-token", "warn", "this shell belongs to an agent ("+agent+") that is not connected yet: gate4ai refuses it the owner's socket (agent_required), so it can neither act nor approve its own requests",
+			"the agent connects itself: its first gate4ai command (or gate4ai pair) shows a code, the owner approves it in the Web UI → Agents")
 	}
 	if e.ClaudeSettings != "" {
 		out = append(out, claudeChecks(e)...)
@@ -236,11 +251,11 @@ func claudeChecks(e DoctorEnv) []Check {
 		return []Check{{"claude-code-settings", "warn", e.ClaudeSettings + " is not valid JSON: " + err.Error(), "fix the file"}}
 	}
 	var out []Check
-	if tok, _ := st.Env["GATE4AI_TOKEN"].(string); tok == "" {
-		out = append(out, Check{"claude-code-token", "warn", "Claude Code has no GATE4AI_TOKEN in " + e.ClaudeSettings + ": its gate4ai commands run with the owner's rights",
-			"Web UI → Agents → connect Claude Code, or add \"env\": {\"GATE4AI_TOKEN\": \"<gate4ai agents token claude-code>\"} to " + e.ClaudeSettings})
-	} else {
-		out = append(out, Check{"claude-code-token", "ok", "Claude Code runs gate4ai with its agent token", ""})
+	if tok, _ := st.Env["GATE4AI_TOKEN"].(string); tok != "" {
+		// Прежняя схема: токен из env попадает только в сессии, начатые после
+		// записи, и подменяет ключ агента.
+		out = append(out, Check{"claude-code-token", "warn", e.ClaudeSettings + " still has GATE4AI_TOKEN in env: it reaches only sessions started after it was written, and Claude Code uses it instead of its own key",
+			"remove GATE4AI_TOKEN from env in " + e.ClaudeSettings + " (Web UI → Agents → reconnect Claude Code does it): gate4ai finds the agent's key itself"})
 	}
 	allowed := false
 	for _, r := range st.Permissions.Allow {

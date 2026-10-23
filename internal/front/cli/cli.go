@@ -22,6 +22,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/front/skill"
+	"github.com/gate4ai/gate4ai/internal/platform/agentid"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/platform/paths"
 	"github.com/gate4ai/gate4ai/internal/platform/version"
@@ -50,32 +51,76 @@ type Env struct {
 	ForceTable bool
 	// StartBinary — бинарник gate4ai для запуска daemon в фоне ("" — этот же).
 	StartBinary string
+	// Self — кто этот процесс: агент среди предков и его каталог (nil — только
+	// признаки в окружении). KeyDir — каталог ключей агентов ("" — нет).
+	Self   func() agentid.Caller
+	KeyDir string
+	// Pair — клиент без токена для запроса на подключение (base — адрес
+	// устройства, "" — сокет агентов); Remote — клиент к адресу устройства с
+	// токеном (ключ агента, спаренного с другим компьютером).
+	Pair   func(base string) *Client
+	Remote func(base, token string) *Client
+
+	selfDone bool // selfC прочитан (первым — в Client, до горутин)
+	selfC    agentid.Caller
+	usedKey  *AgentKey // ключ агента, с которым идёт команда
+	ownerCmd bool      // команда владельца: агенту без ключа не начинать спаривание
 }
 
 // DefaultEnv — реальное окружение процесса.
 func DefaultEnv() *Env {
 	tty := func(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 	errTTY := tty(os.Stderr)
+	remote := func(base, token string) *Client {
+		c, err := NewRemoteClient(base, token, os.Getenv("GATE4AI_CA_FILE"))
+		if err != nil {
+			return &Client{Token: token, Err: err}
+		}
+		return c
+	}
 	return &Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
 		Interactive: errTTY && tty(os.Stdin), StderrTTY: errTTY, StdoutTTY: tty(os.Stdout),
 		Connect: func(token string) *Client {
 			if token != "" {
 				// Удалённый агент: daemon на другом компьютере, доступ по HTTPS.
 				if base := os.Getenv("GATE4AI_URL"); base != "" {
-					c, err := NewRemoteClient(base, token, os.Getenv("GATE4AI_CA_FILE"))
-					if err != nil {
-						return &Client{Token: token, Err: err}
-					}
-					return c
+					return remote(base, token)
 				}
 				return NewSocketClient(paths.FindAgentSocket(), token)
 			}
 			return NewSocketClient(paths.FindOwnerSocket(), "")
-		}, Extra: map[string]func(context.Context, *Env, []string) int{}}
+		},
+		Self:   func() agentid.Caller { return agentid.Identify(os.Getpid()) },
+		KeyDir: paths.AgentKeys(),
+		Pair: func(base string) *Client {
+			if base != "" {
+				return remote(base, "")
+			}
+			return NewSocketClient(paths.FindAgentSocket(), "")
+		},
+		Remote: remote,
+		Extra:  map[string]func(context.Context, *Env, []string) int{}}
 }
 
-// Client — клиент к daemon с токеном из GATE4AI_TOKEN.
-func (e *Env) Client() *Client { return e.Connect(e.Getenv("GATE4AI_TOKEN")) }
+// Client — клиент к daemon: с токеном из GATE4AI_TOKEN; у агента без токена —
+// с его ключом (если ключа нет — запрос на подключение, PairingError); у
+// человека — сокет владельца.
+func (e *Env) Client() *Client {
+	if tok := e.Getenv("GATE4AI_TOKEN"); tok != "" {
+		return e.Connect(tok)
+	}
+	if _, _, ok := e.agentSelf(); !ok {
+		return e.Connect("")
+	}
+	if k, found := e.findKey(); found && k.Pairing == "" {
+		return e.keyClient(k)
+	}
+	if e.ownerCmd {
+		// Команда владельца: daemon сам ответит агенту agent_required.
+		return e.Connect("")
+	}
+	return e.lazyKeyClient()
+}
 
 // call — запрос к daemon с выводом ответа JSON-ом.
 func (e *Env) call(ctx context.Context, c *Client, method, path string, body any) int {
@@ -115,7 +160,9 @@ Start here (on the computer you protect):
   gate4ai ui [--print] [--remote] [--start|--no-start]   open the web UI (one-time link, 2 minutes; starts the daemon at a terminal)
   gate4ai status                          is the daemon running
 
-Agent commands (token in GATE4AI_TOKEN; daemon on another computer: GATE4AI_URL=https://<device address>):
+Agent commands (an agent connects itself: the first command shows a code, the owner approves it in the Web UI;
+  or a token in GATE4AI_TOKEN; daemon on another computer: GATE4AI_URL=https://<device address>):
+  gate4ai pair [--here] [--name agent] [--wait 5m]   connect this agent (--here: a key only for its directory)
   gate4ai tools [--json] [--as agent]     actions available to this agent (--as: owner, another agent's catalog)
   gate4ai <connector> <action> [--arg v] [--wait 10m] [--json '{...}'] [--as agent]   run an action (--help on the action)
   gate4ai status <id> [--wait 10m]        result of an action pending approval
@@ -156,7 +203,7 @@ Output: JSON {"status": "ok" | "denied" | "pending" | "error" | "verification_fa
 `
 
 // commands — встроенные команды (остальное первое слово — имя коннектора).
-var commands = []string{"help", "version", "tools", "status", "skill", "mcp", "daemon", "service", "log", "show", "export",
+var commands = []string{"help", "version", "tools", "status", "skill", "mcp", "pair", "daemon", "service", "log", "show", "export",
 	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "relay", "connectors", "registry", "contract", "fixture", "ui", "run", "doctor", "egress"}
 
 // Run — точка входа CLI.
@@ -174,6 +221,12 @@ func Run(ctx context.Context, e *Env, args []string) int {
 		return ExitOK
 	}
 	cmd, rest := args[0], args[1:]
+	// Команды владельца агенту без ключа спаривание не начинают: daemon
+	// ответит ему agent_required.
+	e.ownerCmd = isCommand(cmd) && !agentCommands[cmd]
+	if cmd == "status" && len(rest) == 0 {
+		e.ownerCmd = true
+	}
 	if isCommand(cmd) && wantsHelp(rest) {
 		return e.commandHelp(cmd)
 	}
@@ -207,6 +260,8 @@ func Run(ctx context.Context, e *Env, args []string) int {
 		return e.status(ctx, rest)
 	case "skill":
 		return e.skill(ctx)
+	case "pair":
+		return e.pair(ctx, rest)
 	case "log":
 		return e.log(ctx, rest)
 	case "show":
@@ -250,6 +305,10 @@ func Run(ctx context.Context, e *Env, args []string) int {
 }
 
 func isCommand(s string) bool { return slices.Contains(commands, s) }
+
+// agentCommands — встроенные команды агента (и действия коннекторов): агент
+// без ключа подключается при первой из них.
+var agentCommands = map[string]bool{"tools": true, "status": true, "skill": true, "mcp": true, "pair": true}
 
 // wantsHelp — среди аргументов встроенной команды есть --help / -h (до `--`:
 // после него — команда агента в `gate4ai run`).
@@ -354,7 +413,7 @@ func (e *Env) tools(ctx context.Context, args []string) int {
 		return e.fail(err)
 	}
 	if len(tools) == 0 {
-		if e.Getenv("GATE4AI_TOKEN") != "" {
+		if e.AgentMode() {
 			fmt.Fprintln(e.Stderr, "gate4ai: no actions are allowed for this agent; the owner allows them in the agent's profile (gate4ai policy set)")
 		} else {
 			fmt.Fprintln(e.Stderr, "gate4ai: no actions yet: allow connectors in a profile (gate4ai policy set config.yaml); more connectors: gate4ai connectors install <name>")
@@ -399,7 +458,7 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 				e.problem(Problem{Code: "unknown_command", Message: fmt.Sprintf("unknown command %q", conn), Hint: "did you mean gate4ai " + s + "?"})
 				return ExitUsage
 			}
-			p := Explain(err, e.Getenv("GATE4AI_TOKEN") != "")
+			p := Explain(err, e.AgentMode())
 			p.Detail = fmt.Sprintf("%q is not a built-in command, and connector names come from the daemon; %s", conn, p.Detail)
 			e.problem(p)
 			return ExitUnavailable

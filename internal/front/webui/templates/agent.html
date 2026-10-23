@@ -33,7 +33,7 @@
 {{if not .Installed}}<span class="warn">{{T "%s was not found on this computer — the settings file will be created anyway." .Title}}</span>{{end}}</p>
 <div class="row">
 <form method="post" action="{{$.Base}}/agents/{{$d.Name}}/client"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="client" value="{{.ID}}">
-<button class="primary">{{if .Connected}}{{T "Reconnect (new token)"}}{{else}}{{T "Connect %s" .Title}}{{end}}</button></form>
+<button class="primary">{{if .Connected}}{{T "Reconnect (new key)"}}{{else}}{{T "Connect %s" .Title}}{{end}}</button></form>
 {{if .Connected}}<form method="post" action="{{$.Base}}/agents/{{$d.Name}}/client/remove" data-confirm="{{T "Remove gate4ai from %s and revoke its token?" .Title}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="client" value="{{.ID}}"><button class="danger">{{T "Disconnect"}}</button></form>{{end}}
 </div>
 <p class="help">{{T .Restart}}</p>
@@ -47,7 +47,8 @@
 {{else}}<p>{{T "A cloud assistant needs an internet address of this computer. The relay gives it — no ports to open, no router settings."}}</p>
 <a class="btn primary" href="{{.Base}}/settings/internet">{{T "Turn on internet access"}}</a>{{end}}</div>
 {{else}}
-<div class="card"><p>{{T "A script or another agent uses a token:"}}</p>
+<div class="card"><p>{{TH "An agent with a shell on this computer (Claude Code, Codex…) connects itself: its first <code>gate4ai</code> command shows a code in its chat — approve it on the Agents page if the codes match. A key only for one project folder: <code>gate4ai pair --here</code> from the agent started there."}}</p>
+<p>{{T "A script or an agent on another computer uses a token:"}}</p>
 <form method="post" action="{{.Base}}/agents/{{$d.Name}}/token" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><label class="inline" for="tok-label">{{T "Label (optional)"}}</label><input id="tok-label" name="label" size="20"><button class="primary">{{T "Issue a token"}}</button></form>
 <p class="help">{{TH "Then: <code>export GATE4AI_TOKEN=g4a_…</code>, instructions for the agent: <code>gate4ai skill &gt; SKILL.md</code>, check: <code>gate4ai tools</code>. Isolated run on this computer: <code>gate4ai run %s --workspace ~/project</code>." $d.Name}}</p></div>
 {{end}}{{end}}
@@ -63,10 +64,9 @@
 <a href="{{$.Base}}/agents/{{$d.Name}}?client=cloud" class="{{if eq "cloud" $d.Client}}on{{end}}">Claude.ai / ChatGPT</a>
 <a href="{{$.Base}}/agents/{{$d.Name}}?client=cli" class="{{if or (eq "cli" $d.Client) (eq "" $d.Client)}}on{{end}}">{{T "CLI / script"}}</a></div>
 {{with $d.ClientInfo}}<h3>{{T "Connect manually"}}</h3>
-<p>{{TH "Issue a token and paste the snippet into <code>%s</code>" $d.SnippetPath}}{{if eq .Format "vscode"}} {{T "(or Command Palette → “MCP: Add Server”)"}}{{end}}{{if eq .ID "claude-code"}} {{TH "— or with one command: <code>claude mcp add --scope user gate4ai -e GATE4AI_TOKEN=&lt;token&gt; -- %s mcp</code>" $d.Bin}}{{end}}:</p>
+<p>{{TH "Paste the snippet into <code>%s</code>" $d.SnippetPath}}{{if eq .Format "vscode"}} {{T "(or Command Palette → “MCP: Add Server”)"}}{{end}}{{if eq .ID "claude-code"}} {{TH "— or with one command: <code>claude mcp add --scope user gate4ai -e GATE4AI_AGENT=%s -- %s mcp</code>" $d.Name $d.Bin}}{{end}}:</p>
 <pre class="box">{{$d.Snippet}}</pre>
-<form method="post" action="{{$.Base}}/agents/{{$d.Name}}/token" class="row" style="margin-top:.5rem"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="client" value="{{.ID}}"><input type="hidden" name="label" value="{{.ID}}">
-<button>{{T "Issue a token and show the ready snippet"}}</button></form>
+<p class="help">{{T "There is no secret in it: on the first call the agent shows a code — approve it on the Agents page if the codes match."}}</p>
 {{if .Docs}}<p class="help">{{T "Documentation:"}} <a href="{{.Docs}}" target="_blank" rel="noopener">{{.Docs}}</a></p>{{end}}{{end}}
 
 <h3>{{T "Permissions"}}</h3>
@@ -77,7 +77,7 @@
 
 <h3>{{T "Tokens"}}</h3>
 <table><tr><th>ID</th><th>{{T "Label"}}</th><th>{{T "Issued"}}</th><th>{{T "Last used"}}</th><th>{{T "Status"}}</th></tr>
-{{range $row.Tokens}}{{if ne .Kind "refresh"}}<tr><td><code>{{.ID}}</code></td><td>{{.Label}}</td><td>{{ts .Created}}</td><td>{{ago .LastUsed}}</td>
+{{range $row.Tokens}}{{if ne .Kind "refresh"}}<tr><td><code>{{.ID}}</code></td><td>{{.Label}}{{with .Dir}}<div class="help">{{T "only for the agent started in"}} <code>{{.}}</code></div>{{end}}</td><td>{{ts .Created}}</td><td>{{ago .LastUsed}}</td>
 <td>{{if .Revoked}}<span class="deny">{{T "revoked"}}</span>{{else}}<span class="allow">{{T "active"}}</span>{{end}}</td></tr>{{end}}{{else}}<tr><td colspan="5" class="muted">{{T "No tokens"}}</td></tr>{{end}}
 </table>
 <div class="row" style="margin-top:.8rem">

@@ -412,3 +412,41 @@ func (c *Channels) Flush() {
 
 // wait — дождаться доставки поставленных событий (тесты).
 func (s *switchable) wait() { s.wg.Wait() }
+
+// Запрос агента на подключение — в Telegram: код, каталог, кнопки; решает
+// только владелец, один раз.
+func TestTelegramPairing(t *testing.T) {
+	fake := &fakeTelegram{token: "1:P"}
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+	const owner = 42
+	tg := NewTelegram(&BotAPI{Base: srv.URL, Token: "1:P"}, owner, nil, nil)
+	type dec struct {
+		id string
+		ok bool
+	}
+	got := make(chan dec, 2)
+	tg.Pairs = func(_ context.Context, id string, ok bool) error { got <- dec{id, ok}; return nil }
+	tg.PairRequested(&state.Pairing{ID: "p_1", Agent: "claude-code", Code: "K7Q-4FM", Dir: "/home/u/proj"})
+	text := fake.sent[0]["text"].(string)
+	if !strings.Contains(text, "K7Q-4FM") || !strings.Contains(text, "claude-code") || !strings.Contains(text, "/home/u/proj") {
+		t.Fatal(text)
+	}
+	kb := fake.sent[0]["reply_markup"].(map[string]any)["inline_keyboard"].([]any)[0].([]any)
+	yes := kb[0].(map[string]any)["callback_data"].(string)
+	if strings.Contains(yes, "p_1") {
+		t.Fatal("request id in callback data")
+	}
+	tg.Handle(context.Background(), cbUpdate(1, 7, yes)) // чужой
+	if len(got) != 0 {
+		t.Fatal("stranger approved")
+	}
+	tg.Handle(context.Background(), cbUpdate(2, owner, yes))
+	if d := <-got; d.id != "p_1" || !d.ok || !strings.Contains(fake.edits[0]["text"].(string), "Подключение разрешено") {
+		t.Fatal("not approved", d, fake.edits)
+	}
+	tg.Handle(context.Background(), cbUpdate(3, owner, yes))
+	if len(got) != 0 {
+		t.Fatal("second press")
+	}
+}
