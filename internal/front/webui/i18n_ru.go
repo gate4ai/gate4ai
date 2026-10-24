@@ -7,6 +7,31 @@ package webui
 // TestRussianCatalogComplete. Термины: daemon → gate4.ai, relay → доступ из
 // интернета, profile → права агента, receipt → запись журнала.
 var ru = map[string]string{
+	// Списки доступа Браузера и Файлов.
+	"%s removed from the list.": "%s убран из списка.",
+	"A connector is a WebAssembly module from the store that works with a site through the built-in browser: high-level actions instead of clicks. It sees only the sites and folders you allowed and never knows your passwords.": "Коннектор — модуль WebAssembly из магазина, который работает с сайтом через встроенный браузер: высокоуровневые действия вместо кликов. Он видит только разрешённые вами сайты и папки и никогда не знает ваших паролей.",
+	"A site or folder with no line is closed. An explicit rule in Access → Rules overrides a line, except deny: deny always wins.":                                                                                                 "Сайт или папка без строки закрыты. Явное правило в «Доступ → Правила» сильнее строки, кроме запрета: запрет побеждает всегда.",
+	"Access for %s": "Доступ для %s",
+	"Browser":       "Браузер",
+	"Browser asks about this site: each call waits for you": "Браузер спрашивает про этот сайт: каждый вызов ждёт вас",
+	"Enter a site or a folder":                              "Укажите сайт или папку",
+	"Files":                                                 "Файлы",
+	"Files →":                                               "Файлы →",
+	"Files are built into gate4.ai. The list below says which folders agents may touch and how; the most specific line wins. Hidden files, keys and app data stay closed anyway.": "Файлы встроены в gate4.ai. Список ниже задаёт, к каким папкам агенты могут обращаться и как; побеждает самая конкретная строка. Скрытые файлы, ключи и данные приложений закрыты в любом случае.",
+	"Nothing yet.":                       "Пока ничего.",
+	"Sites and folders of the connector": "Сайты и папки коннектора",
+	"The browser is built into gate4.ai: agents open sites in a dedicated Chrome profile. The list below says which sites and how; the most specific line wins.": "Браузер встроен в gate4.ai: агенты открывают сайты в отдельном профиле Chrome. Список ниже задаёт, какие сайты и как; побеждает самая конкретная строка.",
+	"What the modes mean": "Что значат режимы",
+	"Where this connector may work: its own list (defaults from its manifest). The Browser and Files lists still apply: a site or folder closed there stays closed.": "Где может работать этот коннектор: его собственный список (умолчания — из манифеста). Списки Браузера и Файлов действуют тоже: закрытое там остаётся закрытым.",
+	"allow — everything without asking":                                           "разрешено — всё без вопроса",
+	"append — reading and adding to files without asking, overwriting asks you":   "добавление — чтение и дописывание в файлы без вопроса, перезапись спрашивает",
+	"ask — every action asks you":                                                 "спросить — каждое действие спрашивает вас",
+	"closed in Browser: the connector cannot open it":                             "закрыто в Браузере: коннектор его не откроет",
+	"closed in Files: the connector cannot open it":                               "закрыто в Файлах: коннектор её не откроет",
+	"connector — only through a connector from the store, not to agents directly": "через коннектор — только коннектору из магазина, агентам напрямую нельзя",
+	"deny — closed for everyone, including connectors":                            "запрещено — закрыто для всех, включая коннекторы",
+	"read — reading without asking, changes ask you":                              "чтение — чтение без вопроса, изменения спрашивают",
+	"append only": "добавление", "read only": "чтение", "only through a connector": "через коннектор",
 	// Меню, общие слова
 	"Home": "Главная", "Agents": "Агенты", "Access": "Доступ", "Journal": "Журнал", "Settings": "Настройки",
 	"Sections": "Разделы", "Language": "Язык", "Sign out": "Выйти", "Skip to content": "К содержимому",

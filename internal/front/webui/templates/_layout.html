@@ -98,7 +98,7 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 <nav class="main" aria-label="{{T "Sections"}}">
 <a href="{{.Base}}/" class="{{if eq $s "home"}}on{{end}}"{{if eq $s "home"}} aria-current="page"{{end}}>{{T "Home"}}<span class="count" data-pending-count{{if not .Pending}} hidden{{end}} aria-label="{{T "waiting for you"}}">{{.Pending}}</span></a>
 {{if not .Remote}}<a href="{{.Base}}/agents" class="{{if eq $s "agents"}}on{{end}}"{{if eq $s "agents"}} aria-current="page"{{end}}>{{T "Agents"}}</a>
-<a href="{{.Base}}/connectors" class="{{if eq $s "access"}}on{{end}}"{{if eq $s "access"}} aria-current="page"{{end}}>{{T "Access"}}</a>{{end}}
+<a href="{{.Base}}/browser" class="{{if eq $s "access"}}on{{end}}"{{if eq $s "access"}} aria-current="page"{{end}}>{{T "Access"}}</a>{{end}}
 <a href="{{.Base}}/journal" class="{{if eq $s "journal"}}on{{end}}"{{if eq $s "journal"}} aria-current="page"{{end}}>{{T "Journal"}}</a>
 {{if not .Remote}}<a href="{{.Base}}/settings" class="{{if eq $s "settings"}}on{{end}}"{{if eq $s "settings"}} aria-current="page"{{end}}>{{T "Settings"}}</a>{{end}}
 </nav>

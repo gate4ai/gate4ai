@@ -181,7 +181,7 @@ func (u *UI) actionViews(l, name string, m manifest.Manifest, cfg *config.Config
 func (u *UI) saveActionDecision(w http.ResponseWriter, r *http.Request) map[string]any {
 	name := r.PathValue("name")
 	prof := r.PostForm.Get("profile")
-	back := "/connectors/" + url.PathEscape(name) + "?profile=" + url.QueryEscape(prof) + "#actions"
+	back := pageOf(name) + "?profile=" + url.QueryEscape(prof) + "#actions"
 	act, effect := r.PostForm.Get("action"), r.PostForm.Get("effect")
 	if effect != "" && effect != config.EffectAllow && effect != config.EffectAsk && effect != config.EffectDeny {
 		return redirectErr(back, M("Unknown decision %q", effect))

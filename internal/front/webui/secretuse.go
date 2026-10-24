@@ -81,7 +81,7 @@ func secretUses(cfg *config.Config, ms []manifest.Manifest) map[string][]SecretU
 	sort.Strings(names)
 	for _, name := range names {
 		settings := cfg.Connectors[name]
-		u := SecretUse{Pre: "connector ", Name: name, Link: "/connectors/" + name}
+		u := SecretUse{Pre: "connector ", Name: name, Link: pageOf(name)}
 		m, ok := installed[name]
 		if !ok {
 			u = SecretUse{Pre: "connector ", Name: name, Post: " (not installed)"}

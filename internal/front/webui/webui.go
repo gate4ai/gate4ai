@@ -69,9 +69,10 @@ var funcs = template.FuncMap{
 		}
 		return m
 	},
-	"lines": func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
-	"first": func(s string) string { return strings.SplitN(s, "\n", 2)[0] },
-	"langs": func() any { return Langs },
+	"lines":  func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
+	"first":  func(s string) string { return strings.SplitN(s, "\n", 2)[0] },
+	"langs":  func() any { return Langs },
+	"pageOf": pageOf,
 }
 
 // tpls — шаблоны на каждом языке: функции перевода привязаны к языку.
@@ -392,6 +393,8 @@ func (u *UI) handler(m mount) http.Handler {
 	}
 	localPage("/agents", u.agents)
 	localPage("/agents/{name}", u.agentPage)
+	localPage("/browser", u.builtinPage("browser"))
+	localPage("/files", u.builtinPage("files"))
 	localPage("/connectors", u.connectorsPage)
 	localPage("/connectors/{name}", u.connectorPage)
 	localPage("/policy", u.policyPage)
@@ -417,6 +420,10 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/setup", u.setupSave)
 	change("/setup/code", u.setupCode)
 	change("/access/group", u.setGroup)
+	change("/access/sites", u.setAccess("sites"))
+	change("/access/folders", u.setAccess("folders"))
+	change("/connectors/{name}/sites", u.setConnectorAccess("sites"))
+	change("/connectors/{name}/folders", u.setConnectorAccess("folders"))
 	change("/vault/account", u.addAccount)
 	change("/settings/self", u.saveSelfConfig)
 	change("/agents", u.createAgent)
@@ -586,7 +593,7 @@ func (v view) Section() string {
 		return "home"
 	case "agents", "agent", "agent_new":
 		return "agents"
-	case "connectors", "connector", "policy", "rule", "templates", "policy_yaml":
+	case "connectors", "connector", "browser", "files", "builtin", "policy", "rule", "templates", "policy_yaml":
 		return "access"
 	case "journal", "receipt":
 		return "journal"

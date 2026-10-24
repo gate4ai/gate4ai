@@ -22,6 +22,8 @@ import (
 // исходники; перевод — каталог ru).
 var (
 	classWords = map[string]string{"read": "read", "write": "change", "external": "send out", "money": "money"}
+	// modeWords — режимы списков доступа.
+	modeWords = map[string]string{"allow": "allowed", "append": "append only", "read": "read only", "connector": "only through a connector", "ask": "ask me", "deny": "denied"}
 	// classVerbs — группа действий класса в мастере и на странице коннектора.
 	classVerbs   = map[string]string{"read": "Read", "write": "Create and change", "external": "Send", "money": "Pay"}
 	effectWords  = map[string]string{"allow": "allow", "ask": "ask me", "deny": "deny"}

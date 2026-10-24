@@ -21,7 +21,7 @@
 <p class="row"><button class="primary" data-busy="{{T "Installing…"}}">{{T "I agree, install"}}</button> <a href="{{$.Base}}/connectors">{{T "Cancel"}}</a></p></form>
 </div>{{end}}
 
-<p class="muted">{{T "A connector is how an agent works with email, files or sites. It sees only what you allowed and never knows your passwords."}}</p>
+<p class="muted">{{T "A connector is a WebAssembly module from the store that works with a site through the built-in browser: high-level actions instead of clicks. It sees only the sites and folders you allowed and never knows your passwords."}}</p>
 {{if $d.IndexError}}<div class="note">{{T "The connector store is not available:"}} {{$d.IndexError}}. <a href="#m-local">{{T "Install not from the store"}}</a>.</div>{{end}}
 <div class="grid">
 {{range $d.Items}}
@@ -57,6 +57,8 @@
 {{template "foot"}}
 
 {{define "access_tabs"}}{{$v := .V}}<div class="row between"><h2>{{T "Access"}}</h2></div>
-<nav class="tabs" aria-label="{{T "Access"}}"><a href="{{$v.Base}}/connectors" class="{{if eq .On "connectors"}}on{{end}}"{{if eq .On "connectors"}} aria-current="page"{{end}}>{{T "Connectors"}}</a>
+<nav class="tabs" aria-label="{{T "Access"}}"><a href="{{$v.Base}}/browser" class="{{if eq .On "browser"}}on{{end}}"{{if eq .On "browser"}} aria-current="page"{{end}}>{{T "Browser"}}</a>
+<a href="{{$v.Base}}/files" class="{{if eq .On "files"}}on{{end}}"{{if eq .On "files"}} aria-current="page"{{end}}>{{T "Files"}}</a>
+<a href="{{$v.Base}}/connectors" class="{{if eq .On "connectors"}}on{{end}}"{{if eq .On "connectors"}} aria-current="page"{{end}}>{{T "Connectors"}}</a>
 <a href="{{$v.Base}}/policy" class="{{if eq .On "rules"}}on{{end}}"{{if eq .On "rules"}} aria-current="page"{{end}}>{{T "Rules"}}</a>
 <a href="{{$v.Base}}/policy/templates" class="{{if eq .On "templates"}}on{{end}}"{{if eq .On "templates"}} aria-current="page"{{end}}>{{T "Ready-made rules"}}</a></nav>{{end}}

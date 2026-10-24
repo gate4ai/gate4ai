@@ -8,6 +8,8 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 )
 
 // Языки Web UI: основной — английский (исходные строки в шаблонах и коде),
@@ -150,21 +152,26 @@ func langFuncs(l string) template.FuncMap {
 			}
 			return template.HTML(fmt.Sprintf(tr(l, s), args...))
 		},
-		"say":      func(v any) string { return say(l, v) },
-		"ago":      func(t any) string { return agoIn(l, t) },
-		"left":     func(t any) string { return leftIn(l, t) },
-		"effect":   func(e string) string { return tr(l, or(effectWords[e], e)) },
-		"class":    func(c string) string { return tr(l, or(classWords[c], c)) },
-		"classGo":  func(c string) string { return tr(l, or(classVerbs[c], c)) },
-		"via":      func(v string) string { return tr(l, or(viaWords[v], v)) },
-		"channel":  func(v string) string { return tr(l, or(channelWords[v], v)) },
-		"describe": func(w string) string { s, _ := describeWhen(l, w); return s },
-		"capRu":    func(c string) string { return humanCapability(l, c) },
-		"errView":  func(msg string) ErrView { return errView(l, msg) },
-		"title":    func(nav string) string { return tr(l, or(titles[nav], nav)) },
-		"reason":   func(s string) string { return reasonText(l, s) },
-		"dur":      func(s string) string { return tr(l, or(durWords[s], s)) },
-		"version":  func(s string) string { return versionComment(l, s) },
+		"say":             func(v any) string { return say(l, v) },
+		"ago":             func(t any) string { return agoIn(l, t) },
+		"left":            func(t any) string { return leftIn(l, t) },
+		"effect":          func(e string) string { return tr(l, or(effectWords[e], e)) },
+		"class":           func(c string) string { return tr(l, or(classWords[c], c)) },
+		"classGo":         func(c string) string { return tr(l, or(classVerbs[c], c)) },
+		"via":             func(v string) string { return tr(l, or(viaWords[v], v)) },
+		"channel":         func(v string) string { return tr(l, or(channelWords[v], v)) },
+		"describe":        func(w string) string { s, _ := describeWhen(l, w); return s },
+		"capRu":           func(c string) string { return humanCapability(l, c) },
+		"mode":            func(m string) string { return tr(l, or(modeWords[m], m)) },
+		"siteModes":       func() []string { return access.SiteModes },
+		"folderModes":     func() []string { return access.FolderModes },
+		"connSiteModes":   func() []string { return access.ConnectorSiteModes },
+		"connFolderModes": func() []string { return access.ConnectorFolderModes },
+		"errView":         func(msg string) ErrView { return errView(l, msg) },
+		"title":           func(nav string) string { return tr(l, or(titles[nav], nav)) },
+		"reason":          func(s string) string { return reasonText(l, s) },
+		"dur":             func(s string) string { return tr(l, or(durWords[s], s)) },
+		"version":         func(s string) string { return versionComment(l, s) },
 	}
 }
 
