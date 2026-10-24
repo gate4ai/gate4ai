@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Ключ registry gate4ai; testdata — настоящий индекс с его подписью.
+// Ключ registry gate4ai; testdata — индекс-пример, подписанный этим ключом.
 const realKey = "ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="
 
 func realIndex(t *testing.T) ([]byte, string) {
@@ -34,11 +34,11 @@ func TestRealIndexVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := ix.Connectors["email"]; !ok {
-		t.Fatal("no email in the index")
+	if _, ok := ix.Connectors["pagereader"]; !ok {
+		t.Fatal("no pagereader in the index")
 	}
-	if ix.Trust("email") != TrustVerified || ix.Trust("nope") != "" {
-		t.Fatalf("trust: %q", ix.Trust("email"))
+	if ix.Trust("pagereader") != TrustVerified || ix.Trust("nope") != "" {
+		t.Fatalf("trust: %q", ix.Trust("pagereader"))
 	}
 }
 
