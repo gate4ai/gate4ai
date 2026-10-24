@@ -35,7 +35,7 @@ func (e *Env) browserSetup(ctx context.Context, args []string) int {
 	s := setupSysFn()
 	c := browserenv.CheckBrowser(s)
 	e.printCheck(c)
-	if len(c.Commands) == 0 || *dry || e.ForceJSON {
+	if len(c.Commands) == 0 || *dry || !e.human() && !*yes {
 		e.out(c, nil)
 		return setupExit(c)
 	}
@@ -71,8 +71,8 @@ func setupExit(c browserenv.BrowserCheck) int {
 }
 
 func (e *Env) printCheck(c browserenv.BrowserCheck) {
-	if e.ForceJSON {
-		return
+	if !e.human() {
+		return // JSON — e.out
 	}
 	w := e.Stdout
 	mark := func(ok bool) string { return map[bool]string{true: "ok  ", false: "--  "}[ok] }
