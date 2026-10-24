@@ -4,19 +4,20 @@ package e2e
 
 import (
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gate4ai/gate4ai/e2e/testsite"
 )
 
 // WASM-коннектор вызывает действия нативного коннектора browser через
 // service_call: настоящий daemon, процесс browser под его надзором, headless
-// Chrome. Сайты задаёт вызывающий (sites манифеста), browser в профиле агента не нужен;
-// сайт вне его списка отклоняется.
+// Chrome, тестовый сайт testsite. Сайты задаёт вызывающий (sites манифеста),
+// browser в профиле агента не нужен; сайт вне его списка отклоняется.
 func TestServiceCallToNativeBrowser(t *testing.T) {
 	t.Parallel()
 	chrome, err := exec.LookPath("google-chrome")
@@ -25,15 +26,11 @@ func TestServiceCallToNativeBrowser(t *testing.T) {
 			t.Skip("needs Chrome")
 		}
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, "<!doctype html><meta charset=utf-8><title>Квитанция</title><p>К оплате 1 234,56 ₽</p>")
-	}))
+	srv := httptest.NewServer(testsite.New().Handler())
 	defer srv.Close()
 
 	g := startGate(t)
-	reader, _ := filepath.Abs(filepath.Join("testdata", "pagereader"))
-	g.installFrom(reader)
+	g.installFrom(src(t, "e2e/testconnector"))
 	dir := t.TempDir()
 	wrapper := filepath.Join(dir, "chrome")
 	os.WriteFile(wrapper, []byte("#!/bin/sh\nexec '"+chrome+"' --headless=new --disable-gpu \"$@\"\n"), 0o755)
@@ -41,16 +38,16 @@ func TestServiceCallToNativeBrowser(t *testing.T) {
   claude-ai: { profile: assistant }
 profiles:
   assistant:
-    connectors: [pagereader]
+    connectors: [testconnector]
 access:
   sites: [{ domain: "127.0.0.1", access: connector }]
 connectors:
-  pagereader: { domains: ["127.0.0.1"] }
+  testconnector: { domains: ["127.0.0.1"], site: %q }
   browser:
     engine: cdp
     chrome_path: %q
     profile_dir: %q
-`, wrapper, filepath.Join(dir, "profile"))
+`, srv.URL, wrapper, filepath.Join(dir, "profile"))
 	cfgFile := filepath.Join(dir, "config.yaml")
 	os.WriteFile(cfgFile, []byte(cfg), 0o600)
 	if r := g.run("", "", "policy", "set", cfgFile, "-m", "service_call e2e"); r.code != 0 {
@@ -58,14 +55,18 @@ connectors:
 	}
 	token := g.run("", "", "agents", "token", "claude-ai").json(t)["token"].(string)
 
-	r := g.run(token, "", "pagereader", "title", "--url", srv.URL+"/bill")
+	r := g.run(token, "", "testconnector", "read")
 	res := r.json(t)
 	result, _ := res["result"].(map[string]any)
-	if r.code != 0 || res["status"] != "ok" || result["title"] != "Квитанция" || !strings.Contains(fmt.Sprint(result["text"]), "1 234,56") {
-		t.Fatalf("pagereader: %d %s", r.code, r.out)
+	rows, _ := result["rows"].([]any)
+	if r.code != 0 || res["status"] != "ok" || result["title"] != "Показания" || len(rows) != len(testsite.Rows) {
+		t.Fatalf("testconnector read: %d %s", r.code, r.out)
+	}
+	if first, _ := rows[0].(map[string]any); first["meter"] != testsite.Rows[0].Meter || first["value"] != testsite.Rows[0].Value {
+		t.Fatalf("rows: %v", rows)
 	}
 	// Сайт вне списка вызывающего.
-	r = g.run(token, "", "pagereader", "title", "--url", "http://localhost:1/")
+	r = g.run(token, "", "testconnector", "read", "--url", "http://localhost:1/")
 	if r.code == 0 || !strings.Contains(r.out, "denied by policy") || !strings.Contains(r.out, "localhost") {
 		t.Fatalf("site outside the connector sites: %d %s", r.code, r.out)
 	}

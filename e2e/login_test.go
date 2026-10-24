@@ -10,74 +10,36 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
+
+	"github.com/gate4ai/gate4ai/e2e/testsite"
 )
 
-// Фейковые сайт входа (localhost) и кабинет (127.0.0.1) — разные origin:
+// Тестовый сайт на двух origin: вход на localhost, кабинет на 127.0.0.1 —
 // кабинет без сеанса уводит на вход, вход при верных значениях возвращает в
-// кабинет с одноразовым билетом. Значения — фейковые.
-const (
-	e2eUser = "user-e2e"
-	e2ePass = "fake-pass-e2e-4242"
-)
-
+// кабинет с одноразовым билетом (testsite.LoginURL / CabinetURL).
 type sites struct {
-	sign, lk *httptest.Server
-	mu       sync.Mutex
-	gen      int // поколение сеансов кабинета: reset выходит из всех
-	tickets  map[string]bool
+	site *testsite.Site
+	lk   *httptest.Server
 }
 
 func newSites(t *testing.T) *sites {
-	s := &sites{tickets: map[string]bool{}, gen: 1}
-	s.lk = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if r.URL.Path == "/reset" {
-			s.gen++
-			return
-		}
-		cookie := fmt.Sprint(s.gen)
-		t := r.URL.Query().Get("t")
-		c, err := r.Cookie("lk")
-		if s.tickets[t] || (err == nil && c.Value == cookie) {
-			delete(s.tickets, t)
-			http.SetCookie(w, &http.Cookie{Name: "lk", Value: cookie, Path: "/"})
-			fmt.Fprint(w, "<!doctype html><meta charset=utf-8><title>Кабинет</title><p>Кабинет: долг 1 234,56 ₽</p>")
-			return
-		}
-		http.Redirect(w, r, s.signURL()+"/sign?back="+r.URL.Path, http.StatusFound)
-	}))
+	s := &sites{site: testsite.New()}
+	s.lk = httptest.NewServer(s.site.Handler())
 	t.Cleanup(s.lk.Close)
-	s.sign = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if r.Method == http.MethodPost {
-			r.ParseForm()
-			if r.Form.Get("login") == e2eUser && r.Form.Get("password") == e2ePass {
-				s.mu.Lock()
-				s.tickets["t1"] = true
-				s.mu.Unlock()
-				http.Redirect(w, r, s.lk.URL+r.Form.Get("back")+"?t=t1", http.StatusFound)
-				return
-			}
-		}
-		fmt.Fprintf(w, `<!doctype html><meta charset=utf-8><title>Вход</title><form method=post action=/session>
-<input type=hidden name=back value="%s"><input id=login name=login><input id=password name=password type=password>
-<button id=bind>Войти</button></form>`, r.URL.Query().Get("back"))
-	}))
-	t.Cleanup(s.sign.Close)
+	s.site.CabinetURL = s.lk.URL
+	s.site.LoginURL = s.signURL()
 	return s
 }
 
-func (s *sites) signURL() string { return strings.Replace(s.sign.URL, "127.0.0.1", "localhost", 1) }
+func (s *sites) signURL() string { return strings.Replace(s.lk.URL, "127.0.0.1", "localhost", 1) }
 
 // Вход по учётке из Vault: агент открывает кабинет, сайт уводит на вход
 // (страница остаётся — это сайт входа его учётки), browser.login вводит поля
 // и отправляет форму, агент видит кабинет; затем то же из коннектора
-// (calls: [browser.login], учётка по слоту). Значение пароля не попадает ни
-// в ответы, ни в журнал.
+// (calls: [browser.login], учётка по слоту); кнопка в кабинете — действие
+// press класса write: ждёт подтверждения владельца, результат проверяется по
+// странице (verified). Значение пароля не попадает ни в ответы, ни в журнал.
 func TestBrowserLoginByAccount(t *testing.T) {
 	t.Parallel()
 	chrome, err := exec.LookPath("google-chrome")
@@ -88,8 +50,7 @@ func TestBrowserLoginByAccount(t *testing.T) {
 	}
 	s := newSites(t)
 	g := startGate(t)
-	reader, _ := filepath.Abs(filepath.Join("testdata", "pagereader"))
-	g.installFrom(reader)
+	g.installFrom(src(t, "e2e/testconnector"))
 	dir := t.TempDir()
 	wrapper := filepath.Join(dir, "chrome")
 	os.WriteFile(wrapper, []byte("#!/bin/sh\nexec '"+chrome+"' --headless=new --disable-gpu \"$@\"\n"), 0o755)
@@ -97,13 +58,13 @@ func TestBrowserLoginByAccount(t *testing.T) {
   claude-ai: { profile: assistant }
 profiles:
   assistant:
-    connectors: [browser, pagereader]
+    connectors: [browser, testconnector]
     rules:
       - { id: browser-ok, action: "browser.*", effect: allow }
       - { id: login-ok, action: browser.login, effect: allow } # browser.* вход не покрывает
-      - { id: cabinet-ok, action: pagereader.cabinet, effect: allow }
+      - { id: cabinet-ok, action: testconnector.cabinet, effect: allow }
 connectors:
-  pagereader: { domains: ["127.0.0.1", localhost], login_site: %q, credentials: { site: "@site" } }
+  testconnector: { domains: ["127.0.0.1", localhost], site: %q, login_site: %q, credentials: { site: "@site" } }
   browser:
     engine: cdp
     chrome_path: %q
@@ -120,13 +81,13 @@ credentials:
       submit: { selector: "#bind" }
       success: { url_prefix: %q }
     use: [assistant]
-`, s.signURL(), wrapper, filepath.Join(dir, "profile"), s.signURL(), e2eUser, s.lk.URL+"/")
+`, s.lk.URL, s.signURL(), wrapper, filepath.Join(dir, "profile"), s.signURL(), testsite.User, s.lk.URL+"/")
 	cfgFile := filepath.Join(dir, "config.yaml")
 	os.WriteFile(cfgFile, []byte(cfg), 0o600)
 	if r := g.run("", "", "policy", "set", cfgFile, "-m", "login e2e"); r.code != 0 {
 		t.Fatalf("policy: %d %s", r.code, r.out)
 	}
-	if r := g.run("", e2ePass, "vault", "set", "@site.password"); r.code != 0 {
+	if r := g.run("", testsite.Password, "vault", "set", "@site.password"); r.code != 0 {
 		t.Fatalf("vault: %d %s", r.code, r.out)
 	}
 	token := g.run("", "", "agents", "token", "claude-ai").json(t)["token"].(string)
@@ -143,14 +104,14 @@ credentials:
 		return m
 	}
 
-	open := run("browser", "open", "--url", s.lk.URL+"/home")
+	open := run("browser", "open", "--url", s.lk.URL+"/cabinet")
 	session, _ := open["session"].(string)
 	lr, _ := open["login_required"].(map[string]any)
-	if !strings.HasPrefix(fmt.Sprint(open["url"]), s.signURL()+"/sign") || lr["account"] != "@site" {
+	if !strings.HasPrefix(fmt.Sprint(open["url"]), s.signURL()+"/login") || lr["account"] != "@site" {
 		t.Fatalf("open: %v", open)
 	}
 	login := run("browser", "login", "--session", session, "--account", "@site")
-	if login["status"] != "logged_in" || !strings.HasPrefix(fmt.Sprint(login["url"]), s.lk.URL+"/home") {
+	if login["status"] != "logged_in" || !strings.HasPrefix(fmt.Sprint(login["url"]), s.lk.URL+"/cabinet") {
 		t.Fatalf("login: %v", login)
 	}
 	page := run("browser", "observe", "--session", session)
@@ -161,9 +122,32 @@ credentials:
 
 	// Коннектор: сеанс кабинета сброшен — снова вход, теперь из действия коннектора.
 	http.Get(s.lk.URL + "/reset")
-	cab := run("pagereader", "cabinet", "--url", s.lk.URL+"/home")
+	cab := run("testconnector", "cabinet")
 	if cab["status"] != "logged_in" || cab["title"] != "Кабинет" {
 		t.Fatalf("connector: %v", cab)
+	}
+
+	// Кнопка в кабинете: write без правила — подтверждение владельца; после
+	// него действие исполняется, verify сверяет номер заявки со страницей.
+	r := g.run(token, "", "testconnector", "press")
+	outs = append(outs, r.out)
+	pending := r.json(t)
+	if r.code == 0 || errOf(pending)["code"] != "pending_approval" {
+		t.Fatalf("press without approval: %d %s", r.code, r.out)
+	}
+	id, _ := pending["id"].(string)
+	if r := g.run("", "", "approvals", "approve", id); r.code != 0 {
+		t.Fatalf("approve: %d %s", r.code, r.out)
+	}
+	r = g.run(token, "", "status", id, "--wait", "60s")
+	outs = append(outs, r.out)
+	done := r.json(t)
+	result, _ := done["result"].(map[string]any)
+	if r.code != 0 || done["status"] != "ok" || done["verified"] != true || result["number"] != float64(1) || result["result"] != "Заявка №1 принята" {
+		t.Fatalf("press: %d %s", r.code, r.out)
+	}
+	if s.site.Presses() != 1 {
+		t.Fatalf("the site got %d presses", s.site.Presses())
 	}
 
 	log := g.run("", "", "log", "--json")
@@ -172,7 +156,7 @@ credentials:
 		t.Fatalf("journal has no secret.use: %s", log.out)
 	}
 	for _, o := range outs {
-		if strings.Contains(o, e2ePass) {
+		if strings.Contains(o, testsite.Password) {
 			t.Fatalf("the password leaked: %s", o)
 		}
 	}

@@ -9,33 +9,15 @@ import (
 	"fmt"
 	"image/png"
 	"io"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-)
 
-// tagsPage — поле тегов (тег — по запятой или Enter в keydown, как
-// «Ключевые слова» на Хабре), поле пароля и длинная страница.
-const tagsPage = `<!doctype html><meta charset=utf-8><title>Теги</title>
-<style>body{margin:0;background:#fff} .chip{display:block}</style>
-<div id=chips></div><input id=kw placeholder="Ключевые слова">
-<form id=search style="display:none"><input name=q></form>
-<form id=login><input type=password id=pw value="pass-e2e-777" style="width:200px;height:40px;padding:0;background:#fff;color:#fff;border:0"><button type=button id=go>Отправить</button></form>
-<div style="height:3000px"></div><p>низ</p>
-<script>
-const kw = document.getElementById('kw');
-kw.addEventListener('keydown', e => {
-  if (e.key !== ',' && e.key !== 'Enter') return;
-  e.preventDefault();
-  const v = kw.value.trim();
-  if (v) { const s = document.createElement('span'); s.className = 'chip'; s.textContent = v; document.getElementById('chips').appendChild(s); }
-  kw.value = '';
-});
-</script>`
+	"github.com/gate4ai/gate4ai/e2e/testsite"
+)
 
 // Агент через CLI: type создаёт три тега одним вызовом, press запятой — ещё
 // один; page_screenshot пишет PNG (--out, окно, вся страница, элемент); клик
@@ -49,10 +31,7 @@ func TestBrowserTypeAndScreenshot(t *testing.T) {
 			t.Skip("needs Chrome")
 		}
 	}
-	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, tagsPage)
-	}))
+	site := httptest.NewServer(testsite.New().Handler()) // /tags — поле тегов, поле пароля, длинная страница
 	t.Cleanup(site.Close)
 	g := startGate(t)
 	dir := t.TempDir()
@@ -92,7 +71,7 @@ connectors:
 		m, _ := res["result"].(map[string]any)
 		return m
 	}
-	session := run("browser", "open", "--url", site.URL+"/")["session"].(string)
+	session := run("browser", "open", "--url", site.URL+"/tags")["session"].(string)
 
 	res := run("browser", "act", "--session", session, "--selector", "#kw", "--method", "type", "--value", "a, b, c", "--submit", "Enter")
 	added, _ := res["changes"].(map[string]any)["added"].([]any)

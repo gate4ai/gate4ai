@@ -22,7 +22,7 @@
 | `cmd/`, `internal/` (ядро: daemon, CLI, трей; `internal/connectors/builtin/{browser,files}` — встроенные компоненты) | AGPL-3.0-only | ядро, `sdk-go`; `relay` — только в тестах |
 | `sdk-go/` (манифест, ABI, PDK, формат индекса registry) | Apache-2.0 (свой `LICENSE`) | только `sdk-go` |
 | `relay/` (сервер relay) | AGPL-3.0-only | `relay`, `sdk-go` |
-| `e2e/` (сквозные тесты; `testdata/pagereader` — тестовый WASM-коннектор поверх браузера) | AGPL-3.0-only | что угодно; `e2e` не импортирует никто |
+| `e2e/` (сквозные тесты; `testsite` — тестовый сайт, поднимается локально; `testconnector` — тестовый WASM-коннектор к нему поверх браузера) | AGPL-3.0-only | что угодно; `e2e` не импортирует никто |
 
 Направление зависимостей проверяет `scripts/deps-check.sh` (в CI — `scripts/ci.sh`); какой компонент спецификации в каком пакете — [architecture.md](architecture.md).
 

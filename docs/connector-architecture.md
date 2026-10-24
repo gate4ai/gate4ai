@@ -216,7 +216,7 @@ access:
 |---|---|
 | `files` | встроен в ядро (`runtime: builtin`) поверх файловой службы; папки и режим — список доступа Файлов (`access.folders`; в начальной конфигурации `~/Documents` — `ask`); скрытые файлы и папки ниже корня, ключи и данные приложений закрыты всегда (`allow_hidden`, `allow_paths`) |
 | `browser` | встроен в ядро (`runtime: builtin`, `internal/connectors/builtin/browser`): браузерный воркер (выделенный профиль Chrome, CDP, Stagehand), действия агента `read` / `screenshot` / `extract` и сеанс страницы (`open` → `observe` / `act` / `network` / `get` … `delete` / `page_extract` / `page_screenshot` → `close`), те же действия со страницей для других коннекторов через `service_call`; сайты и режим — список доступа Браузера (`access.sites`); ключ модели для `extract` — `model_key` через `capabilities.reveal` |
-| коннекторы к сайтам (магазин, WASM) | действия `browser` через `service_call` (вход — `browser.login`), сайты — `sites` манифеста; заготовка — `gate4ai connectors new`, см. [connector-authoring.md](connector-authoring.md); пример — `e2e/testdata/pagereader` |
+| коннекторы к сайтам (магазин, WASM) | действия `browser` через `service_call` (вход — `browser.login`), сайты — `sites` манифеста; заготовка — `gate4ai connectors new`, см. [connector-authoring.md](connector-authoring.md); пример — `e2e/testconnector` к тестовому сайту `e2e/testsite` |
 
 ## Магазин и цепочка поставок
 

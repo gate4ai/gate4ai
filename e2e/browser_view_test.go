@@ -14,9 +14,12 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
 	"time"
 
 	"github.com/chromedp/chromedp"
+
+	"github.com/gate4ai/gate4ai/e2e/testsite"
 )
 
 // Просмотр сеанса агента в настоящем браузере: browser.open отдаёт view_url,
@@ -32,13 +35,7 @@ func TestBrowserLiveView(t *testing.T) {
 			t.Skip("needs Chrome")
 		}
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<!doctype html><title>Live</title><body style="margin:0">
-<button id=b style="position:absolute;left:0;top:0;width:50vw;height:40vh" onclick="this.textContent='clicked '+(++window.n)">click me</button>
-<input id=i style="position:absolute;left:0;top:60vh;width:90vw;height:10vh">
-<p id=o style="position:absolute;top:80vh"></p><script>window.n=0;i.oninput=()=>o.textContent='typed '+i.value</script>`)
-	}))
+	srv := httptest.NewServer(testsite.New().Handler()) // /live — крупные кнопка и поле
 	defer srv.Close()
 	g := startGate(t, "--ui", "127.0.0.1:0")
 	dir := t.TempDir()
@@ -65,7 +62,7 @@ connectors:
 		t.Fatal(r.out)
 	}
 	tok := g.run("", "", "agents", "token", "claude-code").json(t)["token"].(string)
-	r := g.run(tok, "", "browser", "open", "--url", srv.URL+"/")
+	r := g.run(tok, "", "browser", "open", "--url", srv.URL+"/live")
 	if r.code != 0 {
 		t.Fatal(r.out)
 	}
@@ -107,6 +104,31 @@ connectors:
 	ctx, cancel = context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	frame := `(() => { const c = document.querySelector('[data-browser-canvas]'); return !!c && c.width > 100 })()`
+	// frames — сколько кадров нарисовал просмотрщик (data-frames ставит app.js).
+	frames := func(ctx context.Context) int {
+		var n int
+		chromedp.Evaluate(`parseInt(document.querySelector('[data-browser-canvas]').getAttribute('data-frames'), 10) || 0`, &n).Do(ctx)
+		return n
+	}
+	// nextFrame — ждать кадр после текущего: действие в сеансе дошло до Chrome
+	// агента и вернулось картинкой.
+	nextFrame := func() chromedp.Action {
+		return chromedp.ActionFunc(func(ctx context.Context) error {
+			n := frames(ctx)
+			return chromedp.Poll(fmt.Sprintf(`(parseInt(document.querySelector('[data-browser-canvas]').getAttribute('data-frames'), 10) || 0) > %d`, n), nil, chromedp.WithPollingTimeout(15*time.Second)).Do(ctx)
+		})
+	}
+	// keysFocused — поле клавиш просмотрщика в фокусе: иначе набор уйдёт мимо.
+	keysFocused := chromedp.Poll(`document.activeElement === document.querySelector('[data-browser-keys]')`, nil, chromedp.WithPollingTimeout(10*time.Second))
+	// viewerState — состояние просмотрщика для диагностики падения.
+	viewerState := func() string {
+		var s string
+		js := "(() => { const a = document.activeElement, n = document.querySelector('[data-browser-note]'), c = document.querySelector('[data-browser-canvas]');" +
+			" return 'activeElement=' + (a ? a.tagName + Object.keys(a.dataset).map(k => '[data-' + k + ']').join('') : 'none') +" +
+			" ' note=' + JSON.stringify(n ? n.textContent : null) + ' frames=' + (c ? c.getAttribute('data-frames') : null) })()"
+		chromedp.Run(ctx, chromedp.Evaluate(js, &s))
+		return s
+	}
 	// canvasPoint — точка на canvas по долям его размера (координаты окна).
 	click := func(fx, fy float64) chromedp.Action {
 		return chromedp.ActionFunc(func(ctx context.Context) error {
@@ -125,14 +147,18 @@ connectors:
 		chromedp.Click(`//button[text()="Take control"]`),
 		chromedp.WaitVisible(`//button[text()="Give back to the agent"]`),
 		chromedp.Poll(frame, nil),
-		chromedp.Sleep(500*time.Millisecond), // ws просмотрщика после перезагрузки страницы
+		// ws просмотрщика после перезагрузки страницы открыт: кадр пришёл и надпись «Connecting…» снята.
+		chromedp.Poll(`document.querySelector('[data-browser-note]').textContent === ''`, nil, chromedp.WithPollingTimeout(15*time.Second)),
 		click(0.1, 0.1),
+		nextFrame(), // клик дошёл до страницы агента (кнопка перерисовалась)
 		click(0.3, 0.65),
+		keysFocused,
+		nextFrame(), // поле на странице агента в фокусе
 		chromedp.KeyEvent("hi"),
-		chromedp.Sleep(time.Second),
+		nextFrame(), // набранное отрисовано
 	)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v (%s)", err, viewerState())
 	}
 	if r := g.run(tok, "", "browser", "observe", "--session", sid); r.code == 0 || !strings.Contains(r.out, "session_held_by_user") {
 		t.Fatalf("the agent waits while the owner holds the session: %d %s", r.code, r.out)
@@ -140,9 +166,18 @@ connectors:
 	if err := chromedp.Run(ctx, chromedp.Click(`//button[text()="Give back to the agent"]`), chromedp.WaitVisible(`//button[text()="Take control"]`)); err != nil {
 		t.Fatal(err)
 	}
-	r = g.run(tok, "", "browser", "observe", "--session", sid)
-	if r.code != 0 || !strings.Contains(r.out, "clicked 1") || !strings.Contains(r.out, "typed hi") {
-		t.Fatalf("the owner's click and typing reached the page: %d %s", r.code, r.out)
+	// Клик и ввод доходят до страницы асинхронно (websocket → daemon → CDP):
+	// ждём их в тексте страницы опросом, а не одним observe.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		r = g.run(tok, "", "browser", "observe", "--session", sid)
+		if r.code == 0 && strings.Contains(r.out, "clicked 1") && strings.Contains(r.out, "typed hi") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the owner's click and typing did not reach the page: %d %s\nviewer: %s", r.code, r.out, viewerState())
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 	// Без входа в Web UI ссылка не показывает сеанс.
 	resp, err := http.Get(view)

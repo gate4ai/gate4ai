@@ -59,7 +59,7 @@ gate4ai connectors update lk_example              # пересобрать из 
 gate4ai connectors install ./lk_example --watch   # пересобирать и переставлять на каждое сохранение
 ```
 
-Заготовка коннектора к сайту поверх браузера — `gate4ai connectors new <имя> --site <домен>`; как исследовать сайт в сеансе браузера и писать коннектор вместе с агентом — [connector-authoring.md](connector-authoring.md); пример — `e2e/testdata/pagereader`. Лог коннектора — `gate4ai connectors logs <имя>` (вместе с ошибками действий); у своей сборки строки лога за вызов приходят и в ответе (поле `log`). Подвызовы действия — `gate4ai log --parent '#хэш'`. Агент ставит свою сборку без сокета владельца — `gate4ai.change_policy` с `install_dev_connector {folder}` (подтверждает владелец). Личные данные из записанного сеанса браузера перед фикстурой — `gate4ai fixture scrub`.
+Заготовка коннектора к сайту поверх браузера — `gate4ai connectors new <имя> --site <домен>`; как исследовать сайт в сеансе браузера и писать коннектор вместе с агентом — [connector-authoring.md](connector-authoring.md); пример — `e2e/testconnector` к тестовому сайту `e2e/testsite` (`go run ./e2e/testsite/cmd/testsite`). Лог коннектора — `gate4ai connectors logs <имя>` (вместе с ошибками действий); у своей сборки строки лога за вызов приходят и в ответе (поле `log`). Подвызовы действия — `gate4ai log --parent '#хэш'`. Агент ставит свою сборку без сокета владельца — `gate4ai.change_policy` с `install_dev_connector {folder}` (подтверждает владелец). Личные данные из записанного сеанса браузера перед фикстурой — `gate4ai fixture scrub`.
 
 Сборку делает CLI в вашем окружении (ваш Go, `go.mod` папки или выше, `GOFLAGS`), ошибки компиляции видны сразу; daemon записывает папку источником установки (`dir:<путь>` в `gate4ai connectors list`). `--watch` следит за `.go`, `go.mod`, `go.sum` и `manifest.yaml`; ошибка сборки печатается, наблюдение продолжается. Если изменились возможности в манифесте — согласие спрашивается заново (`--yes` — согласиться без вопроса).
 
@@ -246,7 +246,7 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 
 ## Тесты
 
-`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe`, браузер на фейковом CDP. Поток из спецификации на собранных бинарниках, встроенных Браузере и Файлах и тестовом WASM-коннекторе `e2e/testdata/pagereader` — `e2e/` (`./scripts/ci.sh e2e`). Daemon в e2e и на стенде (`dev/scripts/stand.sh`) запускается с `GATE4AI_DESKTOP_NOTIFY=log`: уведомления daemon на рабочем столе (запросы подтверждения вроде «codex хочет выполнить browser.post», запросы агента на подключение, коды, отказы) не всплывают, а пишутся в журнал daemon (`desktop notification` с заголовком и текстом); решения — как обычно, в Web UI, Telegram или CLI.
+`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe`, браузер на фейковом CDP. Поток из спецификации на собранных бинарниках, встроенных Браузере и Файлах и тестовом сайте `e2e/testsite` с WASM-коннектором `e2e/testconnector` — `e2e/` (`./scripts/ci.sh e2e`). Daemon в e2e и на стенде (`dev/scripts/stand.sh`) запускается с `GATE4AI_DESKTOP_NOTIFY=log`: уведомления daemon на рабочем столе (запросы подтверждения вроде «codex хочет выполнить browser.post», запросы агента на подключение, коды, отказы) не всплывают, а пишутся в журнал daemon (`desktop notification` с заголовком и текстом); решения — как обычно, в Web UI, Telegram или CLI.
 
 ## Тестовый стенд
 
@@ -259,7 +259,8 @@ export GATE4AI_DESKTOP_NOTIFY=log   # уведомления daemon — в ег�
 # стенд, который запускает сам агент (Claude Code): сборка go build -tags gate4ai_devstand ./cmd/gate4ai
 # и GATE4AI_OWNER_CHECK=off — сокет владельца не отличает агента от человека (в выпуске переменная не действует)
 gate4ai daemon --ui 127.0.0.1:7531 --keystore file &       # ключи в файле, а не в связке ОС
-gate4ai connectors install e2e/testdata/pagereader --yes --watch   # коннектор из каталога исходников, пересобирается при правках
+go run ./e2e/testsite/cmd/testsite &                       # тестовый сайт на 127.0.0.1:8099 (учётка — на /login)
+gate4ai connectors install e2e/testconnector --yes --watch  # коннектор к нему из каталога исходников, пересобирается при правках
 gate4ai ui --print                                         # одноразовая ссылка на Web UI (2 минуты)
 gate4ai relay register --url https://relay.gate4.ai        # адрес для claude.ai: gate4ai relay status
 ```

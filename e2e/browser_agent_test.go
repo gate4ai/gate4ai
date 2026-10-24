@@ -5,14 +5,16 @@ package e2e
 import (
 	"bytes"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
 	"time"
+
+	"github.com/gate4ai/gate4ai/e2e/testsite"
 )
 
 // Агентский профиль connector-dev, как у пользователя: browser.* → allow и
@@ -30,15 +32,7 @@ func TestBrowserAgentProfile(t *testing.T) {
 			t.Skip("needs Chrome")
 		}
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if r.URL.Path == "/other" {
-			fmt.Fprint(w, "<!doctype html><title>Other</title><p>Other page")
-			return
-		}
-		fmt.Fprint(w, `<!doctype html><title>Publish</title><textarea id=q></textarea>
-<script>addEventListener('beforeunload', e => { if (document.getElementById('q').value) { e.preventDefault(); e.returnValue = 'unsaved'; } })</script>`)
-	}))
+	srv := httptest.NewServer(testsite.New().Handler()) // /publish — beforeunload, /other
 	defer srv.Close()
 	g := startGate(t)
 	dir := t.TempDir()
