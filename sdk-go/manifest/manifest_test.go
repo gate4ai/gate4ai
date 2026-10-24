@@ -238,7 +238,7 @@ actions:
 	if !ok || s.Bind[0] != "https://login.mos.ru" {
 		t.Fatal(s, ok)
 	}
-	if o := m.Credentials[1].Origins(map[string]any{"host": "Lk.Example:443"}); len(o) != 1 || o[0] != "https://lk.example" {
+	if o := m.Credentials[1].Origins(map[string]any{"host": "Account.Example:443"}); len(o) != 1 || o[0] != "https://account.example" {
 		t.Fatal(o)
 	}
 	if !strings.Contains(strings.Join(m.Summary(), "\n"), "signs in on https://login.mos.ru with your account (slot login)") {
@@ -268,7 +268,7 @@ runtime: wasm
 capabilities:
   services: [ { target: browser, contract: 1, actions: [open, act] } ]
 sites:
-  - { domain: lk.example, access: allow }
+  - { domain: account.example, access: allow }
 actions:
   - name: visits
     class: write

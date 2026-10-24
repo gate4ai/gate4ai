@@ -43,7 +43,7 @@ type loginChrome struct {
 
 const (
 	signURL  = "https://login.example/sign"
-	cabinet  = "https://lk.example/home"
+	cabinet  = "https://account.example/home"
 	fakeUser = "user-1"
 	fakePass = "fake-pass-1234"
 )
@@ -239,7 +239,7 @@ func (f *loginChrome) typedCount() int {
 }
 
 func loginForm(pass string) LoginForm {
-	return LoginForm{Bind: []string{"https://login.example"}, SubmitSelector: "#bind", SuccessPrefix: "https://lk.example/",
+	return LoginForm{Bind: []string{"https://login.example"}, SubmitSelector: "#bind", SuccessPrefix: "https://account.example/",
 		Fields: []LoginField{{Selector: "#login", Value: fakeUser}, {Selector: "#password", Value: pass, Secret: true}}}
 }
 
@@ -255,7 +255,7 @@ func loginSession(t *testing.T) (*loginChrome, *Session) {
 	return f, s
 }
 
-var lkSites = domain.Sites{Domains: []string{"lk.example"}}
+var lkSites = domain.Sites{Domains: []string{"account.example"}}
 
 func noValue(t *testing.T, err error) {
 	t.Helper()
@@ -295,11 +295,11 @@ func TestLoginChecksBeforeInput(t *testing.T) {
 	ctx := context.Background()
 	s.SetLoginOrigins([]string{"https://login.example"})
 	// Страница не на origin учётки — ничего не вводится.
-	if _, err := s.Open(ctx, "https://lk.example/about", lkSites); err != nil {
+	if _, err := s.Open(ctx, "https://account.example/about", lkSites); err != nil {
 		t.Fatal(err)
 	}
 	_, err := s.Login(ctx, loginForm(fakePass))
-	if !errors.Is(err, ErrWrongOrigin) || !strings.Contains(err.Error(), "https://lk.example/about") {
+	if !errors.Is(err, ErrWrongOrigin) || !strings.Contains(err.Error(), "https://account.example/about") {
 		t.Fatal(err)
 	}
 	if _, err := s.Open(ctx, signURL, lkSites); err != nil {

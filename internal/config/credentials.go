@@ -191,7 +191,7 @@ func (c *Config) validateCredentials(add func(path, format string, a ...any)) {
 				add(p+".form.submit.press", "only Enter is supported")
 			}
 			if f.Success != nil && domain.OriginOf(f.Success.URLPrefix) == "" {
-				add(p+".form.success.url_prefix", "must be an http(s) address prefix like https://lk.example/")
+				add(p+".form.success.url_prefix", "must be an http(s) address prefix like https://account.example/")
 			}
 		}
 		if v := cr.Via; v != nil {

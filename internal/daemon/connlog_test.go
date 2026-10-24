@@ -167,7 +167,7 @@ func TestLogByParent(t *testing.T) {
 
 func TestAccessAPI(t *testing.T) {
 	home := t.TempDir()
-	d, err := New(Options{Home: filepath.Join(home, "data"), Keys: keys.NewMemory(), InitialConfig: []byte("agents:\n  bot: { profile: p }\nprofiles:\n  p: { connectors: [] }\naccess:\n  sites: [{ domain: lk.example, access: ask }]\n")})
+	d, err := New(Options{Home: filepath.Join(home, "data"), Keys: keys.NewMemory(), InitialConfig: []byte("agents:\n  bot: { profile: p }\nprofiles:\n  p: { connectors: [] }\naccess:\n  sites: [{ domain: account.example, access: ask }]\n")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestAccessAPI(t *testing.T) {
 	if code := owner.do(t, "POST", "/v1/access", map[string]any{"sites": []map[string]any{{"domain": "login.mos.ru", "access": "allow"}}, "folders": []map[string]any{{"path": "~/notes", "access": "append"}}}, &res); code != 200 || len(res.Sites) != 2 || res.Sites[1]["domain"] != "login.mos.ru" || len(res.Folders) != 1 {
 		t.Fatal(code, res)
 	}
-	if code := owner.do(t, "POST", "/v1/access", map[string]any{"sites": []map[string]any{{"domain": "lk.example", "access": ""}}}, &res); code != 200 || len(res.Sites) != 1 {
+	if code := owner.do(t, "POST", "/v1/access", map[string]any{"sites": []map[string]any{{"domain": "account.example", "access": ""}}}, &res); code != 200 || len(res.Sites) != 1 {
 		t.Fatal(code, res)
 	}
 	if code := owner.do(t, "POST", "/v1/access", map[string]any{"sites": []map[string]any{{"domain": "https://x/y", "access": "allow"}}}, nil); code != 400 {

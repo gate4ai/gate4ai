@@ -40,7 +40,7 @@ gate4ai access sites set "*.example.com" allow     # поддомены и са�
 gate4ai access sites set "*" deny                  # остальные сайты закрыты
 gate4ai access folders set ~/Documents/notes append   # чтение, список и дописывание без вопроса, перезапись — с подтверждением
 gate4ai access folders remove ~/Documents
-gate4ai sites allow lk.example.org                 # то же, что access sites set lk.example.org allow
+gate4ai sites allow account.example.org                 # то же, что access sites set account.example.org allow
 ```
 
 Режимы сайтов: `allow`, `read`, `connector` (только через коннектор магазина, агенту напрямую — отказ), `ask`, `deny`; у папок ещё `append`. Побеждает самая конкретная строка, при равенстве — строже. Нет строки или `deny` — отказ; правило политики на действие (`allow` / `ask` / `deny`) побеждает строку, без правила действует режим строки. В Web UI то же — **Доступ → Браузер** и **Файлы**; в запросе подтверждения по сайту или папке есть кнопки «Добавить в разрешённые / запрещённые». Агент просит сайт через `gate4ai.change_policy` (`set_site_access`) — с вашим подтверждением.
@@ -49,14 +49,14 @@ gate4ai sites allow lk.example.org                 # то же, что access si
 
 Коннекторы магазина — WASM-модули без сети: сайт им доступен только страницей встроенного браузера (`service_call`), файлы — папками из манифеста в пределах списка Файлов. Всё, что им можно, объявлено в манифесте (`capabilities`, `sites`, `folders`, `credentials`) и показывается при установке; без согласия владельца коннектор не ставится, а обновление с новыми возможностями требует согласия заново.
 
-**Вызовы между коннекторами.** Коннектор вызывает действия другого через `service_call` (поставщик перечисляет их в `services`, потребитель — в `capabilities.services` с мажором `contract`); каждое действие потребителя перечисляет свои подвызовы (`calls`), и хост пропускает из него только их, не выше его класса. Подвызовы видны в описании инструмента, запросе подтверждения и на экране согласия, поэтому разрешение действия покрывает их — повторно не спрашивается; правило `deny` на действие поставщика действует и во вложенном вызове; вызов браузера проходит, только если сайт разрешают и строка коннектора, и список Браузера (строка коннектора `ask` ждёт вашего решения). Типизированный клиент — `gate4ai contract gen <манифест поставщика> -o client.go` (манифест браузера — `internal/connectors/builtin/browser/manifest.yaml`), совместимость нового манифеста — `gate4ai contract diff old.yaml new.yaml`. `--dev` — пакет собственной сборки без подписи доверенного издателя. Из магазина: `gate4ai connectors install <имя>` (нужны `store.registry` и `store.registry_keys` в конфигурации), `gate4ai connectors update <имя>`, `gate4ai connectors refresh` — список отозванных версий. `connectors install` принимает и адрес `https://…/*.g4c` (пакет скачивается и проверяется так же, как файл). Голое имя (`lk_example`, `lk_example@1.2.0`) — всегда коннектор из магазина, даже если в текущем каталоге есть одноимённый файл или папка (CLI лишь подскажет путь); файл или папку указывайте путём — с `/` (`./lk_example`) или с расширением `.g4c`. В Web UI: **Доступ → Коннекторы → Поставить не из магазина** — путь к папке с исходниками или файлу `.g4c` на этом компьютере либо адрес сборки; галочка «своя сборка» — то же, что `--dev`.
+**Вызовы между коннекторами.** Коннектор вызывает действия другого через `service_call` (поставщик перечисляет их в `services`, потребитель — в `capabilities.services` с мажором `contract`); каждое действие потребителя перечисляет свои подвызовы (`calls`), и хост пропускает из него только их, не выше его класса. Подвызовы видны в описании инструмента, запросе подтверждения и на экране согласия, поэтому разрешение действия покрывает их — повторно не спрашивается; правило `deny` на действие поставщика действует и во вложенном вызове; вызов браузера проходит, только если сайт разрешают и строка коннектора, и список Браузера (строка коннектора `ask` ждёт вашего решения). Типизированный клиент — `gate4ai contract gen <манифест поставщика> -o client.go` (манифест браузера — `internal/connectors/builtin/browser/manifest.yaml`), совместимость нового манифеста — `gate4ai contract diff old.yaml new.yaml`. `--dev` — пакет собственной сборки без подписи доверенного издателя. Из магазина: `gate4ai connectors install <имя>` (нужны `store.registry` и `store.registry_keys` в конфигурации), `gate4ai connectors update <имя>`, `gate4ai connectors refresh` — список отозванных версий. `connectors install` принимает и адрес `https://…/*.g4c` (пакет скачивается и проверяется так же, как файл). Голое имя (`account_example`, `account_example@1.2.0`) — всегда коннектор из магазина, даже если в текущем каталоге есть одноимённый файл или папка (CLI лишь подскажет путь); файл или папку указывайте путём — с `/` (`./account_example`) или с расширением `.g4c`. В Web UI: **Доступ → Коннекторы → Поставить не из магазина** — путь к папке с исходниками или файлу `.g4c` на этом компьютере либо адрес сборки; галочка «своя сборка» — то же, что `--dev`.
 
 **Разработка коннектора — прямо из папки с исходниками** (без `pack` и `.g4c`):
 
 ```sh
-gate4ai connectors install ./lk_example           # собрать в WASM и поставить (своя сборка, как --dev)
-gate4ai connectors update lk_example              # пересобрать из той же папки после правок
-gate4ai connectors install ./lk_example --watch   # пересобирать и переставлять на каждое сохранение
+gate4ai connectors install ./account_example           # собрать в WASM и поставить (своя сборка, как --dev)
+gate4ai connectors update account_example              # пересобрать из той же папки после правок
+gate4ai connectors install ./account_example --watch   # пересобирать и переставлять на каждое сохранение
 ```
 
 Заготовка коннектора к сайту поверх браузера — `gate4ai connectors new <имя> --site <домен>`; как исследовать сайт в сеансе браузера и писать коннектор вместе с агентом — [connector-authoring.md](connector-authoring.md); пример — `e2e/testconnector` к тестовому сайту `e2e/testsite` (`go run ./e2e/testsite/cmd/testsite`). Лог коннектора — `gate4ai connectors logs <имя>` (вместе с ошибками действий); у своей сборки строки лога за вызов приходят и в ответе (поле `log`). Подвызовы действия — `gate4ai log --parent '#хэш'`. Агент ставит свою сборку без сокета владельца — `gate4ai.change_policy` с `install_dev_connector {folder}` (подтверждает владелец). Личные данные из записанного сеанса браузера перед фикстурой — `gate4ai fixture scrub`.
@@ -147,14 +147,14 @@ credentials:
         - { selector: "#login", value: "me@example.org" }
         - { selector: "#password", secret: "@site.password" }   # только в input[type=password]; иначе type: text
       submit: { selector: "button[type=submit]" }
-      success: { url_prefix: "https://lk.example.org/" }
+      success: { url_prefix: "https://account.example.org/" }
     use: [assistant]            # профили агентов
-    connectors: [lk_example]    # коннекторы
+    connectors: [account_example]    # коннекторы
 ```
 
 ```sh
 printf %s 'пароль' | gate4ai vault set site.password
-gate4ai browser open --url https://lk.example.org/      # сайт увёл на вход: login_required {account: "@site"}
+gate4ai browser open --url https://account.example.org/      # сайт увёл на вход: login_required {account: "@site"}
 gate4ai browser login --session s-… --account @site     # logged_in | submitted | still_on_login
 ```
 

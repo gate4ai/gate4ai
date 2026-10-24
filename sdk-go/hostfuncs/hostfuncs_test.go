@@ -139,11 +139,11 @@ func TestServiceCallAndLog(t *testing.T) {
 		}
 	}
 	var res abi.ExecResult
-	if err := call(t, d, abi.FnServiceCall, abi.ServiceCallRequest{Target: "browser", Action: "open", Args: map[string]any{"url": "https://lk.example/"}}, &res); err != nil {
+	if err := call(t, d, abi.FnServiceCall, abi.ServiceCallRequest{Target: "browser", Action: "open", Args: map[string]any{"url": "https://account.example/"}}, &res); err != nil {
 		t.Fatal(err)
 	}
 	st := res.Structured.(map[string]any)
-	if st["target"] != "browser" || st["contract"] != 1.0 || len(fr.got) != 1 || fr.got[0].Args["url"] != "https://lk.example/" {
+	if st["target"] != "browser" || st["contract"] != 1.0 || len(fr.got) != 1 || fr.got[0].Args["url"] != "https://account.example/" {
 		t.Fatal(res, fr.got)
 	}
 	d.used = []string{"tok-SECRET-123"}

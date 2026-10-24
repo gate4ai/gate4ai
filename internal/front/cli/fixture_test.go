@@ -14,7 +14,7 @@ import (
 func TestFixtureScrub(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "session.json")
-	os.WriteFile(in, []byte(`{"steps":[{"action":"observe","args":{},"result":{"url":"https://lk.example/?ehr=12345678901",
+	os.WriteFile(in, []byte(`{"steps":[{"action":"observe","args":{},"result":{"url":"https://account.example/?ehr=12345678901",
 	  "text":"Иванов Иван Петрович, полис 7712345678901234, тел. +7 (916) 123-45-67, ivanov@mail.ru. Иванов — ещё раз: 7712345678901234"}}]}`), 0o600)
 	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
 	run := func(args ...string) int {

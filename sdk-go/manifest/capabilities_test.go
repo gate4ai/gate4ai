@@ -51,7 +51,7 @@ func TestParseAndResolve(t *testing.T) {
 		t.Fatalf("default not normalized to float64: %#v", d)
 	}
 	settings := map[string]any{
-		"sites": []any{"lk.example", "B.example."},
+		"sites": []any{"account.example", "B.example."},
 		"roots": []any{"~/notes", "/srv/docs"},
 	}
 	r, err := m.Capabilities.Resolve(settings)
@@ -66,7 +66,7 @@ func TestParseAndResolve(t *testing.T) {
 	}
 	// Шаблон в домене раскрывается в несколько строк с тем же режимом;
 	// домены — в нижнем регистре, без точки на конце.
-	wantSites := []access.Site{{Domain: "lk.example", Access: access.Allow}, {Domain: "b.example", Access: access.Allow}, {Domain: "*.example", Access: access.Ask}}
+	wantSites := []access.Site{{Domain: "account.example", Access: access.Allow}, {Domain: "b.example", Access: access.Allow}, {Domain: "*.example", Access: access.Ask}}
 	if got := m.ResolveSites(settings); !reflect.DeepEqual(got, wantSites) {
 		t.Fatalf("sites %#v", got)
 	}

@@ -25,7 +25,7 @@ func TestConnectorsNew(t *testing.T) {
 		code := Run(context.Background(), &Env{Stdout: out, Stderr: errb, Getenv: func(string) string { return "" }}, args)
 		return code, out.String() + errb.String()
 	}
-	if code, out := run("connectors", "new", "my_lk", "--site", "https://lk.example.org/", "-o", dir); code != ExitOK {
+	if code, out := run("connectors", "new", "my_lk", "--site", "https://account.example.org/", "-o", dir); code != ExitOK {
 		t.Fatal(code, out)
 	}
 	m, err := manifest.Parse(must(os.ReadFile(filepath.Join(dir, "manifest.yaml"))))
@@ -37,7 +37,7 @@ func TestConnectorsNew(t *testing.T) {
 		t.Fatalf("%+v", m)
 	}
 	rule := m.Capabilities.Services[0]
-	if rule.Target != "browser" || rule.Contract != 1 || len(m.Sites) != 1 || m.Sites[0].Domain != "lk.example.org" || m.Sites[0].Access != access.Allow {
+	if rule.Target != "browser" || rule.Contract != 1 || len(m.Sites) != 1 || m.Sites[0].Domain != "account.example.org" || m.Sites[0].Access != access.Allow {
 		t.Fatalf("%+v %+v", rule, m.Sites)
 	}
 	for _, f := range []string{"main.go", "connector.go", "connector_test.go"} {
@@ -52,7 +52,7 @@ func TestConnectorsNew(t *testing.T) {
 	if !bytes.Contains(must(os.ReadFile(filepath.Join(dir, "go.mod"))), []byte("github.com/gate4ai/gate4ai v")) {
 		t.Fatal("go.mod")
 	}
-	if code, out := run("connectors", "new", "my_lk", "--site", "lk.example.org", "-o", dir); code == ExitOK || !strings.Contains(out, "already exists") {
+	if code, out := run("connectors", "new", "my_lk", "--site", "account.example.org", "-o", dir); code == ExitOK || !strings.Contains(out, "already exists") {
 		t.Fatal("existing folder:", code, out)
 	}
 	for _, bad := range [][]string{{"Bad-Name", "--site", "x.org"}, {"ok", "--site", "a/b"}, {"ok"}} {
