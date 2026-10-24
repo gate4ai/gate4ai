@@ -38,6 +38,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
+	"github.com/gate4ai/gate4ai/internal/platform/browserenv"
 	"github.com/gate4ai/gate4ai/internal/relayclient"
 	"github.com/gate4ai/gate4ai/internal/state"
 )
@@ -163,6 +164,8 @@ type UI struct {
 	Confirm LoginConfirmer
 	// DefaultLang — язык, если браузер не выбрал (переключатель, Accept-Language); "" — английский.
 	DefaultLang string
+	// BrowserEnv — проверка Chrome и Xvfb для раздела «Браузер» (nil — этот компьютер).
+	BrowserEnv func() browserenv.Sys
 
 	mu       sync.Mutex
 	logins   map[string]login // одноразовые токены входа

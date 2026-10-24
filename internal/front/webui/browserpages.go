@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/gate4ai/gate4ai/internal/daemon"
+	"github.com/gate4ai/gate4ai/internal/platform/browserenv"
 )
 
 // Раздел «Браузер»: сеансы агентов в браузере gate4ai — список, просмотр
@@ -28,7 +29,12 @@ func (u *UI) browserList(r *http.Request) (string, map[string]any, error) {
 	ctx, cancel := context.WithTimeout(r.Context(), browserTimeout)
 	defer cancel()
 	st, err := u.D.BrowserStatus(ctx)
-	return "browser", map[string]any{"Status": st, "Handoffs": u.D.Handoffs()}, err
+	env := u.BrowserEnv
+	if env == nil {
+		env = browserenv.System
+	}
+	// Чего не хватает на этом компьютере (Chrome, Xvfb) — с командами установки.
+	return "browser", map[string]any{"Status": st, "Handoffs": u.D.Handoffs(), "Check": browserenv.CheckBrowser(env())}, err
 }
 
 func (u *UI) browserView(m mount) func(r *http.Request) (string, map[string]any, error) {

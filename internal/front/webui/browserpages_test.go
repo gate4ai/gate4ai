@@ -5,6 +5,7 @@ package webui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/internal/connectors"
 	"github.com/gate4ai/gate4ai/internal/daemon"
+	"github.com/gate4ai/gate4ai/internal/platform/browserenv"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 )
 
@@ -123,6 +125,15 @@ func TestBrowserPages(t *testing.T) {
 	if p := get("/browser"); !strings.Contains(p, `href="/browser/s-1"`) || !strings.Contains(p, "lk.example") || !strings.Contains(p, "виртуальный (Xvfb)") {
 		t.Fatal(p)
 	}
+	u.BrowserEnv = func() browserenv.Sys {
+		return browserenv.Sys{GOOS: "linux", GOARCH: "amd64", Getenv: func(string) string { return "" }, LookPath: func(string) (string, error) { return "", errors.New("no") },
+			ReadFile: func(string) ([]byte, error) { return []byte("ID=debian\n"), nil }, Exists: func(string) bool { return false },
+			Output: func(string, ...string) (string, error) { return "", errors.New("no") }}
+	}
+	if p := get("/browser"); !strings.Contains(p, "не установлен Chrome") || !strings.Contains(p, "google-chrome-stable_current_amd64.deb") {
+		t.Fatal("no Chrome: what to install", p)
+	}
+	u.BrowserEnv = nil
 	if p := get("/"); !strings.Contains(p, "Сейчас в браузере") {
 		t.Fatal("the home page shows open sessions", p)
 	}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -75,6 +76,7 @@ func daemonMain(args []string, tty bool) error {
 	agentSock := flag.String("agent-socket", paths.AgentSocket(), "agent socket / named pipe")
 	connDir := flag.String("connectors", "", "installed connectors directory (default <home>/connectors)")
 	showVersion := flag.Bool("version", false, "print version")
+	noBrowser := flag.Bool("no-browser", false, "a fresh install does not get the browser package (GATE4AI_NO_BROWSER=1 of the installer); install it later with gate4ai connectors install browser")
 	flag.StringVar(&uiAddr, "ui", uiAddr, "web UI address (loopback only; empty disables)")
 	flag.BoolVar(&resetUILogin, "reset-ui-login", false, "remove the Web UI login protection (password, Telegram confirmation) if you are locked out")
 	flag.StringVar(&telegramAPI, "telegram-api", telegramAPI, "Telegram Bot API base URL")
@@ -108,6 +110,9 @@ func daemonMain(args []string, tty bool) error {
 	// Без --config пустое хранилище получает начальную политику: агентов нет, значит
 	// агентам ничего не разрешено; коннекторы по умолчанию ставятся из магазина.
 	initial, defaults := []byte(emptyConfig), defaultConnectors
+	if *noBrowser {
+		defaults = slices.DeleteFunc(slices.Clone(defaults), func(n string) bool { return n == "browser" })
+	}
 	if *cfgFile != "" {
 		if initial, err = os.ReadFile(*cfgFile); err != nil {
 			return err

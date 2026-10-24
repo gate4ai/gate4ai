@@ -8,7 +8,10 @@ package webui
 // интернета, profile → права агента, receipt → запись журнала.
 var ru = map[string]string{
 	// Раздел «Браузер».
-	"<b>%s</b> handed the page over to you and asks:": "<b>%s</b> передал вам страницу и просит:",
+	"The browser is not available on this computer: Chrome is not installed. Agents get browser_unavailable until it is.":                                "Браузер на этом компьютере недоступен: не установлен Chrome. Пока его нет, агенты получают browser_unavailable.",
+	"Or run gate4ai browser setup in a terminal: it checks and installs what is missing (it asks first).":                                                "Или запустите в терминале gate4ai browser setup: он проверит и поставит недостающее (сначала спросит).",
+	"No screen and no Xvfb here: the browser will run without a screen (headless), and sites with bot protection ask for a captcha or block more often.": "Здесь нет экрана и Xvfb: браузер будет работать без экрана (headless), а сайты с защитой от ботов чаще просят капчу или блокируют.",
+	"<b>%s</b> handed the page over to you and asks:":                                                                                                    "<b>%s</b> передал вам страницу и просит:",
 	"All sessions →":                             "Все сеансы →",
 	"An agent is waiting for you in the browser": "Агент ждёт вас в браузере",
 	"Browser":         "Браузер",

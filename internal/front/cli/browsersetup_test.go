@@ -11,11 +11,13 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/gate4ai/gate4ai/internal/platform/browserenv"
 )
 
 // fakeSys — компьютер для проверки: что установлено и какой дистрибутив.
-func fakeSys(goos, arch, osRelease string, have map[string]string, vars map[string]string) setupSys {
-	return setupSys{GOOS: goos, GOARCH: arch, Getenv: func(k string) string { return vars[k] },
+func fakeSys(goos, arch, osRelease string, have map[string]string, vars map[string]string) browserenv.Sys {
+	return browserenv.Sys{GOOS: goos, GOARCH: arch, Getenv: func(k string) string { return vars[k] },
 		LookPath: func(n string) (string, error) {
 			if p, ok := have[n]; ok {
 				return p, nil
@@ -72,7 +74,7 @@ func TestCheckBrowser(t *testing.T) {
 			have: map[string]string{`C:\Users\u\AppData\Local/Google/Chrome/Application/chrome.exe`: ""}, display: "host", ok: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got := CheckBrowser(fakeSys(c.goos, c.arch, c.rel, c.have, c.vars))
+			got := browserenv.CheckBrowser(fakeSys(c.goos, c.arch, c.rel, c.have, c.vars))
 			if got.Display != c.display || got.OK != c.ok || strings.Join(got.Missing, ",") != strings.Join(c.missing, ",") {
 				t.Fatalf("%+v", got)
 			}
@@ -93,7 +95,7 @@ func TestCheckBrowser(t *testing.T) {
 	// root: без sudo.
 	s := fakeSys("linux", "amd64", ubuntu, nil, nil)
 	s.Root = true
-	if c := CheckBrowser(s); strings.Contains(strings.Join(c.Commands, " "), "sudo") {
+	if c := browserenv.CheckBrowser(s); strings.Contains(strings.Join(c.Commands, " "), "sudo") {
 		t.Fatal(c.Commands)
 	}
 }
@@ -103,7 +105,7 @@ func TestBrowserSetupCommand(t *testing.T) {
 	sys := fakeSys("linux", "amd64", "ID=debian\n", map[string]string{"google-chrome": "/usr/bin/google-chrome", "sudo": "/usr/bin/sudo"}, nil)
 	sys.Run = func(_ context.Context, cmd string, _ io.Writer) error { ran = append(ran, cmd); return nil }
 	old := setupSysFn
-	setupSysFn = func() setupSys { return sys }
+	setupSysFn = func() browserenv.Sys { return sys }
 	defer func() { setupSysFn = old }()
 	run := func(stdin string, interactive bool, args ...string) (int, string) {
 		var out, errb bytes.Buffer
@@ -127,7 +129,7 @@ func TestBrowserSetupCommand(t *testing.T) {
 	}
 	ran = nil
 	code, out := run("", false, "--json")
-	var c BrowserCheck
+	var c browserenv.BrowserCheck
 	if err := json.Unmarshal([]byte(out[:strings.LastIndex(out, "}")+1]), &c); err != nil || code != 0 || len(ran) != 0 || c.Display != "headless" {
 		t.Fatal(code, err, out)
 	}
