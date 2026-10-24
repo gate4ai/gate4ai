@@ -300,7 +300,7 @@ func PolicySummary(cfg *config.Config, agent string) map[string]any {
 	}
 	out := map[string]any{"agent": agent, "profile": a.Profile, "connectors": p.Connectors, "rules": rules, "limits": limits, "settings": settings,
 		"access": map[string]any{"sites": cfg.Access.Sites, "folders": cfg.Access.Folders},
-		"lists": lists, "other_profiles": others, "defaults": "sites and folders: the most specific access line decides (allow | read | connector | ask | deny, folders also append), deny in a line always wins, no line → denied; " +
+		"lists":  lists, "other_profiles": others, "defaults": "sites and folders: the most specific access line decides (allow | read | connector | ask | deny, folders also append), deny in a line always wins, no line → denied; " +
 			"no rule matched and no line: read → allow; write / external / money → ask; deny beats ask beats allow; " +
 			"gate4ai.change_policy always asks the owner; browser.post / put / patch / delete / login / fill_secret are allowed only by a rule that names them (not browser.*)"}
 	pre := "profiles." + a.Profile + " "
