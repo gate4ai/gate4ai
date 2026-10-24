@@ -10,13 +10,13 @@
 <form method="post" action="{{$.Base}}/vault" autocomplete="off"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="alias" value="{{.}}"><input type="hidden" name="edit" value="1">
 <label for="v-{{secAnchor .}}">{{T "New value"}}</label><input id="v-{{secAnchor .}}" name="value" type="password" autocomplete="new-password" required>
 <p class="help">{{T "The current value is never shown: type the new one in full. It is used everywhere this name is used."}}</p>
-<div class="actions"><a class="btn" href="#{{secAnchor .}}" data-close>{{T "Cancel"}}</a><button class="primary">{{T "Save"}}</button></div></form></div></div></td></tr>
+<div class="actions"><a class="btn" href="#{{secAnchor .}}" data-close>{{T "Cancel"}}</a><button class="primary" data-busy="{{T "Saving…"}}">{{T "Save"}}</button></div></form></div></div></td></tr>
 {{else}}<tr><td colspan="3" class="muted">{{T "No passwords yet. A mail password is easier to enter in the mail connector settings — it gets linked there."}}</td></tr>{{end}}</table>
 <details class="adv card"><summary>{{T "Save a password or a token"}}</summary>
 <form method="post" action="{{$.Base}}/vault" class="row" autocomplete="off"><input type="hidden" name="csrf" value="{{.CSRF}}">
 <label class="inline" for="v-name">{{T "Name"}}</label><input id="v-name" name="name" placeholder="{{T "e.g. work mail"}}" required>
 <label class="inline" for="v-value">{{T "Value"}}</label><input id="v-value" name="value" type="password" required>
-<button class="primary">{{T "Save"}}</button></form></details>
+<button class="primary" data-busy="{{T "Saving…"}}">{{T "Save"}}</button></form></details>
 
 <h2 id="accounts">{{T "Accounts for signing in to sites"}}</h2>
 <p class="muted">{{T "The browser signs in with them itself: gate4.ai types the password; agents and connectors never see it."}}</p>

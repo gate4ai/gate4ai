@@ -77,7 +77,7 @@
 {{range $d.Channels}}{{if ne .Name "webui"}}<div class="set"><div class="d"><span class="dot {{if not .On}}off{{else if ne .State "ok"}}bad{{end}}" aria-hidden="true"></span><b>{{T .Title}}</b> — {{if .On}}{{if eq .State "ok"}}{{T "on"}}{{else}}<span class="bad">{{T "error"}}</span>{{end}}{{else}}{{T "off"}}{{end}}
 {{if eq .Name "telegram"}}<div class="help">{{T "Allow / Deny buttons in your own bot, about 2 minutes to set up."}}</div>{{end}}
 {{if eq .Name "webpush"}}<div class="help">{{T "A notification in the browser on your phone; needs internet access."}}</div>{{end}}</div>
-<div>{{if and .On (eq .State "ok")}}<form method="post" action="{{$.Base}}/channels/{{.Name}}/test"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/setup/check?agent={{$d.Agent}}&amp;client={{$d.Client}}"><button>{{T "Send a test"}}</button></form>
+<div>{{if and .On (eq .State "ok")}}<form method="post" action="{{$.Base}}/channels/{{.Name}}/test"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/setup/check?agent={{$d.Agent}}&amp;client={{$d.Client}}"><button data-busy="{{T "Sending…"}}">{{T "Send a test"}}</button></form>
 {{else if eq .Name "telegram"}}<a class="btn" href="{{$.Base}}/approvals/telegram?for=setup">{{T "Connect"}}</a>
 {{else}}<a class="btn" href="{{$.Base}}/settings/notifications">{{T "Set up"}}</a>{{end}}</div></div>{{end}}{{end}}
 </div>

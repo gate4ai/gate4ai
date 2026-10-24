@@ -97,7 +97,7 @@
 {{TH "MCP answers at the root of the address. The Web UI for the phone is <code>%s/ui/</code>." $d.Relay.MCPURL}}</p></details>
 {{else}}<p>{{T "Needed only for cloud assistants (Claude.ai, ChatGPT) and for signing in from the phone. Local assistants work without it."}}</p>
 <form method="post" action="{{.Base}}/settings/relay"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="url" value="{{$d.RelayDefault}}">
-<button class="primary">{{T "Turn on through %s" $d.RelayDefaultHost}}</button></form>
+<button class="primary" data-busy="{{T "Connecting…"}}">{{T "Turn on through %s" $d.RelayDefaultHost}}</button></form>
 <p class="help">{{T "The computer gets an address like <id>.%s, no ports to open. Traffic is encrypted all the way to this computer: the relay sees only encrypted data." $d.RelayDefaultHost}}</p>
 {{end}}</div>
 
@@ -119,11 +119,11 @@
 <form method="post" action="{{.Base}}/settings/general"><input type="hidden" name="csrf" value="{{.CSRF}}">
 <label for="st-reg">{{T "Catalog address (index.json)"}}</label><input id="st-reg" name="registry" value="{{$d.Config.Store.Registry}}" size="70">
 <label for="st-keys">{{T "Catalog signing keys"}}</label><textarea id="st-keys" name="registry_keys" rows="2" class="code">{{join $d.Config.Store.RegistryKeys "\n"}}</textarea>
-<button>{{T "Save"}}</button></form></div>
+<button data-busy="{{T "Saving…"}}">{{T "Save"}}</button></form></div>
 <div class="card"><h3>{{T "Keeping the journal"}}</h3>
 <form method="post" action="{{.Base}}/settings/general" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}">
 {{$rs := $d.Retentions}}{{range (list "receipts" "denied" "evidence_other" "evidence_money")}}{{$k := .}}{{$cur := index $d.Retention $k}}<label class="inline" for="ret-{{$k}}">{{dur $k}}</label><select id="ret-{{$k}}" name="ret_{{$k}}">{{range $rs}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{dur .}}</option>{{end}}{{if not (has $rs $cur)}}<option selected>{{$cur}}</option>{{end}}</select>{{end}}
-<button>{{T "Save"}}</button></form></div>
+<button data-busy="{{T "Saving…"}}">{{T "Save"}}</button></form></div>
 <div class="card"><h3>{{T "Rules as YAML and versions"}}</h3><p><a href="{{.Base}}/policy/yaml">{{T "YAML for technical users →"}}</a> · <a href="{{.Base}}/policy#advanced">{{T "Lists, check, versions →"}}</a></p></div>
 <div class="card"><h3>{{T "About"}}</h3>
 <p>gate4ai {{$d.Version}} · {{T "data:"}} <code>{{$d.Home}}</code> · {{T "log:"}} <code>{{$d.Log}}</code></p>
@@ -143,7 +143,7 @@
 <a href="{{$v.Base}}/settings/advanced" class="{{if eq .On "advanced"}}on{{end}}">{{T "Store, journal, about"}}</a>
 </nav>{{end}}
 
-{{define "chan_buttons"}}{{$v := .V}}{{with .C}}{{if .On}}<form method="post" action="{{$v.Base}}/channels/{{.Name}}/test" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><button class="small">{{T "Test"}}</button></form>
+{{define "chan_buttons"}}{{$v := .V}}{{with .C}}{{if .On}}<form method="post" action="{{$v.Base}}/channels/{{.Name}}/test" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><button class="small" data-busy="{{T "Sending…"}}">{{T "Test"}}</button></form>
 <form method="post" action="{{$v.Base}}/channels/{{.Name}}/toggle" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="on" value="0"><button class="small">{{T "Turn off"}}</button></form>
 {{else}}<form method="post" action="{{$v.Base}}/channels/{{.Name}}/toggle" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="on" value="1"><button class="small primary">{{T "Turn on"}}</button></form>{{end}}{{end}}{{end}}
 

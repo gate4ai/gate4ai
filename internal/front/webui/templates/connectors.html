@@ -18,7 +18,7 @@
 {{range $d.Grants}}{{if .Agents}}<label class="inline"><input type="checkbox" name="profiles" value="{{.Profile}}" {{if .Checked}}checked{{end}}> {{join .Agents ", "}}</label>{{end}}{{end}}
 {{range $d.Grants}}{{if not .Agents}}<label class="inline muted"><input type="checkbox" name="profiles" value="{{.Profile}}"> {{T "permissions %s (no agents)" .Profile}}</label>{{end}}{{end}}
 </fieldset>{{end}}
-<p class="row"><button class="primary">{{T "I agree, install"}}</button> <a href="{{$.Base}}/connectors">{{T "Cancel"}}</a></p></form>
+<p class="row"><button class="primary" data-busy="{{T "Installing…"}}">{{T "I agree, install"}}</button> <a href="{{$.Base}}/connectors">{{T "Cancel"}}</a></p></form>
 </div>{{end}}
 
 <p class="muted">{{T "A connector is how an agent works with email, files or sites. It sees only what you allowed and never knows your passwords."}}</p>
@@ -33,20 +33,20 @@
 {{if .Installed}}<p class="help">{{T "Used by:"}} {{if .Agents}}{{join .Agents ", "}}{{else}}{{T "no agents yet"}}{{end}}</p>{{end}}
 <div class="row">
 {{if .Installed}}<a class="btn primary" href="{{$.Base}}/connectors/{{.Name}}">{{T "Set up"}}</a>
-{{if .Update}}<a class="btn" href="{{$.Base}}/connectors?install={{.Name}}">{{T "Update to %s" .Version}}</a>{{end}}
-{{if not .Builtin}}<form method="post" action="{{$.Base}}/connectors/{{.Name}}/reinstall"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button title="{{T "Download and install the same version again; settings, accounts and rules stay"}}">{{T "Reinstall"}}</button></form>{{end}}
-{{else}}<a class="btn primary" href="{{$.Base}}/connectors?install={{.Name}}">{{T "Install"}}</a>{{end}}
+{{if .Update}}<a class="btn" href="{{$.Base}}/connectors?install={{.Name}}" data-busy="{{T "Loading…"}}">{{T "Update to %s" .Version}}</a>{{end}}
+{{if not .Builtin}}<form method="post" action="{{$.Base}}/connectors/{{.Name}}/reinstall"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button title="{{T "Download and install the same version again; settings, accounts and rules stay"}}" data-busy="{{T "Reinstalling…"}}">{{T "Reinstall"}}</button></form>{{end}}
+{{else}}<a class="btn primary" href="{{$.Base}}/connectors?install={{.Name}}" data-busy="{{T "Loading…"}}">{{T "Install"}}</a>{{end}}
 </div></div>
 {{else}}<p class="muted">{{T "The catalog is empty."}}</p>{{end}}
 </div>
 
 <details class="adv"><summary>{{T "Advanced"}}</summary>
 <div class="row" style="margin-top:.6rem"><a class="btn small" href="#m-local">{{T "Install not from the store…"}}</a>
-<form method="post" action="{{.Base}}/connectors/refresh"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">{{T "Update the catalog"}}</button></form></div>
+<form method="post" action="{{.Base}}/connectors/refresh"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small" data-busy="{{T "Updating…"}}">{{T "Update the catalog"}}</button></form></div>
 <p class="help">{{T "Publishers, licenses and versions are on each connector page under “About the connector”."}}</p>
 </details>
 <div class="modal" id="m-local" role="dialog" aria-modal="true" aria-labelledby="m-local-h"><div class="box"><h3 id="m-local-h">{{T "Install not from the store"}}</h3>
-<form method="get" action="{{.Base}}/connectors"><input type="hidden" name="local" value="1">
+<form method="get" action="{{.Base}}/connectors" data-busy="{{T "Checking…"}}"><input type="hidden" name="local" value="1">
 <label for="m-local-src">{{T "Folder, file or build address"}}</label><input id="m-local-src" name="install" required placeholder="~/projects/lk_emias  ·  ~/bin/mail.g4c  ·  https://…/mail.g4c" value="{{if $d.Local}}{{$d.Src}}{{end}}">
 <ul class="help" style="padding-left:1.1rem"><li>{{TH "<b>A source folder</b> (with <code>manifest.yaml</code>) — gate4.ai builds the connector itself; Go is needed."}}</li>
 <li>{{TH "<b>A file</b> <code>.g4c</code> on this computer or <b>an address</b> <code>https://…/*.g4c</code>."}}</li>
