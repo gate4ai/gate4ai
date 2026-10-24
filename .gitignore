@@ -5,3 +5,5 @@
 *.g4c
 *.wasm
 /dist/
+# Случайная сборка коннектора в корне (go build ./connectors/browser)
+/browser

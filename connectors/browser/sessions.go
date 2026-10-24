@@ -362,28 +362,33 @@ func (b *Browser) closedErr(id string, r abi.ExecRequest) error {
 	return abi.Errorf(abi.CodeNotFound, "browser session %s is closed or unknown; start a new one with browser.open", id)
 }
 
-// closeSession — browser.close: идущее действие отменяется; страница
-// освобождается после него (не дольше AgentWait, иначе — сразу).
+// closeSession — browser.close: идущее действие отменяется; ответ — не позже
+// AgentWait, а страница освобождается только после действия (освобождать её
+// под идущим действием — гонка за Executor и Session).
 func (b *Browser) closeSession(as *agentSession, args map[string]any, reason string) (abi.ExecResult, error) {
 	b.mu.Lock()
 	if as.cancel != nil {
 		as.cancel()
 	}
 	b.mu.Unlock()
-	locked := false
 	t := time.NewTimer(AgentWait)
+	defer t.Stop()
 	select {
 	case as.lock <- struct{}{}:
-		locked = true
+		b.closeAgent(as, reason)
+		res, err := as.closeResult(args)
+		<-as.lock
+		return res, err
 	case <-t.C:
 	}
-	t.Stop()
-	b.closeAgent(as, reason)
-	res, err := as.closeResult(args)
-	if locked {
+	b.markClosed(as, reason)
+	go func() {
+		as.lock <- struct{}{}
+		as.timer.Stop()
+		as.s.Release()
 		<-as.lock
-	}
-	return res, err
+	}()
+	return as.closeResult(args)
 }
 
 // closeAll закрывает сеансы вызывающего (ownedBy: этот экземпляр агента;
@@ -407,13 +412,23 @@ func (b *Browser) closeAll(r abi.ExecRequest) abi.ExecResult {
 // closeAgent освобождает страницу сеанса агента (close, close --all, простой,
 // неудачный open, падение браузера) и запоминает, кто и почему его закрыл.
 func (b *Browser) closeAgent(as *agentSession, reason string) {
+	if !b.markClosed(as, reason) {
+		return
+	}
+	as.timer.Stop()
+	as.s.Release()
+}
+
+// markClosed — сеанс больше не виден агенту (список, причина для closedErr);
+// false — уже был закрыт. Страницу освобождает closeAgent.
+func (b *Browser) markClosed(as *agentSession, reason string) bool {
 	b.mu.Lock()
 	if b.agents[as.id] == as {
 		delete(b.agents, as.id)
 	}
 	if as.closed {
 		b.mu.Unlock()
-		return
+		return false
 	}
 	as.closed = true
 	if as.cancel != nil {
@@ -430,8 +445,7 @@ func (b *Browser) closeAgent(as *agentSession, reason string) {
 	}
 	b.closed[as.id] = closedInfo{agent: as.agent, instance: as.instance, reason: reason, at: now}
 	b.mu.Unlock()
-	as.timer.Stop()
-	as.s.Release()
+	return true
 }
 
 // busy — подсказка, кто держит браузер (чьи сеансы, с какого времени, когда
