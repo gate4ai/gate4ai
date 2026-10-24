@@ -20,7 +20,7 @@ import (
 // изменениями (beforeunload) возвращается за timeout_ms, сеанс работает;
 // page_screenshot --out пишет PNG и отдаёт путь; два агента работают каждый в
 // своём сеансе, close --all одного не трогает другого; browser.post и правка
-// allowed_domains ждут владельца, несмотря на allow; policy set предупреждает
+// списка сайтов ждут владельца, несмотря на allow; policy set предупреждает
 // об этом; gate4ai skill обновляет установленный навык прежней версии.
 func TestBrowserAgentProfile(t *testing.T) {
 	t.Parallel()
@@ -53,9 +53,10 @@ profiles:
     rules:
       - { id: dev-browser-allow, action: "browser.*", effect: allow }
       - { id: gate4ai-change_policy-allow, action: gate4ai.change_policy, effect: allow }
+access:
+  sites: [{ domain: "127.0.0.1", access: allow }]
 connectors:
   browser:
-    allowed_domains: ["127.0.0.1"]
     engine: cdp
     chrome_path: %q
     profile_dir: %q
@@ -114,13 +115,22 @@ connectors:
 		t.Fatalf("a closed session says who closed it: %d %s", r.code, r.out)
 	}
 
-	// browser.* не покрывает запросы, меняющие данные; change_policy — всегда владелец.
+	// Сайт в списке Браузера как allow покрывает и запросы, меняющие данные;
+	// как read — они ждут владельца, несмотря на правило browser.* allow.
+	// change_policy — всегда владелец.
+	call(tokB, 0, "browser", "post", "--session", sB, "--url", srv.URL+"/api/items", "--body", `{"x":1}`)
+	if r := g.run("", "", "access", "sites", "set", "127.0.0.1", "read"); r.code != 0 {
+		t.Fatalf("access sites set: %d %s", r.code, r.out)
+	}
 	if res := call(tokB, 3, "browser", "post", "--session", sB, "--url", srv.URL+"/api/items", "--body", `{"x":1}`); res["status"] != "pending" {
-		t.Fatalf("browser.post under browser.*: %v", res)
+		t.Fatalf("browser.post on a read-only site: %v", res)
+	}
+	if r := g.run("", "", "access", "sites", "set", "127.0.0.1", "allow"); r.code != 0 {
+		t.Fatalf("access sites set: %d %s", r.code, r.out)
 	}
 	if res := call(tokB, 3, "gate4ai", "change_policy", "--summary", "allow grafana.com", "--changes",
-		`[{"op":"add_setting_items","connector":"browser","key":"allowed_domains","items":["grafana.com"]}]`); res["status"] != "pending" {
-		t.Fatalf("allowed_domains under change_policy allow: %v", res)
+		`[{"op":"set_site_access","domain":"grafana.com","access":"read"}]`); res["status"] != "pending" {
+		t.Fatalf("set_site_access under change_policy allow: %v", res)
 	}
 	call(tokB, 0, "browser", "close", "--session", sB)
 

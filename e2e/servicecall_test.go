@@ -15,8 +15,8 @@ import (
 
 // WASM-коннектор вызывает действия нативного коннектора browser через
 // service_call: настоящий daemon, процесс browser под его надзором, headless
-// Chrome. Сайты задаёт вызывающий (params), browser в профиле агента не нужен;
-// сайт вне params отклоняется.
+// Chrome. Сайты задаёт вызывающий (sites манифеста), browser в профиле агента не нужен;
+// сайт вне его списка отклоняется.
 func TestServiceCallToNativeBrowser(t *testing.T) {
 	t.Parallel()
 	chrome, err := exec.LookPath("google-chrome")
@@ -42,6 +42,8 @@ func TestServiceCallToNativeBrowser(t *testing.T) {
 profiles:
   assistant:
     connectors: [pagereader]
+access:
+  sites: [{ domain: "127.0.0.1", access: connector }]
 connectors:
   pagereader: { domains: ["127.0.0.1"] }
   browser:
@@ -62,10 +64,10 @@ connectors:
 	if r.code != 0 || res["status"] != "ok" || result["title"] != "Квитанция" || !strings.Contains(fmt.Sprint(result["text"]), "1 234,56") {
 		t.Fatalf("pagereader: %d %s", r.code, r.out)
 	}
-	// Сайт вне params вызывающего.
+	// Сайт вне списка вызывающего.
 	r = g.run(token, "", "pagereader", "title", "--url", "http://localhost:1/")
-	if r.code == 0 || !strings.Contains(r.out, "not allowed") {
-		t.Fatalf("site outside params: %d %s", r.code, r.out)
+	if r.code == 0 || !strings.Contains(r.out, "denied by policy") || !strings.Contains(r.out, "localhost") {
+		t.Fatalf("site outside the connector sites: %d %s", r.code, r.out)
 	}
 	// Агент не видит действий browser только для коннекторов.
 	if r := g.run(token, "", "browser", "open", "--url", srv.URL); r.code == 0 {
