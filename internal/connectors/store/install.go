@@ -3,6 +3,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -140,12 +141,12 @@ func SourceFolder(source string) (string, bool) {
 	return abs, err == nil
 }
 
-func isFile(source string) bool {
-	if strings.HasSuffix(source, PackageExt) {
-		return true
-	}
-	fi, err := os.Stat(source)
-	return err == nil && !fi.IsDir()
+// IsName — source — имя коннектора в магазине (name или name@version), а не путь:
+// без разделителей каталогов и ":" (адрес, "dir:"), не .g4c, не "." и "..".
+// Одноимённый файл или папка в текущем каталоге его путём не делают.
+func IsName(source string) bool {
+	return source != "" && source != "." && source != ".." &&
+		!strings.ContainsAny(source, `/\:`) && !strings.HasSuffix(source, PackageExt)
 }
 
 // Prepare проверяет пакет из файла или по адресу http(s) (.g4c), из папки с исходниками (сборка,
@@ -154,12 +155,12 @@ func isFile(source string) bool {
 func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, error) {
 	var p *Plan
 	var err error
-	if dir, ok := SourceFolder(source); ok {
-		p, err = o.prepareDir(ctx, dir, dev)
-	} else if isURL(source) || isFile(source) {
-		p, err = o.prepareFile(ctx, source, dev)
-	} else {
+	if IsName(source) {
 		p, err = o.prepareRegistry(ctx, source)
+	} else if dir, ok := SourceFolder(source); ok {
+		p, err = o.prepareDir(ctx, dir, dev)
+	} else {
+		p, err = o.prepareFile(ctx, source, dev)
 	}
 	if err != nil {
 		return nil, err
@@ -216,9 +217,12 @@ func (o Options) prepareFile(ctx context.Context, source string, dev bool) (*Pla
 	if err != nil {
 		return nil, err
 	}
+	if !bytes.HasPrefix(b, []byte{0x1f, 0x8b}) { // пакет — tar.gz
+		return nil, fmt.Errorf("%s: not a gate4ai package (%s)", source, PackageExt)
+	}
 	pkg, err := Open(b)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", source, err)
 	}
 	p := &Plan{Source: source, pkg: pkg, Trust: TrustLocal}
 	signedBy := func(keys []string) bool {

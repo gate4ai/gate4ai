@@ -6,6 +6,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -261,5 +264,62 @@ func TestSourcesStamp(t *testing.T) {
 		} else {
 			base = s
 		}
+	}
+}
+
+// install: голое имя — всегда коннектор из магазина, даже если в текущем
+// каталоге лежит одноимённый файл или папка (только подсказка про путь);
+// файл и папка — только путь с разделителем или .g4c.
+func TestInstallNameVsPath(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		got = append(got, b["source"].(string))
+		w.Write([]byte(`{"status":"installed"}`))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	os.WriteFile("browser", []byte("\x7fELF not a package"), 0o755)
+	os.MkdirAll("mail", 0o755)
+	os.WriteFile(filepath.Join("mail", store.ManifestFile), []byte("connector: mail\n"), 0o644)
+	os.WriteFile("browser.g4c", []byte("\x1f\x8b"), 0o644)
+	run := func(args ...string) (int, string) {
+		out, errb := &bytes.Buffer{}, &bytes.Buffer{}
+		env := &Env{Stdout: out, Stderr: errb, Getenv: func(string) string { return "" },
+			Connect: func(string) *Client { return &Client{HTTP: srv.Client(), Base: srv.URL} }}
+		code := Run(context.Background(), env, append([]string{"connectors", "install"}, args...))
+		return code, errb.String() + out.String()
+	}
+	for _, name := range []string{"browser", "mail", "browser@1.2.0"} {
+		got = nil
+		code, errs := run(name, "--yes")
+		if code != 0 || len(got) != 1 || got[0] != name {
+			t.Fatal(name, code, got, errs)
+		}
+		if name != "browser@1.2.0" && !strings.Contains(errs, "give its path: ./"+name) {
+			t.Fatal(name, "no hint:", errs)
+		}
+	}
+	abs := filepath.Join(dir, "browser")
+	for arg, want := range map[string]string{"./browser": abs, abs: abs, "browser.g4c": abs + ".g4c"} {
+		got = nil
+		if code, errs := run(arg, "--dev", "--yes"); code != 0 || len(got) != 1 || got[0] != want {
+			t.Fatal(arg, code, got, errs)
+		}
+	}
+	os.MkdirAll("empty", 0o755)
+	for arg, want := range map[string]string{"./nothing": "no such file", "./empty": "no " + store.ManifestFile, ".": "no " + store.ManifestFile} {
+		if code, errs := run(arg); code == 0 || !strings.Contains(errs, want) {
+			t.Fatal(arg, code, errs)
+		}
+	}
+	// Папка с исходниками — только путём: installSource её узнаёт, а голое имя — нет.
+	if _, folder, err := installSource("./mail", io.Discard); err != nil || folder != filepath.Join(dir, "mail") {
+		t.Fatal(folder, err)
+	}
+	if _, folder, _ := installSource("mail", io.Discard); folder != "" {
+		t.Fatal("bare name taken as a folder:", folder)
 	}
 }

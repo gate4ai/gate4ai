@@ -31,8 +31,10 @@ import (
 const connectorsUsage = `usage:
   gate4ai connectors list
   gate4ai connectors new <name> --site <domain> [-o folder]   a WASM connector over the browser to start from
-  gate4ai connectors install <file.g4c | https://…/file.g4c | name[@version]> [--dev] [--yes]
-  gate4ai connectors install <source folder> [--yes] [--watch]   build from Go sources (your own build, like --dev)
+  gate4ai connectors install <name[@version]> [--yes]            from the store (a bare name never means a file)
+  gate4ai connectors install <./file.g4c | https://…/file.g4c> [--dev] [--yes]
+  gate4ai connectors install <./source-folder> [--yes] [--watch] build from Go sources (your own build, like --dev);
+                                                                a file or folder needs a path: with / or .g4c
   gate4ai connectors update <name> [--yes] [--watch]           a connector from a folder is rebuilt from it;
                                                                 --watch: rebuild on every change of the sources
   gate4ai connectors remove <name>
@@ -114,13 +116,12 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 			if folder, err = e.installedFolder(ctx, pos[0]); err != nil {
 				return e.fail(err)
 			}
-		} else if dir, ok := store.SourceFolder(pos[0]); ok {
-			folder = dir
-		} else if fi, err := os.Stat(pos[0]); err == nil && !fi.IsDir() {
-			abs, _ := filepath.Abs(pos[0])
-			body["source"] = abs
-		} else if err == nil {
-			return e.fail(fmt.Errorf("%s: no %s in this folder", pos[0], store.ManifestFile))
+		} else {
+			src, dir, err := installSource(pos[0], e.Stderr)
+			if err != nil {
+				return e.fail(err)
+			}
+			body["source"], folder = src, dir
 		}
 		if *watch && folder == "" {
 			return e.fail(errors.New("--watch needs a connector from a source folder: gate4ai connectors install <folder> --watch"))
@@ -181,6 +182,38 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 	}
 	fmt.Fprintln(e.Stderr, connectorsUsage)
 	return ExitUsage
+}
+
+// installSource — что ставить по аргументу install: голое имя (store.IsName) —
+// коннектор из магазина, файловая система не смотрится (одноимённый файл или
+// папка в текущем каталоге — только подсказка в hint); путь — файл .g4c
+// (абсолютный путь в source) или папка с исходниками (folder).
+func installSource(arg string, hint io.Writer) (source, folder string, err error) {
+	if store.IsName(arg) {
+		if fi, err := os.Stat(arg); err == nil {
+			what := "file"
+			if fi.IsDir() {
+				what = "folder"
+			}
+			fmt.Fprintf(hint, "gate4ai: installing %s from the store; to install the %s, give its path: ./%s\n", arg, what, arg)
+		}
+		return arg, "", nil
+	}
+	if strings.Contains(arg, "://") {
+		return arg, "", nil
+	}
+	if dir, ok := store.SourceFolder(arg); ok {
+		return arg, dir, nil
+	}
+	fi, err := os.Stat(arg)
+	if err == nil && fi.IsDir() {
+		return "", "", fmt.Errorf("%s: no %s in this folder", arg, store.ManifestFile)
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("%s: no such file or folder", arg)
+	}
+	abs, _ := filepath.Abs(arg)
+	return abs, "", nil
 }
 
 // installCall — install / update у daemon; если нужно согласие на возможности,

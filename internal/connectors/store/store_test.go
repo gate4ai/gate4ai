@@ -400,3 +400,21 @@ func TestReinstallSource(t *testing.T) {
 		}
 	}
 }
+
+// Имя из магазина и путь различаются по виду, не по файловой системе;
+// файл, который не пакет, — ошибка с его именем, а не «gzip: invalid header».
+func TestSourceKind(t *testing.T) {
+	for s, want := range map[string]bool{"browser": true, "mail@1.2.0": true, "my-conn": true,
+		"./browser": false, "/tmp/x.g4c": false, "browser.g4c": false, `dir\x`: false, ".": false, "..": false,
+		"dir:/src": false, "https://x/y.g4c": false, "C:x": false, "": false} {
+		if IsName(s) != want {
+			t.Error(s, !want)
+		}
+	}
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "browser")
+	os.WriteFile(bad, []byte("\x7fELF"), 0o755)
+	if _, err := (Options{Dir: dir}).Prepare(context.Background(), bad, true); err == nil || err.Error() != bad+": not a gate4ai package (.g4c)" {
+		t.Fatal(err)
+	}
+}
