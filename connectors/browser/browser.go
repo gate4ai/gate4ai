@@ -57,11 +57,11 @@ type callSession struct {
 	s      *worker.Session
 	sites  domain.Sites
 	opened bool
-	url    string                 // адрес страницы после последнего действия (под mu)
-	shown  atomic.Pointer[string] // тот же адрес для владельца — без mu, который держит идущее действие
+	url    string                      // адрес страницы после последнего действия (под mu)
+	shown  atomic.Pointer[string]      // тот же адрес для владельца — без mu, который держит идущее действие
 	stop   atomic.Pointer[chan string] // идущий handoff: ответ человека из просмотра (Owner "handoff")
-	sid    string                 // id сеанса агента ("" — страница вызывающего коннектора): снимки — в файлы
-	shots  int                    // снимков сеанса (номер в имени файла)
+	sid    string                      // id сеанса агента ("" — страница вызывающего коннектора): снимки — в файлы
+	shots  int                         // снимков сеанса (номер в имени файла)
 	timer  *time.Timer
 	mu     sync.Mutex // действия одной страницы — по очереди
 	owner  string     // кто держит страницу (для текста busy)

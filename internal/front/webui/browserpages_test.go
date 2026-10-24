@@ -245,3 +245,24 @@ func TestBrowserRemoteControl(t *testing.T) {
 	}
 
 }
+
+// Ссылка на сеанс без входа: после входа — сразу на сеанс; чужой адрес возврата не принимается.
+func TestBrowserLinkAfterLogin(t *testing.T) {
+	u, _, _, base := browserUI(t)
+	b := newBrowser(t, base)
+	if _, p := b.get(base + "/browser/s-1"); !strings.Contains(p, "login") && !strings.Contains(p, "Вход") {
+		t.Fatal("login first:", p)
+	}
+	if _, p := b.get(u.LoginURL()); !strings.Contains(p, "Взять управление") {
+		t.Fatal("after login — the session:", p)
+	}
+	b2 := newBrowser(t, base)
+	if _, p := b2.get(u.LoginURL() + "&next=" + url.QueryEscape("/browser/s-1")); !strings.Contains(p, "Взять управление") {
+		t.Fatal("next in the link:", p)
+	}
+	for _, bad := range []string{"//evil.example/x", "/browser/../settings", "/settings", "https://evil.example/browser/x"} {
+		if safeNext(bad) != "" {
+			t.Fatal("unsafe next accepted:", bad)
+		}
+	}
+}

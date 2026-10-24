@@ -478,7 +478,7 @@ func (u *UI) loginStep(w http.ResponseWriter, r *http.Request, m mount, id, errM
 	if done {
 		http.SetCookie(w, &http.Cookie{Name: m.attemptCookie(), Value: "", Path: m.base + "/", MaxAge: -1, Secure: m.remote})
 		u.startSession(w, m, true, a.telegram == tgOK)
-		http.Redirect(w, r, m.base+"/", http.StatusSeeOther)
+		http.Redirect(w, r, m.base+u.takeNext(w, r, m, ""), http.StatusSeeOther)
 		return
 	}
 	data := map[string]any{"Code": st.code, "Password": st.password, "Telegram": st.telegram, "TelegramError": st.tgErr,

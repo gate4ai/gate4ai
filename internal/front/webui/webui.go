@@ -279,7 +279,8 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		var req struct {
-			Remote bool `json:"remote"`
+			Remote bool   `json:"remote"`
+			Next   string `json:"next"` // после входа — эта страница (просмотр сеанса браузера)
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		link := u.LoginURL()
@@ -294,6 +295,9 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": err.Error()}})
 				return
 			}
+		}
+		if n := safeNext(req.Next); n != "" {
+			link += "&next=" + url.QueryEscape(n)
 		}
 		// requires — что ещё нужно для входа по ссылке (пароль, подтверждение в Telegram);
 		// link_required — нужна ли ссылка вообще (иначе вход и по постоянному адресу).
@@ -521,11 +525,46 @@ func (u *UI) guard(m mount, h http.Handler) http.Handler {
 	})
 }
 
+// Куда вернуться после входа (cookie <сессия>_next): только просмотр сеанса
+// браузера — ссылка view_url, которую агент дал человеку.
+
+// safeNext — адрес возврата: только /browser/<id> этого Web UI.
+func safeNext(p string) string {
+	id, ok := strings.CutPrefix(p, "/browser/")
+	if !ok || id == "" || strings.ContainsAny(id, "/\\?#%") {
+		return ""
+	}
+	return p
+}
+
+func setNext(w http.ResponseWriter, m mount, p string) {
+	if p = safeNext(p); p != "" {
+		http.SetCookie(w, &http.Cookie{Name: m.cookie() + "_next", Value: p, Path: m.base + "/", HttpOnly: true, Secure: m.remote,
+			SameSite: http.SameSiteLaxMode, MaxAge: 600})
+	}
+}
+
+// takeNext — адрес после входа: из ссылки (next) или cookie, иначе «/».
+func (u *UI) takeNext(w http.ResponseWriter, r *http.Request, m mount, fromLink string) string {
+	p := safeNext(fromLink)
+	if c, err := r.Cookie(m.cookie() + "_next"); err == nil {
+		if p == "" {
+			p = safeNext(c.Value)
+		}
+		http.SetCookie(w, &http.Cookie{Name: m.cookie() + "_next", Value: "", Path: m.base + "/", MaxAge: -1, Secure: m.remote})
+	}
+	if p == "" {
+		return "/"
+	}
+	return p
+}
+
 // login — одноразовая ссылка. Без защиты она сразу даёт сессию; с защитой —
 // попытку входа (cookie), которой нужны пароль и/или подтверждение в Telegram.
 func (u *UI) login(m mount) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if t := r.URL.Query().Get("t"); t != "" {
+			setNext(w, m, r.URL.Query().Get("next"))
 			u.mu.Lock()
 			l, ok := u.logins[t]
 			if ok && l.remote == m.remote {
@@ -537,7 +576,7 @@ func (u *UI) login(m mount) http.HandlerFunc {
 				p := u.Protection()
 				if !p.Extra() {
 					u.startSession(w, m, false, false)
-					sameSiteRedirect(w, m.base+"/")
+					sameSiteRedirect(w, m.base+u.takeNext(w, r, m, r.URL.Query().Get("next")))
 					return
 				}
 				u.mu.Lock()
@@ -663,6 +702,8 @@ func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, erro
 	return func(w http.ResponseWriter, r *http.Request) {
 		sid, s, ok := u.session(m, r)
 		if !ok {
+			// Ссылка на сеанс браузера без входа: после входа — на неё же.
+			setNext(w, m, strings.TrimPrefix(r.URL.Path, m.base))
 			u.loginPage(w, r, m)
 			return
 		}

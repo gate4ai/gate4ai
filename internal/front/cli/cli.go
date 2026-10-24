@@ -191,6 +191,8 @@ Owner commands (local socket):
   gate4ai approvals [list] [--table|--json] | approve <id> | reject <id> | questions | answer <id> (value from stdin)
   gate4ai vault list | set <alias> [--from-env VAR] (asks with hidden input; or the value from stdin) | rm <alias>
   gate4ai sites [allow | remove <site>...]   sites agents may open in the browser
+  gate4ai browser sessions [close <id>] | watch <id> [--remote]   browser sessions of agents: list, live view, close
+  gate4ai browser setup [--yes] [--dry-run]   check Chrome, the virtual screen (Xvfb) and fonts; install what is missing (asks first)
   gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
   gate4ai connectors list | install <file.g4c | name[@version] | source folder> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | logs <name> [--limit n] [--since 10m] | refresh
   gate4ai connectors new <name> --site <domain> [-o folder]   a connector over the browser to start from (offline)
@@ -306,6 +308,11 @@ func Run(ctx context.Context, e *Env, args []string) int {
 		return e.doctor(ctx)
 	case "egress":
 		return e.call(ctx, e.Client(), "GET", "/v1/egress/log?limit=200", nil)
+	}
+	if cmd == "browser" && len(rest) > 0 && browserOwnerCmds[rest[0]] {
+		// Сеансы и проверка установки — команды владельца, не действия коннектора.
+		e.ownerCmd = true
+		return e.browserOwner(ctx, rest[0], rest[1:])
 	}
 	return e.action(ctx, cmd, rest)
 }
