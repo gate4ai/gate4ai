@@ -5,7 +5,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -44,7 +46,7 @@ func (b *browserFake) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecRes
 		res.Structured = map[string]any{"mode": "viewport", "width": 1, "height": 1, "bytes": len(fakePNG), "file": "/daemon/browser-shots/s1-1.png"}
 		res.Content = []abi.Content{abi.Image("image/png", fakePNG)}
 	case "download":
-		res.Structured = map[string]any{"name": "a.pdf", "mime_type": "application/pdf", "size": len(pdfFile), "sha256": "x", "via": "download"}
+		res.Structured = map[string]any{"name": "a.pdf", "mime_type": "application/pdf", "size": len(pdfFile), "sha256": pdfSum, "via": "download"}
 		res.Content = []abi.Content{abi.Resource("download:a.pdf", "application/pdf", "", pdfFile)}
 	}
 	return res, nil
@@ -163,7 +165,10 @@ profiles:
 	}
 }
 
-var pdfFile = []byte("%PDF-1.4\n\x00\xff\xfe binary\n%%EOF")
+var (
+	pdfFile = []byte("%PDF-1.4\n\x00\xff\xfe binary\n%%EOF")
+	pdfSum  = fmt.Sprintf("%x", sha256.Sum256(pdfFile))
+)
 
 // --out пишет файл из ответа (двоичный resource) на диск агента; в выводе —
 // file и bytes вместо base64.
