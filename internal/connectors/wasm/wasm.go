@@ -339,6 +339,9 @@ func (c *Connector) Manifest() manifest.Manifest { return c.man }
 // run — экспорт export с запросом req в новом экземпляре модуля; ответ в out,
 // доказательства функций хоста — в результате.
 func (c *Connector) run(ctx context.Context, export string, settings map[string]any, req, out any) ([]abi.EvidenceItem, error) {
+	// Срок вызова — и у функций хоста: http_request не переживает дедлайн модуля.
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(c.limits.TimeoutS)*time.Second)
+	defer cancel()
 	d, err := c.e.Dispatcher(ctx, c.man, c.limits, settings)
 	if err != nil {
 		return nil, err

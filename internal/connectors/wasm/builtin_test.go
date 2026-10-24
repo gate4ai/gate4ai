@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -75,5 +76,45 @@ actions:
 	_, err = b.Execute(context.Background(), abi.ExecRequest{Action: "add", Args: map[string]any{"path": "~/other.md"}, Settings: set})
 	if err == nil || !strings.Contains(err.Error(), abi.CodeCapabilityDenied) {
 		t.Fatal("path outside capabilities:", err)
+	}
+}
+
+// slowBuiltin ждёт отмены контекста вызова: встроенный коннектор получает
+// срок и отмену хоста, как WASM и нативный.
+type slowBuiltin struct{}
+
+func (slowBuiltin) Execute(ctx context.Context, _ *abi.Host, _ abi.ExecRequest) (abi.ExecResult, error) {
+	select {
+	case <-ctx.Done():
+		return abi.ExecResult{}, ctx.Err()
+	case <-time.After(5 * time.Second):
+		return abi.ExecResult{ResultRef: "no ctx"}, nil
+	}
+}
+
+func (slowBuiltin) Verify(context.Context, *abi.Host, abi.VerifyRequest) (abi.VerifyResult, error) {
+	return abi.VerifyResult{}, nil
+}
+
+func TestBuiltinGetsCallContext(t *testing.T) {
+	e, err := NewEngine("", Services{Home: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	m, err := manifest.Parse([]byte("connector: slow\nversion: \"1\"\nruntime: builtin\nactions:\n  - name: wait\n    class: read\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := e.Builtin(m, slowBuiltin{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
+	start := time.Now()
+	res, err := b.Execute(ctx, abi.ExecRequest{Action: "wait"})
+	if err == nil || res.ResultRef == "no ctx" || time.Since(start) > 2*time.Second {
+		t.Fatalf("builtin ignored the call context: %v %v after %s", res, err, time.Since(start))
 	}
 }
