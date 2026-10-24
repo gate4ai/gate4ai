@@ -91,7 +91,7 @@ func (u *UI) storeItems(ctx context.Context, l string, refresh bool) ([]storeIte
 			items = append(items, it)
 		}
 	}
-	// Браузер и Файлы — не коннекторы: у них свои страницы (/browser, /files).
+	// Браузер и Файлы — не коннекторы: у них свои страницы (/access/browser, /access/files).
 	for _, name := range daemon.BuiltinConnectors {
 		seen[name] = true
 	}

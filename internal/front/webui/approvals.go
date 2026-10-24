@@ -282,9 +282,9 @@ func (u *UI) decide(m mount) func(w http.ResponseWriter, r *http.Request) map[st
 		}
 		switch dec {
 		case "approve_access", "reject_access":
-			page := "/browser"
+			page := "/access/browser"
 			if strings.HasPrefix(a.Decision.Scope, "folder:") {
-				page = "/files"
+				page = "/access/files"
 			}
 			return redirectDetail(back, M("%s. Access list: %s.", msg, added), page)
 		case "approve_rule":

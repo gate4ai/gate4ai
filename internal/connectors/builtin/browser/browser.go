@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
@@ -54,19 +55,23 @@ type Browser struct {
 	W *worker.Service
 
 	mu       sync.Mutex
-	sessions map[string]*callSession  // корневое действие → страница
-	agents   map[string]*agentSession // сеанс агента → страница
-	closed   map[string]closedInfo    // недавно закрытые сеансы агентов: кто и почему
-	create   sync.Mutex               // страница корневого действия создаётся один раз
+	sessions map[string]*callSession     // корневое действие → страница
+	agents   map[string]*agentSession    // сеанс агента → страница
+	closed   map[string]closedInfo       // недавно закрытые сеансы агентов: кто и почему
+	create   sync.Mutex                  // страница корневого действия создаётся один раз
+	emit     func(kind string, data any) // события хосту (кадры просмотра); nil — некуда
+	events   chan event                  // очередь событий к emit (send)
 }
 
 type callSession struct {
 	s      *worker.Session
 	sites  domain.Sites
 	opened bool
-	url    string // адрес страницы после последнего действия
-	sid    string // id сеанса агента ("" — страница вызывающего коннектора): снимки — в файлы
-	shots  int    // снимков сеанса (номер в имени файла)
+	url    string                      // адрес страницы после последнего действия (под mu)
+	shown  atomic.Pointer[string]      // тот же адрес для владельца — без mu, который держит идущее действие
+	stop   atomic.Pointer[chan string] // идущий handoff: ответ человека из просмотра (Owner "handoff")
+	sid    string                      // id сеанса агента ("" — страница вызывающего коннектора): снимки — в файлы
+	shots  int                         // снимков сеанса (номер в имени файла)
 	timer  *time.Timer
 	mu     sync.Mutex // действия одной страницы — по очереди
 	owner  string     // кто держит страницу (для текста busy)
@@ -89,6 +94,22 @@ type agentSession struct {
 	running string             // идущее действие ("" — нет)
 	started time.Time          // когда оно началось
 	last    time.Time          // последнее действие: сеанс закроется в last + AgentIdle
+	held    time.Time          // с какого времени сеанс держит владелец (нулевое — не держит)
+	view    *sessionView       // просмотр владельцем (nil — не смотрят)
+}
+
+// setURL — адрес страницы после действия (под cs.mu).
+func (cs *callSession) setURL(u string) {
+	cs.url = u
+	cs.shown.Store(&u)
+}
+
+// shownURL — последний адрес страницы (без cs.mu).
+func (cs *callSession) shownURL() string {
+	if u := cs.shown.Load(); u != nil {
+		return *u
+	}
+	return ""
 }
 
 // Name — имя встроенного браузера (действия browser.*).
@@ -142,6 +163,7 @@ func settings(r abi.ExecRequest) worker.Settings {
 	st.MaxTextChars = num(s, "max_text_chars")
 	st.RedactParams = strs(s["redact_params"])
 	st.DownloadDir = str(s, "download_dir")
+	st.Display = str(s, "display")
 	return st
 }
 
@@ -227,6 +249,12 @@ const (
 	// CodeSessionBlocked — в сеансе ещё идёт другое действие (или оно зависло):
 	// кто, с какого времени, что делать.
 	CodeSessionBlocked = "session_blocked"
+	// CodeUnavailable — браузер на компьютере не запускается (нет Chrome,
+	// дисплея, Chrome падает): чинит владелец, повтор не поможет.
+	CodeUnavailable = "browser_unavailable"
+	// CodeHeldByUser — сеанс взял под управление владелец (просмотр в Web UI):
+	// действия агента в нём ждут, пока он не вернёт сеанс.
+	CodeHeldByUser = "session_held_by_user"
 )
 
 // fail — ошибка воркера в коде ABI.
@@ -234,6 +262,8 @@ func fail(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, worker.ErrUnavailable):
+		return abi.Errorf(CodeUnavailable, "%v. Do not retry: tell the user — they check and fix it with `gate4ai browser setup` on the computer with gate4ai", err)
 	case errors.Is(err, worker.ErrDomain), errors.Is(err, worker.ErrFileType):
 		return abi.Errorf(abi.CodeCapabilityDenied, "%v", err)
 	case errors.Is(err, worker.ErrTooLarge):
@@ -451,7 +481,7 @@ func (cs *callSession) page(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 	}
 	if errors.Is(err, worker.ErrRedirected) {
 		if u, uerr := cs.s.Engine.URL(ctx); uerr == nil {
-			cs.url = u
+			cs.setURL(u)
 			if acc := loginRequired(ctx, cs.s, u, r.Accounts); acc != "" {
 				err = fmt.Errorf("%w; account %s is available: browser.login --account %s", err, acc, acc)
 			}
@@ -503,7 +533,8 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		cs.opened, cs.url = true, p.URL
+		cs.opened = true
+		cs.setURL(p.URL)
 		w := waitOf(r.Args, str(r.Args, "url"))
 		if err := cs.s.WaitFor(ctx, w); err != nil {
 			return abi.ExecResult{}, err
@@ -523,14 +554,14 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			// JSON, текст: тело как прислал сервер (элементов и структуры у него нет).
 			u, _ := cs.s.Engine.URL(ctx)
 			title, _ := cs.s.Engine.Title(ctx)
-			cs.url = u
+			cs.setURL(u)
 			return abi.ExecResult{Structured: rawResult(cleanURL(u), title, raw), ResultRef: cleanURL(u), Source: "web:" + cleanURL(u)}, nil
 		}
 		p, err := cs.s.Observe(ctx, num(r.Args, "max_chars"))
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		cs.url = p.URL
+		cs.setURL(p.URL)
 		root := str(r.Args, "selector")
 		if root != "" {
 			// Текст только внутри элемента (модальное окно, карточка).
@@ -570,7 +601,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		cs.url = res.URL
+		cs.setURL(res.URL)
 		out := map[string]any{"url": cleanURL(res.URL), "text": res.Text}
 		if res.Value != nil {
 			out["value"] = res.Value
@@ -593,7 +624,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		cs.url = u
+		cs.setURL(u)
 		if err := cs.s.WaitFor(ctx, waitOf(r.Args, u)); err != nil {
 			return abi.ExecResult{}, err
 		}
@@ -606,11 +637,15 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			return abi.ExecResult{Structured: map[string]any{"url": cleanURL(cs.url)}}, worker.CheckHandoff(hr)
 		}
 		cs.s.Activate(ctx) // человек видит вкладку сеанса
+		stop := make(chan string, 1)
+		cs.stop.Store(&stop)
+		defer cs.stop.Store(nil)
+		hr.Stop = stop
 		res, err := cs.s.Handoff(ctx, hr)
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		cs.url = res.URL
+		cs.setURL(res.URL)
 		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(res.URL), "status": res.Status}, ResultRef: res.Status}, nil
 	case "network":
 		all, _ := r.Args["all_sites"].(bool)
@@ -647,7 +682,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 	case "download":
 		f, err := cs.s.Download(ctx, downloadRequest(r))
 		if u, uerr := cs.s.Engine.URL(ctx); uerr == nil {
-			cs.url = u
+			cs.setURL(u)
 		}
 		if err != nil {
 			return abi.ExecResult{}, err
@@ -684,7 +719,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			return abi.ExecResult{}, err
 		}
 		if u != "" {
-			cs.url = u
+			cs.setURL(u)
 		}
 		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(cs.url), "dialog": d, "accepted": accept}, ResultRef: d.Type}, nil
 	case "login":
@@ -701,7 +736,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		cs.url = res.URL
+		cs.setURL(res.URL)
 		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(res.URL), "status": res.Status, "origin": res.Origin}, ResultRef: res.Status}, nil
 	case "fill_secret":
 		bind, f, err := secretField(r)
@@ -716,7 +751,7 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 		if err != nil {
 			return abi.ExecResult{}, err
 		}
-		cs.url = res.URL
+		cs.setURL(res.URL)
 		return abi.ExecResult{Structured: map[string]any{"url": cleanURL(res.URL), "origin": res.Origin}, ResultRef: res.Origin}, nil
 	}
 	return abi.ExecResult{}, fmt.Errorf("unknown action %s", r.Action)

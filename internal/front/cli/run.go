@@ -196,7 +196,7 @@ func (e *Env) doctor(ctx context.Context) int {
 		env.AgentKey, env.KeyPending = k.Agent, k.Pairing != ""
 	}
 	env.Agent = e.self().Agent
-	checks := sandbox.Doctor(env)
+	checks := append(sandbox.Doctor(env), e.browserChecks(ctx)...)
 	e.printJSON(checks)
 	for _, c := range checks {
 		if c.Status == "fail" {

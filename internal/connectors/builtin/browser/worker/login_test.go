@@ -246,7 +246,7 @@ func loginForm(pass string) LoginForm {
 func loginSession(t *testing.T) (*loginChrome, *Session) {
 	t.Helper()
 	f := newLoginChrome(t)
-	svc := &Service{NewEngine: DefaultEngine, Launch: Launch}
+	svc := &Service{NewEngine: DefaultEngine, Launch: LaunchEnv}
 	s, err := svc.Acquire(context.Background(), Settings{CDPURL: f.srv.URL, Engine: "cdp"}, 0)
 	if err != nil {
 		t.Fatal(err)

@@ -97,6 +97,24 @@ func (d *Dispatcher) Evidence() []abi.EvidenceItem {
 	return append([]abi.EvidenceItem(nil), d.evidence...)
 }
 
+// Reveal — значение алиаса из capabilities.reveal (встроенный компонент
+// получает его в запросе); значение запоминается для маскирования.
+func (d *Dispatcher) Reveal(alias string) (string, error) {
+	if d.Secrets == nil {
+		return "", abi.Errorf(abi.CodeNotSupported, "no vault")
+	}
+	v, err := d.Secrets.Value(alias)
+	if err != nil {
+		return "", abi.Errorf(abi.CodeNotFound, "secret %s: %v", alias, err)
+	}
+	if v != "" {
+		d.mu.Lock()
+		d.used = append(d.used, v)
+		d.mu.Unlock()
+	}
+	return v, nil
+}
+
 // masks — набор маскирования по секретам, подставленным в этом вызове
 // (значения и производные формы, один проход).
 func (d *Dispatcher) masks() *mask.Set {

@@ -15,7 +15,7 @@
 <p class="muted">{{T "Enter it on the gate4.ai sign-in page when Claude.ai / ChatGPT opens it. One-time, valid until %s." (ts $d.ConnectExpires)}}</p></div>{{end}}
 
 <h3>{{T "What it may do"}}</h3>
-{{if $d.FilesHome}}<p class="warn">{{T "Files are open for the whole home folder. Limit them to the folders you need:"}} <a href="{{.Base}}/files">{{T "Files →"}}</a></p>{{end}}
+{{if $d.FilesHome}}<p class="warn">{{T "Files are open for the whole home folder. Limit them to the folders you need:"}} <a href="{{.Base}}/access/files">{{T "Files →"}}</a></p>{{end}}
 {{if $row.Shared}}<p class="help">{{T "These permissions are shared with other agents (%s): a change applies to all of them." $d.Agent.Profile}}</p>{{end}}
 <div class="card">
 {{range $d.Access}}{{$a := .}}<div style="padding:.4rem 0"><b><a href="{{$.Base}}{{pageOf .Conn.Name}}?profile={{$d.Agent.Profile}}">{{.Conn.Title}}</a></b>
@@ -23,7 +23,7 @@
 <input type="hidden" name="profile" value="{{$d.Agent.Profile}}"><input type="hidden" name="connector" value="{{.Connector}}"><input type="hidden" name="class" value="{{.Class}}"><input type="hidden" name="back" value="/agents/{{$d.Name}}">
 <span>{{T .Title}}{{if .Scoped}} <span class="muted">— {{T "in the chosen folders"}}</span>{{end}}{{if eq .Effect "mixed"}} <span class="muted">— {{T "different rules"}}, <a href="{{$.Base}}/policy?profile={{$d.Agent.Profile}}">{{T "see the rules"}}</a></span>{{end}}{{with .Warn}}<br><span class="help">{{T .}}</span>{{end}}</span>
 <span class="seg" role="group" aria-label="{{T .Title}}">{{range (list "allow" "ask" "deny")}}<button name="effect" value="{{.}}" class="{{if eq . $g.Effect}}on{{end}}"{{if eq . $g.Effect}} aria-pressed="true"{{else}} aria-pressed="false"{{end}}>{{effect .}}</button>{{end}}</span></form>{{end}}
-</div>{{else}}<p class="warn">{{T "No access yet — the agent sees no tools."}} <a href="{{.Base}}/browser">{{T "Access →"}}</a></p>{{end}}
+</div>{{else}}<p class="warn">{{T "No access yet — the agent sees no tools."}} <a href="{{.Base}}/access/browser">{{T "Access →"}}</a></p>{{end}}
 <p class="help">{{T "Finer rules (by folder, site, recipient) —"}} <a href="{{.Base}}/policy?profile={{$d.Agent.Profile}}">{{T "rules of this agent"}}</a>.</p></div>
 
 <h3>{{T "Connection"}}</h3>

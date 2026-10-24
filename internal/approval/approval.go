@@ -156,8 +156,8 @@ func (d *Desktop) Asked(id, text string) {
 }
 
 // HandedOff — агент передал страницу браузера человеку (browser.handoff).
-func (d *Desktop) HandedOff(text string) {
-	_ = d.show("gate4.ai: агент ждёт вас в Chrome", text)
+func (d *Desktop) HandedOff(text, _ string) {
+	_ = d.show("gate4.ai: агент ждёт вас в браузере", text)
 }
 
 // PairRequested — агент просит подключения (gate4ai pair): решение — в Web UI.

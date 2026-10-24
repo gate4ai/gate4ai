@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -42,26 +43,93 @@ func FindChrome() (string, error) {
 	return "", errors.New("Chrome not found; set connectors.browser.chrome_path")
 }
 
-// Launch запускает настоящий Chrome с выделенным профилем (не headless): с Chrome 136
-// удалённая отладка не работает с профилем по умолчанию. Порт выбирает Chrome
-// (--remote-debugging-port=0) и пишет в DevToolsActivePort профиля.
+// Launch запускает настоящий Chrome с выделенным профилем: с Chrome 136
+// удалённая отладка не работает с профилем по умолчанию. Окружение — как у
+// воркера; другое окружение (дисплей Xvfb) — LaunchEnv.
 func Launch(ctx context.Context, chrome, profileDir string, extra ...string) (cdpURL string, proc *os.Process, err error) {
+	return LaunchEnv(ctx, chrome, profileDir, nil, extra...)
+}
+
+// LaunchEnv — Launch с дополнительными переменными окружения Chrome (env
+// поверх окружения воркера). Порт отладки Chrome не открывает: CDP идёт по
+// pipe (--remote-debugging-pipe), клиентам адрес отдаёт Mux — 127.0.0.1 с
+// секретным токеном (cdpURL — http://127.0.0.1:<port>/t/<token>). На Windows
+// pipe в Go не передать (exec.Cmd.ExtraFiles) — там прежний порт
+// (--remote-debugging-port=0 на 127.0.0.1).
+func LaunchEnv(ctx context.Context, chrome, profileDir string, env []string, extra ...string) (cdpURL string, proc *os.Process, err error) {
 	if err := os.MkdirAll(profileDir, 0o700); err != nil {
 		return "", nil, err
 	}
-	portFile := filepath.Join(profileDir, "DevToolsActivePort")
-	_ = os.Remove(portFile)
 	args := []string{
 		"--user-data-dir=" + profileDir,
-		"--remote-debugging-port=0",
-		"--remote-debugging-address=127.0.0.1",
 		"--enable-unsafe-extension-debugging", // Stagehand ставит своё расширение через CDP Extensions.loadUnpacked
-		// С портом отладки Chrome выставляет navigator.webdriver = true — прямой признак
+		// С отладкой Chrome выставляет navigator.webdriver = true — прямой признак
 		// автоматизации для антифрода и reCAPTCHA (login.mos.ru: «подозрительная активность»).
 		"--disable-blink-features=AutomationControlled",
 		"--no-first-run", "--no-default-browser-check",
 	}
-	cmd := exec.Command(chrome, append(append(args, extra...), "about:blank")...)
+	if !pipeSupported {
+		return launchPort(ctx, chrome, profileDir, env, append(args, extra...))
+	}
+	chromeIn, toChrome, err := os.Pipe() // fd 3 Chrome: его команды
+	if err != nil {
+		return "", nil, err
+	}
+	fromChrome, chromeOut, err := os.Pipe() // fd 4 Chrome: ответы и события
+	if err != nil {
+		toChrome.Close()
+		chromeIn.Close()
+		return "", nil, err
+	}
+	cmd := exec.Command(chrome, append(append(append(args, "--remote-debugging-pipe"), extra...), "about:blank")...)
+	cmd.ExtraFiles = []*os.File{chromeIn, chromeOut}
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	tail := &tailBuffer{max: 2048}
+	cmd.Stderr = tail
+	ownGroup(cmd)
+	err = cmd.Start()
+	chromeIn.Close()
+	chromeOut.Close()
+	if err != nil {
+		toChrome.Close()
+		fromChrome.Close()
+		return "", nil, fmt.Errorf("launch chrome: %w", err)
+	}
+	sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	m, err := StartMux(sctx, fromChrome, toChrome)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		toChrome.Close()
+		fromChrome.Close()
+		if t := tail.String(); t != "" {
+			return "", nil, fmt.Errorf("chrome did not answer on its DevTools pipe: %w; chrome said: %s%s", err, t, sandboxHint(t))
+		}
+		return "", nil, fmt.Errorf("chrome did not answer on its DevTools pipe: %w", err)
+	}
+	go func() {
+		<-m.Done()
+		toChrome.Close()
+		fromChrome.Close()
+	}()
+	return m.URL(), cmd.Process, nil
+}
+
+// launchPort — запуск с портом отладки (Windows): Chrome выбирает порт сам
+// (--remote-debugging-port=0) и пишет его в DevToolsActivePort профиля.
+func launchPort(ctx context.Context, chrome, profileDir string, env, args []string) (string, *os.Process, error) {
+	portFile := filepath.Join(profileDir, "DevToolsActivePort")
+	_ = os.Remove(portFile)
+	args = append(args, "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1",
+		// Расширение Stagehand подключается со своим origin (chrome-extension://<id>),
+		// id меняется при каждой распаковке: разрешить можно только все origin.
+		"--remote-allow-origins=*")
+	cmd := exec.Command(chrome, append(args, "about:blank")...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	ownGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return "", nil, fmt.Errorf("launch chrome: %w", err)
@@ -87,4 +155,37 @@ func Launch(ctx context.Context, chrome, profileDir string, extra ...string) (cd
 	}
 	_ = cmd.Process.Kill()
 	return "", nil, errors.New("chrome did not report its DevTools port")
+}
+
+// sandboxHint — песочнице Chrome не дали пространства имён (Docker с
+// seccomp по умолчанию, AppArmor Ubuntu 24.04 для Chrome не из пакета).
+func sandboxHint(stderr string) string {
+	if !strings.Contains(stderr, "namespace") && !strings.Contains(stderr, "No usable sandbox") {
+		return ""
+	}
+	return " (the Chrome sandbox needs user namespaces: in Docker run the container with --security-opt seccomp=unconfined or Chrome's seccomp profile; " +
+		"on Ubuntu 24.04 install the google-chrome-stable package, it brings its AppArmor profile)"
+}
+
+// tailBuffer — последние max байт вывода (stderr Chrome для ошибки запуска).
+type tailBuffer struct {
+	mu  sync.Mutex
+	max int
+	b   []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.b = append(t.b, p...)
+	if len(t.b) > t.max {
+		t.b = t.b[len(t.b)-t.max:]
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.TrimSpace(string(t.b))
 }

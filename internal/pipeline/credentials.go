@@ -58,6 +58,8 @@ type Question struct {
 type Handoff struct {
 	Agent   string
 	Message string
+	Session string // сеанс браузера
+	URL     string // ссылка на его просмотр ("" — нет)
 }
 
 // accessor — кто пользуется учёткой: профиль агента корневого действия или

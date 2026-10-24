@@ -26,3 +26,6 @@ func StopChrome(p *os.Process, grace time.Duration) {
 	case <-time.After(grace):
 	}
 }
+
+// pipeSupported — на Windows exec.Cmd.ExtraFiles не работает: порт отладки.
+const pipeSupported = false

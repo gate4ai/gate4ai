@@ -141,6 +141,7 @@
 <div class="sep">{{T "Advanced"}}</div>
 <a href="{{$v.Base}}/settings/internet" class="{{if eq .On "internet"}}on{{end}}">{{T "Internet access"}}</a>
 <a href="{{$v.Base}}/settings/advanced" class="{{if eq .On "advanced"}}on{{end}}">{{T "Store, journal, about"}}</a>
+<a href="{{$v.Base}}/settings/server" class="{{if eq .On "server"}}on{{end}}">{{T "Server"}}</a>
 </nav>{{end}}
 
 {{define "chan_buttons"}}{{$v := .V}}{{with .C}}{{if .On}}<form method="post" action="{{$v.Base}}/channels/{{.Name}}/test" class="inline"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><button class="small" data-busy="{{T "Sending…"}}">{{T "Test"}}</button></form>

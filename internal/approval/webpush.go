@@ -95,8 +95,8 @@ func (w *WebPush) Notify(a *state.Approval) {
 func (w *WebPush) Resolved(*state.Approval) {}
 
 // HandedOff — агент передал страницу браузера человеку (browser.handoff).
-func (w *WebPush) HandedOff(text string) {
-	w.sendAll(Message{Title: "gate4.ai: агент ждёт вас в Chrome", Body: text, URL: "/approvals#handoffs"})
+func (w *WebPush) HandedOff(text, path string) {
+	w.sendAll(Message{Title: "gate4.ai: агент ждёт вас в браузере", Body: text, URL: path})
 }
 
 // Denied — отказ политикой: в push не отправляем (шумно).

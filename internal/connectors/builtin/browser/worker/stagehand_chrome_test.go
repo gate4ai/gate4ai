@@ -40,7 +40,7 @@ func TestStagehandRealChrome(t *testing.T) {
 	os.WriteFile(wrapper, []byte("#!/bin/sh\nexec '"+chrome+"' --headless=new --disable-gpu \"$@\"\n"), 0o755)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	cdpURL, proc, err := Launch(ctx, wrapper, filepath.Join(dir, "profile"), chromeFlags(Settings{Engine: "stagehand"})...)
+	cdpURL, proc, err := Launch(ctx, wrapper, filepath.Join(dir, "profile"))
 	if err != nil {
 		t.Skip("chrome did not start:", err)
 	}

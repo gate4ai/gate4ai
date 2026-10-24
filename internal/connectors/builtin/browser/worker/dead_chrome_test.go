@@ -25,8 +25,8 @@ func TestClosedRealChrome(t *testing.T) {
 	wrapper := filepath.Join(dir, "chrome")
 	os.WriteFile(wrapper, []byte("#!/bin/sh\nexec '"+chrome+"' --headless=new --disable-gpu \"$@\"\n"), 0o755)
 	var procs []*os.Process
-	svc := &Service{NewEngine: DefaultEngine, Launch: func(ctx context.Context, c, p string, extra ...string) (string, *os.Process, error) {
-		u, proc, err := Launch(ctx, c, p, extra...)
+	svc := &Service{NewEngine: DefaultEngine, Launch: func(ctx context.Context, c, p string, env []string, extra ...string) (string, *os.Process, error) {
+		u, proc, err := LaunchEnv(ctx, c, p, env, extra...)
 		if proc != nil {
 			procs = append(procs, proc)
 		}

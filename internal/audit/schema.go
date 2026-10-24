@@ -4,10 +4,11 @@ package audit
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/gate4ai/gate4ai/internal/platform/sqlschema"
 )
 
 // Схема журнала версионируется PRAGMA user_version; миграции упорядочены и
@@ -69,26 +70,13 @@ CREATE TABLE IF NOT EXISTS checkpoints(
 var SchemaVersion = len(migrations)
 
 // ErrSchemaTooNew — журнал записан более новой версией gate4ai.
-var ErrSchemaTooNew = errors.New("journal was written by a newer gate4ai")
+var ErrSchemaTooNew = sqlschema.ErrTooNew
 
-// addColumn добавляет колонку, если её ещё нет (журналы до версионирования
-// различаются набором колонок).
 func addColumn(tx *sql.Tx, table, col, def string) error {
-	var n int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, table, col).Scan(&n); err != nil || n > 0 {
-		return err
-	}
-	_, err := tx.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + col + ` ` + def)
-	return err
+	return sqlschema.AddColumn(tx, table, col, def)
 }
 
-func schemaVersion(q interface {
-	QueryRow(string, ...any) *sql.Row
-}) (int, error) {
-	var v int
-	err := q.QueryRow(`PRAGMA user_version`).Scan(&v)
-	return v, err
-}
+func schemaVersion(q sqlschema.Querier) (int, error) { return sqlschema.Version(q) }
 
 // migrate приводит схему к SchemaVersion и возвращает версию, с которой
 // начинали. Непустой журнал перед миграцией копируется рядом

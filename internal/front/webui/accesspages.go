@@ -27,9 +27,9 @@ type accessRow struct {
 func pageOf(name string) string {
 	switch name {
 	case "browser":
-		return "/browser"
+		return "/access/browser"
 	case "files":
-		return "/files"
+		return "/access/files"
 	}
 	return "/connectors/" + url.PathEscape(name)
 }
@@ -136,7 +136,7 @@ func (u *UI) connectorRows(l string, cfg *config.Config, name string, m manifest
 func (u *UI) setAccess(kind string) func(w http.ResponseWriter, r *http.Request) map[string]any {
 	return func(w http.ResponseWriter, r *http.Request) map[string]any {
 		f := r.PostForm
-		back := or(f.Get("back"), map[string]string{"sites": "/browser", "folders": "/files"}[kind])
+		back := or(f.Get("back"), map[string]string{"sites": "/access/browser", "folders": "/access/files"}[kind])
 		value, mode := strings.TrimSpace(f.Get("value")), f.Get("access")
 		if f.Get("op") == "remove" {
 			mode = ""

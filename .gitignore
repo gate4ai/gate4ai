@@ -5,4 +5,5 @@
 *.g4c
 *.wasm
 /dist/
+# Случайная сборка браузера в корне (go build ./internal/connectors/builtin/browser)
 /browser

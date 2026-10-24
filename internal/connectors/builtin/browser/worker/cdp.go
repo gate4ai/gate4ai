@@ -37,6 +37,9 @@ type CDP struct {
 	// onEvent — события подключения к браузеру (без вкладки): загрузки.
 	onEvent func(cdpMsg)
 	catch   *responseCatch // перехват ответов (download --response_url_contains)
+	// hook — события вкладки до общей очереди (просмотр: кадры screencast);
+	// true — событие обработано.
+	hook func(cdpMsg) bool
 }
 
 type cdpMsg struct {
@@ -75,10 +78,11 @@ func DialCDP(ctx context.Context, httpURL string) (*CDP, error) {
 
 // NewTab — ещё одна вкладка того же Chrome (тот же профиль и cookie) со своим
 // подключением; Close закрывает её. background — в фоне (временная вкладка
-// одноразового вызова: страница сессии остаётся впереди), иначе — впереди
-// (вкладка сеанса: человек видит, что в ней происходит).
+// одноразового вызова: страница сессии остаётся впереди), иначе — своё окно
+// (сеанс: человек видит, что в нём происходит, а Chrome рисует его, даже
+// когда впереди другой сеанс, — кадры просмотра идут у всех сеансов сразу).
 func (c *CDP) NewTab(ctx context.Context, background bool) (Engine, error) {
-	return dialCDP(ctx, c.http, tabOpts{new: true, background: background})
+	return dialCDP(ctx, c.http, tabOpts{new: true, background: background, window: !background})
 }
 
 // AttachCDP — подключение к уже открытой вкладке targetID (её ведёт другой
@@ -91,8 +95,9 @@ func AttachCDP(ctx context.Context, httpURL, targetID string) (*CDP, error) {
 // tabOpts — к какой вкладке подключаться: new — новая (background — в фоне),
 // target — к этой; иначе — пустая стартовая вкладка Chrome или новая.
 type tabOpts struct {
-	new, background bool
-	target          string
+	new, background, window bool
+	target                  string
+	hook                    func(cdpMsg) bool // CDP.hook
 }
 
 // dialCDP — подключение к вкладке.
@@ -107,7 +112,7 @@ func dialCDP(ctx context.Context, httpURL string, o tabOpts) (*CDP, error) {
 	}
 	conn.SetReadLimit(64 << 20)
 	cctx, cancel := context.WithCancel(context.Background())
-	c := &CDP{conn: conn, pending: map[int64]chan cdpMsg{}, events: make(chan cdpMsg, 256), ctx: cctx, cancel: cancel, http: httpURL, target: o.target}
+	c := &CDP{conn: conn, pending: map[int64]chan cdpMsg{}, events: make(chan cdpMsg, 256), ctx: cctx, cancel: cancel, http: httpURL, target: o.target, hook: o.hook}
 	c.dialogs.answer = func(ctx context.Context, accept bool, text string) error {
 		p := map[string]any{"accept": accept}
 		if text != "" {
@@ -138,7 +143,7 @@ func dialCDP(ctx context.Context, httpURL string, o tabOpts) (*CDP, error) {
 		var t struct {
 			TargetID string `json:"targetId"`
 		}
-		if err := c.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank", "background": o.background}, &t); err != nil {
+		if err := c.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank", "background": o.background, "newWindow": o.window}, &t); err != nil {
 			c.Close()
 			return nil, err
 		}
@@ -249,6 +254,9 @@ func (c *CDP) readLoop() {
 			if m.SessionID == c.session {
 				c.dialogs.event(m)
 			}
+			continue
+		}
+		if c.hook != nil && m.SessionID == c.session && c.hook(m) {
 			continue
 		}
 		select {
@@ -460,6 +468,9 @@ func (c *CDP) Extract(context.Context, string) (any, error) {
 func (c *CDP) Ping(ctx context.Context) error {
 	return c.call(ctx, "", "Browser.getVersion", nil, nil)
 }
+
+// TargetID — id цели CDP вкладки (просмотр сеанса подключается к ней).
+func (c *CDP) TargetID() string { return c.target }
 
 // Activate — вкладка впереди (handoff: человек видит её).
 func (c *CDP) Activate(ctx context.Context) error {

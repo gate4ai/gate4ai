@@ -33,7 +33,7 @@ func (shopConn) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, er
 func TestAccessPages(t *testing.T) {
 	u, d, _, base := setupCfg(t, "access:\n  sites: [{ domain: \"*\", access: ask }]\n  folders: [{ path: \"~/Documents\", access: ask }]\nprofiles:\n  p:\n    connectors: [notes, browser, files]\n")
 	_, _, post, get := loginAs(t, u, base)
-	p := get("/browser")
+	p := get("/access/browser")
 	if !strings.Contains(p, "<code>*</code>") || !strings.Contains(p, `<option value="ask" selected>`) || !strings.Contains(p, `action="/access/sites"`) {
 		t.Fatal("browser page", p)
 	}
@@ -46,14 +46,14 @@ func TestAccessPages(t *testing.T) {
 	if len(d.Config.Current().Access.Sites) != 2 {
 		t.Fatal(d.Config.Current().Access.Sites)
 	}
-	if p := get("/browser"); !strings.Contains(p, "<code>app.example.org</code>") {
+	if p := get("/access/browser"); !strings.Contains(p, "<code>app.example.org</code>") {
 		t.Fatal(p)
 	}
 	post("/access/folders", url.Values{"value": {"~/notes"}, "access": {"append"}})
 	if f, ok := access.MatchFolder(d.Config.Current().Access.Folders, "~/notes/a.md", d.Pipeline.Home); !ok || f.Access != access.Append {
 		t.Fatal(d.Config.Current().Access.Folders)
 	}
-	if p := get("/files"); !strings.Contains(p, "<code>~/notes</code>") || !strings.Contains(p, "Скрытые файлы") {
+	if p := get("/access/files"); !strings.Contains(p, "<code>~/notes</code>") || !strings.Contains(p, "Скрытые файлы") {
 		t.Fatal("files page", p)
 	}
 	// Неверные строки — ошибка, список не меняется.
@@ -62,12 +62,12 @@ func TestAccessPages(t *testing.T) {
 	if len(d.Config.Current().Access.Folders) != 2 || len(d.Config.Current().Access.Sites) != 2 {
 		t.Fatal(d.Config.Current().Access)
 	}
-	// Браузер и Файлы — не в магазине; /connectors/browser ведёт на /browser.
+	// Браузер и Файлы — не в магазине; /connectors/browser ведёт на /access/browser.
 	if p := get("/connectors"); strings.Contains(p, `/connectors/browser"`) || strings.Contains(p, `/connectors/files"`) {
 		t.Fatal("builtins listed as store connectors", p)
 	}
 	if p := get("/connectors/files"); !strings.Contains(p, `action="/access/folders"`) {
-		t.Fatal("redirect to /files", p)
+		t.Fatal("redirect to /access/files", p)
 	}
 }
 

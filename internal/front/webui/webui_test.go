@@ -321,10 +321,13 @@ func TestTrayContract(t *testing.T) {
 	if err := tr.Decide(ctx, p.ID, true); err != nil || n.n != 1 {
 		t.Fatal(err, n.n)
 	}
-	if st := tr.Fetch(ctx); st == nil || len(st.Pending) != 0 || tray.MenuKey(st) != "ok" {
+	if st := tr.Fetch(ctx); st == nil || len(st.Pending) != 0 || tray.MenuKey(st) != "ok,b0/0" || tray.BrowserLine(st) != "" {
 		t.Fatalf("%+v", st)
 	}
 	if u, err := tr.LoginURL(ctx); err != nil || !strings.Contains(u, "/login?t=") {
+		t.Fatal(u, err)
+	}
+	if u, err := tr.LoginURLTo(ctx, "/browser"); err != nil || !strings.Contains(u, "&next=%2Fbrowser") {
 		t.Fatal(u, err)
 	}
 	// Агентский сокет трею ничего не отдаёт.

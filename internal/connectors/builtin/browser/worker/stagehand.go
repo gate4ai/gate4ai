@@ -146,21 +146,58 @@ func (s *Stagehand) Extract(ctx context.Context, instruction string) (any, error
 }
 
 // NewTab — ещё одна вкладка того же Chrome (тот же профиль и cookie) на
-// общем подключении SDK; Close закрывает только её. background SDK не
-// поддерживает: вкладка открывается впереди.
-func (s *Stagehand) NewTab(ctx context.Context, _ bool) (Engine, error) {
+// общем подключении SDK; Close закрывает только её. Сеанс (не background) —
+// своё окно, как у CDP: окно создаёт прямое подключение (у SDK такого
+// параметра нет), страницу SDK находит по id цели. background SDK не
+// поддерживает: временная вкладка открывается впереди.
+func (s *Stagehand) NewTab(ctx context.Context, background bool) (Engine, error) {
 	bc, err := s.browser.Context()
 	if err != nil {
 		return nil, err
 	}
-	p, err := bc.NewPage(ctx, "about:blank")
-	if err != nil {
-		return nil, fmt.Errorf("stagehand: new tab: %w", err)
+	var p *stagehand.Page
+	if !background && s.aux != nil {
+		p = s.windowPage(ctx, bc)
+	}
+	if p == nil {
+		if p, err = bc.NewPage(ctx, "about:blank"); err != nil {
+			return nil, fmt.Errorf("stagehand: new tab: %w", err)
+		}
 	}
 	t := &Stagehand{browser: s.browser, client: s.client, page: p, tab: true, http: s.http}
 	t.attach(ctx)
 	return t, nil
 }
+
+// windowPage — новое окно Chrome и его страница в SDK (nil — не вышло: тогда вкладка).
+func (s *Stagehand) windowPage(ctx context.Context, bc *stagehand.BrowserContext) *stagehand.Page {
+	var t struct {
+		TargetID string `json:"targetId"`
+	}
+	if err := s.aux.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank", "newWindow": true}, &t); err != nil {
+		return nil
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		pages, err := bc.Pages(ctx)
+		if err == nil {
+			for _, p := range pages {
+				if p.PageID() == t.TargetID {
+					return p
+				}
+			}
+		}
+		if wait(ctx, 50*time.Millisecond) != nil {
+			break
+		}
+	}
+	// SDK окно не увидел: закрыть, чтобы не висело пустым.
+	_ = s.aux.call(context.Background(), "", "Target.closeTarget", map[string]any{"targetId": t.TargetID}, nil)
+	return nil
+}
+
+// TargetID — id цели CDP вкладки (её id страницы в SDK).
+func (s *Stagehand) TargetID() string { return s.page.PageID() }
 
 // CloseTimeout — сколько ждать закрытия вкладки или SDK.
 var CloseTimeout = 5 * time.Second

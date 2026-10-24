@@ -15,6 +15,7 @@ package webui
 
 import (
 	"cmp"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -37,6 +38,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
+	"github.com/gate4ai/gate4ai/internal/platform/browserenv"
 	"github.com/gate4ai/gate4ai/internal/relayclient"
 	"github.com/gate4ai/gate4ai/internal/state"
 )
@@ -95,7 +97,7 @@ func tplIn(l string) *template.Template {
 var titles = map[string]string{"overview": "Home", "approvals": "Approvals", "telegram": "Telegram", "agents": "Agents", "agent": "Agent",
 	"agent_new": "New agent", "setup": "Getting started", "connectors": "Access", "connector": "Connector", "policy": "Rules", "rule": "Rule", "templates": "Ready-made rules",
 	"policy_yaml": "YAML", "journal": "Journal", "receipt": "Journal entry", "vault": "Passwords and accounts", "settings": "Settings", "relay": "Internet access",
-	"remote_only": "Only on this computer"}
+	"remote_only": "Only on this computer", "browser": "Browser", "browser_view": "Browser session", "server": "Server"}
 
 // or — первое непустое.
 var or = cmp.Or[string]
@@ -163,6 +165,10 @@ type UI struct {
 	Confirm LoginConfirmer
 	// DefaultLang — язык, если браузер не выбрал (переключатель, Accept-Language); "" — английский.
 	DefaultLang string
+	// BrowserEnv — проверка Chrome и Xvfb для раздела «Браузер» (nil — этот компьютер).
+	BrowserEnv func() browserenv.Sys
+	// Server — окружение страницы «Сервер» (nil — этот компьютер).
+	Server func() ServerEnv
 
 	mu       sync.Mutex
 	logins   map[string]login // одноразовые токены входа
@@ -188,6 +194,7 @@ type session struct {
 	expires   time.Time
 	remote    bool
 	protected bool // вход прошёл защиту (пароль и/или Telegram)
+	telegram  bool // вход подтверждён в Telegram
 }
 
 // mount — где обслуживается Web UI: локально (loopback) или удалённо (/ui/ на
@@ -279,7 +286,8 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		var req struct {
-			Remote bool `json:"remote"`
+			Remote bool   `json:"remote"`
+			Next   string `json:"next"` // после входа — эта страница (просмотр сеанса браузера)
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		link := u.LoginURL()
@@ -294,6 +302,9 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": err.Error()}})
 				return
 			}
+		}
+		if n := safeNext(req.Next); n != "" {
+			link += "&next=" + url.QueryEscape(n)
 		}
 		// requires — что ещё нужно для входа по ссылке (пароль, подтверждение в Telegram);
 		// link_required — нужна ли ссылка вообще (иначе вход и по постоянному адресу).
@@ -315,8 +326,18 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		}
 		_, n := u.D.Config.CurrentRaw()
 		seq, _, _ := u.D.Journal.Head()
+		bctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		bs, _ := u.D.BrowserStatus(bctx)
+		cancel()
+		waiting := 0
+		for _, s := range bs.Sessions {
+			if s.State == "waiting" {
+				waiting++
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pending": items, "config_version": n, "receipts": seq})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pending": items, "config_version": n, "receipts": seq,
+			"browser": len(bs.Sessions), "browser_waiting": waiting})
 	})
 }
 
@@ -369,6 +390,13 @@ func (u *UI) handler(m mount) http.Handler {
 	mux.HandleFunc("GET "+b+"/approvals/live", u.livePending(m))
 	get("/journal", u.journal)
 	get("/journal/{hash}", u.receipt)
+	get("/settings/server", u.serverPage(m)) // и удалённо: только чтение
+	get("/browser", u.browserList)
+	get("/browser/{id}", u.browserView(m))
+	mux.HandleFunc("GET "+b+"/browser/{id}/ws", u.browserWS(m))
+	post("/browser/{id}/control", u.browserControl(m))
+	post("/browser/{id}/close", u.browserClose)
+	post("/browser/{id}/handoff", u.browserHandoff)
 	post("/approvals/{id}", u.decide(m))
 	post("/questions/{id}", u.answer)
 	post("/push/subscribe", u.pushSubscribe(m))
@@ -393,8 +421,8 @@ func (u *UI) handler(m mount) http.Handler {
 	}
 	localPage("/agents", u.agents)
 	localPage("/agents/{name}", u.agentPage)
-	localPage("/browser", u.builtinPage("browser"))
-	localPage("/files", u.builtinPage("files"))
+	localPage("/access/browser", u.builtinPage("browser"))
+	localPage("/access/files", u.builtinPage("files"))
 	localPage("/connectors", u.connectorsPage)
 	localPage("/connectors/{name}", u.connectorPage)
 	localPage("/policy", u.policyPage)
@@ -521,11 +549,49 @@ func (u *UI) guard(m mount, h http.Handler) http.Handler {
 	})
 }
 
+// Куда вернуться после входа (cookie <сессия>_next): только раздел «Браузер»
+// и просмотр сеанса — ссылка view_url, которую агент дал человеку.
+
+// safeNext — адрес возврата: только /browser/<id> этого Web UI.
+func safeNext(p string) string {
+	if p == "/browser" {
+		return p
+	}
+	id, ok := strings.CutPrefix(p, "/browser/")
+	if !ok || id == "" || strings.ContainsAny(id, "/\\?#%") {
+		return ""
+	}
+	return p
+}
+
+func setNext(w http.ResponseWriter, m mount, p string) {
+	if p = safeNext(p); p != "" {
+		http.SetCookie(w, &http.Cookie{Name: m.cookie() + "_next", Value: p, Path: m.base + "/", HttpOnly: true, Secure: m.remote,
+			SameSite: http.SameSiteLaxMode, MaxAge: 600})
+	}
+}
+
+// takeNext — адрес после входа: из ссылки (next) или cookie, иначе «/».
+func (u *UI) takeNext(w http.ResponseWriter, r *http.Request, m mount, fromLink string) string {
+	p := safeNext(fromLink)
+	if c, err := r.Cookie(m.cookie() + "_next"); err == nil {
+		if p == "" {
+			p = safeNext(c.Value)
+		}
+		http.SetCookie(w, &http.Cookie{Name: m.cookie() + "_next", Value: "", Path: m.base + "/", MaxAge: -1, Secure: m.remote})
+	}
+	if p == "" {
+		return "/"
+	}
+	return p
+}
+
 // login — одноразовая ссылка. Без защиты она сразу даёт сессию; с защитой —
 // попытку входа (cookie), которой нужны пароль и/или подтверждение в Telegram.
 func (u *UI) login(m mount) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if t := r.URL.Query().Get("t"); t != "" {
+			setNext(w, m, r.URL.Query().Get("next"))
 			u.mu.Lock()
 			l, ok := u.logins[t]
 			if ok && l.remote == m.remote {
@@ -536,8 +602,8 @@ func (u *UI) login(m mount) http.HandlerFunc {
 			if valid {
 				p := u.Protection()
 				if !p.Extra() {
-					u.startSession(w, m, false)
-					sameSiteRedirect(w, m.base+"/")
+					u.startSession(w, m, false, false)
+					sameSiteRedirect(w, m.base+u.takeNext(w, r, m, r.URL.Query().Get("next")))
 					return
 				}
 				u.mu.Lock()
@@ -593,11 +659,13 @@ func (v view) Section() string {
 		return "home"
 	case "agents", "agent", "agent_new":
 		return "agents"
-	case "connectors", "connector", "browser", "files", "builtin", "policy", "rule", "templates", "policy_yaml":
+	case "connectors", "connector", "builtin", "policy", "rule", "templates", "policy_yaml":
 		return "access"
 	case "journal", "receipt":
 		return "journal"
-	case "settings", "relay", "vault":
+	case "browser", "browser_view":
+		return "browser"
+	case "settings", "relay", "vault", "server":
 		return "settings"
 	}
 	return ""
@@ -661,6 +729,8 @@ func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, erro
 	return func(w http.ResponseWriter, r *http.Request) {
 		sid, s, ok := u.session(m, r)
 		if !ok {
+			// Ссылка на сеанс браузера без входа: после входа — на неё же.
+			setNext(w, m, strings.TrimPrefix(r.URL.Path, m.base))
 			u.loginPage(w, r, m)
 			return
 		}
