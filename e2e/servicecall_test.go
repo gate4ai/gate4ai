@@ -43,7 +43,7 @@ profiles:
   assistant:
     connectors: [pagereader]
 connectors:
-  pagereader: { sites: ["127.0.0.1"] }
+  pagereader: { domains: ["127.0.0.1"] }
   browser:
     engine: cdp
     chrome_path: %q

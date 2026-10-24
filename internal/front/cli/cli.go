@@ -191,7 +191,7 @@ Owner commands (local socket):
   gate4ai policy show | set <file> [-m comment] | versions | rollback <n> | test --agent a --action x [--args json] [--file draft.yaml]
   gate4ai approvals [list] [--table|--json] | approve <id> | reject <id> | questions | answer <id> (value from stdin)
   gate4ai vault list | set <alias> [--from-env VAR] (asks with hidden input; or the value from stdin) | rm <alias>
-  gate4ai sites [allow | remove <site>...]   sites agents may open in the browser
+  gate4ai access [sites | folders [set <site|folder> <access> | remove <site|folder>]]   the Browser and Files access lists
   gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
   gate4ai connectors list | install <file.g4c | name[@version] | source folder> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | logs <name> [--limit n] [--since 10m] | refresh
   gate4ai connectors new <name> --site <domain> [-o folder]   a connector over the browser to start from (offline)
@@ -211,7 +211,7 @@ Output: JSON {"status": "ok" | "denied" | "pending" | "error" | "verification_fa
 
 // commands — встроенные команды (остальное первое слово — имя коннектора).
 var commands = []string{"help", "version", "tools", "status", "skill", "mcp", "pair", "daemon", "service", "log", "show", "export",
-	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "relay", "connectors", "registry", "contract", "fixture", "ui", "run", "doctor", "egress"}
+	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "access", "relay", "connectors", "registry", "contract", "fixture", "ui", "run", "doctor", "egress"}
 
 // Run — точка входа CLI.
 func Run(ctx context.Context, e *Env, args []string) int {
@@ -299,6 +299,8 @@ func Run(ctx context.Context, e *Env, args []string) int {
 		return e.fixture(rest)
 	case "sites":
 		return e.sites(ctx, rest)
+	case "access":
+		return e.accessCmd(ctx, rest)
 	case "ui":
 		return e.ui(ctx, rest)
 	case "run":

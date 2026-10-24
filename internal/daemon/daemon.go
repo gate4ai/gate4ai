@@ -32,6 +32,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 	"github.com/gate4ai/gate4ai/internal/secrets/vault"
 	"github.com/gate4ai/gate4ai/internal/state"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/connector"
 	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -76,6 +77,7 @@ type Daemon struct {
 
 	mu        sync.Mutex
 	installMu sync.Mutex    // установка коннекторов
+	userHome  string        // домашний каталог для "~" в путях
 	stop      chan struct{} // закрывается RequestStop
 	stopOnce  sync.Once
 	notifiers *MultiNotifier
@@ -183,6 +185,7 @@ func New(opt Options) (*Daemon, error) {
 	}
 	d.Pipeline = pipeline.New(d.Registry, d.State, d.Journal, d.Vault, d.notifiers, eng)
 	d.Pipeline.Log = opt.Log
+	d.Pipeline.Home = d.userHome
 	d.Pipeline.Describe = map[string]func(string, map[string]any) (string, error){SelfConnector: d.describeSelf}
 	d.Pipeline.EndCall = d.endCall
 	d.Pipeline.ConnectorLog = d.devLog
@@ -415,11 +418,18 @@ func (d *Daemon) startWasm(opt Options) error {
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
+	d.userHome = home
 	kv := wasm.KVDir(filepath.Join(d.ConnectorsDir, "data"))
 	e, err := wasm.NewEngine(filepath.Join(opt.Home, "cache", "wasm"), wasm.Services{
 		Secrets: vaultSecrets{d.Vault},
 		KV:      func(name string) hostfuncs.KV { return kv(name) },
-		Router:  d, Log: d.Log, Home: home, Mask: d.Vault.MaskString})
+		Router:  d, Log: d.Log, Home: home, Mask: d.Vault.MaskString,
+		Folders: func() []access.Folder {
+			if d.Pipeline == nil {
+				return []access.Folder{}
+			}
+			return d.Pipeline.GlobalFolders()
+		}})
 	if err != nil {
 		return err
 	}

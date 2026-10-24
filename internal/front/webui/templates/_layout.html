@@ -128,8 +128,10 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
     <input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}">
     <button class="primary" name="decision" value="approve">{{T "Allow"}}</button>
     {{if and (not $v.Remote) .Always}}<button name="decision" value="approve_always">{{.Always}}</button>{{end}}
+    {{if and (not $v.Remote) .AddAllow}}<button name="decision" value="approve_access">{{.AddAllow}}</button>{{end}}
     <span class="sp"></span>
     <button class="danger" name="decision" value="reject">{{T "Deny"}}</button>
+    {{if and (not $v.Remote) .AddDeny}}<button class="danger" name="decision" value="reject_access">{{.AddDeny}}</button>{{end}}
   </form>
   <details><summary>{{T "Technical details"}}</summary><p class="help"><code>{{.Action}}</code> · {{class .Class}} · #{{short .PreviewHash}} · {{T "until"}} {{ts .Expires}}{{if .Decision.RuleIDs}} · {{T "rule"}} {{join .Decision.RuleIDs ", "}}{{end}}</p>
   {{with .Desc}}<p class="help">{{.}}</p>{{end}}

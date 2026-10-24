@@ -33,17 +33,49 @@ func HostOf(raw string) string {
 }
 
 // HostMatches — хост совпадает с шаблоном: "example.com" — точно,
-// "*.example.com" — только поддомены (не сам example.com).
+// "*.example.com" — поддомены и сам example.com, "*" — любой хост; "*" в
+// метке — любые символы метки (shop-*.example.com).
 func HostMatches(host, pattern string) bool {
 	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 	p := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(pattern)), ".")
 	if host == "" || p == "" {
 		return false
 	}
-	if strings.HasPrefix(p, "*.") {
-		return strings.HasSuffix(host, p[1:]) && len(host) > len(p)-1
+	if p == "*" {
+		return true
 	}
-	return host == p
+	if strings.HasPrefix(p, "*.") {
+		base := p[2:]
+		if host == base {
+			return true
+		}
+		p = "*" + p[1:]
+	}
+	if !strings.Contains(p, "*") {
+		return host == p
+	}
+	return globHost(host, p)
+}
+
+// globHost — шаблон с "*": "*" — любые символы, в том числе точки.
+func globHost(host, p string) bool {
+	parts := strings.Split(p, "*")
+	if !strings.HasPrefix(host, parts[0]) {
+		return false
+	}
+	host = host[len(parts[0]):]
+	for i := 1; i < len(parts); i++ {
+		part := parts[i]
+		if i == len(parts)-1 {
+			return strings.HasSuffix(host, part)
+		}
+		j := strings.Index(host, part)
+		if j < 0 {
+			return false
+		}
+		host = host[j+len(part):]
+	}
+	return true
 }
 
 // Matches — хост URL совпадает с одним из шаблонов.
@@ -57,6 +89,8 @@ func Matches(raw string, patterns []string) bool {
 type Sites struct {
 	Blocklist bool
 	Domains   []string
+	// Blocked — сайты, закрытые в любом режиме (списки доступа gate4.ai).
+	Blocked []string
 }
 
 // Allows — URL разрешён. Не http(s)-адрес не разрешён ни в каком режиме;
@@ -64,7 +98,7 @@ type Sites struct {
 // IP loopback, частные и link-local) — их можно разрешить только белым списком.
 func (s Sites) Allows(raw string) bool {
 	h := HostOf(raw)
-	if h == "" {
+	if h == "" || Matches(raw, s.Blocked) {
 		return false
 	}
 	if !s.Blocklist {

@@ -55,6 +55,9 @@ func (d *Daemon) reloadConnector(name string, removed bool) error {
 		if err := d.askInDefault(name); err != nil {
 			d.Log.Warn("connector not added to profile "+DefaultProfile, "connector", name, "err", err)
 		}
+		if err := d.ensureConnectorAccess(name); err != nil {
+			d.Log.Warn("connector sites and folders not written to the policy", "connector", name, "err", err)
+		}
 	}
 	// Политика — из текущей версии по новому каталогу, тем же путём, что и
 	// смены версий (по порядку с ними). Если она ссылается на аргументы

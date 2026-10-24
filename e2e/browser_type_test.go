@@ -65,9 +65,10 @@ profiles:
     connectors: [browser]
     rules:
       - { id: browser-ok, action: "browser.*", effect: allow }
+access:
+  sites: [{ domain: "127.0.0.1", access: allow }]
 connectors:
   browser:
-    allowed_domains: ["127.0.0.1"]
     engine: cdp
     chrome_path: %q
     profile_dir: %q

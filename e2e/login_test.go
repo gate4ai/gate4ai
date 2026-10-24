@@ -103,7 +103,7 @@ profiles:
       - { id: login-ok, action: browser.login, effect: allow } # browser.* вход не покрывает
       - { id: cabinet-ok, action: pagereader.cabinet, effect: allow }
 connectors:
-  pagereader: { sites: ["127.0.0.1"], login_site: %q, credentials: { site: "@site" } }
+  pagereader: { domains: ["127.0.0.1"], login_site: %q, credentials: { site: "@site" } }
   browser:
     allowed_domains: ["127.0.0.1"]
     engine: cdp

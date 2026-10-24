@@ -274,7 +274,7 @@ func TestDomainMatches(t *testing.T) {
 	cases := map[string]bool{
 		"https://www.example.com/":            true,
 		"https://login.example.com:443/login": true,
-		"https://example.com/":                false,
+		"https://example.com/":                true, // *.example.com покрывает и example.com
 		"https://evilexample.com/":            false,
 		"https://example.com.evil.test/":      false,
 		"https://APP.Example.ORG/pay":         true,

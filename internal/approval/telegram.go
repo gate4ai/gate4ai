@@ -162,6 +162,9 @@ type Telegram struct {
 	Answer func(id, value string) error
 	// Pairs — решение по запросу агента на подключение (gate4ai pair).
 	Pairs func(ctx context.Context, id string, approve bool) error
+	// Access — добавить сайт или папку запроса в списки доступа (разрешённые
+	// или запрещённые) перед решением; nil — кнопок нет.
+	Access func(ctx context.Context, id string, allow bool) (string, error)
 
 	mu       sync.Mutex
 	question string           // вопрос с вводом, ждущий ответа (последний)
@@ -308,6 +311,12 @@ func (t *Telegram) Notify(a *state.Approval) {
 		// Самонастройка: одобрение — только в Web UI, где видны все правки (E.5).
 		kb[0] = kb[0][1:]
 		text += "\n" + WebOnlyHint
+	} else if _, value, ok := strings.Cut(a.Decision.Scope, ":"); ok && value != "" && t.Access != nil {
+		// Сайт или папка из списков доступа: добавить строку и решить.
+		kb = append(kb, []Button{
+			{Text: "➕ В разрешённые: " + value, Data: "ya:" + a.ID + ":" + sig(a)},
+			{Text: "⛔ В запрещённые", Data: "nd:" + a.ID + ":" + sig(a)},
+		})
 	}
 	ctx, cancel := botCtx(context.Background())
 	defer cancel()
@@ -588,19 +597,30 @@ func (t *Telegram) callback(ctx context.Context, cbID, data string) {
 			return
 		}
 		_ = t.API.AnswerCallback(ctx, cbID, "")
-	case "y", "n":
-		if parts[0] == "y" && WebOnly(a.Action) {
+	case "y", "n", "ya", "nd":
+		approve := parts[0] == "y" || parts[0] == "ya"
+		if approve && WebOnly(a.Action) {
 			_ = t.API.AnswerCallback(ctx, cbID, WebOnlyHint)
 			return
 		}
 		who := "tg:" + strconv.FormatInt(t.OwnerID, 10)
 		var err error
+		if parts[0] == "ya" || parts[0] == "nd" {
+			if t.Access == nil {
+				_ = t.API.AnswerCallback(ctx, cbID, "Списки доступа недоступны")
+				return
+			}
+			if _, err := t.Access(ctx, a.ID, approve); err != nil {
+				_ = t.API.AnswerCallback(ctx, cbID, "Ошибка: "+err.Error())
+				return
+			}
+		}
 		if ad, ok := t.Decider.(AsyncDecider); ok {
 			// Действие исполняется в фоне: цикл опроса не ждёт его и успевает
 			// принять другие нажатия и ответы (код для входа на сайт).
-			err = ad.DecideAsync(ctx, a.ID, parts[0] == "y", "telegram", who)
+			err = ad.DecideAsync(ctx, a.ID, approve, "telegram", who)
 		} else {
-			_, err = t.Decider.Decide(ctx, a.ID, parts[0] == "y", "telegram", who)
+			_, err = t.Decider.Decide(ctx, a.ID, approve, "telegram", who)
 		}
 		switch {
 		case errors.Is(err, state.ErrAlreadyDecided):

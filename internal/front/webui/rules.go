@@ -5,7 +5,6 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/daemon"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 )
 
 // Конструктор правил: условия из блоков → CEL (спецификация, «Как
@@ -331,7 +331,7 @@ var Templates = []Template{
 			return nil
 		}},
 	{ID: "notes-folder", Title: "Notes in a folder", Needs: []string{"files.read"},
-		Description: "Reading and appending in the folder go without asking, overwriting asks you, everything outside the folder is denied. The folder is added to the Files settings.",
+		Description: "Reading and appending in the folder go without asking, overwriting asks you, everything outside the folder is denied. The folder goes to the Files access list as append.",
 		Params:      []TemplateParam{{Name: "folder", Label: "Folder", Placeholder: "~/Documents/notes"}},
 		Apply: func(c *config.Config, profile string, p map[string]string, tools []daemon.Tool) error {
 			dir := strings.TrimSuffix(strings.TrimSpace(p["folder"]), "/")
@@ -352,18 +352,13 @@ var Templates = []Template{
 			if err := putRule(c, profile, config.Rule{ID: "notes-only", Action: "files.*", When: "!glob(path, " + g + ")", Effect: config.EffectDeny, Reason: "Only the folder " + dir}); err != nil {
 				return err
 			}
-			s := map[string]any{}
-			maps.Copy(s, c.Connectors["files"])
-			roots := toStrings(s["roots"])
-			if !slices.Contains(roots, dir) {
-				roots = append(roots, dir)
+			if err := c.SetFolderAccess(dir, access.Append); err != nil {
+				return err
 			}
-			s["roots"] = roots
-			c.SetConnectorSettings("files", s)
 			return c.SetProfileConnector(profile, "files", true)
 		}},
 	{ID: "sites-list", Title: "Sites from a list", Needs: []string{"browser.read"},
-		Description: "The browser opens only the sites from the list. The list also goes to the Browser settings.",
+		Description: "The browser opens only the sites from the list. The sites go to the Browser access list as read.",
 		Params:      []TemplateParam{{Name: "sites", Label: "Sites", Placeholder: "*.example.com, app.example.org", Multiline: true}},
 		Apply: func(c *config.Config, profile string, p map[string]string, _ []daemon.Tool) error {
 			items := splitItems(p["sites"])
@@ -377,10 +372,11 @@ var Templates = []Template{
 			if err := putRule(c, profile, config.Rule{ID: "sites-only", Action: "browser.*", When: "!domain_matches(url, [" + strings.Join(q, ", ") + "])", Effect: config.EffectDeny, Reason: "The site is not in the list"}); err != nil {
 				return err
 			}
-			s := map[string]any{}
-			maps.Copy(s, c.Connectors["browser"])
-			s["allowed_domains"] = items
-			c.SetConnectorSettings("browser", s)
+			for _, it := range items {
+				if err := c.SetSiteAccess(it, access.Read); err != nil {
+					return err
+				}
+			}
 			return nil
 		}},
 	{ID: "daily-limit", Title: "At most N actions a day", Description: "Limit changes and sends per day for each connector of the agent.",

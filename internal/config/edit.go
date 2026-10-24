@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 )
 
 // Структурные правки конфигурации — для Web UI и предложений агентов: текущая
@@ -52,6 +53,8 @@ func (s *Store) Edit(p auth.Principal, comment string, f func(c *Config) error) 
 		if err != nil {
 			return Version{}, err
 		}
+		// Комментарий в начале файла (Marshal его не сохраняет) остаётся.
+		out = append(LeadingComment(raw), out...)
 		v, err := s.PutIf(p, out, comment, n)
 		if errors.Is(err, ErrConflict) && try < 3 {
 			continue
@@ -358,4 +361,88 @@ func settingList(v any) []string {
 		return slices.Clone(t)
 	}
 	return nil
+}
+
+// SetSiteAccess задаёт режим домена в списке Браузера; access "" — убирает строку.
+func (c *Config) SetSiteAccess(domain, mode string) error {
+	if mode != "" {
+		if err := access.CheckSite(access.Site{Domain: domain, Access: mode}, access.SiteModes); err != nil {
+			return err
+		}
+	}
+	c.Access.Sites = access.SetSite(c.Access.Sites, domain, mode)
+	return nil
+}
+
+// SetFolderAccess задаёт режим папки в списке Файлов; access "" — убирает строку.
+func (c *Config) SetFolderAccess(p, mode string) error {
+	if mode != "" {
+		if err := access.CheckFolder(access.Folder{Path: p, Access: mode}, access.FolderModes); err != nil {
+			return err
+		}
+	}
+	c.Access.Folders = access.SetFolder(c.Access.Folders, p, mode)
+	return nil
+}
+
+// ConnectorSites — домены коннектора из его настроек (nil — владелец не менял:
+// действуют умолчания манифеста).
+func (c *Config) ConnectorSites(conn string) []access.Site {
+	s, _ := access.ParseSites(c.Connectors[conn]["sites"])
+	return s
+}
+
+// ConnectorFolders — папки коннектора из его настроек (nil — умолчания манифеста).
+func (c *Config) ConnectorFolders(conn string) []access.Folder {
+	f, _ := access.ParseFolders(c.Connectors[conn]["folders"])
+	return f
+}
+
+// SetConnectorSite задаёт режим домена коннектора; base — текущий действующий
+// список (умолчания манифеста, если владелец ещё не менял). mode "" — убрать.
+func (c *Config) SetConnectorSite(conn string, base []access.Site, domain, mode string) error {
+	if mode != "" {
+		if err := access.CheckSite(access.Site{Domain: domain, Access: mode}, access.ConnectorSiteModes); err != nil {
+			return err
+		}
+	}
+	cur := map[string]any{}
+	maps.Copy(cur, c.Connectors[conn])
+	if domain == "" {
+		cur["sites"] = access.SitesAny(base) // только записать действующий список
+	} else {
+		cur["sites"] = access.SitesAny(access.SetSite(base, domain, mode))
+	}
+	c.SetConnectorSettings(conn, cur)
+	return nil
+}
+
+// SetConnectorFolder задаёт режим папки коннектора (см. SetConnectorSite).
+func (c *Config) SetConnectorFolder(conn string, base []access.Folder, p, mode string) error {
+	if mode != "" {
+		if err := access.CheckFolder(access.Folder{Path: p, Access: mode}, access.ConnectorFolderModes); err != nil {
+			return err
+		}
+	}
+	cur := map[string]any{}
+	maps.Copy(cur, c.Connectors[conn])
+	if p == "" {
+		cur["folders"] = access.FoldersAny(base)
+	} else {
+		cur["folders"] = access.FoldersAny(access.SetFolder(base, p, mode))
+	}
+	c.SetConnectorSettings(conn, cur)
+	return nil
+}
+
+// LeadingComment — строки-комментарии в начале YAML (Marshal их не сохраняет).
+func LeadingComment(raw []byte) []byte {
+	var out []byte
+	for _, line := range bytes.SplitAfter(raw, []byte("\n")) {
+		if !bytes.HasPrefix(line, []byte("#")) {
+			break
+		}
+		out = append(out, line...)
+	}
+	return out
 }

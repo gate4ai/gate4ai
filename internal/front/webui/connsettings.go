@@ -49,15 +49,11 @@ type fieldHint struct {
 // исходники; перевод — каталог ru).
 var settingHints = map[string]map[string]fieldHint{
 	"files": {
-		"roots":        {Label: "Allowed folders", Kind: fieldList, Help: "Agents see only these folders and what is inside. One per line.", Placeholder: "~/Documents/notes"},
 		"allow_hidden": {Label: "Open hidden files and folders", Kind: fieldBool, Help: "Hidden files and folders inside the allowed folders (.ssh, .aws, .config…) are closed unless this is on. Keys and passwords stay closed anyway.", Advanced: true},
 		"allow_paths":  {Label: "Open these protected paths", Kind: fieldList, Help: "Exact paths inside the allowed folders that are opened despite the protection (keys, hidden folders). One per line.", Placeholder: "~/Documents/notes/.obsidian", Advanced: true},
 		"max_bytes":    {Label: "Largest file to read, bytes", Kind: fieldNumber, Help: "1 MiB by default.", Placeholder: "1048576", Advanced: true},
 	},
 	"browser": {
-		"allowed_domains":    {Label: "Allowed sites", Kind: fieldList, Help: "The browser opens only these sites; *.example.com means all subdomains.", Placeholder: "*.example.com"},
-		"mode":               {Label: "Site list mode", Kind: fieldChoice, Choices: []string{"allowlist", "blocklist"}, Help: "allowlist — only the allowed sites (default); blocklist — every site except the blocked ones.", Advanced: true},
-		"blocked":            {Label: "Blocked sites", Kind: fieldList, Help: "For the blocklist mode. Addresses of this computer and the local network are always closed.", Placeholder: "*.example.org", Advanced: true},
 		"model":              {Label: "Model for data extraction", Kind: fieldText, Help: "Provider and model, e.g. openai/gpt-5.4-mini.", Placeholder: "openai/gpt-5.4-mini", Advanced: true},
 		"model_key":          {Label: "Model key", Kind: fieldSecret, Help: "Kept in gate4.ai passwords; given only to the browser package.", Advanced: true},
 		"profile_dir":        {Label: "Chrome profile", Kind: fieldText, Help: "A dedicated profile; ~/.gate4ai-chrome by default.", Placeholder: "~/.gate4ai-chrome", Advanced: true},
@@ -103,14 +99,19 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 			}
 		}
 	}
-	for _, sc := range c.Services {
-		params(sc.Params, false)
+	for _, st := range m.Sites {
+		add(st.Domain, fieldList)
 	}
 	for _, r := range c.Reveal {
 		add(r, fieldSecret)
 	}
-	for _, f := range c.Files {
-		add(f, fieldList)
+	for _, f := range m.Folders {
+		add(f.Path, fieldList)
+	}
+	// Списки доступа встроенных компонентов и строки коннекторов правятся своими
+	// таблицами, не полями настроек.
+	for _, k := range []string{"sites", "folders", "roots", "allowed_domains", "blocked", "mode"} {
+		delete(kinds, k)
 	}
 	hints := settingHints[m.Connector]
 	for k, h := range hints {
@@ -166,8 +167,8 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 }
 
 var hintOrder = map[string][]string{
-	"files":   {"roots", "allow_hidden", "allow_paths", "max_bytes"},
-	"browser": {"allowed_domains", "mode", "blocked", "model", "model_key", "profile_dir", "chrome_path", "cdp_url", "engine", "download_types", "max_download_bytes", "download_dir"},
+	"files":   {"allow_hidden", "allow_paths", "max_bytes"},
+	"browser": {"model", "model_key", "profile_dir", "chrome_path", "cdp_url", "engine", "download_types", "max_download_bytes", "download_dir"},
 }
 
 // getPath — значение по ключу с точками (imap.host → settings["imap"]["host"]).

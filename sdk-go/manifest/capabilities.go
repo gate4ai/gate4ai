@@ -20,7 +20,6 @@ import (
 // коннектора шаблоном ${setting:путь} (путь через точку: imap.host); список
 // в настройке раскрывается в несколько записей, пустое значение запись убирает.
 type Capabilities struct {
-	Files   []string    `json:"files,omitempty" yaml:"files,omitempty"` // "<папка>/**" — дерево, иначе один файл
 	Storage *StorageCap `json:"storage,omitempty" yaml:"storage,omitempty"`
 	// Services — действия других коннекторов, которые можно вызвать через service_call.
 	Services []ServiceCap `json:"services,omitempty" yaml:"services,omitempty"`
@@ -30,13 +29,11 @@ type Capabilities struct {
 }
 
 // ServiceCap — действия поставщика Target с мажором контракта Contract.
-// Params — разрешение, которое хост передаёт поставщику при каждом вызове
-// (например, сайты браузера); строки могут быть шаблонами ${setting:…}.
+// Сайты, на которых коннектор работает через браузер, — Manifest.Sites.
 type ServiceCap struct {
-	Target   string         `json:"target" yaml:"target"`
-	Contract int            `json:"contract" yaml:"contract"`
-	Actions  []string       `json:"actions" yaml:"actions"`
-	Params   map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	Target   string   `json:"target" yaml:"target"`
+	Contract int      `json:"contract" yaml:"contract"`
+	Actions  []string `json:"actions" yaml:"actions"`
 }
 
 // StorageCap — собственное KV-хранилище коннектора.
@@ -153,9 +150,6 @@ func (c Capabilities) validate() error {
 				return fmt.Errorf("capabilities.services: %s: bad action %q", sc.Target, a)
 			}
 		}
-		if err := checkParams("capabilities.services."+sc.Target+".params", sc.Params); err != nil {
-			return err
-		}
 	}
 	for _, a := range c.Reveal {
 		if !strings.HasPrefix(a, "@") && !tmplRe.MatchString(a) {
@@ -163,14 +157,6 @@ func (c Capabilities) validate() error {
 		}
 		if err := checkTemplate("capabilities.reveal", a); err != nil {
 			return err
-		}
-	}
-	for _, f := range c.Files {
-		if err := checkTemplate("capabilities.files", f); err != nil {
-			return err
-		}
-		if !strings.HasPrefix(f, "/") && !strings.HasPrefix(f, "~") && !strings.HasPrefix(f, "${setting:") {
-			return fmt.Errorf("capabilities.files: %q must be absolute, ~/… or ${setting:…}", f)
 		}
 	}
 	if c.Storage != nil && c.Storage.QuotaMB <= 0 {
@@ -181,83 +167,20 @@ func (c Capabilities) validate() error {
 
 // Resolved — возможности с подставленными настройками конкретного экземпляра.
 type Resolved struct {
-	Files        []string
 	StorageBytes int64
 	Services     []ServiceRule
 	Reveal       []string
 }
 
-// ServiceRule — разрешённые действия поставщика и параметры с подставленными настройками.
+// ServiceRule — разрешённые действия поставщика.
 type ServiceRule struct {
 	Target   string
 	Contract int
 	Actions  []string
-	Params   map[string]any
 }
 
 // Allows — действие action поставщика разрешено.
 func (s ServiceRule) Allows(action string) bool { return slices.Contains(s.Actions, action) }
-
-// checkParams проверяет шаблоны в строках параметров.
-func checkParams(field string, v any) error {
-	switch t := v.(type) {
-	case string:
-		return checkTemplate(field, t)
-	case map[string]any:
-		for k, x := range t {
-			if err := checkParams(field+"."+k, x); err != nil {
-				return err
-			}
-		}
-	case []any:
-		for _, x := range t {
-			if err := checkParams(field, x); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// expandParams подставляет настройки в параметры: шаблон в списке
-// раскрывается в несколько элементов, отдельное значение — в одно (пустое —
-// "", несколько — список).
-func expandParams(v any, settings map[string]any) any {
-	switch t := v.(type) {
-	case string:
-		x := Expand(t, settings)
-		switch len(x) {
-		case 0:
-			return ""
-		case 1:
-			return x[0]
-		}
-		out := make([]any, len(x))
-		for i := range x {
-			out[i] = x[i]
-		}
-		return out
-	case map[string]any:
-		out := make(map[string]any, len(t))
-		for k, x := range t {
-			out[k] = expandParams(x, settings)
-		}
-		return out
-	case []any:
-		out := []any{}
-		for _, x := range t {
-			if str, ok := x.(string); ok {
-				for _, e := range Expand(str, settings) {
-					out = append(out, e)
-				}
-				continue
-			}
-			out = append(out, expandParams(x, settings))
-		}
-		return out
-	}
-	return v
-}
 
 // lookup — значение настройки по пути через точку.
 func lookup(settings map[string]any, path string) any {
@@ -337,11 +260,7 @@ func expandAll(vs []string, settings map[string]any) []string {
 func (c Capabilities) Resolve(settings map[string]any) (Resolved, error) {
 	var r Resolved
 	for _, sc := range c.Services {
-		var p map[string]any
-		if sc.Params != nil {
-			p = expandParams(sc.Params, settings).(map[string]any)
-		}
-		r.Services = append(r.Services, ServiceRule{Target: sc.Target, Contract: sc.Contract, Actions: sc.Actions, Params: p})
+		r.Services = append(r.Services, ServiceRule{Target: sc.Target, Contract: sc.Contract, Actions: sc.Actions})
 	}
 	for _, a := range expandAll(c.Reveal, settings) {
 		if !strings.HasPrefix(a, "@") {
@@ -349,7 +268,6 @@ func (c Capabilities) Resolve(settings map[string]any) (Resolved, error) {
 		}
 		r.Reveal = append(r.Reveal, a)
 	}
-	r.Files = expandAll(c.Files, settings)
 	if c.Storage != nil {
 		r.StorageBytes = int64(c.Storage.QuotaMB) << 20
 	}
@@ -360,18 +278,10 @@ func (c Capabilities) Resolve(settings map[string]any) (Resolved, error) {
 func (c Capabilities) Summary() []string {
 	var out []string
 	for _, sc := range c.Services {
-		line := fmt.Sprintf("call %s (contract %d): %s", sc.Target, sc.Contract, strings.Join(sc.Actions, ", "))
-		if len(sc.Params) > 0 {
-			b, _ := json.Marshal(sc.Params)
-			line += " with " + string(b)
-		}
-		out = append(out, line)
+		out = append(out, fmt.Sprintf("call %s (contract %d): %s", sc.Target, sc.Contract, strings.Join(sc.Actions, ", ")))
 	}
 	for _, a := range c.Reveal {
 		out = append(out, "reveal the value of "+a+" to the connector")
-	}
-	for _, f := range c.Files {
-		out = append(out, "files "+f)
 	}
 	if c.Storage != nil {
 		out = append(out, fmt.Sprintf("storage %d MB", c.Storage.QuotaMB))

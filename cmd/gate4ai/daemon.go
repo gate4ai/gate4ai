@@ -30,24 +30,21 @@ import (
 // (корень ~/Documents; скрытое и ключи закрыты им самим) виден в профиле
 // default с правилом ask на каждое действие. Каждый
 // установленный из магазина коннектор daemon добавляет туда же с ask.
-const emptyConfig = `# gate4ai: no agents yet. Files are built in, limited to ~/Documents (every action
-# asks you first; hidden files and keys are always closed);
-# the browser is built in too and asks about every action until you allow sites.
-# Add agents and your rules (see the README), then: gate4ai policy set config.yaml
+const emptyConfig = `# gate4ai: no agents yet. The browser and files are built in: every site and
+# ~/Documents ask you first (hidden files and keys are always closed). Open sites
+# and folders in the Web UI (Browser, Files) or: gate4ai access sites set app.example.org read
+# Add agents in the Web UI, or: gate4ai policy set config.yaml
 store:
   registry: https://raw.githubusercontent.com/gate4ai/registry/main/index.json
   registry_keys: ["ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="]
-connectors:
-  files: { roots: ["~/Documents"] }
+access:
+  sites:
+    - { domain: "*", access: ask }
+  folders:
+    - { path: "~/Documents", access: ask }
 profiles:
   default:
     connectors: [files, browser]
-    rules:
-      - { id: files-read-ask, action: files.read, effect: ask }
-      - { id: files-list-ask, action: files.list, effect: ask }
-      - { id: files-append-ask, action: files.append, effect: ask }
-      - { id: files-write-ask, action: files.write, effect: ask }
-      - { id: browser-ask, action: "browser.*", effect: ask }
 `
 
 // runDaemon — `gate4ai daemon`: политики, подтверждения, секреты, журнал.

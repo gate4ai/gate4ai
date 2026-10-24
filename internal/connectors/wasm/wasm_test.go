@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
@@ -155,7 +156,7 @@ func TestLimits(t *testing.T) {
 func TestManifestMustMatchPackage(t *testing.T) {
 	bin, man := probe(t)
 	e, _ := NewEngine("", Services{})
-	man.Capabilities.Files = append(man.Capabilities.Files, "/**")
+	man.Folders = append(man.Folders, access.Folder{Path: "/", Access: access.Allow})
 	if _, err := e.Load(context.Background(), bin, man); err == nil || !strings.Contains(err.Error(), "differs") {
 		t.Fatal("package manifest with wider capabilities accepted:", err)
 	}

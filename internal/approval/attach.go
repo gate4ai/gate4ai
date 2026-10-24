@@ -170,6 +170,7 @@ func Attach(ctx context.Context, d *daemon.Daemon, desktop *Desktop, telegramBas
 			_, err := d.DecidePairing(ctx, id, approve, "", "telegram")
 			return err
 		}
+		tg.Access = d.AddAccessByID
 		tg.Webhook = hook
 		tctx, cancel := context.WithCancel(ctx)
 		stopTG = cancel

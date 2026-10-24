@@ -140,6 +140,8 @@ type Notifier interface {
 
 // Pipeline — Action Pipeline.
 type Pipeline struct {
+	// Home — домашний каталог пользователя для "~" в списках доступа.
+	Home     string
 	Registry *connectors.Registry
 	State    *state.Store
 	Journal  *audit.Journal
@@ -242,8 +244,10 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 	// 2. Обогащение.
 	prov, perr := p.provenance(args)
 	req := policy.Request{Agent: c.Agent, Action: c.Action, Class: act.Class, Args: args, Provenance: prov, Now: p.Now(), StateError: perr}
-	// 3. PDP.
+	// 3. PDP: списки доступа Браузера и Файлов и правила профиля.
 	dec := p.decidePolicy(req)
+	acc, hasAcc := p.accessOf(c.Action, act, args, cli, nil, "")
+	dec = mergeAccess(dec, acc, hasAcc)
 	if f := p.AlwaysAsk[conn]; f != nil && (dec.Effect == config.EffectAllow || dec.Effect == config.EffectAsk && dec.Default) {
 		// Правило allow такое действие не разрешает без человека (deny — по-прежнему);
 		// без правила — подтверждение с конкретной причиной.
@@ -336,6 +340,16 @@ func (p *Pipeline) admit(ctx context.Context, agent, action string, act manifest
 	p.admitMu.Lock()
 	defer p.admitMu.Unlock()
 	dec := p.decidePolicy(req)
+	var n *nestedCall
+	if nc, ok := ctx.Value(nestedKey{}).(nestedCall); ok {
+		n = &nc
+	}
+	root := ""
+	if nested {
+		root = parent.Root
+	}
+	acc, hasAcc := p.accessOf(action, act, args, p.client(action), n, root)
+	dec = mergeAccess(dec, acc, hasAcc)
 	if dec.Effect == config.EffectDeny {
 		r := p.deny(ctx, agent, act, action, args, dec, appr, parentID)
 		return 0, &r
@@ -434,9 +448,9 @@ func (l *logConns) list() []string {
 func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connectors.Client, act manifest.Action, args map[string]any, dec policy.Decision, appr *audit.Approval) Result {
 	res := Result{Action: action, Reason: dec.Reason, RuleIDs: dec.RuleIDs}
 	conn := strings.SplitN(action, ".", 2)[0]
-	// 5. Секреты: настройки экземпляра передаются как есть — с алиасами; значения
-	// подставляет хост только в функциях хоста и только для адресов привязки.
-	settings := p.cfg().Connectors[conn]
+	// 5. Настройки экземпляра — с алиасами секретов (значения подставляет хост);
+	// Браузер и Файлы получают сайты и папки из списков доступа.
+	settings := p.settingsFor(conn)
 	// 6. Исполнение.
 	receipt := &audit.Receipt{ID: audit.NewID(), Agent: agent, Caller: CallerFrom(ctx), Action: action, Class: act.Class, Args: p.maskArgs(act, args),
 		Decision: receiptDecision(config.EffectAllow, dec), Approval: appr}
@@ -452,7 +466,7 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 		info.Root, info.Depth, info.Chain = parent.Root, parent.Depth+1, append(slices.Clone(parent.Chain), conn)
 		info.Session = parent.Session
 		if n, ok := ctx.Value(nestedKey{}).(nestedCall); ok {
-			exReq.Caller = &abi.Caller{Connector: n.caller, Call: parent.Root, Params: n.params, Session: parent.Session}
+			exReq.Caller = &abi.Caller{Connector: n.caller, Call: parent.Root, Params: p.browserParams(n.sites), Session: parent.Session}
 		}
 	} else if p.EndCall != nil {
 		defer p.EndCall(info.Root)

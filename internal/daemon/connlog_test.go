@@ -165,9 +165,9 @@ func TestLogByParent(t *testing.T) {
 	}
 }
 
-func TestSitesAPI(t *testing.T) {
+func TestAccessAPI(t *testing.T) {
 	home := t.TempDir()
-	d, err := New(Options{Home: filepath.Join(home, "data"), Keys: keys.NewMemory(), InitialConfig: []byte("agents:\n  bot: { profile: p }\nprofiles:\n  p: { connectors: [] }\nconnectors:\n  browser: { allowed_domains: [lk.example] }\n")})
+	d, err := New(Options{Home: filepath.Join(home, "data"), Keys: keys.NewMemory(), InitialConfig: []byte("agents:\n  bot: { profile: p }\nprofiles:\n  p: { connectors: [] }\naccess:\n  sites: [{ domain: lk.example, access: read }]\n")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,18 +184,22 @@ func TestSitesAPI(t *testing.T) {
 	}
 	owner := client{c: ipc.HTTPClient(ownerSock)}
 	var res struct {
-		Allowed []string `json:"allowed_domains"`
+		Sites   []map[string]any `json:"sites"`
+		Folders []map[string]any `json:"folders"`
 	}
-	if code := owner.do(t, "POST", "/v1/sites", map[string]any{"add": []string{"login.mos.ru", "lk.example"}}, &res); code != 200 || len(res.Allowed) != 2 || res.Allowed[1] != "login.mos.ru" {
+	if code := owner.do(t, "POST", "/v1/access", map[string]any{"sites": []map[string]any{{"domain": "login.mos.ru", "access": "allow"}}, "folders": []map[string]any{{"path": "~/notes", "access": "append"}}}, &res); code != 200 || len(res.Sites) != 2 || res.Sites[1]["domain"] != "login.mos.ru" || len(res.Folders) != 1 {
 		t.Fatal(code, res)
 	}
-	if code := owner.do(t, "POST", "/v1/sites", map[string]any{"remove": []string{"lk.example"}}, &res); code != 200 || len(res.Allowed) != 1 {
+	if code := owner.do(t, "POST", "/v1/access", map[string]any{"sites": []map[string]any{{"domain": "lk.example", "access": ""}}}, &res); code != 200 || len(res.Sites) != 1 {
 		t.Fatal(code, res)
 	}
-	if code := owner.do(t, "POST", "/v1/sites", map[string]any{"add": []string{"https://x/y"}}, nil); code != 400 {
+	if code := owner.do(t, "POST", "/v1/access", map[string]any{"sites": []map[string]any{{"domain": "https://x/y", "access": "allow"}}}, nil); code != 400 {
 		t.Fatal("not a site:", code)
 	}
-	if code := owner.do(t, "GET", "/v1/sites", nil, &res); code != 200 || res.Allowed[0] != "login.mos.ru" {
+	if code := owner.do(t, "POST", "/v1/access", map[string]any{"folders": []map[string]any{{"path": "relative", "access": "read"}}}, nil); code != 400 {
+		t.Fatal("relative folder:", code)
+	}
+	if code := owner.do(t, "GET", "/v1/access", nil, &res); code != 200 || res.Sites[0]["domain"] != "login.mos.ru" || res.Folders[0]["access"] != "append" {
 		t.Fatal(code, res)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
 	"github.com/gate4ai/gate4ai/internal/config"
@@ -39,22 +40,19 @@ type CallView struct {
 	UsedBy                    []string // действия этого коннектора с этим подвызовом
 }
 
-// callSites — сайты из params подвызова поставщика (domains), с подставленными настройками.
+// callSites — сайты коннектора для подвызовов браузера: его список доменов
+// (настройки владельца или умолчания манифеста) с режимом.
 func callSites(m manifest.Manifest, target string, settings map[string]any) []string {
+	if target != "browser" {
+		return nil
+	}
+	sites, _ := access.ParseSites(settings["sites"])
+	if sites == nil {
+		sites = m.ResolveSites(settings)
+	}
 	var out []string
-	for _, sc := range m.Capabilities.Services {
-		if sc.Target != target {
-			continue
-		}
-		ds, _ := sc.Params["domains"].([]any)
-		for _, d := range ds {
-			s, _ := d.(string)
-			for _, x := range manifest.Expand(s, settings) {
-				if !slices.Contains(out, x) {
-					out = append(out, x)
-				}
-			}
-		}
+	for _, st := range sites {
+		out = append(out, st.Domain+" ("+st.Access+")")
 	}
 	return out
 }

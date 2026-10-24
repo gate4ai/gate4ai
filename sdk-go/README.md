@@ -19,8 +19,9 @@ SDK — каталог `sdk-go/` модуля `github.com/gate4ai/gate4ai` (од
 
 ## Принципы
 
-- Коннектор пользуется только функциями хоста: файлы (`files`), своё KV-хранилище (`storage`), доказательства, лог и вызовы других коннекторов (`service_call`). Сети, процессов и переменных окружения у WASM-модуля нет; во внешний мир коннектор выходит только через `service_call` к браузеру gate4.ai.
-- Всё, что не объявлено в `capabilities` манифеста, недоступно: функция хоста вернёт `capability_denied`. Политика пользователя может возможности только сузить.
+- Коннектор пользуется только функциями хоста: файлы в объявленных папках (`folders`), своё KV-хранилище (`capabilities.storage`), доказательства, лог и вызовы других коннекторов (`service_call`). Сети, процессов и переменных окружения у WASM-модуля нет; во внешний мир коннектор выходит только через `service_call` к браузеру gate4.ai — на сайты из `sites`.
+- Всё, что не объявлено в манифесте, недоступно: функция хоста вернёт `capability_denied`. Политика пользователя может возможности только сузить.
+- Сайты и папки объявляются с режимом доступа. `sites: [{domain, access}]` — `allow` (всё), `read` (только чтение, изменения — с подтверждением), `ask` (всё с подтверждением), `deny`; домен — `app.example.org`, `*.example.org` (включая сам `example.org`) или `*`. `folders: [{path, access}]` — `allow`, `append` (чтение, список и добавление), `read` (чтение и список), `deny`; путь — абсолютный или `~/…`, без масок — папка и всё внутри, `*`/`?` — внутри сегмента, `**` — любое число сегментов. Домен и путь могут быть шаблоном `${setting:…}`: список в настройке раскрывается в несколько строк с тем же режимом. Решает самая конкретная строка, при равенстве — строже; симлинки раскрываются, относительные пути запрещены. Проверка — `capability.Checker.Locate(path, op)` (`access.OpRead|OpList|OpAppend|OpWrite`), функции хоста `fs_*` выбирают операцию по имени.
 - Коннектор не видит секреты: в настройках — только алиасы (`@mail.work`), в формы сайтов их подставляет браузер хоста. Значения получает лишь `runtime: native` с `capabilities.reveal` и отдельным согласием владельца; всё раскрытое вырезается из доказательств и логов.
 
 ## Коннектор за пять минут
@@ -90,7 +91,11 @@ GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o connector.wasm .
 ```yaml
 capabilities:
   services:
-    - { target: browser, contract: 1, actions: [open, act], params: { domains: ["${setting:allowed_domains}"] } }
+    - { target: browser, contract: 1, actions: [open, act] }
+sites:
+  - { domain: "${setting:allowed_domains}", access: allow }
+folders:
+  - { path: "~/Documents/bank", access: append }
 actions:
   - { name: pay, class: money, verify: feed, calls: [browser.open, browser.act] }
 ```
@@ -100,7 +105,7 @@ gate4ai contract gen contracts/browser.yaml -o browserclient/client.go   # кл�
 gate4ai contract diff old/manifest.yaml manifest.yaml                     # CI поставщика: ломающее изменение без нового contract — ошибка
 ```
 
-`params` хост передаёт поставщику при каждом вызове (`ExecRequest.Caller`); вложенный вызов проходит политики хоста.
+Сайты, на которых потребитель работает через браузер, он объявляет в `sites`; хост передаёт поставщику, кто его вызвал (`ExecRequest.Caller`), и вложенный вызов проходит политики хоста.
 
 ## runtime: native
 

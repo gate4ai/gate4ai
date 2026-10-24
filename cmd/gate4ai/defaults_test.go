@@ -24,6 +24,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 	"github.com/gate4ai/gate4ai/sdk-go/registry"
 )
@@ -40,8 +41,8 @@ var defaultManifests = map[string]string{
 	"files": `connector: files
 version: "4"
 runtime: wasm
-capabilities:
-  files: ["${setting:roots}/**"]
+folders:
+  - { path: "${setting:roots}", access: allow }
 actions:
   - { name: read, class: read }
   - { name: list, class: read }
@@ -52,8 +53,8 @@ actions:
 	"bank": `connector: bank
 version: "1"
 runtime: wasm
-capabilities:
-  files: [ "/srv/api.bank.example/**" ]
+folders:
+  - { path: /srv/api.bank.example, access: allow }
 actions:
   - { name: balance, class: read }
   - { name: pay, class: external }
@@ -137,15 +138,16 @@ func TestFreshInstallBuiltins(t *testing.T) {
 	}
 	raw, _ := d.Config.CurrentRaw()
 	raw = append(raw, "agents:\n  bot: { profile: default }\n"...)
-	raw = bytes.Replace(raw, []byte("    rules:\n"),
-		[]byte("    rules:\n      - { id: owner-bank, action: bank.balance, effect: deny }\n"), 1)
+	raw = bytes.Replace(raw, []byte("    connectors: [files, browser]\n"),
+		[]byte("    connectors: [files, browser]\n    rules:\n      - { id: owner-bank, action: bank.balance, effect: deny }\n"), 1)
 	if _, err := d.Config.Put(auth.OwnerVia("test"), raw, "agent"); err != nil {
 		t.Fatal(err)
 	}
 	c := d.Config.Current()
 	if !c.Profiles["default"].HasConnector("files") || !c.Profiles["default"].HasConnector("browser") ||
-		!slices.Equal(c.Connectors["files"]["roots"].([]any), []any{"~/Documents"}) || len(c.Connectors["browser"]) != 0 {
-		t.Fatal(c.Profiles["default"], c.Connectors)
+		len(c.Access.Folders) != 1 || c.Access.Folders[0] != (access.Folder{Path: "~/Documents", Access: access.Ask}) ||
+		len(c.Access.Sites) != 1 || c.Access.Sites[0] != (access.Site{Domain: "*", Access: access.Ask}) {
+		t.Fatal(c.Profiles["default"], c.Access)
 	}
 	for conn, acts := range defaultActions {
 		cli, ok := d.Registry.Get(conn)
@@ -159,17 +161,10 @@ func TestFreshInstallBuiltins(t *testing.T) {
 			}
 			got = append(got, a.Name)
 			action := conn + "." + a.Name
-			wantRule := conn + "-" + a.Name + "-ask"
-			if conn == "browser" {
-				wantRule = "browser-ask"
-			}
-			dec := d.Pipeline.Engine().Decide(policy.Request{Agent: "bot", Action: action, Class: a.Class}, nil)
-			if dec.Effect != config.EffectAsk || dec.Default || !slices.Equal(dec.RuleIDs, []string{wantRule}) {
-				t.Fatal(action, dec)
-			}
 			if conn != "files" {
 				continue // действия браузера проверяют аргументы и ждут Chrome
 			}
+			// Правил нет: решает список доступа (~/Documents: ask).
 			args := map[string]map[string]any{"read": {"path": "~/Documents/a"}, "list": {"path": "~/Documents"}, "append": {"path": "~/Documents/a", "text": "x"},
 				"write": {"path": "~/Documents/a", "content": "x"}}[a.Name]
 			if r := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: action, Args: args}); r.Status != pipeline.StatusPending {
@@ -222,6 +217,7 @@ lists:
   contacts_trusted: [a@example.com]
 connectors:
   files: { roots: ["~/Documents"] }
+  browser: { allowed_domains: [lk.example], engine: cdp }
   email: { address: me@example.com }
 profiles:
   default:
@@ -233,7 +229,8 @@ profiles:
       - { id: files-ro, action: files.write, effect: deny }
 `
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	// Первый запуск — «старая» установка: кладём политику с почтой напрямую.
+	// Первый запуск — «старая» установка: кладём политику с почтой и прежними
+	// настройками сайтов и папок напрямую.
 	d, err := daemon.New(daemon.Options{Home: home, InitialConfig: []byte(cfg), Keys: keys.NewMemory(), Log: log})
 	if err != nil {
 		t.Fatal(err)
@@ -258,6 +255,13 @@ profiles:
 	}
 	if vs, _ := d.Config.Versions(); len(vs) < 2 {
 		t.Fatal("migration must be a new policy version:", vs)
+	}
+	// Прежние папки и сайты — в списках доступа как read; настройки убраны.
+	if f, ok := access.MatchFolder(c.Access.Folders, "~/Documents/x", d.Pipeline.Home); !ok || f.Access != access.Read || c.Connectors["files"] != nil {
+		t.Fatal(c.Access.Folders, c.Connectors["files"])
+	}
+	if s, ok := access.MatchSite(c.Access.Sites, "https://lk.example/"); !ok || s.Access != access.Read || c.Connectors["browser"]["allowed_domains"] != nil {
+		t.Fatal(c.Access.Sites, c.Connectors["browser"])
 	}
 }
 

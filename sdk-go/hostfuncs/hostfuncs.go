@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/capability"
 	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs/mask"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -228,7 +229,8 @@ func rootSize(r *os.Root, rel string) int64 {
 }
 
 func (d *Dispatcher) fs(fn string, r abi.FSRequest) (any, error) {
-	loc, err := d.Check.Locate(r.Path)
+	op := map[string]string{abi.FnFSRead: access.OpRead, abi.FnFSStat: access.OpRead, abi.FnFSList: access.OpList, abi.FnFSAppend: access.OpAppend, abi.FnFSWrite: access.OpWrite}[fn]
+	loc, err := d.Check.Locate(r.Path, op)
 	if err != nil {
 		return nil, err
 	}

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
 )
 
@@ -39,6 +40,14 @@ type Manifest struct {
 	// Services — действия, которые другие коннекторы могут вызвать через service_call.
 	Services     []string     `json:"services,omitempty" yaml:"services,omitempty"`
 	Capabilities Capabilities `json:"capabilities" yaml:"capabilities"`
+	// Sites — домены, на которых коннектор работает через браузер (service_call),
+	// с режимом доступа (allow | read | ask | deny) — умолчания, владелец меняет
+	// их в настройках коннектора (connectors.<имя>.sites). Домен может быть
+	// шаблоном ${setting:…}. Без строки для домена вызов браузера отклоняется.
+	Sites []access.Site `json:"sites,omitempty" yaml:"sites,omitempty"`
+	// Folders — папки, с которыми коннектор работает функциями хоста fs_*
+	// (allow | append | read | deny) — так же умолчания.
+	Folders []access.Folder `json:"folders,omitempty" yaml:"folders,omitempty"`
 	// Credentials — слоты учёток, с которыми коннектор входит на сайты
 	// (browser.login / browser.fill_secret): владелец связывает слот со своей
 	// учёткой в connectors.<коннектор>.credentials; значений коннектор не видит.
@@ -206,6 +215,12 @@ func (a Action) CallsAction(target, action string) bool {
 // (изменение — повторное согласие).
 func (m *Manifest) Summary() []string {
 	out := m.Capabilities.Summary()
+	for _, st := range m.Sites {
+		out = append(out, fmt.Sprintf("site %s: %s", st.Domain, st.Access))
+	}
+	for _, f := range m.Folders {
+		out = append(out, fmt.Sprintf("folder %s: %s", f.Path, f.Access))
+	}
 	for _, c := range m.Credentials {
 		detail := "slot " + c.Slot
 		if len(c.Types) > 0 {
@@ -266,6 +281,25 @@ func (m *Manifest) Validate() error {
 	}
 	if err := m.Capabilities.validate(); err != nil {
 		return fmt.Errorf("manifest %s: %w", m.Connector, err)
+	}
+	for _, st := range m.Sites {
+		if err := checkTemplate("sites", st.Domain); err != nil {
+			return fmt.Errorf("manifest %s: %w", m.Connector, err)
+		}
+		if tmplRe.MatchString(st.Domain) {
+			st.Domain = "x.example"
+		}
+		if err := access.CheckSite(st, access.ConnectorSiteModes); err != nil {
+			return fmt.Errorf("manifest %s: sites: %w", m.Connector, err)
+		}
+	}
+	for _, f := range m.Folders {
+		if err := checkTemplate("folders", f.Path); err != nil {
+			return fmt.Errorf("manifest %s: %w", m.Connector, err)
+		}
+		if err := access.CheckFolder(f, access.ConnectorFolderModes); err != nil {
+			return fmt.Errorf("manifest %s: folders: %w", m.Connector, err)
+		}
 	}
 	if len(m.Capabilities.Reveal) > 0 && m.Runtime != RuntimeBuiltin {
 		return fmt.Errorf("manifest %s: capabilities.reveal is only for runtime builtin", m.Connector)
@@ -374,6 +408,29 @@ func (m *Manifest) Validate() error {
 
 // IsService — действие доступно другим коннекторам через service_call.
 func (m *Manifest) IsService(action string) bool { return slices.Contains(m.Services, action) }
+
+// ResolveSites — домены коннектора с подставленными настройками (шаблон в
+// домене раскрывается в несколько строк с тем же режимом).
+func (m *Manifest) ResolveSites(settings map[string]any) []access.Site {
+	var out []access.Site
+	for _, st := range m.Sites {
+		for _, d := range Expand(st.Domain, settings) {
+			out = append(out, access.Site{Domain: strings.ToLower(strings.TrimSuffix(d, ".")), Access: st.Access})
+		}
+	}
+	return out
+}
+
+// ResolveFolders — папки коннектора с подставленными настройками.
+func (m *Manifest) ResolveFolders(settings map[string]any) []access.Folder {
+	var out []access.Folder
+	for _, f := range m.Folders {
+		for _, p := range Expand(f.Path, settings) {
+			out = append(out, access.Folder{Path: p, Access: f.Access})
+		}
+	}
+	return out
+}
 
 // ArgError — ошибка нормализации аргументов (отдаётся агенту как invalid_arguments).
 type ArgError struct{ Msg string }

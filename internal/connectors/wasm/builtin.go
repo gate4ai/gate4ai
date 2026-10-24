@@ -96,6 +96,16 @@ func (b *Builtin) reveal(req *abi.ExecRequest) error {
 	return nil
 }
 
+// PageURL — адрес открытой страницы браузера (pipeline.URLResolver); "" — не браузер.
+func (b *Builtin) PageURL(session, call string) string {
+	if r, ok := b.c.(interface {
+		PageURL(session, call string) string
+	}); ok {
+		return r.PageURL(session, call)
+	}
+	return ""
+}
+
 // EndCall — корневое действие закончилось: коннектор освобождает его состояние.
 func (b *Builtin) EndCall(call string) {
 	if e, ok := b.c.(CallEnder); ok {

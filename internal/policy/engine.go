@@ -169,7 +169,11 @@ type Decision struct {
 	Reason      string   `json:"reason"`
 	Obligations []string `json:"obligations,omitempty"`
 	Default     bool     `json:"default,omitempty"` // сработало значение по умолчанию класса
-	Errors      []string `json:"errors,omitempty"`  // ошибки вычисления условий (fail-closed)
+	// Scope — домен или папка из списков доступа, по которым принято решение
+	// ("site:app.example.org", "folder:/home/u/notes"): подтверждение предлагает
+	// добавить их в разрешённые или запрещённые.
+	Scope  string   `json:"scope,omitempty"`
+	Errors []string `json:"errors,omitempty"` // ошибки вычисления условий (fail-closed)
 }
 
 var stringSliceType = reflect.TypeOf([]string{})

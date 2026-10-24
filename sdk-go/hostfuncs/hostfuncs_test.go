@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,7 +56,7 @@ func code(err error) string {
 
 func TestFSAndKV(t *testing.T) {
 	root := t.TempDir()
-	d := dispatcher(t, `capabilities: { files: ["${setting:root}/**"], storage: { quota_mb: 1 } }`, map[string]any{"root": root})
+	d := dispatcher(t, "capabilities: { storage: { quota_mb: 1 } }\nfolders: [ { path: \"${setting:root}\", access: allow } ]", map[string]any{"root": root})
 	p := filepath.Join(root, "a.md")
 	var w abi.FSWriteResponse
 	if err := call(t, d, abi.FnFSAppend, abi.FSRequest{Path: p, Data: []byte("one\n")}, &w); err != nil || w.SizeBefore != -1 || w.SizeAfter != 4 {
@@ -122,12 +121,11 @@ type fakeRouter struct{ got []abi.ServiceCallRequest }
 
 func (f *fakeRouter) ServiceCall(_ context.Context, rule manifest.ServiceRule, r abi.ServiceCallRequest) (abi.ExecResult, error) {
 	f.got = append(f.got, r)
-	return abi.ExecResult{Structured: map[string]any{"sites": rule.Params["domains"], "contract": float64(rule.Contract)}}, nil
+	return abi.ExecResult{Structured: map[string]any{"target": rule.Target, "contract": float64(rule.Contract)}}, nil
 }
 
 func TestServiceCallAndLog(t *testing.T) {
-	d := dispatcher(t, `capabilities: { services: [ { target: browser, contract: 1, actions: [open, observe], params: { domains: ["${setting:allowed}"] } } ] }`,
-		map[string]any{"allowed": []any{"lk.example", "b.example"}})
+	d := dispatcher(t, `capabilities: { services: [ { target: browser, contract: 1, actions: [open, observe] } ] }`, nil)
 	var logs []string
 	d.Log = func(l, m string) { logs = append(logs, m) }
 	if err := call(t, d, abi.FnServiceCall, abi.ServiceCallRequest{Target: "browser", Action: "open"}, nil); code(err) != abi.CodeNotSupported {
@@ -145,7 +143,7 @@ func TestServiceCallAndLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := res.Structured.(map[string]any)
-	if fmt.Sprint(st["sites"]) != "[lk.example b.example]" || st["contract"] != 1.0 || len(fr.got) != 1 || fr.got[0].Args["url"] != "https://lk.example/" {
+	if st["target"] != "browser" || st["contract"] != 1.0 || len(fr.got) != 1 || fr.got[0].Args["url"] != "https://lk.example/" {
 		t.Fatal(res, fr.got)
 	}
 	d.used = []string{"tok-SECRET-123"}

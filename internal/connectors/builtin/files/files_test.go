@@ -111,7 +111,7 @@ func TestEscapes(t *testing.T) {
 		t.Fatal("secret modified")
 	}
 	h.Settings = map[string]any{}
-	if _, err := h.Execute(c, "read", map[string]any{"path": "~/x"}); err == nil || !strings.Contains(err.Error(), "roots") {
+	if _, err := h.Execute(c, "read", map[string]any{"path": "~/x"}); err == nil || !strings.Contains(err.Error(), "no folders") {
 		t.Fatal("no roots must deny everything", err)
 	}
 	// Обрезанный по max_bytes двоичный файл не отдаётся.
@@ -127,7 +127,7 @@ func TestManifest(t *testing.T) {
 	if w, _ := m.Find("write"); w.Class != "write" {
 		t.Fatal("write must default to ask")
 	}
-	if m.Runtime != "builtin" || len(m.Capabilities.Files) != 1 {
+	if m.Runtime != "builtin" || len(m.Folders) != 1 {
 		t.Fatal("files connector must have only file capabilities", m.Capabilities)
 	}
 }

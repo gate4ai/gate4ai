@@ -162,7 +162,7 @@ func globSegs(ps, pats []string) bool {
 }
 
 // DomainMatches — хост URL совпадает с одним из шаблонов: "example.com" — точно,
-// "*.example.com" — только поддомены (не сам example.com).
+// "*.example.com" — поддомены и сам example.com, "*" — любой сайт.
 func DomainMatches(raw string, patterns []string) bool { return domain.Matches(raw, patterns) }
 
 // ActionMatches сопоставляет имя действия с шаблоном правила: "email.send",

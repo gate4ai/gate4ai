@@ -46,8 +46,8 @@ func TestBuiltinUsesHostChecks(t *testing.T) {
 	m, err := manifest.Parse([]byte(`connector: echo
 version: "1"
 runtime: builtin
-capabilities:
-  files: ["${setting:root}/**"]
+folders:
+  - { path: "${setting:root}", access: allow }
 actions:
   - name: add
     class: write

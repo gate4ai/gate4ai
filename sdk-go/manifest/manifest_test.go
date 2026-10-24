@@ -266,7 +266,9 @@ func TestCallReasons(t *testing.T) {
 version: "1"
 runtime: wasm
 capabilities:
-  services: [ { target: browser, contract: 1, actions: [open, act], params: { domains: [lk.example] } } ]
+  services: [ { target: browser, contract: 1, actions: [open, act] } ]
+sites:
+  - { domain: lk.example, access: allow }
 actions:
   - name: visits
     class: write

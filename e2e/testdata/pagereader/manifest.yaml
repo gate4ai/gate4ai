@@ -7,7 +7,8 @@ capabilities:
     - target: browser
       contract: 1
       actions: [open, observe, login]
-      params: { domains: ["${setting:sites}"] }
+sites:
+  - { domain: "${setting:domains}", access: allow }
 credentials:
   - { slot: site, bind: ["${setting:login_site}"] }
 actions:

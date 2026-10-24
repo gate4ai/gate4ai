@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package files — встроенный коннектор ядра «Файлы» (runtime: builtin): чтение,
-// список, добавление и запись в разрешённых папках (connectors.files.roots)
+// список, добавление и запись в папках из списка доступа Файлов (roots — от pipeline)
 // поверх функций хоста fs_* с той же проверкой возможностей, что у WASM.
 // Скрытые файлы ниже корня, ключи и каталоги секретов закрыты всегда
 // (guard.go), открыть — allow_hidden и allow_paths.
@@ -59,7 +59,7 @@ func settings(m map[string]any) (Settings, error) {
 		return s, err
 	}
 	if len(s.Roots) == 0 {
-		return s, errors.New("connectors.files.roots is empty: no folders are allowed")
+		return s, errors.New("no folders are open in the Files access list")
 	}
 	if s.MaxBytes <= 0 {
 		s.MaxBytes = 1 << 20

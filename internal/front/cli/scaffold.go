@@ -35,7 +35,7 @@ func (e *Env) scaffold(args []string) int {
 	pos, fl := splitFlags(args, map[string]bool{"site": true, "o": true})
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
-	site := fs.String("site", "", "the site's domain, e.g. lk.example.org (more: edit params.domains in the manifest)")
+	site := fs.String("site", "", "the site's domain, e.g. lk.example.org (more: edit sites in the manifest)")
 	out := fs.String("o", "", "folder (default: ./<name>)")
 	if fs.Parse(fl) != nil || len(pos) != 1 || *site == "" {
 		fmt.Fprintln(e.Stderr, newUsage)
@@ -125,11 +125,13 @@ version: "0.1.0"
 runtime: wasm
 capabilities:
   services:
-    # Действия браузера на странице этого коннектора; сайты — только эти.
+    # Действия браузера на странице этого коннектора.
     - target: browser
       contract: 1
       actions: [open, observe, act, page_extract, page_screenshot]
-      params: { domains: ["{{.Site}}"] }
+# Сайты коннектора и режим доступа (умолчания; владелец меняет на странице коннектора).
+sites:
+  - { domain: "{{.Site}}", access: allow }
 limits: { timeout_s: 60 }
 actions:
   - name: summary
@@ -262,7 +264,7 @@ const tplFixture = `{
 
 const tplReadme = `# {{.Name}} — коннектор gate4.ai к {{.Site}}
 
-WASM-коннектор поверх браузера пользователя: страницу открывает и действия на ней выполняет коннектор ` + "`browser`" + ` (service_call), сайты ограничены ` + "`params.domains`" + ` в манифесте.
+WASM-коннектор поверх браузера пользователя: страницу открывает и действия на ней выполняет коннектор ` + "`browser`" + ` (service_call), сайты и режим доступа — ` + "`sites`" + ` в манифесте (владелец может сузить их на странице коннектора).
 
 ## Как писать
 

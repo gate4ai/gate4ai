@@ -3,7 +3,6 @@
 package daemon
 
 import (
-	"bytes"
 	"slices"
 
 	"github.com/gate4ai/gate4ai/internal/config"
@@ -57,18 +56,6 @@ func (d *Daemon) askInDefault(name string) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.Config.Put(auth.OwnerVia("daemon"), append(leadingComment(raw), out...), "connector "+name+": actions ask in profile "+DefaultProfile)
+	_, err = d.Config.Put(auth.OwnerVia("daemon"), append(config.LeadingComment(raw), out...), "connector "+name+": actions ask in profile "+DefaultProfile)
 	return err
-}
-
-// leadingComment — строки-комментарии в начале YAML (Marshal их не сохраняет).
-func leadingComment(raw []byte) []byte {
-	var out []byte
-	for _, line := range bytes.SplitAfter(raw, []byte("\n")) {
-		if !bytes.HasPrefix(line, []byte("#")) {
-			break
-		}
-		out = append(out, line...)
-	}
-	return out
 }

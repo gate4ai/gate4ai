@@ -202,6 +202,7 @@ func sitesOf(m map[string]any, domainsKey string) (domain.Sites, error) {
 	blocked := strs(m["blocked"])
 	switch mode {
 	case "allowlist":
+		return domain.Sites{Domains: strs(m[domainsKey]), Blocked: blocked}, nil
 	case "blocklist":
 		return domain.Sites{Blocklist: true, Domains: blocked}, nil
 	case "":
@@ -390,7 +391,7 @@ func (b *Browser) session(ctx context.Context, r abi.ExecRequest) (*callSession,
 		return nil, fmt.Errorf("params of %s: %w", r.Caller.Connector, err)
 	}
 	if !sites.Blocklist && len(sites.Domains) == 0 {
-		return nil, abi.Errorf(abi.CodeCapabilityDenied, "%s allows no sites (capabilities.services params.domains is empty)", r.Caller.Connector)
+		return nil, abi.Errorf(abi.CodeCapabilityDenied, "%s allows no sites (its sites list is empty)", r.Caller.Connector)
 	}
 	wait := time.Duration(0)
 	b.mu.Lock()
@@ -911,7 +912,24 @@ func handoffRequest(a map[string]any) worker.HandoffRequest {
 		Timeout: time.Duration(num(a, "timeout_ms")) * time.Millisecond}
 }
 
-// EndCall освобождает страницу корневого действия (native.CallEnder).
+// PageURL — адрес открытой страницы: сеанса агента session или страницы
+// корневого вызова коннектора call (pipeline.URLResolver); "" — страницы нет.
+func (b *Browser) PageURL(session, call string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if session != "" {
+		if as := b.agents[session]; as != nil && !as.closed {
+			return as.url
+		}
+		return ""
+	}
+	if cs := b.sessions[call]; cs != nil {
+		return cs.url
+	}
+	return ""
+}
+
+// EndCall освобождает страницу корневого действия (wasm.CallEnder).
 func (b *Browser) EndCall(call string) {
 	b.mu.Lock()
 	cs, ok := b.sessions[call]
@@ -1000,7 +1018,7 @@ func siteHint(err error) error {
 	if host == "" || strings.Contains(host, " ") {
 		return err
 	}
-	return fmt.Errorf("%w (the owner adds the site: gate4ai sites allow %s — or Web UI → Connectors → browser; an agent asks the owner for it: "+
-		`gate4ai gate4ai change_policy --summary "allow %s" --changes '[{"op":"add_setting_items","connector":"browser","key":"allowed_domains","items":["%s"]}]'`+
-		"; the sites allowed now: gate4ai gate4ai policy_summary)", err, host, host, host)
+	return fmt.Errorf("%w (the owner opens the site: gate4ai access sites set %s read — or Web UI → Browser; an agent asks the owner for it: "+
+		`gate4ai gate4ai change_policy --summary "open %s" --changes '[{"op":"set_site_access","domain":"%s","access":"read"}]'`+
+		"; the sites open now: gate4ai gate4ai policy_summary)", err, host, host, host)
 }

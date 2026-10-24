@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
 	"github.com/gate4ai/gate4ai/internal/config"
@@ -154,7 +155,7 @@ func TestSetupSkip(t *testing.T) {
 func TestSetupFolders(t *testing.T) {
 	u, _, _, base := setupCfg(t, "profiles:\n  default:\n    connectors: [notes]\n")
 	// Встроенного files в тестовом daemon нет — проверяем правила напрямую.
-	c := &config.Config{Connectors: map[string]map[string]any{"files": {"roots": []any{"~"}}}}
+	c := &config.Config{Access: config.Access{Folders: []access.Folder{{Path: "~", Access: access.Read}}}}
 	if !filesWholeHome(c) {
 		t.Fatal("whole home not detected")
 	}

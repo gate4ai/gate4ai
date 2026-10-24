@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 )
 
 // Текстовые доказательства маскируются по значениям секретов, подставленным
@@ -37,9 +38,9 @@ func TestFSSymlinkSwap(t *testing.T) {
 	ws := t.TempDir()
 	outside := t.TempDir()
 	os.MkdirAll(filepath.Join(ws, "a"), 0o755)
-	d := dispatcher(t, `capabilities: { files: ["${setting:root}/**"] }`, map[string]any{"root": ws})
+	d := dispatcher(t, `folders: [ { path: "${setting:root}", access: allow } ]`, map[string]any{"root": ws})
 	p := filepath.Join(ws, "a", "authorized_keys")
-	loc, err := d.Check.Locate(p)
+	loc, err := d.Check.Locate(p, access.OpWrite)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,8 +61,8 @@ func TestFSSymlinkSwap(t *testing.T) {
 	one := filepath.Join(ws, "todo.md")
 	os.WriteFile(one, []byte("x"), 0o644)
 	os.WriteFile(filepath.Join(ws, "other"), []byte("keep"), 0o644)
-	d1 := dispatcher(t, `capabilities: { files: ["`+one+`"] }`, nil)
-	loc, err = d1.Check.Locate(one)
+	d1 := dispatcher(t, `folders: [ { path: "`+one+`", access: append } ]`, nil)
+	loc, err = d1.Check.Locate(one, access.OpAppend)
 	if err != nil || !loc.Exact {
 		t.Fatal(loc, err)
 	}
@@ -75,6 +76,7 @@ func TestFSSymlinkSwap(t *testing.T) {
 	}
 	// Без подмены всё работает.
 	os.Remove(one)
+	os.WriteFile(one, []byte("x"), 0o644)
 	if _, err := d1.fs(abi.FnFSAppend, abi.FSRequest{Path: one, Data: []byte("ok")}); err != nil {
 		t.Fatal(err)
 	}

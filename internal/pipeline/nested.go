@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
+	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/policy"
 )
@@ -46,7 +48,7 @@ type nestedKey struct{}
 
 type nestedCall struct {
 	caller string
-	params map[string]any
+	sites  []access.Site // действующие домены вызывающего коннектора
 }
 
 // ExecuteNested — вызов service_call коннектора caller во время его действия
@@ -95,12 +97,32 @@ func (p *Pipeline) ExecuteNested(ctx context.Context, caller string, rule manife
 	prov, perr := p.provenance(args)
 	req := policy.Request{Agent: parent.Agent, Action: full, Class: act.Class, Args: args, Provenance: prov, Now: p.Now(), Nested: true, StateError: perr}
 	dec := p.decidePolicy(req)
-	if dec.Effect == config.EffectDeny {
+	n := nestedCall{caller: caller, sites: p.ConnectorSites(caller)}
+	acc, hasAcc := p.accessOf(full, act, args, cli, &n, parent.Root)
+	dec = mergeAccess(dec, acc, hasAcc)
+	var appr *audit.Approval
+	switch dec.Effect {
+	case config.EffectDeny:
 		p.deny(ctx, parent.Agent, act, full, args, dec, nil, parent.ID)
 		return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "service_call %s denied by policy: %s", full, dec.Reason)
+	case config.EffectAsk:
+		// Строка коннектора «спросить»: подтверждение человека внутри вызова —
+		// вызывающее действие ждёт (в пределах своего срока).
+		a, err := p.requestApproval(ctx, parent.Agent, full, act, args, prov, dec)
+		if err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeConnector, "service_call %s: %v", full, err)
+		}
+		r := p.WaitFor(ctx, a.ID, p.nestedWait(ctx))
+		if r.Status != StatusOK {
+			if r.Status == StatusPending {
+				return abi.ExecResult{}, abi.Errorf(abi.CodeCancelled, "service_call %s: the owner did not answer in time", full)
+			}
+			return abi.ExecResult{}, abi.Errorf(abi.CodeCapabilityDenied, "service_call %s: %s", full, r.Message)
+		}
+		return abi.ExecResult{Structured: r.Result, Content: r.Content, ResultRef: r.ID}, nil
 	}
-	ctx = context.WithValue(ctx, nestedKey{}, nestedCall{caller: caller, params: rule.Params})
-	res := p.run(ctx, parent.Agent, full, cli, act, args, dec, nil)
+	ctx = context.WithValue(ctx, nestedKey{}, n)
+	res := p.run(ctx, parent.Agent, full, cli, act, args, dec, appr)
 	switch res.Status {
 	case StatusOK:
 	case StatusVerificationFailed:

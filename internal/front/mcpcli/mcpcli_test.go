@@ -42,7 +42,7 @@ func TestStdioMCPAgainstDaemon(t *testing.T) {
 	defer os.RemoveAll(home)
 	c, _ := connectors.NewInProcess(files{})
 	d, err := daemon.New(daemon.Options{Home: filepath.Join(home, "d"), Keys: keys.NewMemory(), Connectors: []connectors.Client{c},
-		InitialConfig: []byte("agents: {cc: {profile: p}}\nprofiles: {p: {connectors: [files], rules: [{id: no-etc, action: files.read, when: 'glob(path, \"/etc/**\")', effect: deny, reason: system files}]}}\n")})
+		InitialConfig: []byte("access: {folders: [{path: /home/x, access: read}, {path: /etc, access: read}]}\nagents: {cc: {profile: p}}\nprofiles: {p: {connectors: [files], rules: [{id: no-etc, action: files.read, when: 'glob(path, \"/etc/**\")', effect: deny, reason: system files}]}}\n")})
 	if err != nil {
 		t.Fatal(err)
 	}

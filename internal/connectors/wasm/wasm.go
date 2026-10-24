@@ -23,6 +23,7 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/capability"
 	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -38,6 +39,9 @@ type Services struct {
 	Log    *slog.Logger
 	// Home — домашний каталог пользователя для "~" в путях.
 	Home string
+	// Folders — список папок Файлов gate4.ai: коннекторам магазина доступны
+	// только папки, которые там не закрыты (nil — не проверяется).
+	Folders func() []access.Folder
 	// Mask — маскирование секретов Vault в диагностике коннекторов (stderr
 	// нативных процессов) перед записью в лог daemon; nil — без маскирования.
 	Mask func(string) string
@@ -309,6 +313,15 @@ func (e *Engine) Dispatcher(ctx context.Context, m manifest.Manifest, lim manife
 	chk, err := capability.New(m, settings, e.svc.Home)
 	if err != nil {
 		return nil, err
+	}
+	if f, err := access.ParseFolders(settings["folders"]); err == nil && f != nil {
+		chk.Folders = f // владелец сузил или расширил папки коннектора
+	}
+	if m.Runtime == manifest.RuntimeWasm && e.svc.Folders != nil {
+		chk.Global = e.svc.Folders()
+		if chk.Global == nil {
+			chk.Global = []access.Folder{}
+		}
 	}
 	var kv hostfuncs.KV
 	if e.svc.KV != nil {
