@@ -184,12 +184,11 @@ func (u *UI) serverChecks(ctx context.Context) []ServerCheck {
 	ck := browserenv.CheckBrowser(env.Browser)
 	switch {
 	case bs.Missing:
-		add(ServerCheck{ID: "browser_pkg", Title: M("Browser package"), Status: "off", Detail: M("not installed: agents have no browser"),
-			Fix: M("Install it from the store."), Cmd: "gate4ai connectors install browser", Link: "/connectors", Button: M("Access")})
+		add(ServerCheck{ID: "browser_pkg", Title: M("Browser"), Status: "off", Detail: M("not available in this build: agents have no browser")})
 	case bs.Running:
-		add(ServerCheck{ID: "browser_pkg", Title: M("Browser package"), Status: "ok", Detail: M("running, %d sessions", len(bs.Sessions))})
+		add(ServerCheck{ID: "browser_pkg", Title: M("Browser"), Status: "ok", Detail: M("running, %d sessions", len(bs.Sessions))})
 	default:
-		add(ServerCheck{ID: "browser_pkg", Title: M("Browser package"), Status: "ok", Detail: M("installed; Chrome starts with the first browser action")})
+		add(ServerCheck{ID: "browser_pkg", Title: M("Browser"), Status: "ok", Detail: M("built in; Chrome starts with the first browser action")})
 	}
 	if !bs.Missing {
 		if ck.Chrome == "" {

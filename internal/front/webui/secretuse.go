@@ -81,17 +81,13 @@ func secretUses(cfg *config.Config, ms []manifest.Manifest) map[string][]SecretU
 	sort.Strings(names)
 	for _, name := range names {
 		settings := cfg.Connectors[name]
-		u := SecretUse{Pre: "connector ", Name: name, Link: "/connectors/" + name}
+		u := SecretUse{Pre: "connector ", Name: name, Link: pageOf(name)}
 		m, ok := installed[name]
 		if !ok {
 			u = SecretUse{Pre: "connector ", Name: name, Post: " (not installed)"}
 		}
 		// Возможности манифеста с подставленными настройками экземпляра.
-		var tmpls []string
-		for _, s := range m.Capabilities.Secrets {
-			tmpls = append(tmpls, s.Alias)
-		}
-		tmpls = append(tmpls, m.Capabilities.Reveal...)
+		tmpls := m.Capabilities.Reveal
 		for _, t := range tmpls {
 			for _, a := range manifest.Expand(t, settings) {
 				if strings.HasPrefix(a, "@") {

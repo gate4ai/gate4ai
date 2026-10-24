@@ -7,8 +7,8 @@ i18n:
     description: Файлы в разрешённых папках. Скрытые файлы, ключи и данные приложений закрыты всегда.
 version: "6"
 runtime: builtin
-capabilities:
-  files: ["${setting:roots}/**"]
+folders:
+  - { path: "${setting:roots}", access: allow }
 limits: { memory_mb: 64, timeout_s: 30 }
 actions:
   - name: read

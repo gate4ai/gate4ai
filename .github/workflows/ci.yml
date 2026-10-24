@@ -24,7 +24,7 @@ jobs:
           prev=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
           [ -n "$prev" ] || exit 0
           go build -o "$RUNNER_TEMP/gate4ai" ./cmd/gate4ai
-          for m in connectors/*/manifest.yaml; do
+          for m in internal/connectors/builtin/*/manifest.yaml; do
             git show "$prev:$m" > "$RUNNER_TEMP/prev.yaml" 2>/dev/null || continue
             grep -q '^services:' "$RUNNER_TEMP/prev.yaml" || continue
             echo "== $m against $prev"

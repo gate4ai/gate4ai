@@ -1,0 +1,28 @@
+{{template "head" .}}
+{{$d := .Data}}{{$m := $d.Manifest}}
+{{template "access_tabs" (dict "V" . "On" $d.Name)}}
+<p class="muted">{{if eq $d.Name "browser"}}{{T "The browser is built into gate4.ai: agents open sites in a dedicated Chrome profile. The list below says which sites and how; the most specific line wins."}}{{else}}{{T "Files are built into gate4.ai. The list below says which folders agents may touch and how; the most specific line wins. Hidden files, keys and app data stay closed anyway."}}{{end}}</p>
+{{if $d.WholeHome}}<p class="warn">{{T "Files are open for the whole home folder. Put only the folders agents need below (hidden folders and keys stay closed anyway)."}}</p>{{end}}
+<div class="card" id="access"><h3>{{if eq $d.Kind "sites"}}{{T "Sites"}}{{else}}{{T "Folders"}}{{end}}</h3>
+{{if eq $d.Kind "sites"}}{{template "access_table" (dict "V" . "Rows" $d.Rows "Kind" "sites" "Action" "/access/sites" "Modes" siteModes "Label" (T "Site") "Placeholder" "*.example.org")}}
+{{else}}{{template "access_table" (dict "V" . "Rows" $d.Rows "Kind" "folders" "Action" "/access/folders" "Modes" folderModes "Label" (T "Folder") "Placeholder" "~/Documents/notes")}}{{end}}
+<details class="adv"><summary>{{T "What the modes mean"}}</summary><ul class="help">{{range $d.ModeHelp}}<li>{{.}}</li>{{end}}</ul>
+<p class="help">{{T "A site or folder with no line is closed. An explicit rule in Access → Rules overrides a line, except deny: deny always wins."}}</p></details>
+</div>
+{{template "conn_settings" .}}
+{{template "conn_actions" .}}
+{{template "foot"}}
+
+{{/* access_table — строки списка доступа: режим меняется на месте, строка убирается, новая добавляется. */}}
+{{define "access_table"}}{{$v := .V}}{{$act := .Action}}{{$modes := .Modes}}
+<table class="access"><tr><th>{{.Label}}</th><th>{{T "Access"}}</th><th></th></tr>
+{{range .Rows}}<tr><td><code>{{.Value}}</code>{{with .Warn}}<div class="help warn">{{.}}</div>{{end}}</td>
+<td><form method="post" action="{{$v.Base}}{{$act}}" class="row"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="value" value="{{.Value}}">
+<select name="access" data-autosubmit aria-label="{{T "Access for %s" .Value}}">{{$cur := .Access}}{{range $modes}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{mode .}}</option>{{end}}</select><noscript><button class="small">{{T "Save"}}</button></noscript></form></td>
+<td><form method="post" action="{{$v.Base}}{{$act}}"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="value" value="{{.Value}}"><input type="hidden" name="op" value="remove"><button class="small" title="{{T "Remove"}}">✕</button></form></td></tr>
+{{else}}<tr><td colspan="3" class="muted">{{T "Nothing yet."}}</td></tr>{{end}}
+<tr><td colspan="3"><form method="post" action="{{$v.Base}}{{$act}}" class="row" autocomplete="off"><input type="hidden" name="csrf" value="{{$v.CSRF}}">
+<input name="value" placeholder="{{.Placeholder}}" aria-label="{{.Label}}" size="32" required>
+<select name="access" aria-label="{{T "Access"}}">{{range $modes}}<option value="{{.}}">{{mode .}}</option>{{end}}</select>
+<button class="small primary" data-busy="{{T "Saving…"}}">{{T "Add"}}</button></form></td></tr>
+</table>{{end}}

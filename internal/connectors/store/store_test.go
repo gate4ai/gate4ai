@@ -28,7 +28,7 @@ func manifestYAML(version, host string, write bool) []byte {
 	if write {
 		acts += "  - { name: pay, class: external }\n"
 	}
-	return []byte("connector: bank\nversion: \"" + version + "\"\nruntime: wasm\ncapabilities:\n  network: [ { host: \"" + host + "\", scheme: https } ]\nactions:\n" + acts)
+	return []byte("connector: bank\nversion: \"" + version + "\"\nruntime: wasm\nfolders: [ { path: \"/srv/" + host + "\", access: allow } ]\nactions:\n" + acts)
 }
 
 func keys(t *testing.T) (string, string) {
@@ -109,7 +109,7 @@ func TestInstallFromFileTrustAndConsent(t *testing.T) {
 	if _, err := o.Install(p, nil); !errors.Is(err, ErrConsent) {
 		t.Fatal("installed without consent")
 	}
-	if _, err := o.Install(p, []string{"network https://evil.example"}); !errors.Is(err, ErrConsent) {
+	if _, err := o.Install(p, []string{"folder /srv/evil.example: allow"}); !errors.Is(err, ErrConsent) {
 		t.Fatal("installed with consent to other capabilities")
 	}
 	info, err := o.Install(p, p.Capabilities)
@@ -258,7 +258,7 @@ func TestRegistryCapabilitiesMustMatchReview(t *testing.T) {
 	r := newRegistry(t, registry.TrustVerified)
 	r.publish(t, "1", "api.bank.example")
 	e := r.index.Connectors["bank"]
-	e.Versions[0].Capabilities = []string{"network https://statements.bank.example"} // проверены другие возможности
+	e.Versions[0].Capabilities = []string{"folder /srv/statements.bank.example: allow"} // проверены другие возможности
 	r.index.Connectors["bank"] = e
 	r.save(t)
 	if _, err := r.o.Prepare(context.Background(), "bank", false); err == nil || !strings.Contains(err.Error(), "reviewed") {

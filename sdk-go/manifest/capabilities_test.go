@@ -7,25 +7,30 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 )
 
-const mailYAML = `
-connector: email
+const notesYAML = `
+connector: notes
 version: "2"
 runtime: wasm
 capabilities:
-  network:
-    - { host: "${setting:imap.host}", port: "${setting:imap.port}", scheme: tls }
-    - { host: "${setting:smtp.host}", scheme: tls }
-  secrets:
-    - { alias: "${setting:imap.password}", bind: ["${setting:imap.host}"] }
-  files: ["${setting:roots}/**"]
+  services:
+    - { target: browser, contract: 1, actions: [open, act] }
   storage: { quota_mb: 1 }
+sites:
+  - { domain: "${setting:sites}", access: allow }
+  - { domain: "*.example", access: read }
+folders:
+  - { path: "${setting:roots}", access: append }
+  - { path: "~/todo.md", access: read }
 limits: { memory_mb: 64 }
 actions:
   - name: send
     class: external
     verify: sent_folder
+    calls: [browser.open, browser.act]
     input_schema:
       type: object
       properties:
@@ -35,7 +40,7 @@ actions:
 `
 
 func TestParseAndResolve(t *testing.T) {
-	m, err := Parse([]byte(mailYAML))
+	m, err := Parse([]byte(notesYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,70 +51,118 @@ func TestParseAndResolve(t *testing.T) {
 		t.Fatalf("default not normalized to float64: %#v", d)
 	}
 	settings := map[string]any{
-		"imap":  map[string]any{"host": "IMAP.example.com", "port": 993.0, "password": "@mail.work"},
-		"smtp":  map[string]any{"host": "smtp.example.com"},
+		"sites": []any{"lk.example", "B.example."},
 		"roots": []any{"~/notes", "/srv/docs"},
 	}
 	r, err := m.Capabilities.Resolve(settings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantNet := []NetworkRule{{"imap.example.com", 993, "tls"}, {"smtp.example.com", 0, "tls"}}
-	if !reflect.DeepEqual(r.Network, wantNet) {
-		t.Fatalf("network %#v", r.Network)
+	if len(r.Services) != 1 || r.Services[0].Target != "browser" || r.Services[0].Contract != 1 || !r.Services[0].Allows("act") || r.Services[0].Allows("close") {
+		t.Fatalf("services %#v", r.Services)
 	}
-	if len(r.Secrets) != 1 || r.Secrets[0].Alias != "@mail.work" || r.Secrets[0].Bind[0] != "IMAP.example.com" {
-		t.Fatalf("secrets %#v", r.Secrets)
+	if r.StorageBytes != 1<<20 {
+		t.Fatal(r.StorageBytes)
 	}
-	if !reflect.DeepEqual(r.Files, []string{"~/notes/**", "/srv/docs/**"}) || r.StorageBytes != 1<<20 {
-		t.Fatal(r.Files, r.StorageBytes)
+	// Шаблон в домене раскрывается в несколько строк с тем же режимом;
+	// домены — в нижнем регистре, без точки на конце.
+	wantSites := []access.Site{{Domain: "lk.example", Access: access.Allow}, {Domain: "b.example", Access: access.Allow}, {Domain: "*.example", Access: access.Read}}
+	if got := m.ResolveSites(settings); !reflect.DeepEqual(got, wantSites) {
+		t.Fatalf("sites %#v", got)
 	}
-	// Пустая настройка убирает запись; порт не задан — любой.
-	r, _ = m.Capabilities.Resolve(map[string]any{"imap": map[string]any{"host": "a.example"}})
-	if len(r.Network) != 1 || r.Network[0].Port != 0 || len(r.Secrets) != 0 || len(r.Files) != 0 {
-		t.Fatalf("%#v", r)
+	wantFolders := []access.Folder{{Path: "~/notes", Access: access.Append}, {Path: "/srv/docs", Access: access.Append}, {Path: "~/todo.md", Access: access.Read}}
+	if got := m.ResolveFolders(settings); !reflect.DeepEqual(got, wantFolders) {
+		t.Fatalf("folders %#v", got)
 	}
-	// Значение секрета в настройках — только алиас.
-	if _, err := m.Capabilities.Resolve(map[string]any{"imap": map[string]any{"host": "a", "password": "hunter2"}}); err == nil {
+	// Пустая настройка убирает запись: без sites и roots остаются только литералы.
+	if got := m.ResolveSites(nil); !reflect.DeepEqual(got, wantSites[2:]) {
+		t.Fatalf("sites without settings %#v", got)
+	}
+	if got := m.ResolveFolders(nil); !reflect.DeepEqual(got, wantFolders[2:]) {
+		t.Fatalf("folders without settings %#v", got)
+	}
+	// reveal: значение настройки — только алиас Vault.
+	rm, err := Parse([]byte("connector: x\nruntime: builtin\ncapabilities: { reveal: [\"${setting:key}\"] }"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err := rm.Capabilities.Resolve(map[string]any{"key": "@api"}); err != nil || !reflect.DeepEqual(r.Reveal, []string{"@api"}) {
+		t.Fatal(r, err)
+	}
+	if _, err := rm.Capabilities.Resolve(map[string]any{"key": "hunter2"}); err == nil {
 		t.Fatal("plain secret value accepted")
 	}
 }
 
 func TestValidateRejects(t *testing.T) {
 	cases := map[string]string{
-		"bad scheme":       "capabilities: { network: [ { host: a.com, scheme: ftp } ] }",
-		"secret no bind":   "capabilities: { secrets: [ { alias: \"@x\", bind: [] } ] }",
-		"secret not alias": "capabilities: { secrets: [ { alias: \"x\", bind: [a.com] } ] }",
-		"relative files":   "capabilities: { files: [ \"notes/**\" ] }",
-		"two templates":    "capabilities: { files: [ \"${setting:a}/${setting:b}\" ] }",
-		"money no verify":  "actions: [ { name: pay, class: money } ]",
-		"unknown field":    "capabilites: {}",
-		"bad runtime":      "runtime: docker",
+		"relative folder":    "folders: [ { path: \"notes\", access: allow } ]",
+		"two templates":      "folders: [ { path: \"${setting:a}/${setting:b}\", access: allow } ]",
+		"folder ask":         "folders: [ { path: \"~/notes\", access: ask } ]",
+		"folder connector":   "folders: [ { path: \"~/notes\", access: connector } ]",
+		"folder no access":   "folders: [ { path: \"~/notes\" } ]",
+		"bad domain":         "sites: [ { domain: \"http://a.com/x\", access: allow } ]",
+		"site connector":     "sites: [ { domain: a.com, access: connector } ]",
+		"site append":        "sites: [ { domain: a.com, access: append } ]",
+		"site two templates": "sites: [ { domain: \"${setting:a}.${setting:b}\", access: allow } ]",
+		"files removed":      "capabilities: { files: [ \"~/notes/**\" ] }",
+		"params removed":     "capabilities: { services: [ { target: browser, contract: 1, actions: [open], params: { domains: [a.com] } } ] }",
+		"zero quota":         "capabilities: { storage: { quota_mb: 0 } }",
+		"service no acts":    "capabilities: { services: [ { target: browser, contract: 1, actions: [] } ] }",
+		"service contract":   "capabilities: { services: [ { target: browser, contract: 0, actions: [open] } ] }",
+		"reveal not alias":   "runtime: builtin\ncapabilities: { reveal: [ \"x\" ] }",
+		"network removed":    "capabilities: { network: [ { host: a.com, scheme: https } ] }",
+		"secrets removed":    "capabilities: { secrets: [ { alias: \"@x\", bind: [a.com] } ] }",
+		"money no verify":    "actions: [ { name: pay, class: money } ]",
+		"unknown field":      "capabilites: {}",
+		"bad runtime":        "runtime: docker",
 	}
 	for name, body := range cases {
 		if _, err := Parse([]byte("connector: bank\n" + body)); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if _, err := Parse([]byte("connector: bank\nactions: [ { name: pay, class: money, verify: payment_status } ]")); err != nil {
-		t.Fatal(err)
+	for name, body := range map[string]string{
+		"money verified": "actions: [ { name: pay, class: money, verify: payment_status } ]",
+		"site modes":     "sites: [ { domain: a.com, access: allow }, { domain: \"*.b.com\", access: read }, { domain: \"*\", access: ask }, { domain: c.com, access: deny } ]",
+		"folder modes":   "folders: [ { path: /srv, access: allow }, { path: \"~/in\", access: append }, { path: \"~/docs/**/*.md\", access: read }, { path: \"~/.ssh\", access: deny } ]",
+		"site template":  "sites: [ { domain: \"${setting:site}\", access: allow } ]",
+	} {
+		if _, err := Parse([]byte("connector: bank\n" + body)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
 
 func TestSummaryAndSame(t *testing.T) {
-	m, _ := Parse([]byte(mailYAML))
-	s := strings.Join(m.Capabilities.Summary(), "\n")
-	for _, want := range []string{"network tls://${setting:imap.host}:${setting:imap.port}", "secret ${setting:imap.password} for ${setting:imap.host}", "storage 1 MB"} {
+	m, _ := Parse([]byte(notesYAML))
+	s := strings.Join(m.Summary(), "\n")
+	for _, want := range []string{
+		"call browser (contract 1): open, act",
+		"site ${setting:sites}: allow",
+		"site *.example: read",
+		"folder ${setting:roots}: append",
+		"folder ~/todo.md: read",
+		"storage 1 MB",
+	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("summary lacks %q:\n%s", want, s)
 		}
 	}
-	m2, _ := Parse([]byte(mailYAML))
-	if !Same(m, m2) || !slices.Equal(m.Capabilities.Summary(), m2.Capabilities.Summary()) {
+	if strings.Contains(strings.Join(m.Capabilities.Summary(), "\n"), "folder") {
+		t.Fatal("capabilities summary lists folders:", m.Capabilities.Summary())
+	}
+	m2, _ := Parse([]byte(notesYAML))
+	if !Same(m, m2) || !slices.Equal(m.Summary(), m2.Summary()) {
 		t.Fatal("same manifests differ")
 	}
-	m2.Capabilities.Network = m2.Capabilities.Network[:1]
-	if Same(m, m2) || slices.Equal(m.Capabilities.Summary(), m2.Capabilities.Summary()) {
+	m2.Capabilities.Services[0].Actions = m2.Capabilities.Services[0].Actions[:1]
+	if Same(m, m2) || slices.Equal(m.Summary(), m2.Summary()) {
 		t.Fatal("changed capabilities not detected")
+	}
+	m3, _ := Parse([]byte(notesYAML))
+	m3.Folders[0].Access = access.Allow
+	if Same(m, m3) || slices.Equal(m.Summary(), m3.Summary()) {
+		t.Fatal("changed folder mode not detected")
 	}
 }

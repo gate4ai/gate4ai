@@ -98,7 +98,7 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 <nav class="main" aria-label="{{T "Sections"}}">
 <a href="{{.Base}}/" class="{{if eq $s "home"}}on{{end}}"{{if eq $s "home"}} aria-current="page"{{end}}>{{T "Home"}}<span class="count" data-pending-count{{if not .Pending}} hidden{{end}} aria-label="{{T "waiting for you"}}">{{.Pending}}</span></a>
 {{if not .Remote}}<a href="{{.Base}}/agents" class="{{if eq $s "agents"}}on{{end}}"{{if eq $s "agents"}} aria-current="page"{{end}}>{{T "Agents"}}</a>
-<a href="{{.Base}}/connectors" class="{{if eq $s "access"}}on{{end}}"{{if eq $s "access"}} aria-current="page"{{end}}>{{T "Access"}}</a>{{end}}
+<a href="{{.Base}}/access/browser" class="{{if eq $s "access"}}on{{end}}"{{if eq $s "access"}} aria-current="page"{{end}}>{{T "Access"}}</a>{{end}}
 <a href="{{.Base}}/browser" class="{{if eq $s "browser"}}on{{end}}"{{if eq $s "browser"}} aria-current="page"{{end}}>{{T "Browser"}}</a>
 <a href="{{.Base}}/journal" class="{{if eq $s "journal"}}on{{end}}"{{if eq $s "journal"}} aria-current="page"{{end}}>{{T "Journal"}}</a>
 {{if not .Remote}}<a href="{{.Base}}/settings" class="{{if eq $s "settings"}}on{{end}}"{{if eq $s "settings"}} aria-current="page"{{end}}>{{T "Settings"}}</a>{{end}}
@@ -131,8 +131,10 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
     <input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}">
     <button class="primary" name="decision" value="approve">{{T "Allow"}}</button>
     {{if and (not $v.Remote) .Always}}<button name="decision" value="approve_always">{{.Always}}</button>{{end}}
+    {{if and (not $v.Remote) .AddAllow}}<button name="decision" value="approve_access">{{.AddAllow}}</button>{{end}}
     <span class="sp"></span>
     <button class="danger" name="decision" value="reject">{{T "Deny"}}</button>
+    {{if and (not $v.Remote) .AddDeny}}<button class="danger" name="decision" value="reject_access">{{.AddDeny}}</button>{{end}}
   </form>
   <details><summary>{{T "Technical details"}}</summary><p class="help"><code>{{.Action}}</code> · {{class .Class}} · #{{short .PreviewHash}} · {{T "until"}} {{ts .Expires}}{{if .Decision.RuleIDs}} · {{T "rule"}} {{join .Decision.RuleIDs ", "}}{{end}}</p>
   {{with .Desc}}<p class="help">{{.}}</p>{{end}}

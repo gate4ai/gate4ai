@@ -2,14 +2,10 @@ connector: probe
 version: "1"
 runtime: wasm
 capabilities:
-  network: [ { host: 127.0.0.1, scheme: http }, { host: 127.0.0.1, scheme: tcp } ]
-  secrets: [ { alias: "${setting:token}", bind: [127.0.0.1] } ]
   storage: { quota_mb: 1 }
 limits: { memory_mb: 48, timeout_s: 3 }
 actions:
   - { name: deny_all, class: read }
-  - { name: http, class: read, input_schema: { type: object, properties: { url: { type: string } }, required: [url] } }
-  - { name: imap, class: read, input_schema: { type: object, properties: { port: { type: integer } }, required: [port] } }
   - { name: settings, class: read }
   - { name: kv, class: write }
   - { name: spin, class: read }

@@ -162,10 +162,10 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestNativeAndServices(t *testing.T) {
+func TestBuiltinAndServices(t *testing.T) {
 	const acts = "actions:\n  - { name: open, class: read, service_only: true }\n  - { name: read, class: read }\n"
 	ok := []string{
-		"connector: browser\nruntime: native\nplatforms: [linux/amd64, darwin/arm64]\ncontract: 1\nservices: [open]\ncapabilities: { reveal: [\"${setting:model_key}\"] }\n" + acts,
+		"connector: browser\nruntime: builtin\ncontract: 1\nservices: [open]\ncapabilities: { reveal: [\"${setting:model_key}\"] }\n" + acts,
 		"connector: browser\nruntime: wasm\ncontract: 2\nservices: [open, read]\n" + acts,
 	}
 	for _, y := range ok {
@@ -178,9 +178,8 @@ func TestNativeAndServices(t *testing.T) {
 		}
 	}
 	bad := []string{
-		"connector: b\nruntime: native\n" + acts,                                                   // нет platforms
-		"connector: b\nruntime: native\nplatforms: [plan9/386]\n" + acts,                           // чужая платформа
-		"connector: b\nruntime: wasm\nplatforms: [linux/amd64]\n" + acts,                           // platforms не для wasm
+		"connector: b\nruntime: native\n" + acts,                                                   // среды native больше нет
+		"connector: b\nruntime: wasm\nplatforms: [linux/amd64]\n" + acts,                           // platforms — неизвестное поле
 		"connector: b\nservices: [open]\n" + acts,                                                  // нет contract
 		"connector: b\ncontract: 1\nservices: [nope]\n" + acts,                                     // не действие
 		"connector: b\ncontract: 1\nservices: [read]\n" + acts,                                     // service_only open не в services
@@ -267,7 +266,9 @@ func TestCallReasons(t *testing.T) {
 version: "1"
 runtime: wasm
 capabilities:
-  services: [ { target: browser, contract: 1, actions: [open, act], params: { domains: [lk.example] } } ]
+  services: [ { target: browser, contract: 1, actions: [open, act] } ]
+sites:
+  - { domain: lk.example, access: allow }
 actions:
   - name: visits
     class: write

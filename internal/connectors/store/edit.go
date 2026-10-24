@@ -50,7 +50,7 @@ func VerifyPackages(ctx context.Context, ix *registry.Index, base string) (check
 	for _, name := range slices.Sorted(maps.Keys(ix.Connectors)) {
 		e := ix.Connectors[name]
 		for _, rel := range e.Versions {
-			if _, err := FetchRelease(ctx, base, name, e.Publisher, rel, ix.Publishers[e.Publisher], ""); err != nil {
+			if _, err := FetchRelease(ctx, base, name, e.Publisher, rel, ix.Publishers[e.Publisher]); err != nil {
 				errs = append(errs, fmt.Sprintf("%s %s: %v", name, rel.Version, err))
 				continue
 			}

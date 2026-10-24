@@ -55,7 +55,6 @@ func TestBrowserTypeAndScreenshot(t *testing.T) {
 	}))
 	t.Cleanup(site.Close)
 	g := startGate(t)
-	g.install("browser")
 	dir := t.TempDir()
 	wrapper := filepath.Join(dir, "chrome")
 	os.WriteFile(wrapper, []byte("#!/bin/sh\nexec '"+chrome+"' --headless=new --disable-gpu --window-size=1000,700 \"$@\"\n"), 0o755)
@@ -66,9 +65,10 @@ profiles:
     connectors: [browser]
     rules:
       - { id: browser-ok, action: "browser.*", effect: allow }
+access:
+  sites: [{ domain: "127.0.0.1", access: allow }]
 connectors:
   browser:
-    allowed_domains: ["127.0.0.1"]
     engine: cdp
     chrome_path: %q
     profile_dir: %q

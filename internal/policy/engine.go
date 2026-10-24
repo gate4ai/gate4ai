@@ -169,7 +169,11 @@ type Decision struct {
 	Reason      string   `json:"reason"`
 	Obligations []string `json:"obligations,omitempty"`
 	Default     bool     `json:"default,omitempty"` // сработало значение по умолчанию класса
-	Errors      []string `json:"errors,omitempty"`  // ошибки вычисления условий (fail-closed)
+	// Scope — домен или папка из списков доступа, по которым принято решение
+	// ("site:app.example.org", "folder:/home/u/notes"): подтверждение предлагает
+	// добавить их в разрешённые или запрещённые.
+	Scope  string   `json:"scope,omitempty"`
+	Errors []string `json:"errors,omitempty"` // ошибки вычисления условий (fail-closed)
 }
 
 var stringSliceType = reflect.TypeOf([]string{})
@@ -263,9 +267,6 @@ var baseEnvOpts = []cel.EnvOption{
 				}
 				return types.Bool(DomainMatches(string(a.(types.String)), pats.([]string)))
 			}))),
-	cel.Function("email_domain",
-		cel.Overload("email_domain_string", []*cel.Type{cel.StringType}, cel.StringType,
-			cel.UnaryBinding(func(a ref.Val) ref.Val { return types.String(EmailDomain(string(a.(types.String)))) }))),
 }
 
 func compile(r config.Rule, cfg *config.Config, cat Catalog) (cel.Program, error) {

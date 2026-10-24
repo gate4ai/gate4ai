@@ -14,13 +14,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
 )
 
 // Среды исполнения.
 const (
 	RuntimeWasm    = "wasm"    // WASM-модуль в хосте (wazero), только функции хоста
-	RuntimeNative  = "native"  // процесс под надзором хоста (только проверенный издатель)
 	RuntimeBuiltin = "builtin" // внутренний коннектор хоста (не из магазина)
 )
 
@@ -38,10 +38,16 @@ type Manifest struct {
 	// их схем — только с его повышением (contract.Diff).
 	Contract int `json:"contract,omitempty" yaml:"contract,omitempty"`
 	// Services — действия, которые другие коннекторы могут вызвать через service_call.
-	Services []string `json:"services,omitempty" yaml:"services,omitempty"`
-	// Platforms — платформы сборки "os/arch" (обязательны для runtime native).
-	Platforms    []string     `json:"platforms,omitempty" yaml:"platforms,omitempty"`
+	Services     []string     `json:"services,omitempty" yaml:"services,omitempty"`
 	Capabilities Capabilities `json:"capabilities" yaml:"capabilities"`
+	// Sites — домены, на которых коннектор работает через браузер (service_call),
+	// с режимом доступа (allow | read | ask | deny) — умолчания, владелец меняет
+	// их в настройках коннектора (connectors.<имя>.sites). Домен может быть
+	// шаблоном ${setting:…}. Без строки для домена вызов браузера отклоняется.
+	Sites []access.Site `json:"sites,omitempty" yaml:"sites,omitempty"`
+	// Folders — папки, с которыми коннектор работает функциями хоста fs_*
+	// (allow | append | read | deny) — так же умолчания.
+	Folders []access.Folder `json:"folders,omitempty" yaml:"folders,omitempty"`
 	// Credentials — слоты учёток, с которыми коннектор входит на сайты
 	// (browser.login / browser.fill_secret): владелец связывает слот со своей
 	// учёткой в connectors.<коннектор>.credentials; значений коннектор не видит.
@@ -204,12 +210,17 @@ func (a Action) CallsAction(target, action string) bool {
 	return slices.Contains(a.Calls, target+"."+action)
 }
 
-// Summary — возможности, учётки, подвызовы действий, среда исполнения без
-// песочницы (native), действия классов выше read и лимиты выше значений по
-// умолчанию человеческим языком: то, на что владелец соглашается при установке
+// Summary — возможности, учётки, подвызовы действий, действия классов выше
+// read и лимиты выше значений по умолчанию человеческим языком: то, на что владелец соглашается при установке
 // (изменение — повторное согласие).
 func (m *Manifest) Summary() []string {
 	out := m.Capabilities.Summary()
+	for _, st := range m.Sites {
+		out = append(out, fmt.Sprintf("site %s: %s", st.Domain, st.Access))
+	}
+	for _, f := range m.Folders {
+		out = append(out, fmt.Sprintf("folder %s: %s", f.Path, f.Access))
+	}
 	for _, c := range m.Credentials {
 		detail := "slot " + c.Slot
 		if len(c.Types) > 0 {
@@ -231,9 +242,6 @@ func (m *Manifest) Summary() []string {
 			out = append(out, fmt.Sprintf("action %s calls %s", a.Name, a.CallsText()))
 		}
 		byClass[a.Class] = append(byClass[a.Class], a.Name)
-	}
-	if m.Runtime == RuntimeNative {
-		out = append(out, "runs as a separate program without a sandbox, with your user's rights")
 	}
 	for _, c := range []string{"write", "external", "money"} {
 		if names := byClass[c]; len(names) > 0 {
@@ -267,28 +275,34 @@ func (m *Manifest) Validate() error {
 		return fmt.Errorf("manifest: bad connector name %q", m.Connector)
 	}
 	switch m.Runtime {
-	case "", RuntimeWasm, RuntimeNative, RuntimeBuiltin:
+	case "", RuntimeWasm, RuntimeBuiltin:
 	default:
 		return fmt.Errorf("manifest %s: bad runtime %q", m.Connector, m.Runtime)
 	}
 	if err := m.Capabilities.validate(); err != nil {
 		return fmt.Errorf("manifest %s: %w", m.Connector, err)
 	}
-	if len(m.Capabilities.Reveal) > 0 && m.Runtime != RuntimeNative {
-		return fmt.Errorf("manifest %s: capabilities.reveal is only for runtime native", m.Connector)
-	}
-	if m.Runtime == RuntimeNative && len(m.Platforms) == 0 {
-		return fmt.Errorf("manifest %s: runtime native needs platforms", m.Connector)
-	}
-	if m.Runtime != RuntimeNative && len(m.Platforms) > 0 {
-		return fmt.Errorf("manifest %s: platforms are only for runtime native", m.Connector)
-	}
-	seenPlat := map[string]bool{}
-	for _, p := range m.Platforms {
-		if !Platforms[p] || seenPlat[p] {
-			return fmt.Errorf("manifest %s: bad or duplicate platform %q", m.Connector, p)
+	for _, st := range m.Sites {
+		if err := checkTemplate("sites", st.Domain); err != nil {
+			return fmt.Errorf("manifest %s: %w", m.Connector, err)
 		}
-		seenPlat[p] = true
+		if tmplRe.MatchString(st.Domain) {
+			st.Domain = "x.example"
+		}
+		if err := access.CheckSite(st, access.ConnectorSiteModes); err != nil {
+			return fmt.Errorf("manifest %s: sites: %w", m.Connector, err)
+		}
+	}
+	for _, f := range m.Folders {
+		if err := checkTemplate("folders", f.Path); err != nil {
+			return fmt.Errorf("manifest %s: %w", m.Connector, err)
+		}
+		if err := access.CheckFolder(f, access.ConnectorFolderModes); err != nil {
+			return fmt.Errorf("manifest %s: folders: %w", m.Connector, err)
+		}
+	}
+	if len(m.Capabilities.Reveal) > 0 && m.Runtime != RuntimeBuiltin {
+		return fmt.Errorf("manifest %s: capabilities.reveal is only for runtime builtin", m.Connector)
 	}
 	if m.Contract < 0 || (len(m.Services) > 0 && m.Contract == 0) {
 		return fmt.Errorf("manifest %s: services need contract >= 1", m.Connector)
@@ -392,12 +406,31 @@ func (m *Manifest) Validate() error {
 	return nil
 }
 
-// Platforms — платформы, под которые собираются нативные пакеты (как у ядра gate4ai).
-var Platforms = map[string]bool{"linux/amd64": true, "linux/arm64": true, "darwin/amd64": true, "darwin/arm64": true,
-	"windows/amd64": true, "windows/arm64": true}
-
 // IsService — действие доступно другим коннекторам через service_call.
 func (m *Manifest) IsService(action string) bool { return slices.Contains(m.Services, action) }
+
+// ResolveSites — домены коннектора с подставленными настройками (шаблон в
+// домене раскрывается в несколько строк с тем же режимом).
+func (m *Manifest) ResolveSites(settings map[string]any) []access.Site {
+	var out []access.Site
+	for _, st := range m.Sites {
+		for _, d := range Expand(st.Domain, settings) {
+			out = append(out, access.Site{Domain: strings.ToLower(strings.TrimSuffix(d, ".")), Access: st.Access})
+		}
+	}
+	return out
+}
+
+// ResolveFolders — папки коннектора с подставленными настройками.
+func (m *Manifest) ResolveFolders(settings map[string]any) []access.Folder {
+	var out []access.Folder
+	for _, f := range m.Folders {
+		for _, p := range Expand(f.Path, settings) {
+			out = append(out, access.Folder{Path: p, Access: f.Access})
+		}
+	}
+	return out
+}
 
 // ArgError — ошибка нормализации аргументов (отдаётся агенту как invalid_arguments).
 type ArgError struct{ Msg string }

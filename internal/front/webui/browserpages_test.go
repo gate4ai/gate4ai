@@ -26,7 +26,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 )
 
-// fakeBrowserPkg — нативный пакет browser с одним сеансом s-1.
+// fakeBrowserPkg — встроенный браузер с одним сеансом s-1.
 type fakeBrowserPkg struct {
 	mu    sync.Mutex
 	state string
@@ -36,7 +36,7 @@ type fakeBrowserPkg struct {
 }
 
 func (f *fakeBrowserPkg) Manifest() manifest.Manifest {
-	m, _ := manifest.Parse([]byte("connector: browser\nruntime: native\nplatforms: [linux/amd64]\nactions:\n  - { name: open, class: read }\n"))
+	m, _ := manifest.Parse([]byte("connector: browser\nruntime: builtin\nactions:\n  - { name: open, class: read }\n"))
 	return m
 }
 func (f *fakeBrowserPkg) Execute(context.Context, abi.ExecRequest) (abi.ExecResult, error) {

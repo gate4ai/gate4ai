@@ -19,7 +19,6 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 	"github.com/gate4ai/gate4ai/sdk-go/registry"
 
-	"github.com/gate4ai/gate4ai/internal/connectors/native"
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 )
 
@@ -70,20 +69,14 @@ type Plan struct {
 	Classes      []string `json:"classes"`
 	Installed    string   `json:"installed,omitempty"` // установленная версия
 	// NeedsConsent — возможности новые или изменились по сравнению с согласованными.
-	NeedsConsent bool `json:"needs_consent"`
-	// Native — нативный пакет: работает без песочницы, с правами пользователя.
-	Native   bool     `json:"native,omitempty"`
-	Warnings []string `json:"warnings,omitempty"`
+	NeedsConsent bool     `json:"needs_consent"`
+	Warnings     []string `json:"warnings,omitempty"`
 
 	pkg *Package
 }
 
 // ErrConsent — установка требует согласия на возможности.
 var ErrConsent = errors.New("consent required")
-
-// ErrNativeThirdParty — нативный пакет не от gate4.ai (и не своя сборка владельца).
-var ErrNativeThirdParty = errors.New("native packages are accepted only from gate4.ai for now (they run without a sandbox); " +
-	"if you want to publish one, contact us at https://gate4.ai — we are open to it")
 
 func (o Options) indexKeysOK() bool { return o.Registry != "" && len(o.RegistryKeys) > 0 }
 
@@ -192,16 +185,6 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 	if owner, ok := o.dataOwner(m.Connector); ok && owner != p.owner() {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("connector %s from another publisher was installed under this name: its stored data will be erased", m.Connector))
 	}
-	if m.Runtime == manifest.RuntimeNative {
-		if p.Trust != registry.TrustVerified && p.Trust != TrustLocal {
-			return nil, fmt.Errorf("connector %s: %s", m.Connector, ErrNativeThirdParty)
-		}
-		if p.pkg.Sig.Platform != HostPlatform() {
-			return nil, fmt.Errorf("connector %s: the package is built for %s, this computer is %s", m.Connector, p.pkg.Sig.Platform, HostPlatform())
-		}
-		p.Native = true
-		p.Warnings = append(p.Warnings, "native connector: runs as a separate program without a sandbox, with your user's rights")
-	}
 	if p.Trust == registry.TrustCommunity {
 		p.Warnings = append(p.Warnings, "community connector: not reviewed by gate4.ai; only read actions will be available")
 	}
@@ -213,7 +196,7 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 
 // prepareFile — пакет .g4c из файла или по адресу http(s) (сборка не из магазина).
 func (o Options) prepareFile(ctx context.Context, source string, dev bool) (*Plan, error) {
-	b, err := fetchN(ctx, source, maxNativePackage)
+	b, err := fetchN(ctx, source, maxPackage)
 	if err != nil {
 		return nil, err
 	}
@@ -272,25 +255,18 @@ func (o Options) prepareDir(ctx context.Context, dir string, dev bool) (*Plan, e
 		return nil, err
 	}
 	defer os.RemoveAll(tmp)
-	out := filepath.Join(tmp, ModuleFile)
-	build := func() error { return wasm.BuildGo(ctx, dir, out) }
-	if m.Runtime == manifest.RuntimeNative {
-		out = filepath.Join(tmp, BinaryName(HostPlatform()))
-		build = func() error { return native.BuildGo(ctx, dir, HostPlatform(), out) }
+	if m.Runtime != manifest.RuntimeWasm {
+		return nil, fmt.Errorf("connector %s: runtime must be wasm, got %q", m.Connector, m.Runtime)
 	}
-	if err := build(); err != nil {
+	out := filepath.Join(tmp, ModuleFile)
+	if err := wasm.BuildGo(ctx, dir, out); err != nil {
 		return nil, err
 	}
 	wb, err := os.ReadFile(out)
 	if err != nil {
 		return nil, err
 	}
-	var b []byte
-	if m.Runtime == manifest.RuntimeNative {
-		b, err = PackNative(man, wb, HostPlatform(), nil)
-	} else {
-		b, err = Pack(man, wb, nil)
-	}
+	b, err := Pack(man, wb, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -319,10 +295,6 @@ func trustOf(ix *registry.Index, pkg *Package, signedBy func([]string) bool, p *
 		if rel.Version != m.Version {
 			continue
 		}
-		if rel.Native() || pkg.Native() {
-			// Дайджест платформы — в списке платформ на сервере registry.
-			return false, fmt.Errorf("native connector %s %s from a file cannot be matched with the registry entry: install it from the registry", m.Connector, m.Version)
-		}
 		if pkg.Sig.Digest != rel.Digest || !capsMatch(m, rel.Capabilities) {
 			return false, fmt.Errorf("connector %s %s does not match its reviewed entry in the registry (digest or capabilities)", m.Connector, m.Version)
 		}
@@ -343,7 +315,7 @@ func (o Options) prepareRegistry(ctx context.Context, source string) (*Plan, err
 		return nil, err
 	}
 	pub := ix.Publishers[e.Publisher]
-	pkg, err := FetchRelease(ctx, o.Registry, name, e.Publisher, rel, pub, HostPlatform())
+	pkg, err := FetchRelease(ctx, o.Registry, name, e.Publisher, rel, pub)
 	if err != nil {
 		return nil, err
 	}
@@ -439,11 +411,7 @@ func (o Options) Install(p *Plan, consent []string) (Info, error) {
 		data []byte
 		mode os.FileMode
 	}
-	files := []file{{ManifestFile, p.pkg.ManifestYAML, 0o600}, {ModuleFile, p.pkg.Wasm, 0o600}, {InfoFile, ib, 0o600}}
-	if p.pkg.Native() {
-		files[1] = file{BinaryName(p.pkg.Sig.Platform), p.pkg.Binary, 0o700}
-	}
-	for _, f := range files {
+	for _, f := range []file{{ManifestFile, p.pkg.ManifestYAML, 0o600}, {ModuleFile, p.pkg.Wasm, 0o600}, {InfoFile, ib, 0o600}} {
 		if err := os.WriteFile(filepath.Join(tmp, f.name), f.data, f.mode); err != nil {
 			return Info{}, err
 		}

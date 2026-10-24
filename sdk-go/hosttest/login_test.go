@@ -23,7 +23,8 @@ capabilities:
     - target: browser
       contract: 1
       actions: [observe, act, fill_secret]
-      params: { domains: [login.mos.ru] }
+sites:
+  - { domain: login.mos.ru, access: allow }
 credentials:
   - { slot: login, bind: ["https://login.mos.ru"] }
 actions:

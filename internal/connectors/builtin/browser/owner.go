@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package browser
 
 import (
 	"context"
@@ -12,10 +12,10 @@ import (
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
 
-	"github.com/gate4ai/gate4ai/connectors/browser/worker"
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/browser/worker"
 )
 
-// Запросы владельца (native.Owner): их шлёт только daemon и только от имени
+// Запросы владельца (wasm.OwnerRequests): их шлёт только daemon и только от имени
 // владельца — Web UI («Браузер»: список сеансов, просмотр, управление) и
 // CLI владельца (gate4ai browser sessions). Агентам они недоступны: у агента
 // свои действия под политикой.
@@ -51,7 +51,7 @@ type BrowserStatus struct {
 	Warning  string        `json:"warning,omitempty"`
 }
 
-// SetEmit — события хосту (native.Evented).
+// SetEmit — события хосту (wasm.Evented).
 func (b *Browser) SetEmit(f func(kind string, data any)) {
 	b.mu.Lock()
 	b.emit = f

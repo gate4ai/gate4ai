@@ -41,7 +41,6 @@ func TestBrowserLiveView(t *testing.T) {
 	}))
 	defer srv.Close()
 	g := startGate(t, "--ui", "127.0.0.1:0")
-	g.install("browser")
 	dir := t.TempDir()
 	profile := filepath.Join(dir, "profile")
 	cfg := fmt.Sprintf(`agents:
@@ -51,9 +50,10 @@ profiles:
     connectors: [browser]
     rules:
       - { id: dev-browser-allow, action: "browser.*", effect: allow }
+access:
+  sites: [{ domain: "127.0.0.1", access: allow }]
 connectors:
   browser:
-    allowed_domains: ["127.0.0.1"]
     engine: cdp
     display: headless
     chrome_path: %q

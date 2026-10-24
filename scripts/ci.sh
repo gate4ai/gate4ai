@@ -26,5 +26,5 @@ if [ -z "${CI:-}" ]; then
   done
 fi
 # SDK и WASM-коннекторы собираются и в WASM (сторона модуля).
-GOOS=wasip1 GOARCH=wasm go vet ./sdk-go/... ./connectors/mail/...
+GOOS=wasip1 GOARCH=wasm go vet ./sdk-go/...
 echo "ci: ok"

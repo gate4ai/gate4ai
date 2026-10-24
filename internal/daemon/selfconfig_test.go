@@ -13,6 +13,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 )
 
 func TestSelfConfigIsAnOrdinaryAction(t *testing.T) {
@@ -125,7 +126,7 @@ func TestInstallDevConnectorByAgent(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	a, _ := d.State.GetApproval(r.ID)
-	if !strings.Contains(a.Preview, "own build") || !strings.Contains(a.Preview, "probe") || !strings.Contains(a.Preview, "127.0.0.1") {
+	if !strings.Contains(a.Preview, "own build") || !strings.Contains(a.Preview, "probe") || !strings.Contains(a.Preview, "storage 1 MB") {
 		t.Fatal(a.Preview)
 	}
 	res, err := d.Pipeline.Decide(ctx, r.ID, true, "webui", "owner")
@@ -172,7 +173,7 @@ func TestInstallDevAlwaysAsks(t *testing.T) {
 // add_setting_items и add_credential (всегда с подтверждением владельца).
 func TestSitesAndCredentialChanges(t *testing.T) {
 	c, _ := connectors.NewInProcess(&notes{})
-	conf := cfg + "      - { id: self-allow, action: gate4ai.change_policy, effect: allow }\nconnectors:\n  browser: { allowed_domains: [lk.example], model_key: \"@llm.key\" }\n  notes: { root: \"~/n\" }\n"
+	conf := cfg + "      - { id: self-allow, action: gate4ai.change_policy, effect: allow }\nconnectors:\n  browser: { model_key: \"@llm.key\" }\n  notes: { root: \"~/n\" }\n"
 	d, err := New(Options{Home: filepath.Join(t.TempDir(), "d"), Keys: keys.NewMemory(), Connectors: []connectors.Client{c}, InitialConfig: []byte(conf)})
 	if err != nil {
 		t.Fatal(err)
@@ -191,15 +192,18 @@ func TestSitesAndCredentialChanges(t *testing.T) {
 	if st := sum["settings"].(map[string]map[string]any); st["notes"]["root"] != "~/n" {
 		t.Fatalf("%+v", sum["settings"])
 	}
-	r := call(map[string]any{"op": "add_setting_items", "connector": "browser", "key": "allowed_domains", "items": []any{"login.example", "lk.example"}})
+	r := call(map[string]any{"op": "set_site_access", "domain": "login.example", "access": "read"})
 	if r.Status != pipeline.StatusPending {
 		t.Fatalf("sites: the owner approves: %+v", r)
 	}
 	if res, err := d.Pipeline.Decide(ctx, r.ID, true, "webui", "owner"); err != nil || res.Status != "ok" {
 		t.Fatal(res, err)
 	}
-	if got := d.Config.Current().SettingList("browser", "allowed_domains"); len(got) != 2 || got[1] != "login.example" {
-		t.Fatal(got)
+	if st, ok := access.MatchSite(d.Config.Current().Access.Sites, "https://login.example/"); !ok || st.Access != access.Read {
+		t.Fatal(d.Config.Current().Access.Sites)
+	}
+	if r := call(map[string]any{"op": "set_site_access", "domain": "bad host", "access": "read"}); r.Code != pipeline.CodeInvalidArgs {
+		t.Fatalf("bad domain: %+v", r)
 	}
 	if r := call(map[string]any{"op": "add_setting_items", "connector": "browser", "key": "model_key", "items": []any{"@x"}}); r.Code != pipeline.CodeInvalidArgs {
 		t.Fatalf("secrets via settings: %+v", r)

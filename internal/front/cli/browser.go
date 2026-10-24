@@ -76,7 +76,7 @@ func (e *Env) browserOwner(ctx context.Context, sub string, args []string) int {
 			fmt.Fprintln(e.Stderr, "gate4ai: "+st.Warning)
 		}
 		if st.Missing && e.human() {
-			fmt.Fprintln(e.Stderr, "gate4ai: the browser package is not installed (gate4ai connectors install browser)")
+			fmt.Fprintln(e.Stderr, "gate4ai: the browser is not available in this daemon")
 		}
 		e.out(st, func(w io.Writer) {
 			if len(st.Sessions) == 0 {

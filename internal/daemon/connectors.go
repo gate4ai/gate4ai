@@ -11,8 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gate4ai/gate4ai/sdk-go/manifest"
-
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/browser"
 	"github.com/gate4ai/gate4ai/internal/connectors/builtin/files"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/policy"
@@ -25,27 +24,8 @@ func (d *Daemon) StoreOptions() store.Options {
 		Builtin: BuiltinConnectors, Log: d.Log}
 }
 
-// stopNative останавливает процесс нативного коннектора до замены или удаления
-// его файлов (на Windows файл запущенной программы не заменить); коннектор
-// загружается заново в reloadConnector.
-func (d *Daemon) stopNative(name string) {
-	if c, ok := d.Registry.Get(name); ok && c.Manifest().Runtime == manifest.RuntimeNative {
-		_ = c.Close()
-	}
-}
-
-// restartNative — установка не удалась: прежняя версия остановленного
-// нативного коннектора загружается заново.
-func (d *Daemon) restartNative(name string) {
-	if c, ok := d.Registry.Get(name); ok && c.Manifest().Runtime == manifest.RuntimeNative {
-		if err := d.reloadConnector(name, false); err != nil {
-			d.Log.Warn("connector not reloaded", "connector", name, "err", err)
-		}
-	}
-}
-
-// BuiltinConnectors — коннекторы ядра: из магазина не ставятся.
-var BuiltinConnectors = []string{files.Name, SelfConnector, "egress"}
+// BuiltinConnectors — компоненты ядра: из магазина не ставятся и не удаляются.
+var BuiltinConnectors = []string{files.Name, browser.Name, SelfConnector, "egress"}
 
 // dropRevoked выгружает отозванные версии по кэшу индекса registry.
 func (d *Daemon) dropRevoked() {
@@ -73,6 +53,9 @@ func (d *Daemon) reloadConnector(name string, removed bool) error {
 		d.Registry.Add(c)
 		if err := d.askInDefault(name); err != nil {
 			d.Log.Warn("connector not added to profile "+DefaultProfile, "connector", name, "err", err)
+		}
+		if err := d.ensureConnectorAccess(name); err != nil {
+			d.Log.Warn("connector sites and folders not written to the policy", "connector", name, "err", err)
 		}
 	}
 	// Политика — из текущей версии по новому каталогу, тем же путём, что и
@@ -108,9 +91,7 @@ func (d *Daemon) installPlan(opts store.Options, plan *store.Plan, consent []str
 	if !plan.ConsentOK(consent) {
 		return store.Info{}, "", store.ErrConsent
 	}
-	d.stopNative(plan.Connector)
 	if info, err = opts.Install(plan, consent); err != nil {
-		d.restartNative(plan.Connector)
 		return store.Info{}, "", err
 	}
 	if err := d.reloadConnector(info.Connector, false); err != nil {
@@ -154,7 +135,6 @@ func (d *Daemon) PrepareConnectorDev(ctx context.Context, source string, dev boo
 func (d *Daemon) RemoveConnector(name string) (warning string, err error) {
 	d.installMu.Lock()
 	defer d.installMu.Unlock()
-	d.stopNative(name)
 	if err := d.StoreOptions().Remove(name); err != nil {
 		return "", err
 	}

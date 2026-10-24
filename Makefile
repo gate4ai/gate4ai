@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: all build vet test e2e ci bin connectors
+.PHONY: all build vet test e2e ci bin
 all: ci
 
 build:
@@ -21,13 +21,3 @@ ci:
 bin:
 	mkdir -p bin
 	$(GO) build -o bin/ ./cmd/... ./relay/cmd/...
-
-# Пакеты официальных коннекторов для локальной установки:
-#   gate4ai connectors install bin/connectors/<коннектор>.g4c --dev
-# Подпись ключом издателя: make connectors KEY=publisher.key
-KEY ?=
-connectors: bin
-	mkdir -p bin/connectors
-	for c in mail browser; do \
-		./bin/gate4ai connectors pack connectors/$$c $(if $(KEY),--key $(KEY)) -o bin/connectors/$$c.g4c || exit 1; \
-	done

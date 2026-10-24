@@ -17,6 +17,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/front/skill"
 	"github.com/gate4ai/gate4ai/internal/platform/agentkeys"
 	"github.com/gate4ai/gate4ai/internal/state"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 )
 
 // ---- Агенты ----
@@ -169,8 +170,8 @@ func (u *UI) agentPage(r *http.Request) (string, map[string]any, error) {
 
 // filesWholeHome — коннектору «Файлы» открыт весь домашний каталог.
 func filesWholeHome(cfg *config.Config) bool {
-	for _, r := range toStrings(cfg.Connectors["files"]["roots"]) {
-		if r == "~" || r == "~/" {
+	for _, f := range cfg.Access.Folders {
+		if (f.Path == "~" || f.Path == "~/" || f.Path == "/") && f.Access != access.Deny {
 			return true
 		}
 	}

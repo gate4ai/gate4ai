@@ -6,7 +6,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,6 +20,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/connectors"
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/browser"
 	"github.com/gate4ai/gate4ai/internal/connectors/builtin/files"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
@@ -32,7 +32,10 @@ import (
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 	"github.com/gate4ai/gate4ai/internal/secrets/vault"
 	"github.com/gate4ai/gate4ai/internal/state"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
+	"github.com/gate4ai/gate4ai/sdk-go/connector"
 	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
 // Options — параметры daemon.
@@ -42,19 +45,13 @@ type Options struct {
 	Keys          keys.Store
 	// ConnectorsDir — установленные коннекторы ("" — <Home>/connectors).
 	ConnectorsDir string
-	// DefaultConnectors — коннекторы из магазина, которые ставятся на свежей
-	// установке (хранилище конфигурации пусто): см. InstallDefaults.
-	DefaultConnectors []string
 	// Connectors — дополнительные коннекторы в том же процессе (тесты).
 	Connectors []connectors.Client
 	// UserHome — каталог для "~" в путях коннекторов ("" — домашний каталог).
 	UserHome string
-	// WasmDial и WasmRootCAs — сеть коннекторов (тесты).
-	WasmDial    func(ctx context.Context, network, addr string) (net.Conn, error)
-	WasmRootCAs *x509.CertPool
-	Notifier    pipeline.Notifier
-	Log         *slog.Logger
-	Now         func() time.Time
+	Notifier pipeline.Notifier
+	Log      *slog.Logger
+	Now      func() time.Time
 }
 
 // Daemon — собранное ядро.
@@ -79,7 +76,8 @@ type Daemon struct {
 	Callers func(pid int) agentid.Caller
 
 	mu        sync.Mutex
-	installMu sync.Mutex    // установка коннекторов: владелец и коннекторы по умолчанию
+	installMu sync.Mutex    // установка коннекторов
+	userHome  string        // домашний каталог для "~" в путях
 	stop      chan struct{} // закрывается RequestStop
 	stopOnce  sync.Once
 	notifiers *MultiNotifier
@@ -134,15 +132,21 @@ func New(opt Options) (*Daemon, error) {
 	if err := d.startWasm(opt); err != nil {
 		return nil, err
 	}
+	d.removeLegacyPackages()
 	// Каталог действий — из манифестов установленных пакетов (компиляция — в фоне);
 	// отзыв версий проверяется после чтения конфигурации (ключи registry — в ней).
 	for _, c := range (store.Options{Dir: d.ConnectorsDir}).LoadAll(context.Background(), d.Wasm, d.Log) {
 		d.Registry.Add(c)
 	}
-	if fc, err := d.Wasm.Builtin(files.Manifest(), files.Files{}); err == nil {
-		d.Registry.Add(fc)
-	} else {
-		return nil, err
+	for _, b := range []struct {
+		m manifest.Manifest
+		c connector.Connector
+	}{{files.Manifest(), files.Files{}}, {browser.Manifest(), browser.New()}} {
+		bc, err := d.Wasm.Builtin(b.m, b.c)
+		if err != nil {
+			return nil, err
+		}
+		d.Registry.Add(bc)
 	}
 	for _, c := range opt.Connectors {
 		d.Registry.Add(c)
@@ -160,12 +164,10 @@ func New(opt Options) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
-	d.strict.Store(true)
-	if fresh {
-		if err := d.savePendingDefaults(opt.DefaultConnectors); err != nil {
-			return nil, err
-		}
+	if !fresh {
+		d.migrateBuiltins()
 	}
+	d.strict.Store(true)
 	d.dropRevoked()
 	d.AddRoutes(d.connectorRoutes)
 	d.AddRoutes(d.browserRoutes)
@@ -186,6 +188,7 @@ func New(opt Options) (*Daemon, error) {
 	}
 	d.Pipeline = pipeline.New(d.Registry, d.State, d.Journal, d.Vault, d.notifiers, eng)
 	d.Pipeline.Log = opt.Log
+	d.Pipeline.Home = d.userHome
 	d.Pipeline.Describe = map[string]func(string, map[string]any) (string, error){SelfConnector: d.describeSelf}
 	d.Pipeline.EndCall = d.endCall
 	d.Pipeline.ConnectorLog = d.devLog
@@ -419,11 +422,18 @@ func (d *Daemon) startWasm(opt Options) error {
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
+	d.userHome = home
 	kv := wasm.KVDir(filepath.Join(d.ConnectorsDir, "data"))
 	e, err := wasm.NewEngine(filepath.Join(opt.Home, "cache", "wasm"), wasm.Services{
 		Secrets: vaultSecrets{d.Vault},
 		KV:      func(name string) hostfuncs.KV { return kv(name) },
-		Router:  d, Log: d.Log, Home: home, Dial: opt.WasmDial, RootCAs: opt.WasmRootCAs, Mask: d.Vault.MaskString})
+		Router:  d, Log: d.Log, Home: home, Mask: d.Vault.MaskString,
+		Folders: func() []access.Folder {
+			if d.Pipeline == nil {
+				return []access.Folder{}
+			}
+			return d.Pipeline.GlobalFolders()
+		}})
 	if err != nil {
 		return err
 	}

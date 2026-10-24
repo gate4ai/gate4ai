@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+// Package browser — встроенный компонент «Браузер» (runtime: builtin): воркер
+// выделенного профиля Chrome (CDP, Stagehand) в процессе daemon. Агенту — чтение,
+// снимок, извлечение и сеанс страницы (open, observe, act, network, login,
+// fill_secret, page_extract, page_screenshot, close) на сайтах по спискам
+// доступа; WASM-коннекторам — те же действия с открытой страницей через
+// service_call на их сайтах. Ключ модели для extract хост передаёт по
+// capabilities.reveal.
+package browser
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,8 +25,9 @@ import (
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
-	"github.com/gate4ai/gate4ai/connectors/browser/worker"
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/browser/worker"
 )
 
 // SessionIdle — страница вызывающего коннектора освобождается, если end_call
@@ -103,8 +112,26 @@ func (cs *callSession) shownURL() string {
 	return ""
 }
 
+// Name — имя встроенного браузера (действия browser.*).
+const Name = "browser"
+
 // New — коннектор с воркером по умолчанию.
 func New() *Browser { return &Browser{W: worker.New()} }
+
+//go:embed manifest.yaml
+var manifestYAML []byte
+
+// Manifest — манифест встроенного браузера.
+func Manifest() manifest.Manifest {
+	m, err := manifest.Parse(manifestYAML)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
+
+// Close останавливает запущенный воркером Chrome (остановка daemon).
+func (b *Browser) Close() error { return b.W.Close() }
 
 func str(m map[string]any, k string) string { s, _ := m[k].(string); return s }
 
@@ -197,6 +224,7 @@ func sitesOf(m map[string]any, domainsKey string) (domain.Sites, error) {
 	blocked := strs(m["blocked"])
 	switch mode {
 	case "allowlist":
+		return domain.Sites{Domains: strs(m[domainsKey]), Blocked: blocked}, nil
 	case "blocklist":
 		return domain.Sites{Blocklist: true, Domains: blocked}, nil
 	case "":
@@ -393,7 +421,7 @@ func (b *Browser) session(ctx context.Context, r abi.ExecRequest) (*callSession,
 		return nil, fmt.Errorf("params of %s: %w", r.Caller.Connector, err)
 	}
 	if !sites.Blocklist && len(sites.Domains) == 0 {
-		return nil, abi.Errorf(abi.CodeCapabilityDenied, "%s allows no sites (capabilities.services params.domains is empty)", r.Caller.Connector)
+		return nil, abi.Errorf(abi.CodeCapabilityDenied, "%s allows no sites (its sites list is empty)", r.Caller.Connector)
 	}
 	wait := time.Duration(0)
 	b.mu.Lock()
@@ -919,7 +947,24 @@ func handoffRequest(a map[string]any) worker.HandoffRequest {
 		Timeout: time.Duration(num(a, "timeout_ms")) * time.Millisecond}
 }
 
-// EndCall освобождает страницу корневого действия (native.CallEnder).
+// PageURL — адрес открытой страницы: сеанса агента session или страницы
+// корневого вызова коннектора call (pipeline.URLResolver); "" — страницы нет.
+func (b *Browser) PageURL(session, call string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if session != "" {
+		if as := b.agents[session]; as != nil && !as.closed {
+			return as.url
+		}
+		return ""
+	}
+	if cs := b.sessions[call]; cs != nil {
+		return cs.url
+	}
+	return ""
+}
+
+// EndCall освобождает страницу корневого действия (wasm.CallEnder).
 func (b *Browser) EndCall(call string) {
 	b.mu.Lock()
 	cs, ok := b.sessions[call]
@@ -1008,7 +1053,7 @@ func siteHint(err error) error {
 	if host == "" || strings.Contains(host, " ") {
 		return err
 	}
-	return fmt.Errorf("%w (the owner adds the site: gate4ai sites allow %s — or Web UI → Connectors → browser; an agent asks the owner for it: "+
-		`gate4ai gate4ai change_policy --summary "allow %s" --changes '[{"op":"add_setting_items","connector":"browser","key":"allowed_domains","items":["%s"]}]'`+
-		"; the sites allowed now: gate4ai gate4ai policy_summary)", err, host, host, host)
+	return fmt.Errorf("%w (the owner opens the site: gate4ai access sites set %s read — or Web UI → Browser; an agent asks the owner for it: "+
+		`gate4ai gate4ai change_policy --summary "open %s" --changes '[{"op":"set_site_access","domain":"%s","access":"read"}]'`+
+		"; the sites open now: gate4ai gate4ai policy_summary)", err, host, host, host)
 }

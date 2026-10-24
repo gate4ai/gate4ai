@@ -191,7 +191,7 @@ Owner commands (local socket):
   gate4ai policy show | set <file> [-m comment] | versions | rollback <n> | test --agent a --action x [--args json] [--file draft.yaml]
   gate4ai approvals [list] [--table|--json] | approve <id> | reject <id> | questions | answer <id> (value from stdin)
   gate4ai vault list | set <alias> [--from-env VAR] (asks with hidden input; or the value from stdin) | rm <alias>
-  gate4ai sites [allow | remove <site>...]   sites agents may open in the browser
+  gate4ai access [sites | folders [set <site|folder> <access> | remove <site|folder>]]   the Browser and Files access lists
   gate4ai browser sessions [close <id>] | watch <id> [--remote]   browser sessions of agents: list, live view, close
   gate4ai browser setup [--yes] [--dry-run]   check Chrome, the virtual screen (Xvfb) and fonts; install what is missing (asks first)
   gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
@@ -213,7 +213,7 @@ Output: JSON {"status": "ok" | "denied" | "pending" | "error" | "verification_fa
 
 // commands — встроенные команды (остальное первое слово — имя коннектора).
 var commands = []string{"help", "version", "tools", "status", "skill", "mcp", "pair", "daemon", "service", "log", "show", "export",
-	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "relay", "connectors", "registry", "contract", "fixture", "ui", "run", "doctor", "egress"}
+	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "access", "relay", "connectors", "registry", "contract", "fixture", "ui", "run", "doctor", "egress"}
 
 // Run — точка входа CLI.
 func Run(ctx context.Context, e *Env, args []string) int {
@@ -301,6 +301,8 @@ func Run(ctx context.Context, e *Env, args []string) int {
 		return e.fixture(rest)
 	case "sites":
 		return e.sites(ctx, rest)
+	case "access":
+		return e.accessCmd(ctx, rest)
 	case "ui":
 		return e.ui(ctx, rest)
 	case "run":
@@ -457,10 +459,10 @@ func (e *Env) skill(ctx context.Context) int {
 
 // knownConnectors — коннекторы ядра и магазина по умолчанию: их имена — не
 // опечатки встроенных команд (files ≠ sites), даже когда daemon не отвечает.
-var knownConnectors = map[string]bool{"files": true, "browser": true, "email": true, "gate4ai": true}
+var knownConnectors = map[string]bool{"files": true, "browser": true, "gate4ai": true}
 
 // connectorAliases — привычные имена коннекторов в CLI.
-var connectorAliases = map[string]string{"mail": "email"}
+var connectorAliases = map[string]string{}
 
 // action — `gate4ai <connector> <action> --arg value ...`.
 func (e *Env) action(ctx context.Context, conn string, args []string) int {
@@ -1166,7 +1168,7 @@ func (e *Env) policy(ctx context.Context, args []string) int {
 		argsJSON := fs.String("args", "{}", "")
 		file := fs.String("file", "", "draft policy to test instead of the current one")
 		if fs.Parse(args) != nil || *agent == "" || *action == "" {
-			fmt.Fprintln(e.Stderr, "usage: gate4ai policy test --agent a --action email.send [--args '{...}'] [--file draft.yaml]")
+			fmt.Fprintln(e.Stderr, "usage: gate4ai policy test --agent a --action browser.open [--args '{...}'] [--file draft.yaml]")
 			return ExitUsage
 		}
 		var a map[string]any

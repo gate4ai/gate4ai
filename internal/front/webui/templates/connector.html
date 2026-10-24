@@ -4,10 +4,25 @@
 <p>{{$d.Desc}}</p>
 {{if $d.WholeHome}}<p class="warn">{{T "Files are open for the whole home folder. Put only the folders agents need below (hidden folders and keys stay closed anyway)."}}</p>{{end}}
 
+{{if $d.HasAccess}}<div class="card" id="access"><h3>{{T "Sites and folders of the connector"}}</h3>
+<p class="help">{{T "Where this connector may work: its own list (defaults from its manifest). The Browser and Files lists still apply: a site or folder closed there stays closed."}}</p>
+{{template "access_table" (dict "V" . "Rows" $d.Sites "Kind" "sites" "Action" (print "/connectors/" $d.Name "/sites") "Modes" connSiteModes "Label" (T "Site") "Placeholder" "app.example.org")}}
+{{template "access_table" (dict "V" . "Rows" $d.Folders "Kind" "folders" "Action" (print "/connectors/" $d.Name "/folders") "Modes" connFolderModes "Label" (T "Folder") "Placeholder" "~/Documents/notes")}}
+</div>{{end}}
+{{template "conn_settings" .}}
+{{template "conn_actions" .}}
+<details class="adv card"><summary>{{T "About the connector"}}</summary>
+{{if not $d.Builtin}}<ul>{{range $d.Info.Capabilities}}<li>{{capRu .}} <span class="muted"><code>{{.}}</code></span></li>{{else}}<li class="muted">{{T "nothing"}}</li>{{end}}</ul>
+<p class="help">{{T "Publisher %s · trust %s · source %s · installed %s" (or $d.Info.Publisher "—") $d.Info.Trust $d.Info.Source (ts $d.Info.InstalledAt)}}</p>
+<div class="row" style="margin-top:.6rem"><form method="post" action="{{.Base}}/connectors/{{$d.Name}}/reinstall"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="from" value="connector"><button class="small" title="{{T "Download and install the same version again; settings, accounts and rules stay"}}" data-busy="{{T "Reinstalling…"}}">{{T "Reinstall"}}</button></form>
+<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/remove" data-confirm="{{T "Remove %s? Rules with its actions are removed too (you can roll back in the policy versions)." $d.Title}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger small" data-busy="{{T "Removing…"}}">{{T "Remove the connector"}}</button></form></div>
+{{else}}<p class="help">{{T "Built into gate4.ai; version %s." $m.Version}}</p>{{end}}
+</details>
+{{template "foot"}}
+
+{{define "conn_settings"}}{{$d := .Data}}
 <form method="post" action="{{.Base}}/connectors/{{$d.Name}}/settings" autocomplete="off" data-dirty-warn><input type="hidden" name="csrf" value="{{.CSRF}}">
-{{if or $d.Fields $d.Providers}}<div class="card"><h3>{{T "Settings"}}</h3>
-{{with $d.Providers}}<label for="f-provider">{{T "Mail service"}}</label><select id="f-provider" name="provider"><option value="">{{T "another — I will enter the servers myself"}}</option>{{range .}}<option value="{{.ID}}">{{T .Title}}</option>{{end}}</select>
-<div class="help">{{T "The IMAP/SMTP servers are filled in."}} {{range .}}<br><b>{{T .Title}}:</b> {{T .Help}}{{end}}</div>{{end}}
+{{if $d.Fields}}<div class="card"><h3>{{T "Settings"}}</h3>
 {{range $d.Fields}}{{template "setting_field" (dict "F" . "V" $)}}{{end}}
 </div>{{end}}
 
@@ -21,6 +36,9 @@
 {{range $d.AdvFields}}{{template "setting_field" (dict "F" . "V" $)}}{{end}}</details>{{end}}
 <p><button class="primary" data-busy="{{T "Saving…"}}">{{T "Save"}}</button></p>
 </form>
+{{end}}
+
+{{define "conn_actions"}}{{$d := .Data}}
 
 {{if $d.Profile}}<div class="card" id="actions"><div class="row between"><h3>{{T "What it may do"}}</h3>
 {{if gt (len $d.Access) 1}}<nav class="tabs" style="margin:0;border:0" aria-label="{{T "Agents"}}">{{range $d.Access}}<a href="{{$.Base}}/connectors/{{$d.Name}}?profile={{.}}#actions" class="{{if eq . $d.Profile}}on{{end}}">{{.}}</a>{{end}}</nav>{{end}}</div>
@@ -57,14 +75,7 @@
 <p class="help">{{T "A decision here is a rule without a condition; “no rule” — by kind: reading is allowed, everything else asks you."}}</p>
 </details></div>{{end}}
 
-<details class="adv card"><summary>{{T "About the connector"}}</summary>
-{{if not $d.Builtin}}<ul>{{range $d.Info.Capabilities}}<li>{{capRu .}} <span class="muted"><code>{{.}}</code></span></li>{{else}}<li class="muted">{{T "nothing"}}</li>{{end}}</ul>
-<p class="help">{{T "Publisher %s · trust %s · source %s · installed %s" (or $d.Info.Publisher "—") $d.Info.Trust $d.Info.Source (ts $d.Info.InstalledAt)}}</p>
-<div class="row" style="margin-top:.6rem"><form method="post" action="{{.Base}}/connectors/{{$d.Name}}/reinstall"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="from" value="connector"><button class="small" title="{{T "Download and install the same version again; settings, accounts and rules stay"}}" data-busy="{{T "Reinstalling…"}}">{{T "Reinstall"}}</button></form>
-<form method="post" action="{{.Base}}/connectors/{{$d.Name}}/remove" data-confirm="{{T "Remove %s? Rules with its actions are removed too (you can roll back in the policy versions)." $d.Title}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger small" data-busy="{{T "Removing…"}}">{{T "Remove the connector"}}</button></form></div>
-{{else}}<p class="help">{{T "Built into gate4.ai; version %s." $m.Version}}</p>{{end}}
-</details>
-{{template "foot"}}
+{{end}}
 
 {{define "setting_field"}}{{$f := .F}}{{with $f}}
 <label for="f-{{.Key}}">{{T .Label}}{{if ne .Label .Key}} <span class="muted"><code>{{.Key}}</code></span>{{end}}</label>

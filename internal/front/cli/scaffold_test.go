@@ -5,7 +5,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"go/parser"
 	"go/token"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/gate4ai/gate4ai/internal/platform/version"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/hosttest"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
@@ -37,8 +37,8 @@ func TestConnectorsNew(t *testing.T) {
 		t.Fatalf("%+v", m)
 	}
 	rule := m.Capabilities.Services[0]
-	if rule.Target != "browser" || rule.Contract != 1 || !strings.Contains(string(must(json.Marshal(rule.Params))), "lk.example.org") {
-		t.Fatalf("%+v", rule)
+	if rule.Target != "browser" || rule.Contract != 1 || len(m.Sites) != 1 || m.Sites[0].Domain != "lk.example.org" || m.Sites[0].Access != access.Allow {
+		t.Fatalf("%+v %+v", rule, m.Sites)
 	}
 	for _, f := range []string{"main.go", "connector.go", "connector_test.go"} {
 		src := must(os.ReadFile(filepath.Join(dir, f)))

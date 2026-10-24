@@ -12,13 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gate4ai/gate4ai/internal/connectors/native"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 )
 
 // Сеансы браузера для владельца: список, просмотр вживую, управление и
-// закрытие — запросы владельца к нативному пакету browser (native.Process.Owner)
-// и его события (кадры). Агентам это недоступно: у них свои действия под политикой.
+// закрытие — запросы владельца встроенному браузеру (wasm.Builtin.Owner) и его
+// события (кадры). Агентам это недоступно: у них свои действия под политикой.
 
 // BrowserSession — сеанс агента в браузере (как его видит пакет).
 type BrowserSession struct {
@@ -42,7 +41,7 @@ type BrowserStatus struct {
 	Sessions []BrowserSession `json:"sessions"`
 	Display  string           `json:"display,omitempty"` // virtual | headless | host ("" — Chrome не запущен)
 	Warning  string           `json:"warning,omitempty"`
-	Running  bool             `json:"running"` // процесс пакета запущен
+	Running  bool             `json:"running"` // браузер отвечает (встроен: всегда, когда есть)
 	Missing  bool             `json:"missing,omitempty"`
 }
 
@@ -58,14 +57,14 @@ type BrowserEvent struct {
 	Reason  string          // closed
 }
 
-// browserOwner — нативный пакет с запросами владельца.
+// browserOwner — браузер с запросами владельца.
 type browserOwner interface {
 	Owner(ctx context.Context, op string, args, out any) error
 	SetEventSink(f func(kind string, data json.RawMessage))
 }
 
-// ErrNoBrowser — пакет browser не установлен или не нативный.
-var ErrNoBrowser = errors.New("the browser package is not installed")
+// ErrNoBrowser — браузера в этой сборке нет (daemon --no-browser в тестах).
+var ErrNoBrowser = errors.New("the browser is not available")
 
 func (d *Daemon) browser() (browserOwner, error) {
 	c, ok := d.Registry.Get(pipeline.BrowserConnector)
@@ -104,7 +103,7 @@ func (d *Daemon) BrowserViewURL(session string) string {
 	return local + "/browser/" + id
 }
 
-// BrowserStatus — сеансы агентов в браузере (пакет не запущен — сеансов нет).
+// BrowserStatus — сеансы агентов в браузере.
 func (d *Daemon) BrowserStatus(ctx context.Context) (BrowserStatus, error) {
 	b, err := d.browser()
 	if err != nil {
@@ -112,9 +111,6 @@ func (d *Daemon) BrowserStatus(ctx context.Context) (BrowserStatus, error) {
 	}
 	var st BrowserStatus
 	if err := b.Owner(ctx, "sessions", nil, &st); err != nil {
-		if errors.Is(err, native.ErrNotRunning) {
-			return BrowserStatus{Sessions: []BrowserSession{}}, nil
-		}
 		return BrowserStatus{Sessions: []BrowserSession{}}, err
 	}
 	st.Running = true
@@ -138,8 +134,8 @@ func (d *Daemon) BrowserSession(ctx context.Context, id string) (*BrowserSession
 	return nil, nil
 }
 
-// browserViews — зрители сеансов: кадры пакета раздаются всем зрителям
-// сеанса; первый зритель включает просмотр в пакете, последний — выключает.
+// browserViews — зрители сеансов: кадры браузера раздаются всем зрителям
+// сеанса; первый зритель включает просмотр, последний — выключает.
 type browserViews struct {
 	mu      sync.Mutex
 	viewers map[string]map[*browserViewer]bool
@@ -235,7 +231,7 @@ func (d *Daemon) unwatch(session string, v *browserViewer) {
 	}
 }
 
-// browserEvent — событие пакета зрителям его сеанса.
+// browserEvent — событие браузера зрителям его сеанса.
 func (d *Daemon) browserEvent(kind string, data json.RawMessage) {
 	var p struct {
 		Session string  `json:"session"`
@@ -288,7 +284,7 @@ func (d *Daemon) browserEvent(kind string, data json.RawMessage) {
 }
 
 // BrowserInput — ввод владельца в сеанс (мышь, клавиши, текст): только под
-// управлением владельца или во время handoff — решает пакет.
+// управлением владельца или во время handoff — решает браузер.
 func (d *Daemon) BrowserInput(ctx context.Context, session string, in json.RawMessage) error {
 	b, err := d.browser()
 	if err != nil {

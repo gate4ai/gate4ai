@@ -20,7 +20,7 @@ import (
 // startAsk — daemon с браузерным фейком, где download ждёт одобрения владельца.
 func startAsk(t *testing.T) (*harness, string) {
 	t.Helper()
-	src, err := os.ReadFile("../../../connectors/browser/manifest.yaml")
+	src, err := os.ReadFile("../../connectors/builtin/browser/manifest.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

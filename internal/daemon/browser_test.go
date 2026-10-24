@@ -21,7 +21,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 )
 
-// fakeBrowser — нативный пакет browser: сеанс s-1, запросы владельца и события.
+// fakeBrowser — встроенный браузер: сеанс s-1, запросы владельца и события.
 type fakeBrowser struct {
 	mu   sync.Mutex
 	ops  []string
@@ -29,7 +29,7 @@ type fakeBrowser struct {
 }
 
 func (f *fakeBrowser) Manifest() manifest.Manifest {
-	m, _ := manifest.Parse([]byte("connector: browser\nruntime: native\nplatforms: [linux/amd64]\nactions:\n  - { name: open, class: read, input_schema: { type: object, properties: { url: { type: string }, session: { type: string } } } }\n"))
+	m, _ := manifest.Parse([]byte("connector: browser\nruntime: builtin\nactions:\n  - { name: open, class: read, input_schema: { type: object, properties: { url: { type: string }, session: { type: string } } } }\n"))
 	return m
 }
 

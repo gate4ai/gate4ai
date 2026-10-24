@@ -162,21 +162,8 @@ func globSegs(ps, pats []string) bool {
 }
 
 // DomainMatches — хост URL совпадает с одним из шаблонов: "example.com" — точно,
-// "*.example.com" — только поддомены (не сам example.com).
+// "*.example.com" — поддомены и сам example.com, "*" — любой сайт.
 func DomainMatches(raw string, patterns []string) bool { return domain.Matches(raw, patterns) }
-
-// EmailDomain — домен адреса электронной почты в нижнем регистре.
-func EmailDomain(addr string) string {
-	addr = strings.TrimSpace(addr)
-	if i := strings.LastIndexByte(addr, '<'); i >= 0 {
-		addr = strings.TrimSuffix(addr[i+1:], ">")
-	}
-	i := strings.LastIndexByte(addr, '@')
-	if i < 0 {
-		return ""
-	}
-	return strings.ToLower(addr[i+1:])
-}
 
 // ActionMatches сопоставляет имя действия с шаблоном правила: "email.send",
 // "payments.*", "*".

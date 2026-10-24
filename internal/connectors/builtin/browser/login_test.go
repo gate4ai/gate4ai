@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package browser
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/hosttest"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
-	"github.com/gate4ai/gate4ai/connectors/browser/worker"
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/browser/worker"
 )
 
 // formEngine — страница входа без Chrome: поля по селекторам, метка секрета,

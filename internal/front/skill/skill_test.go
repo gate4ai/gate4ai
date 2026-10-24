@@ -62,7 +62,7 @@ func TestGenerateBrowser(t *testing.T) {
 
 func browserManifest(t *testing.T) []byte {
 	t.Helper()
-	b, err := os.ReadFile("../../../connectors/browser/manifest.yaml")
+	b, err := os.ReadFile("../../connectors/builtin/browser/manifest.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

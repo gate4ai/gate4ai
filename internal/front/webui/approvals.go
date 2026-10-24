@@ -39,6 +39,9 @@ type approvalView struct {
 	Args        []argKV
 	Why         string
 	Always      string // «Always allow in ~/notes»; "" — не предлагать
+	// AddAllow, AddDeny — кнопки списков доступа: «Add example.org to allowed sites»;
+	// "" — у запроса нет сайта или папки.
+	AddAllow, AddDeny string
 }
 
 // targetKeys — аргументы, которые называют цель действия, по убыванию важности.
@@ -190,7 +193,14 @@ func (u *UI) approvalView(l string, a *state.Approval) approvalView {
 	} else {
 		v.Why = reasonText(l, a.Decision.Reason)
 	}
-	if scope, _, ok := u.alwaysScope(a); ok {
+	if kind, value, ok := strings.Cut(a.Decision.Scope, ":"); ok && value != "" {
+		switch kind {
+		case "site":
+			v.AddAllow, v.AddDeny = M("Add %s to allowed sites", value).In(l), M("Add %s to denied sites", value).In(l)
+		case "folder":
+			v.AddAllow, v.AddDeny = M("Add %s to allowed folders", shortPath(value)).In(l), M("Add %s to denied folders", shortPath(value)).In(l)
+		}
+	} else if scope, _, ok := u.alwaysScope(a); ok {
 		v.Always = M("Always allow %s", scope).In(l)
 	}
 	return v
@@ -229,8 +239,16 @@ func (u *UI) decide(m mount) func(w http.ResponseWriter, r *http.Request) map[st
 	}
 	return func(w http.ResponseWriter, r *http.Request) map[string]any {
 		dec := r.PostForm.Get("decision")
-		approve := dec == "approve" || dec == "approve_rule" || dec == "approve_always"
+		approve := dec == "approve" || dec == "approve_rule" || dec == "approve_always" || dec == "approve_access"
 		a, _ := u.D.State.GetApproval(r.PathValue("id"))
+		added := ""
+		if a != nil && !m.remote && (dec == "approve_access" || dec == "reject_access") {
+			// Сначала строка в списке доступа, потом решение: исполнение видит новый список.
+			var aerr error
+			if added, aerr = u.D.AddAccess(a, approve); aerr != nil {
+				return redirectErr(or(r.PostForm.Get("back"), "/approvals"), aerr)
+			}
+		}
 		res, err := u.D.Pipeline.Decide(r.Context(), r.PathValue("id"), approve, channel, "owner")
 		back := or(r.PostForm.Get("back"), "/approvals")
 		switch {
@@ -263,6 +281,12 @@ func (u *UI) decide(m mount) func(w http.ResponseWriter, r *http.Request) map[st
 			return redirectDetail(back, msg, detail)
 		}
 		switch dec {
+		case "approve_access", "reject_access":
+			page := "/access/browser"
+			if strings.HasPrefix(a.Decision.Scope, "folder:") {
+				page = "/access/files"
+			}
+			return redirectDetail(back, M("%s. Access list: %s.", msg, added), page)
 		case "approve_rule":
 			return redirect("/policy/rule?approval="+url.QueryEscape(a.ID), M("%s. Now you can create a rule so it is not asked next time.", msg))
 		case "approve_always":

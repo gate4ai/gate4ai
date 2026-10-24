@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package browser
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
 
-	"github.com/gate4ai/gate4ai/connectors/browser/worker"
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/browser/worker"
 )
 
 func owner(t *testing.T, b *Browser, op string, args map[string]any) (any, error) {

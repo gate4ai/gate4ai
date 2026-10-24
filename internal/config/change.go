@@ -9,6 +9,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 )
 
 // Change — одна правка политики из действия агента gate4ai.change_policy.
@@ -35,6 +37,12 @@ type Change struct {
 	// только алиасы Vault) в JSON, как в credentials политики.
 	Account        string `json:"account,omitempty"`
 	CredentialJSON string `json:"credential_json,omitempty"`
+	// Domain, Path, Access — set_site_access / set_folder_access (списки
+	// Браузера и Файлов) и set_connector_site / set_connector_folder (строки
+	// коннектора Connector); Access "" — убрать строку.
+	Domain string `json:"domain,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Access string `json:"access,omitempty"`
 }
 
 // Операции правок.
@@ -51,17 +59,23 @@ const (
 	// сокета владельца — под подтверждением change_policy.
 	OpInstallDev = "install_dev_connector"
 	// OpAddSettingItems / OpRemoveSettingItems — дополнить или сократить
-	// настройку-список коннектора (сайты браузера), не заменяя её целиком.
+	// настройку-список коннектора (redact_params, download_types), не заменяя её целиком;
+	// сайты и папки — set_site_access / set_folder_access.
 	OpAddSettingItems    = "add_setting_items"
 	OpRemoveSettingItems = "remove_setting_items"
 	// OpAddCredential — учётка входа на сайт (метаданные; значения секретов
 	// кладёт владелец в Vault). Подтверждается человеком всегда.
 	OpAddCredential = "add_credential"
+	// Списки доступа: домены Браузера, папки Файлов и строки коннекторов.
+	OpSetSiteAccess      = "set_site_access"
+	OpSetFolderAccess    = "set_folder_access"
+	OpSetConnectorSite   = "set_connector_site"
+	OpSetConnectorFolder = "set_connector_folder"
 )
 
 // ChangeOps — допустимые операции.
 var ChangeOps = []string{OpAddRule, OpRemoveRule, OpAddListItems, OpRemoveListItems, OpAddConnector, OpConnectorSetting, OpInstallConnector, OpInstallDev,
-	OpAddSettingItems, OpRemoveSettingItems, OpAddCredential}
+	OpAddSettingItems, OpRemoveSettingItems, OpAddCredential, OpSetSiteAccess, OpSetFolderAccess, OpSetConnectorSite, OpSetConnectorFolder}
 
 // CheckChange проверяет правку до решения политики: форму и запрет секретов.
 func CheckChange(ch Change) error {
@@ -125,6 +139,34 @@ func CheckChange(ch Change) error {
 		}
 		if slices.ContainsFunc(ch.Items, func(it string) bool { return hasAlias(it) }) || SecretKey(ch.Key) {
 			return fmt.Errorf("%s: secrets and vault aliases cannot be set by agents", ch.Op)
+		}
+	case OpSetSiteAccess:
+		if err := need("domain", ch.Domain); err != nil {
+			return err
+		}
+		if ch.Access != "" {
+			return access.CheckSite(access.Site{Domain: ch.Domain, Access: ch.Access}, access.SiteModes)
+		}
+	case OpSetFolderAccess:
+		if err := need("path", ch.Path); err != nil {
+			return err
+		}
+		if ch.Access != "" {
+			return access.CheckFolder(access.Folder{Path: ch.Path, Access: ch.Access}, access.FolderModes)
+		}
+	case OpSetConnectorSite:
+		if err := errors.Join(need("connector", ch.Connector), need("domain", ch.Domain)); err != nil {
+			return err
+		}
+		if ch.Access != "" {
+			return access.CheckSite(access.Site{Domain: ch.Domain, Access: ch.Access}, access.ConnectorSiteModes)
+		}
+	case OpSetConnectorFolder:
+		if err := errors.Join(need("connector", ch.Connector), need("path", ch.Path)); err != nil {
+			return err
+		}
+		if ch.Access != "" {
+			return access.CheckFolder(access.Folder{Path: ch.Path, Access: ch.Access}, access.ConnectorFolderModes)
 		}
 	case OpAddCredential:
 		if err := errors.Join(need("account", ch.Account), need("credential_json", ch.CredentialJSON)); err != nil {
@@ -237,6 +279,14 @@ func (c *Config) ApplyChange(profile string, ch Change) error {
 		c.AddSettingItems(ch.Connector, ch.Key, ch.Items)
 	case OpRemoveSettingItems:
 		c.RemoveSettingItems(ch.Connector, ch.Key, ch.Items)
+	case OpSetSiteAccess:
+		return c.SetSiteAccess(ch.Domain, ch.Access)
+	case OpSetFolderAccess:
+		return c.SetFolderAccess(ch.Path, ch.Access)
+	case OpSetConnectorSite:
+		return c.SetConnectorSite(ch.Connector, c.ConnectorSites(ch.Connector), ch.Domain, ch.Access)
+	case OpSetConnectorFolder:
+		return c.SetConnectorFolder(ch.Connector, c.ConnectorFolders(ch.Connector), ch.Path, ch.Access)
 	case OpAddCredential:
 		var cr Credential
 		_ = json.Unmarshal([]byte(ch.CredentialJSON), &cr)
@@ -365,6 +415,26 @@ func (ch Change) describe() string {
 		return fmt.Sprintf("Remove from setting %s.%s: %s", ch.Connector, ch.Key, strings.Join(ch.Items, ", "))
 	case OpAddCredential:
 		return "Account " + ch.Account + " (secret values stay in the vault, you set them): " + ch.CredentialJSON
+	case OpSetSiteAccess:
+		if ch.Access == "" {
+			return "Browser: remove site " + ch.Domain + " from the access list"
+		}
+		return "Browser: site " + ch.Domain + " — " + ch.Access
+	case OpSetFolderAccess:
+		if ch.Access == "" {
+			return "Files: remove folder " + ch.Path + " from the access list"
+		}
+		return "Files: folder " + ch.Path + " — " + ch.Access
+	case OpSetConnectorSite:
+		if ch.Access == "" {
+			return "Connector " + ch.Connector + ": remove site " + ch.Domain
+		}
+		return "Connector " + ch.Connector + ": site " + ch.Domain + " — " + ch.Access
+	case OpSetConnectorFolder:
+		if ch.Access == "" {
+			return "Connector " + ch.Connector + ": remove folder " + ch.Path
+		}
+		return "Connector " + ch.Connector + ": folder " + ch.Path + " — " + ch.Access
 	}
 	return ch.Op
 }

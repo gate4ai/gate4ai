@@ -102,7 +102,7 @@ func nestedEnv(t *testing.T) (*Pipeline, *bank, *web, *audit.Journal, *[]string)
 	dir := t.TempDir()
 	ks := keys.NewMemory()
 	w := &web{}
-	b := &bank{rule: manifest.ServiceRule{Target: "web", Contract: 1, Actions: []string{"open", "act", "read"}, Params: map[string]any{"domains": []any{"bank.example"}}}}
+	b := &bank{rule: manifest.ServiceRule{Target: "web", Contract: 1, Actions: []string{"open", "act", "read"}}}
 	reg := connectors.NewRegistry()
 	for _, c := range []connectors.Connector{w, b} {
 		cli, err := connectors.NewInProcess(c)

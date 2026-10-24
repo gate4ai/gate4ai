@@ -63,11 +63,11 @@
 
 4.1 **Один цикл вызова коннектора.** Реализация функций хоста одна (`sdk-go/hostfuncs`), но обвязка вызова (лимиты, тайм-аут, Dispatcher, `Close`, marshal/decode, `Evidence`) скопирована четырежды: `wasm.go:341-368`, `builtin.go:41-66`, `native.go:221-303`, `hosttest.go:75-130`; отображение ошибок с одинаковым текстом — `wasm.go:297-309` и `native.go:251-258`. Общие `runCall(ctx, man, settings, func(d) error)` и `mapCallErr`.
 
-4.2 **Dispatcher-фабрика вне `wasm.Engine`.** `wasm.Engine` одновременно среда wazero и фабрика хост-сервисов (`wasm.go:33-49, 313-334`); поэтому `native` импортирует `wasm` (`native.go:32`) ради `Hosts` и `Toolchain` (`:416`), а CLI — `wasm.Toolchain` для нативных сборок (`cli/connectors.go:485,552,624`). Разнести: `internal/connectors/hostsvc` (Services + Dispatcher) и `internal/connectors/build` (Toolchain, BuildGo). Обновить устаревший doc-комментарий `host.go:3-6` (store-коннекторы «только WASM», egress назван Builtin).
+4.2 **Dispatcher-фабрика вне `wasm.Engine`.** `wasm.Engine` одновременно среда wazero и фабрика хост-сервисов (`wasm.go:33-49, 313-334`). Разнести: `internal/connectors/hostsvc` (Services + Dispatcher) и `internal/connectors/build` (Toolchain, BuildGo). Нативного runtime больше нет (браузер встроен), так что импорт `wasm` из `native` отпал сам. Обновить устаревший doc-комментарий `host.go:3-6` (store-коннекторы «только WASM», egress назван Builtin).
 
 4.3 **Одна проверка имени коннектора.** Четыре регэкспа, три разных: `manifest.go:262`, `config/credentials.go:120` (тот же), `config/load.go:123` (`^[a-z0-9_]+$`, компилируется в цикле), `store/install.go:493` (допускает ведущую цифру и `_`). Экспортировать `manifest.ValidName`. Там же: дубль проверки диапазона портов (`capabilities.go:177-181` и `Resolve` 415-420), `store.SHA256` = `registry.Sum`.
 
-4.4 **Один JSON-RPC по строкам.** `internal/platform/rpc/rpc.go` и `sdk-go/native/native.go:84-290` (`Peer`) — побайтно одинаковые `Message`; ядру можно импортировать `sdk-go`, `rpc` переиспользует `native`. Делается вместе с 0.6.
+4.4 **Один JSON-RPC по строкам.** Снято: `sdk-go/native` удалён вместе с нативным runtime, JSON-RPC остался один — `internal/platform/rpc/rpc.go`.
 
 4.5 **State kv и OAuth.** `state/oauth.go:44-64` знает формат ключа `oauth.client.*` и JSON-форму (`json_extract` с join на `tokens.label`) — утечка слоя; типизированная таблица `oauth_clients` или перенос в `front/oauth`. Делается после 0.4 (миграции).
 

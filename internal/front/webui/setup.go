@@ -5,7 +5,6 @@ package webui
 import (
 	"context"
 	"fmt"
-	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -19,6 +18,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
 	"github.com/gate4ai/gate4ai/internal/relayclient"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 )
 
 // Мастер первого запуска (/setup): 1) какой ассистент, 2) что ему можно —
@@ -35,7 +35,6 @@ var classOrder = []string{"read", "write", "external", "money"}
 var groupTitles = map[string]map[string]string{
 	"files":   {"read": "Read files", "write": "Create and change files"},
 	"browser": {"read": "Read pages", "write": "Click, type and sign in"},
-	"email":   {"read": "Read emails", "write": "Save drafts", "external": "Send emails"},
 }
 
 // groupWarns — предупреждения к группам действий: что значит «разрешать».
@@ -297,13 +296,24 @@ func (u *UI) setupAccessPage(r *http.Request) (string, map[string]any, error) {
 		}
 		switch cn {
 		case "files":
-			roots := toStrings(cfg.Connectors["files"]["roots"])
-			if len(roots) == 0 {
-				roots = []string{"~/Documents"}
+			var folders []string
+			for _, f := range cfg.Access.Folders {
+				if f.Access != access.Deny {
+					folders = append(folders, f.Path)
+				}
 			}
-			sc.Folders = strings.Join(roots, "\n")
+			if len(folders) == 0 {
+				folders = []string{"~/Documents"}
+			}
+			sc.Folders = strings.Join(folders, "\n")
 		case "browser":
-			sc.Sites = strings.Join(toStrings(cfg.Connectors["browser"]["allowed_domains"]), ", ")
+			var sites []string
+			for _, st := range cfg.Access.Sites {
+				if st.Access != access.Deny && st.Domain != "*" {
+					sites = append(sites, st.Domain)
+				}
+			}
+			sc.Sites = strings.Join(sites, ", ")
 		}
 		conns = append(conns, sc)
 	}
@@ -344,6 +354,7 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 	if slices.Contains(on, "files") && len(folders) == 0 {
 		return redirectErr(back, M("Choose at least one folder for files, or turn files off"))
 	}
+	effects := map[string]string{}
 	err := u.edit("setup: add agent "+name, func(c *config.Config) error {
 		if err := c.EnsureProfile(name); err != nil {
 			return err
@@ -360,54 +371,29 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 				if !validEffect(eff) {
 					eff = defaultEffect(g.Class)
 				}
-				switch cn {
-				case "files":
-					// Права агента — только в выбранных папках, даже если в общих
-					// настройках есть папки других агентов.
-					for _, a := range g.Actions {
-						id := c.Profiles[name].UniqueRuleID(strings.ReplaceAll(a, ".", "-") + "-" + eff)
-						if err := c.PutRule(name, config.Rule{ID: id, Action: a, When: folderWhen(folders), Effect: eff}); err != nil {
-							return err
-						}
-					}
-				default:
+				effects[cn+"."+g.Class] = eff
+				if cn != "files" && cn != "browser" {
 					if err := setGroupRules(c, name, g.Actions, eff); err != nil {
 						return err
 					}
 				}
 			}
+			// Браузер и Файлы: папки и сайты идут в общие списки доступа с режимом по
+			// выбранным решениям; правила на них не пишутся.
 			switch cn {
 			case "files":
-				if err := c.PutRule(name, config.Rule{ID: c.Profiles[name].UniqueRuleID("files-outside-folders"), Action: "files.*",
-					When: "!(" + folderWhen(folders) + ")", Effect: config.EffectDeny, Reason: "Outside the folders chosen for this agent"}); err != nil {
-					return err
-				}
-				s := map[string]any{}
-				maps.Copy(s, c.Connectors["files"])
-				roots := toStrings(s["roots"])
-				// Начальный корень ~/Documents заменяется выбранными папками.
-				if len(roots) == 1 && roots[0] == "~/Documents" {
-					roots = nil
-				}
+				mode := accessMode(effects["files.read"], effects["files.write"], true)
 				for _, d := range folders {
-					if !slices.Contains(roots, d) {
-						roots = append(roots, d)
+					if err := c.SetFolderAccess(strings.TrimSuffix(strings.TrimSuffix(d, "/**"), "/"), mode); err != nil {
+						return err
 					}
 				}
-				s["roots"] = anyStrings(roots)
-				c.SetConnectorSettings("files", s)
 			case "browser":
-				if len(sites) > 0 {
-					s := map[string]any{}
-					maps.Copy(s, c.Connectors["browser"])
-					cur := toStrings(s["allowed_domains"])
-					for _, x := range sites {
-						if !slices.Contains(cur, x) {
-							cur = append(cur, x)
-						}
+				mode := accessMode(effects["browser.read"], effects["browser.write"], false)
+				for _, x := range sites {
+					if err := c.SetSiteAccess(x, mode); err != nil {
+						return err
 					}
-					s["allowed_domains"] = anyStrings(cur)
-					c.SetConnectorSettings("browser", s)
 				}
 			}
 		}
@@ -592,4 +578,20 @@ func (u *UI) setupSkip(m mount) http.HandlerFunc {
 		http.SetCookie(w, &http.Cookie{Name: setupCookie, Value: "skip", Path: m.base + "/", MaxAge: 5 * 365 * 24 * 3600, SameSite: http.SameSiteLaxMode, Secure: m.remote})
 		http.Redirect(w, r, m.base+"/", http.StatusSeeOther)
 	}
+}
+
+// accessMode — режим строки списка доступа по решениям мастера для чтения и
+// изменений: обе «разрешать» — allow; чтение без вопроса, изменения с вопросом —
+// read (для папок — append не выбирается мастером); чтение с вопросом — ask;
+// запрет чтения — deny.
+func accessMode(read, write string, folder bool) string {
+	switch {
+	case read == config.EffectDeny:
+		return access.Deny
+	case read == config.EffectAsk || read == "":
+		return access.Ask
+	case write == config.EffectAllow:
+		return access.Allow
+	}
+	return access.Read
 }

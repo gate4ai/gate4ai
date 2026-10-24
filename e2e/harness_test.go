@@ -89,7 +89,7 @@ func binary(t *testing.T, pkg string) string {
 }
 
 // src — абсолютный путь к каталогу репозитория ("" — корень, иначе relay,
-// connectors/mail, …).
+// e2e/testdata/pagereader, …).
 func src(t *testing.T, name string) string {
 	t.Helper()
 	p, err := filepath.Abs(filepath.Join("..", name))
@@ -246,17 +246,17 @@ func (g *gate) run(token, stdin string, args ...string) cliResult {
 
 // install собирает коннектор из ../connectors/<dir> и ставит его как свою сборку
 // (--dev) с согласием владельца.
-func (g *gate) install(dir string) { g.t.Helper(); g.installFrom(src(g.t, "connectors/"+dir)) }
-
 // installFrom — то же из папки с исходниками dir.
 func (g *gate) installFrom(dir string) {
 	g.t.Helper()
 	pkg := filepath.Join(g.t.TempDir(), filepath.Base(dir)+".g4c")
-	// нативный коннектор (browser) — пакет только этой платформы
-	if r := g.run("", "", "connectors", "pack", dir, "-o", pkg, "--platform", runtime.GOOS+"/"+runtime.GOARCH); r.code != 0 {
+	if r := g.run("", "", "connectors", "pack", dir, "-o", pkg); r.code != 0 {
 		g.t.Fatal(r.out)
 	}
 	if r := g.run("", "y\n", "connectors", "install", pkg, "--dev"); r.code != 0 {
 		g.t.Fatalf("install %s: %d %s", dir, r.code, r.out)
 	}
 }
+
+// errOf — объект error из ответа gate4ai.
+func errOf(m map[string]any) map[string]any { e, _ := m["error"].(map[string]any); return e }

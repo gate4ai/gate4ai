@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"gopkg.in/yaml.v3"
 )
 
@@ -95,6 +96,36 @@ func (c *Config) Validate() Errors {
 	if len(c.Profiles) == 0 {
 		add("profiles", "at least one profile is required")
 	}
+	for i, st := range c.Access.Sites {
+		if err := access.CheckSite(st, access.SiteModes); err != nil {
+			add(fmt.Sprintf("access.sites[%d]", i), "%v", err)
+		}
+	}
+	for i, f := range c.Access.Folders {
+		if err := access.CheckFolder(f, access.FolderModes); err != nil {
+			add(fmt.Sprintf("access.folders[%d]", i), "%v", err)
+		}
+	}
+	for _, name := range sortedKeys(c.Connectors) {
+		if sites, err := access.ParseSites(c.Connectors[name]["sites"]); err != nil {
+			add("connectors."+name+".sites", "%v", err)
+		} else {
+			for i, st := range sites {
+				if err := access.CheckSite(st, access.ConnectorSiteModes); err != nil {
+					add(fmt.Sprintf("connectors.%s.sites[%d]", name, i), "%v", err)
+				}
+			}
+		}
+		if folders, err := access.ParseFolders(c.Connectors[name]["folders"]); err != nil {
+			add("connectors."+name+".folders", "%v", err)
+		} else {
+			for i, f := range folders {
+				if err := access.CheckFolder(f, access.ConnectorFolderModes); err != nil {
+					add(fmt.Sprintf("connectors.%s.folders[%d]", name, i), "%v", err)
+				}
+			}
+		}
+	}
 	for _, name := range sortedKeys(c.Agents) {
 		a := c.Agents[name]
 		p := "agents." + name
@@ -136,7 +167,7 @@ func (c *Config) Validate() Errors {
 			}
 			seen[r.ID] = true
 			if r.Action == "" {
-				add(rp+".action", "action is required (e.g. email.send or payments.*)")
+				add(rp+".action", "action is required (e.g. files.append or browser.*)")
 			} else if !actionRe.MatchString(r.Action) {
 				add(rp+".action", "invalid action %q (expected connector.action, connector.* or *)", r.Action)
 			}

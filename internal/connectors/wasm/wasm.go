@@ -11,12 +11,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"sync"
 	"time"
 
@@ -25,6 +23,7 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"github.com/gate4ai/gate4ai/sdk-go/capability"
 	"github.com/gate4ai/gate4ai/sdk-go/hostfuncs"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -40,9 +39,9 @@ type Services struct {
 	Log    *slog.Logger
 	// Home — домашний каталог пользователя для "~" в путях.
 	Home string
-	// Dial и RootCAs — сеть (подменяются в тестах).
-	Dial    func(ctx context.Context, network, addr string) (net.Conn, error)
-	RootCAs *x509.CertPool
+	// Folders — список папок Файлов gate4.ai: коннекторам магазина доступны
+	// только папки, которые там не закрыты (nil — не проверяется).
+	Folders func() []access.Folder
 	// Mask — маскирование секретов Vault в диагностике коннекторов (stderr
 	// нативных процессов) перед записью в лог daemon; nil — без маскирования.
 	Mask func(string) string
@@ -315,6 +314,15 @@ func (e *Engine) Dispatcher(ctx context.Context, m manifest.Manifest, lim manife
 	if err != nil {
 		return nil, err
 	}
+	if f, err := access.ParseFolders(settings["folders"]); err == nil && f != nil {
+		chk.Folders = f // владелец сузил или расширил папки коннектора
+	}
+	if m.Runtime == manifest.RuntimeWasm && e.svc.Folders != nil {
+		chk.Global = e.svc.Folders()
+		if chk.Global == nil {
+			chk.Global = []access.Folder{}
+		}
+	}
 	var kv hostfuncs.KV
 	if e.svc.KV != nil {
 		kv = e.svc.KV(m.Connector)
@@ -326,7 +334,7 @@ func (e *Engine) Dispatcher(ctx context.Context, m manifest.Manifest, lim manife
 		router = callerRouter{caller: name, r: e.svc.Router}
 	}
 	return &hostfuncs.Dispatcher{Ctx: ctx, Check: chk, Secrets: e.svc.Secrets, KV: kv, Services: router,
-		Dial: e.svc.Dial, RootCAs: e.svc.RootCAs, Timeout: time.Duration(lim.TimeoutS) * time.Second,
+		Timeout: time.Duration(lim.TimeoutS) * time.Second,
 		Log: func(level, msg string) {
 			lv := map[string]slog.Level{"debug": slog.LevelDebug, "warn": slog.LevelWarn, "error": slog.LevelError}[level]
 			log.Log(context.Background(), lv, msg, "connector", name)

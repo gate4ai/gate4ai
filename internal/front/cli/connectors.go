@@ -12,18 +12,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 	"github.com/gate4ai/gate4ai/sdk-go/registry"
 
-	"github.com/gate4ai/gate4ai/internal/connectors/native"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
 )
@@ -41,10 +37,7 @@ const connectorsUsage = `usage:
   gate4ai connectors logs <name> [--limit 50] [--since 10m]   the connector's log: its log(), stderr, daemon messages
   gate4ai connectors refresh                       fetch the registry index (revocations)
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c]
-                                                   runtime native: a package per manifest.platforms and
-                                                   <connector>-<version>.platforms.json (--platform os/arch,… — only these;
-                                                   one platform with -o file.g4c — just that package)
-  gate4ai connectors verify <dir> <file.g4c | list.platforms.json | URL>   rebuild from sources and compare (registry review)
+  gate4ai connectors verify <dir> <file.g4c | URL>   rebuild from sources and compare (registry review)
   gate4ai connectors keygen [-o key]`
 
 // splitFlags отделяет позиционные аргументы от флагов (флаги могут идти после).
@@ -91,7 +84,7 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 			return e.fail(err)
 		}
 		if json.Unmarshal(raw, &res) == nil && len(res.Connectors) == 0 {
-			fmt.Fprintln(e.Stderr, "gate4ai: no connectors installed: gate4ai connectors install browser (from the store) or gate4ai connectors install <file.g4c>")
+			fmt.Fprintln(e.Stderr, "gate4ai: no connectors from the store installed (files and the browser are built in): gate4ai connectors install <name> or gate4ai connectors install <file.g4c>")
 		}
 		var out any
 		_ = json.Unmarshal(raw, &out)
@@ -410,13 +403,12 @@ func (e *Env) consent(p store.Plan, yes bool) (ok, answered bool) {
 
 // pack собирает пакет коннектора из каталога исходников (Go) или готового модуля.
 func (e *Env) pack(ctx context.Context, args []string) int {
-	pos, fl := splitFlags(args, map[string]bool{"wasm": true, "key": true, "o": true, "platform": true})
+	pos, fl := splitFlags(args, map[string]bool{"wasm": true, "key": true, "o": true})
 	fs := flag.NewFlagSet("pack", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	wasmFile := fs.String("wasm", "", "ready connector.wasm (default: build the Go sources in <dir>)")
 	keyFile := fs.String("key", "", "publisher private key file (gate4ai connectors keygen); without it the package is unsigned")
-	out := fs.String("o", "", "output file (default <connector>-<version>.g4c; native: <connector>-<version>.platforms.json)")
-	platform := fs.String("platform", "", "native: only these platforms (os/arch,…; default manifest.platforms)")
+	out := fs.String("o", "", "output file (default <connector>-<version>.g4c)")
 	if fs.Parse(fl) != nil || len(pos) != 1 {
 		fmt.Fprintln(e.Stderr, connectorsUsage)
 		return ExitUsage
@@ -435,13 +427,6 @@ func (e *Env) pack(ctx context.Context, args []string) int {
 		if key, err = registry.ParsePrivateKey(string(kb)); err != nil {
 			return e.fail(err)
 		}
-	}
-	m, err := manifest.Parse(man)
-	if err != nil {
-		return e.fail(err)
-	}
-	if m.Runtime == manifest.RuntimeNative {
-		return e.packNative(ctx, dir, man, m, key, *platform, *out)
 	}
 	var wb []byte
 	var toolchain string
@@ -476,77 +461,6 @@ func (e *Env) pack(ctx context.Context, args []string) int {
 	return ExitOK
 }
 
-// packNative собирает нативный пакет под каждую платформу и список платформ.
-func (e *Env) packNative(ctx context.Context, dir string, man []byte, m manifest.Manifest, key ed25519.PrivateKey, only, out string) int {
-	plats := m.Platforms
-	if only != "" {
-		plats = strings.Split(only, ",")
-	}
-	tc, err := wasm.Toolchain(dir)
-	if err != nil {
-		return e.fail(err)
-	}
-	single := len(plats) == 1 && strings.HasSuffix(out, store.PackageExt)
-	if out == "" {
-		out = m.Connector + "-" + m.Version + store.SetExt
-	}
-	base := filepath.Dir(out)
-	set := store.PlatformSet{Connector: m.Connector, Version: m.Version, Platforms: map[string]store.Artifact{}}
-	var signedBy string
-	for _, plat := range plats {
-		bin, err := buildNative(ctx, dir, plat)
-		if err != nil {
-			return e.fail(err)
-		}
-		pkg, err := store.PackNative(man, bin, plat, key)
-		if err != nil {
-			return e.fail(err)
-		}
-		p, err := store.Open(pkg)
-		if err != nil {
-			return e.fail(err)
-		}
-		signedBy = p.Sig.PublicKey
-		name := m.Connector + "-" + m.Version + "-" + strings.ReplaceAll(plat, "/", "-") + store.PackageExt
-		file := filepath.Join(base, name)
-		if single {
-			file = out
-		}
-		if err := os.WriteFile(file, pkg, 0o644); err != nil {
-			return e.fail(err)
-		}
-		if single {
-			e.printJSON(map[string]any{"package": filepath.Base(file), "connector": m.Connector, "version": m.Version, "platform": plat,
-				"digest": p.Sig.Digest, "sha256": store.SHA256(pkg), "signed_by": signedBy, "capabilities": m.Summary(), "go": tc})
-			return ExitOK
-		}
-		set.Platforms[plat] = store.Artifact{URL: name, SHA256: store.SHA256(pkg), Digest: p.Sig.Digest}
-	}
-	sb, _ := json.MarshalIndent(set, "", "  ")
-	sb = append(sb, '\n')
-	if err := os.WriteFile(out, sb, 0o644); err != nil {
-		return e.fail(err)
-	}
-	e.printJSON(map[string]any{"package": filepath.Base(out), "connector": m.Connector, "version": m.Version,
-		"digest": store.SetDigest(set), "sha256": store.SHA256(sb), "signed_by": signedBy, "capabilities": m.Summary(),
-		"go": tc, "platforms": set.Platforms})
-	return ExitOK
-}
-
-// buildNative собирает бинарник нативного коннектора под платформу.
-func buildNative(ctx context.Context, dir, platform string) ([]byte, error) {
-	tmp, err := os.MkdirTemp("", "g4apack")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(tmp)
-	bin := filepath.Join(tmp, store.BinaryName(platform))
-	if err := native.BuildGo(ctx, dir, platform, bin); err != nil {
-		return nil, err
-	}
-	return os.ReadFile(bin)
-}
-
 // buildModule собирает WASM-модуль из исходников dir и возвращает его и версию Go.
 func buildModule(ctx context.Context, dir string) ([]byte, string, error) {
 	tc, err := wasm.Toolchain(dir)
@@ -568,7 +482,7 @@ func buildModule(ctx context.Context, dir string) ([]byte, string, error) {
 
 // verifyPackage пересобирает пакет из исходников и сравнивает с готовым: так ревьюер
 // registry убеждается, что пакет собран из этого кода (подпись издателя этого
-// не доказывает). Для нативного — каждый пакет из списка платформ.
+// не доказывает).
 func (e *Env) verifyPackage(ctx context.Context, args []string) int {
 	if len(args) != 2 {
 		fmt.Fprintln(e.Stderr, connectorsUsage)
@@ -583,74 +497,26 @@ func (e *Env) verifyPackage(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	type item struct {
-		ref string
-		raw []byte
+	p, err := store.Open(raw)
+	if err != nil {
+		return e.fail(fmt.Errorf("%s: %w", file, err))
 	}
-	items := []item{{file, raw}}
-	var set *store.PlatformSet
-	if store.IsSet(file) {
-		s, err := store.ParseSet(raw)
-		if err != nil {
-			return e.fail(err)
-		}
-		set = &s
-		items = nil
-		for _, plat := range slices.Sorted(maps.Keys(s.Platforms)) {
-			ref := store.ResolveRef(file, s.Platforms[plat].URL)
-			b, err := store.Fetch(ctx, ref)
-			if err != nil {
-				return e.fail(err)
-			}
-			if store.SHA256(b) != s.Platforms[plat].SHA256 {
-				return e.fail(fmt.Errorf("%s: sha256 does not match the platforms list", ref))
-			}
-			items = append(items, item{ref, b})
-		}
+	built, tc, err := buildModule(ctx, dir)
+	if err != nil {
+		return e.fail(err)
 	}
-	var tc string
-	var p *store.Package
-	for _, it := range items {
-		if p, err = store.Open(it.raw); err != nil {
-			return e.fail(fmt.Errorf("%s: %w", it.ref, err))
-		}
-		var built []byte
-		have := p.Wasm
-		if p.Native() {
-			have = p.Binary
-			if set != nil && set.Platforms[p.Sig.Platform].Digest != p.Sig.Digest {
-				return e.fail(fmt.Errorf("%s: digest does not match the platforms list", it.ref))
-			}
-			if tc, err = wasm.Toolchain(dir); err == nil {
-				built, err = buildNative(ctx, dir, p.Sig.Platform)
-			}
-		} else {
-			built, tc, err = buildModule(ctx, dir)
-		}
-		if err != nil {
-			return e.fail(err)
-		}
-		var diff []string
-		if !bytes.Equal(man, p.ManifestYAML) {
-			diff = append(diff, store.ManifestFile)
-		}
-		if !bytes.Equal(built, have) {
-			name := store.ModuleFile
-			if p.Native() {
-				name = store.BinaryName(p.Sig.Platform) + " (" + p.Sig.Platform + ")"
-			}
-			diff = append(diff, name)
-		}
-		if len(diff) > 0 {
-			return e.fail(fmt.Errorf("%s does not match the sources in %s (built with %s): %s differs", it.ref, dir, tc, strings.Join(diff, ", ")))
-		}
+	var diff []string
+	if !bytes.Equal(man, p.ManifestYAML) {
+		diff = append(diff, store.ManifestFile)
 	}
-	res := map[string]any{"status": "ok", "reproducible": true, "connector": p.Manifest.Connector, "version": p.Manifest.Version,
-		"digest": p.Sig.Digest, "sha256": store.SHA256(raw), "signed_by": p.SignedBy(), "go": tc}
-	if set != nil {
-		res["digest"], res["platforms"] = store.SetDigest(*set), len(items)
+	if !bytes.Equal(built, p.Wasm) {
+		diff = append(diff, store.ModuleFile)
 	}
-	e.printJSON(res)
+	if len(diff) > 0 {
+		return e.fail(fmt.Errorf("%s does not match the sources in %s (built with %s): %s differs", file, dir, tc, strings.Join(diff, ", ")))
+	}
+	e.printJSON(map[string]any{"status": "ok", "reproducible": true, "connector": p.Manifest.Connector, "version": p.Manifest.Version,
+		"digest": p.Sig.Digest, "sha256": store.SHA256(raw), "signed_by": p.SignedBy(), "go": tc})
 	return ExitOK
 }
 

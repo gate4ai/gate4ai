@@ -9,20 +9,20 @@ SDK — каталог `sdk-go/` модуля `github.com/gate4ai/gate4ai` (од
 | `manifest` | манифест: действия, аргументы, класс эффекта, проверка результата, `runtime`, `capabilities`, `limits`; шаблоны `${setting:…}` |
 | `abi` | ABI: экспорты модуля, функции хоста, их запросы и ответы; `abi.Host` — типизированные функции хоста для кода коннектора |
 | `connector` | PDK: `connector.Register` и экспорты WASM-модуля (`GOOS=wasip1`) |
-| `native` | `runtime: native`: отдельный процесс под надзором хоста, JSON-RPC по stdio; `native.Serve` — тот же PDK, что у WASM |
+| `access` | списки доступа: домены и папки с режимом (`allow` / `read` / `append` / `connector` / `ask` / `deny`), сопоставление по самой конкретной строке — одни правила у хоста, коннекторов и Web UI |
 | `contract` | контракт для вызовов между коннекторами (`service_call`): `Diff` / `Check` — несовместимые изменения, `Gen` — типизированный Go-клиент |
 | `capability` | проверка вызовов по возможностям манифеста (`capability_denied`) |
 | `hostfuncs` | реализация функций хоста поверх служб хоста; та же, что в хосте gate4.ai |
-| `netauth` | TLS, STARTTLS и аутентификация хостом в IMAP/SMTP — коннектор не видит пароль |
 | `hosttest` | хост в том же процессе для нативных тестов коннектора; `Replay` — фейк поставщика по шагам, записанным в сеансе браузера агента (`browser.close`), `LoadFixture` — их файл |
 | `domain` | сопоставление адресов с шаблонами доменов, списки сайтов (белый / чёрный) |
 | `registry` | индекс registry коннекторов (`index.json`): формат, проверка, последняя и отозванные версии; подпись индекса (Ed25519 над hex(sha256)) и ключи `ed25519:` — у хоста и у сайта gate4.ai одни правила |
 
 ## Принципы
 
-- Коннектор пользуется только функциями хоста: сети, файлов, процессов и переменных окружения у WASM-модуля нет.
-- Всё, что не объявлено в `capabilities` манифеста, недоступно: функция хоста вернёт `capability_denied`. Политика пользователя может возможности только сузить.
-- Коннектор не видит секреты: в настройках — только алиасы (`@mail.work`), значения подставляет хост (`{{secret:@alias}}` в `http_request`, аутентификация в `tls_dial`) и только для адресов из `bind`.
+- Коннектор пользуется только функциями хоста: файлы в объявленных папках (`folders`), своё KV-хранилище (`capabilities.storage`), доказательства, лог и вызовы других коннекторов (`service_call`). Сети, процессов и переменных окружения у WASM-модуля нет; во внешний мир коннектор выходит только через `service_call` к браузеру gate4.ai — на сайты из `sites`.
+- Всё, что не объявлено в манифесте, недоступно: функция хоста вернёт `capability_denied`. Политика пользователя может возможности только сузить.
+- Сайты и папки объявляются с режимом доступа. `sites: [{domain, access}]` — `allow` (всё), `read` (только чтение, изменения — с подтверждением), `ask` (всё с подтверждением), `deny`; домен — `app.example.org`, `*.example.org` (включая сам `example.org`) или `*`. `folders: [{path, access}]` — `allow`, `append` (чтение, список и добавление), `read` (чтение и список), `deny`; путь — абсолютный или `~/…`, без масок — папка и всё внутри, `*`/`?` — внутри сегмента, `**` — любое число сегментов. Домен и путь могут быть шаблоном `${setting:…}`: список в настройке раскрывается в несколько строк с тем же режимом. Решает самая конкретная строка, при равенстве — строже; симлинки раскрываются, относительные пути запрещены. Проверка — `capability.Checker.Locate(path, op)` (`access.OpRead|OpList|OpAppend|OpWrite`), функции хоста `fs_*` выбирают операцию по имени.
+- Коннектор не видит секреты: в формы сайтов их подставляет встроенный браузер хоста по учёткам входа владельца. Значения получает лишь компонент ядра (`runtime: builtin`) с `capabilities.reveal` — ключ модели браузера; всё раскрытое вырезается из доказательств и логов.
 
 ## Коннектор за пять минут
 
@@ -43,12 +43,15 @@ var manifestYAML []byte
 type Hello struct{}
 
 func (Hello) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.ExecResult, error) {
-	resp, err := h.HTTP(abi.HTTPRequest{URL: "https://api.example.com/hello",
-		Headers: map[string]string{"Authorization": "Bearer {{secret:@example}}"}})
+	name, _ := r.Args["name"].(string)
+	seen, _, err := h.KVGet("seen")
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	return abi.ExecResult{Content: []abi.Content{abi.Text(string(resp.Body))}}, nil
+	if err := h.KVSet("seen", append(seen, name+"\n"...)); err != nil {
+		return abi.ExecResult{}, err
+	}
+	return abi.ExecResult{Content: []abi.Content{abi.Text("hello, " + name)}}, nil
 }
 
 func (Hello) Verify(_ context.Context, _ *abi.Host, r abi.VerifyRequest) (abi.VerifyResult, error) {
@@ -64,8 +67,7 @@ connector: hello
 version: 1.0.0
 runtime: wasm
 capabilities:
-  network: [ { host: api.example.com, scheme: https } ]
-  secrets: [ { alias: "@example", bind: [api.example.com] } ]
+  storage: { quota_mb: 1 }
 actions:
   - name: say
     class: read
@@ -80,7 +82,7 @@ actions:
 GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o connector.wasm .
 ```
 
-Тесты — нативно, на `hosttest` (те же проверки возможностей, что в хосте). Примеры — коннекторы [`connectors/mail`](../connectors/mail) (WASM), [`connectors/browser`](../connectors/browser) (`runtime: native`, поставщик действий для других коннекторов).
+Тесты — нативно, на `hosttest` (те же проверки возможностей, что в хосте). Пример коннектора к сайту — [`e2e/testdata/pagereader`](../e2e/testdata/pagereader); поставщик действий — встроенный браузер gate4.ai ([`internal/connectors/builtin/browser`](../internal/connectors/builtin/browser)). Сайты коннектор открывает через него: см. «Вызовы других коннекторов».
 
 ## Вызовы других коннекторов
 
@@ -89,7 +91,11 @@ GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o connector.wasm .
 ```yaml
 capabilities:
   services:
-    - { target: browser, contract: 1, actions: [open, act], params: { domains: ["${setting:allowed_domains}"] } }
+    - { target: browser, contract: 1, actions: [open, act] }
+sites:
+  - { domain: "${setting:domains}", access: allow }
+folders:
+  - { path: "~/Documents/bank", access: append }
 actions:
   - { name: pay, class: money, verify: feed, calls: [browser.open, browser.act] }
 ```
@@ -99,17 +105,11 @@ gate4ai contract gen contracts/browser.yaml -o browserclient/client.go   # кл�
 gate4ai contract diff old/manifest.yaml manifest.yaml                     # CI поставщика: ломающее изменение без нового contract — ошибка
 ```
 
-`params` хост передаёт поставщику при каждом вызове (`ExecRequest.Caller`); вложенный вызов проходит политики хоста.
+Сайты, на которых потребитель работает через браузер, он объявляет в `sites`; хост передаёт поставщику, кто его вызвал (`ExecRequest.Caller`), и вложенный вызов проходит политики хоста.
 
-## runtime: native
+## runtime: builtin
 
-Только для пакетов проверенного издателя (gate4.ai): процесс работает без песочницы, с правами пользователя; нативные пакеты сторонних издателей не принимаются.
-
-```go
-func main() { native.Serve(manifestYAML, &Browser{}) }
-```
-
-В манифесте — `runtime: native` и `platforms: [linux/amd64, darwin/arm64, …]`; `gate4ai connectors pack` собирает пакет под каждую платформу (`CGO_ENABLED=0 -trimpath`).
+Компоненты ядра gate4.ai — Браузер и Файлы — написаны на том же PDK (`connector.Connector`) и исполняются в процессе daemon на тех же функциях хоста с той же проверкой манифеста (`internal/connectors/wasm/builtin.go`). Из магазина они не ставятся; коннекторы магазина — только `runtime: wasm`.
 
 ## ABI
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gate4ai/gate4ai/sdk-go/access"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,6 +42,16 @@ type Config struct {
 	Relay       Relay                 `yaml:"relay,omitempty" json:"relay"`
 	Egress      Egress                `yaml:"egress,omitempty" json:"egress"`
 	Store       ConnectorStore        `yaml:"store,omitempty" json:"store"`
+	// Access — первый уровень доступа: домены Браузера и папки Файлов с режимом
+	// (allow | read | connector | ask | deny; папки — ещё append). Решает самая
+	// конкретная строка; без строки — deny.
+	Access Access `yaml:"access,omitempty" json:"access"`
+}
+
+// Access — списки доступа Браузера и Файлов (общие для всех агентов).
+type Access struct {
+	Sites   []access.Site   `yaml:"sites,omitempty" json:"sites"`
+	Folders []access.Folder `yaml:"folders,omitempty" json:"folders"`
 }
 
 // ConnectorStore — магазин коннекторов: индекс registry и ключи, которым владелец доверяет.
@@ -205,6 +216,9 @@ func FormatDuration(d time.Duration) string {
 
 // Defaults заполняет значения по умолчанию из спецификации (docs/specification.md).
 func (c *Config) Defaults() {
+	if c.Access.Sites == nil {
+		c.Access.Sites = []access.Site{{Domain: "*", Access: access.Ask}}
+	}
 	if c.Approvals.Timeout == 0 {
 		c.Approvals.Timeout = Duration(30 * time.Minute)
 	}

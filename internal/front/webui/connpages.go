@@ -19,7 +19,6 @@ import (
 	"github.com/gate4ai/gate4ai/internal/connectors"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/daemon"
-	"github.com/gate4ai/gate4ai/internal/policy"
 )
 
 // ---- Коннекторы ----
@@ -92,15 +91,9 @@ func (u *UI) storeItems(ctx context.Context, l string, refresh bool) ([]storeIte
 			items = append(items, it)
 		}
 	}
+	// Браузер и Файлы — не коннекторы: у них свои страницы (/access/browser, /access/files).
 	for _, name := range daemon.BuiltinConnectors {
-		c, ok := u.D.Registry.Get(name)
-		if !ok || policy.Implicit[name] || policy.Everyone[name] {
-			continue
-		}
-		m := c.Manifest()
 		seen[name] = true
-		items = append(items, storeItem{Name: name, Description: m.Description, Publisher: "gate4ai", Trust: "verified", Installed: m.Version,
-			Version: m.Version, Loaded: true, Builtin: true, Capabilities: m.Summary(), Profiles: profilesOf(name)})
 	}
 	for name, in := range inst {
 		if seen[name] {
@@ -198,7 +191,7 @@ func (u *UI) installConnector(w http.ResponseWriter, r *http.Request) map[string
 	if warn != "" {
 		msg = M("%s %s is installed. Set it up below. Note: %s", u.connTitle(u.lang(r), info.Connector), info.Version, warn)
 	}
-	return redirect("/connectors/"+url.PathEscape(info.Connector), msg)
+	return redirect(pageOf(info.Connector), msg)
 }
 
 // reinstallConnector — «Переустановить»: та же версия из того же источника
@@ -207,7 +200,7 @@ func (u *UI) reinstallConnector(w http.ResponseWriter, r *http.Request) map[stri
 	name := r.PathValue("name")
 	back := "/connectors"
 	if r.PostForm.Get("from") == "connector" {
-		back = "/connectors/" + url.PathEscape(name)
+		back = pageOf(name)
 	}
 	info, plan, warn, err := u.D.ReinstallConnector(r.Context(), name)
 	if errors.Is(err, store.ErrConsent) {
@@ -252,6 +245,25 @@ func (u *UI) refreshIndex(w http.ResponseWriter, r *http.Request) map[string]any
 
 func (u *UI) connectorPage(r *http.Request) (string, map[string]any, error) {
 	name := r.PathValue("name")
+	if builtinRedirect(name) {
+		return "", map[string]any{"redirect": pageOf(name) + "?" + r.URL.RawQuery}, nil
+	}
+	tpl, data, err := u.connectorData(r, name)
+	if err != nil || tpl != "connector" {
+		return tpl, data, err
+	}
+	l := u.lang(r)
+	c, _ := u.D.Registry.Get(name)
+	m := c.Manifest()
+	sites, folders := u.connectorRows(l, u.D.Config.Current(), name, m)
+	data["Sites"], data["Folders"] = sites, folders
+	data["HasAccess"] = len(m.Sites)+len(m.Folders)+len(sites)+len(folders) > 0
+	return tpl, data, nil
+}
+
+// connectorData — данные страницы компонента name (коннектора магазина или
+// встроенного): настройки, кто может пользоваться, решения по действиям.
+func (u *UI) connectorData(r *http.Request, name string) (string, map[string]any, error) {
 	c, ok := u.D.Registry.Get(name)
 	if !ok {
 		items, ierr := u.storeItems(r.Context(), u.lang(r), false)
@@ -284,15 +296,12 @@ func (u *UI) connectorPage(r *http.Request) (string, map[string]any, error) {
 		"Profiles": profiles, "Config": cfg, "Info": in.Info, "Builtin": in.Name == "", "Actions": acts, "Calls": calls, "Access": access,
 		"Profile": prof, "Grants": grantsFor(cfg, name), "Groups": u.groups(name, cfg.Profiles[prof]), "ProfileAgents": profileAgents(cfg, prof),
 		"WholeHome": name == "files" && filesWholeHome(cfg)}
-	if name == "email" {
-		data["Providers"] = mailProviders
-	}
 	return "connector", data, nil
 }
 
 func (u *UI) saveConnectorSettings(w http.ResponseWriter, r *http.Request) map[string]any {
 	name := r.PathValue("name")
-	back := "/connectors/" + url.PathEscape(name)
+	back := pageOf(name)
 	c, ok := u.D.Registry.Get(name)
 	if !ok {
 		return redirectErr("/connectors", M("%s is not installed", name))
@@ -300,22 +309,6 @@ func (u *UI) saveConnectorSettings(w http.ResponseWriter, r *http.Request) map[s
 	f := r.PostForm
 	cur := map[string]any{}
 	maps.Copy(cur, u.D.Config.Current().Connectors[name])
-	// Почтовый сервис: серверы по умолчанию.
-	if p := f.Get("provider"); p != "" {
-		for _, mp := range mailProviders {
-			if mp.ID == p {
-				if f.Get("imap.host") == "" {
-					f.Set("imap.host", mp.IMAP)
-				}
-				if f.Get("smtp.host") == "" {
-					f.Set("smtp.host", mp.SMTP)
-				}
-				if f.Get("imap.username") == "" {
-					f.Set("imap.username", f.Get("address"))
-				}
-			}
-		}
-	}
 	for _, fl := range settingFields(c.Manifest(), cur) {
 		raw := f.Get(fl.Key)
 		if fl.Kind == fieldSecret {

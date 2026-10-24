@@ -66,16 +66,16 @@ func TestInstallDevPinnedToRequest(t *testing.T) {
 	}
 	id := request()
 	a, _ := d.State.GetApproval(id)
-	for _, want := range []string{"runtime wasm (sandbox)", "actions: write: kv; read: deny_all", "limits per call: memory 48 MB, timeout 3 s", "secret ${setting:token} for 127.0.0.1"} {
+	for _, want := range []string{"runtime wasm (sandbox)", "actions: write: kv; read: deny_all", "limits per call: memory 48 MB, timeout 3 s"} {
 		if !strings.Contains(a.Preview, want) {
 			t.Fatalf("%q not in\n%s", want, a.Preview)
 		}
 	}
 	man := filepath.Join(folder, "manifest.yaml")
 	orig, _ := os.ReadFile(man)
-	// После запроса агент расширяет возможности и переключает runtime.
-	evil := strings.Replace(string(orig), "bind: [127.0.0.1]", "bind: [attacker.example]", 1)
-	_ = os.WriteFile(man, []byte(strings.Replace(evil, "runtime: wasm", "runtime: native", 1)), 0o644)
+	// После запроса агент расширяет возможности: доступ к файлам.
+	evil := strings.Replace(string(orig), "capabilities:\n", "folders: [{ path: \"~\", access: allow }]\ncapabilities:\n", 1)
+	_ = os.WriteFile(man, []byte(evil), 0o644)
 	if res, err := d.Pipeline.Decide(ctx, id, true, "webui", "owner"); err != nil || res.Status == "ok" {
 		t.Fatalf("changed manifest installed: %+v %v", res, err)
 	}
@@ -157,19 +157,18 @@ func TestSelfConfigPreviewAgentTextAfterChanges(t *testing.T) {
 	}
 }
 
-// mailLike — коннектор, у которого хост настройки — привязка секрета.
-type mailLike struct{}
+// siteLike — коннектор, у которого сайт входа учётки — из настройки.
+type siteLike struct{}
 
-func (mailLike) Manifest() manifest.Manifest {
-	return manifest.Manifest{Connector: "mail", Capabilities: manifest.Capabilities{
-		Network: []manifest.NetworkCap{{Host: "${setting:imap.host}", Scheme: "tls"}},
-		Secrets: []manifest.SecretCap{{Alias: "${setting:imap.password}", Bind: []string{"${setting:imap.host}"}}}},
-		Actions: []manifest.Action{{Name: "read", Class: "read"}}}
+func (siteLike) Manifest() manifest.Manifest {
+	return manifest.Manifest{Connector: "site",
+		Credentials: []manifest.CredentialSlot{{Slot: "login", Bind: []string{"https://${setting:imap.host}"}}},
+		Actions:     []manifest.Action{{Name: "read", Class: "read"}}}
 }
-func (mailLike) Execute(context.Context, abi.ExecRequest) (abi.ExecResult, error) {
+func (siteLike) Execute(context.Context, abi.ExecRequest) (abi.ExecResult, error) {
 	return abi.ExecResult{}, nil
 }
-func (mailLike) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
+func (siteLike) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{}, nil
 }
 
@@ -177,8 +176,8 @@ func (mailLike) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, er
 // пропускает: только человек и с предупреждением; учётка не ссылается на
 // секрет, который уже есть в Vault (code review H4).
 func TestSelfConfigBindSettingsAndVaultAliases(t *testing.T) {
-	c, _ := connectors.NewInProcess(mailLike{})
-	conf := "agents:\n  bot: { profile: p }\nprofiles:\n  p:\n    connectors: [mail]\n    rules:\n      - { id: self-allow, action: gate4ai.change_policy, effect: allow }\n"
+	c, _ := connectors.NewInProcess(siteLike{})
+	conf := "agents:\n  bot: { profile: p }\nprofiles:\n  p:\n    connectors: [site]\n    rules:\n      - { id: self-allow, action: gate4ai.change_policy, effect: allow }\n"
 	d, err := New(Options{Home: filepath.Join(t.TempDir(), "d"), Keys: keys.NewMemory(), Connectors: []connectors.Client{c}, InitialConfig: []byte(conf)})
 	if err != nil {
 		t.Fatal(err)
@@ -188,14 +187,14 @@ func TestSelfConfigBindSettingsAndVaultAliases(t *testing.T) {
 	call := func(ch map[string]any) pipeline.Result {
 		return d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "gate4ai.change_policy", Args: map[string]any{"summary": "x", "changes": []any{ch}}})
 	}
-	r := call(map[string]any{"op": "connector_settings", "connector": "mail", "settings_json": `{"imap":{"host":"evil.example"}}`})
+	r := call(map[string]any{"op": "connector_settings", "connector": "site", "settings_json": `{"imap":{"host":"evil.example"}}`})
 	if r.Status != pipeline.StatusPending || !strings.Contains(r.Reason, "always needs the owner") {
 		t.Fatalf("%+v", r)
 	}
-	if a, _ := d.State.GetApproval(r.ID); !strings.Contains(a.Preview, "ATTENTION: setting imap of connector mail") || !strings.Contains(a.Preview, "evil.example") {
+	if a, _ := d.State.GetApproval(r.ID); !strings.Contains(a.Preview, "ATTENTION: setting imap of connector site") || !strings.Contains(a.Preview, "evil.example") {
 		t.Fatal(a.Preview)
 	}
-	if r := call(map[string]any{"op": "connector_settings", "connector": "mail", "settings_json": `{"folder":"INBOX"}`}); r.Status != pipeline.StatusPending || strings.Contains(r.Reason, "ATTENTION") {
+	if r := call(map[string]any{"op": "connector_settings", "connector": "site", "settings_json": `{"folder":"INBOX"}`}); r.Status != pipeline.StatusPending || strings.Contains(r.Reason, "ATTENTION") {
 		t.Fatalf("other settings: the owner approves, without the warning: %+v", r)
 	}
 	if err := d.Vault.Set("@bank.password", "fake-value"); err != nil {
@@ -257,8 +256,8 @@ func TestInstallConnectorPinnedToIndexEntry(t *testing.T) {
 	if a, _ := d.State.GetApproval(id); !strings.Contains(a.Preview, "kvx 1 by acme") || !strings.Contains(a.Preview, "storage 1 MB") {
 		t.Fatal(a.Preview)
 	}
-	// Издатель переопубликовал ту же версию с сетью.
-	storeIndex(t, reg, regPriv, pubPub, pubPriv, strings.Replace(man, "capabilities: {", "capabilities: { network: [ { host: evil.example, scheme: https } ],", 1))
+	// Издатель переопубликовал ту же версию с другими возможностями.
+	storeIndex(t, reg, regPriv, pubPub, pubPriv, strings.Replace(man, "capabilities: {", "folders: [{ path: \"/srv/evil.example\", access: allow }]\ncapabilities: {", 1))
 	if res, err := d.Pipeline.Decide(ctx, id, true, "webui", "owner"); err != nil || res.Status == "ok" {
 		t.Fatalf("changed release installed: %+v %v", res, err)
 	}
