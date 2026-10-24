@@ -2,7 +2,7 @@
 
 Один репозиторий `gate4ai/gate4ai` и один Go-модуль `github.com/gate4ai/gate4ai`: ядро (`cmd/`, `internal/`), `sdk-go/` (Apache-2.0), `relay/`, `connectors/`, `e2e/`. Направление зависимостей проверяет CI (`scripts/deps-check.sh`: прямые импорты пакетов и их тестов под linux, darwin, windows и wasip1; только этот модуль — `GOWORK=off`, ошибка `go list` — провал): `sdk-go` — только сам себя; `relay` — сам себя и `sdk-go`; ядро — себя и `sdk-go`, `relay` — только в тестах; коннектор — свой каталог, `sdk-go` и ядро, другой коннектор — никогда; `e2e` — что угодно, но его не импортирует никто. Остальные репозитории проекта и их лицензии — [repo-structure.md](repo-structure.md).
 
-План рефакторинга (дефекты, структурные этапы, порядок) — [refactoring-plan.md](refactoring-plan.md).
+План рефакторинга — [refactoring-plan.md](refactoring-plan.md); технический долг (структурные этапы) — [tech-debt.md](tech-debt.md).
 
 | Компонент [спецификации](specification.md) | Пакет |
 |---|---|
@@ -10,7 +10,7 @@
 | Policy Engine (CEL, deny > ask > allow, умолчания по классу, лимиты); действия, которые правило allow не разрешает (`OwnerOnly`: `gate4ai.change_policy` — всегда владелец) и которые шаблон `browser.*` / `*` не покрывает (`ExplicitOnly`: `browser.post` / `put` / `patch` / `delete` / `login` / `fill_secret`), предупреждения о таких правилах (`Warnings`: `policy set`, Web UI, `policy_summary`) | `internal/policy` |
 | Action Pipeline (8 шагов) | `internal/pipeline` |
 | Перед исполнением (и одобренного действия): повторное решение PDP и резерв лимита атомарно (`admit`), квитанция-намерение (`execution.status: started`) до исполнения — без журнала действие не исполняется; восстановление прерванных действий при старте (`Recover`) | `internal/pipeline/pipeline.go`, `internal/pipeline/approval.go`, `internal/pipeline/recover.go` |
-| State Store (счётчики, очередь подтверждений, метки происхождения, токены) | `internal/state` |
+| State Store (счётчики, очередь подтверждений, метки происхождения, токены); схема версионируется `PRAGMA user_version`, миграции только добавляют (`schema.go`, общий код с журналом — `internal/platform/sqlschema`) | `internal/state` |
 | Журнал: квитанции RFC 8785, цепочка, AEAD, доказательства age, чекпоинты (связаны `prev`), экспорт; редактирование по сроку — с записью `journal.redact` (хэш и хэш заголовка) под чекпоинтом, доказательства удаляются с учётом ссылок других квитанций; версия схемы и миграции — [ниже](#журнал-что-можно-менять) | `internal/audit` (`schema.go` — миграции) |
 | Vault (keychain, алиасы, маскирование) | `internal/secrets/vault`, `internal/secrets/keys` |
 | Учётки входа на сайты (`credentials`): доступ, форма и значения только для `browser.login` / `browser.fill_secret`, вход коннектором входа (`via`), события `secret.use`; вопросы человеку с вводом кода | `internal/config/credentials.go`, `internal/pipeline/credentials.go`, `internal/daemon/questions.go` |
@@ -31,7 +31,7 @@
 | Лог по коннектору (кольцевой буфер записей slog с атрибутом `connector`), `gate4ai connectors logs`, поле `log` в ответе своей сборки | `internal/daemon/connlog.go`, `Pipeline.ConnectorLog` |
 | Заготовка коннектора к сайту (`gate4ai connectors new`) | `internal/front/cli/scaffold.go`; как писать — [connector-authoring.md](connector-authoring.md) |
 | Обезличивание фикстур (`gate4ai fixture scrub`) | `internal/front/cli/fixture.go` |
-| Маскирование одноразовых кодов и токенов в адресах (результаты, журнал) | `internal/pipeline/urlmask.go` |
+| Маскирование одноразовых кодов и токенов в адресах — одно правило для ядра (результаты, журнал, уведомления) и коннекторов (`worker.RedactURL`) | `sdk-go/redact`, `internal/pipeline/urlmask.go` |
 | Отмена вызова нативного пакета (`cancel`, срок вызова в процессе) | `sdk-go/native/serve.go`, `internal/connectors/native/native.go` |
 | Публичный адрес устройства: один обработчик для relay и прямого HTTPS (`--public`), разделение по путям — MCP (`POST`/`DELETE` на корень) и OAuth (`resource` — адрес устройства), `/v1/{whoami,tools,call,status}` (удалённый CLI), `/ui/` (удалённый Web UI), `/telegram` (вебхук); у каждого пути своя аутентификация, API владельца нет | `internal/daemon` (`PublicHandler`, `AddPublic`, `ServePublic`), `cmd/gate4ai/setup.go`, тест изоляции `cmd/gate4ai/public_test.go` |
 | CLI, skill (установленный SKILL.md агента — обёртка `skill.Stub` «выполни `gate4ai skill`», устаревший daemon при старте и `gate4ai skill` заменяют ею — `agentsetup.RefreshSkill`; картинки ответа — в файлы, `--out`) | `internal/front/cli`, `internal/front/skill`; ошибки для человека и агента (`hint`, `detail`) — `errors.go`; `gate4ai daemon start/stop/status` — `daemonctl.go`; автозапуск `gate4ai service` — `service.go` поверх `internal/platform/autostart`; UX путей пользователя — [cli-ux.md](cli-ux.md) |
