@@ -2,7 +2,7 @@
 
 Продукт описан в спецификации [docs/specification.md](docs/specification.md). [README.md](README.md) — инструкция для пользователя (установка и запуск).
 
-Репозиторий — один Go-модуль `github.com/gate4ai/gate4ai`: ядро (`cmd/`, `internal/`; Браузер и Файлы — `internal/connectors/builtin/`), `sdk-go/` (Apache-2.0), `relay/`, `e2e/`; направление зависимостей между ними проверяет `scripts/deps-check.sh` ([docs/architecture.md](docs/architecture.md)). Один тег — один релиз всего ([docs/publishing.md](docs/publishing.md)). Остальные репозитории проекта (registry, www, dev), лицензии и архивные клоны прежних репозиториев — [docs/repo-structure.md](docs/repo-structure.md).
+Репозиторий — один Go-модуль `github.com/gate4ai/gate4ai`: ядро (`cmd/`, `internal/`; Браузер и Файлы — `internal/connectors/builtin/`), `sdk-go/` (Apache-2.0), `relay/`, `e2e/`; направление зависимостей между ними проверяет `scripts/deps-check.sh` ([docs/architecture.md](docs/architecture.md)). Один тег — один релиз всего ([docs/publishing.md](docs/publishing.md)). Остальные репозитории проекта (registry, www, dev) и лицензии — [docs/repo-structure.md](docs/repo-structure.md).
 
 ## Как работать: автономно, до конца задачи
 
