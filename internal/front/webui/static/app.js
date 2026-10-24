@@ -355,6 +355,8 @@
         if (canvas.width !== img.width || canvas.height !== img.height) { canvas.width = img.width; canvas.height = img.height; }
         g.drawImage(img, 0, 0);
         if (img.close) img.close();
+        // Счётчик нарисованных кадров: тесты ждут новый кадр, а не время.
+        canvas.setAttribute("data-frames", String((parseInt(canvas.getAttribute("data-frames"), 10) || 0) + 1));
       }).catch(function () {}).then(function () {
         drawing = false;
         if (next) { var b = next; next = null; draw(b); }
