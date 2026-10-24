@@ -80,10 +80,11 @@ func modeHelp(l string, folder bool) []string {
 		M("allow — everything without asking"),
 	}
 	if folder {
-		rows = append(rows, M("append — reading and adding to files without asking, overwriting asks you"))
+		rows = append(rows,
+			M("append — reading and adding to files without asking, overwriting asks you"),
+			M("read — reading without asking, changes ask you"))
 	}
 	rows = append(rows,
-		M("read — reading without asking, changes ask you"),
 		M("connector — only through a connector from the store, not to agents directly"),
 		M("ask — every action asks you"),
 		M("deny — closed for everyone, including connectors"))

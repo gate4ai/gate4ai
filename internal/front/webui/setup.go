@@ -37,6 +37,25 @@ var groupTitles = map[string]map[string]string{
 	"browser": {"read": "Read pages", "write": "Click, type and sign in"},
 }
 
+// browserSitesClass — единственная группа Браузера в мастере: у сайта доступ
+// либо есть, либо нет (и GET-запрос может что-то изменить), поэтому читать и
+// менять не делятся; решение группы становится режимом строк списка сайтов.
+const browserSitesClass = "sites"
+
+// setupGroups — группы действий для мастера: Браузер — одна группа «Сайты из
+// списка» со всеми действиями, остальные — по классам (groups).
+func (u *UI) setupGroups(conn string) []groupView {
+	gs := u.groups(conn, config.Profile{})
+	if conn != "browser" {
+		return gs
+	}
+	one := groupView{Connector: conn, Class: browserSitesClass, Title: "Sites from the list"}
+	for _, g := range gs {
+		one.Actions = append(one.Actions, g.Actions...)
+	}
+	return []groupView{one}
+}
+
 // groupWarns — предупреждения к группам действий: что значит «разрешать».
 // Самонастройка: правило allow на change_policy не действует (policy.OwnerOnly) —
 // правку подтверждает владелец.
@@ -290,7 +309,7 @@ func (u *UI) setupAccessPage(r *http.Request) (string, map[string]any, error) {
 		m := localized(c.Manifest())
 		sc := setupConn{Name: cn, Title: m.TitleIn(l), Desc: m.DescriptionIn(l), On: cn == "files" || cn == "browser"}
 		// Предложение решений: чтение — само, остальное — спрашивать.
-		for _, g := range u.groups(cn, config.Profile{}) {
+		for _, g := range u.setupGroups(cn) {
 			g.Effect = defaultEffect(g.Class)
 			sc.Groups = append(sc.Groups, g)
 		}
@@ -366,7 +385,7 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 			if err := c.SetProfileConnector(name, cn, true); err != nil {
 				return err
 			}
-			for _, g := range u.groups(cn, config.Profile{}) {
+			for _, g := range u.setupGroups(cn) {
 				eff := f.Get("effect." + cn + "." + g.Class)
 				if !validEffect(eff) {
 					eff = defaultEffect(g.Class)
@@ -382,14 +401,14 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 			// выбранным решениям; правила на них не пишутся.
 			switch cn {
 			case "files":
-				mode := accessMode(effects["files.read"], effects["files.write"], true)
+				mode := accessMode(effects["files.read"], effects["files.write"])
 				for _, d := range folders {
 					if err := c.SetFolderAccess(strings.TrimSuffix(strings.TrimSuffix(d, "/**"), "/"), mode); err != nil {
 						return err
 					}
 				}
 			case "browser":
-				mode := accessMode(effects["browser.read"], effects["browser.write"], false)
+				mode := effects["browser."+browserSitesClass] // allow | ask | deny — и режим строки
 				for _, x := range sites {
 					if err := c.SetSiteAccess(x, mode); err != nil {
 						return err
@@ -580,11 +599,11 @@ func (u *UI) setupSkip(m mount) http.HandlerFunc {
 	}
 }
 
-// accessMode — режим строки списка доступа по решениям мастера для чтения и
+// accessMode — режим строки списка папок по решениям мастера для чтения и
 // изменений: обе «разрешать» — allow; чтение без вопроса, изменения с вопросом —
-// read (для папок — append не выбирается мастером); чтение с вопросом — ask;
-// запрет чтения — deny.
-func accessMode(read, write string, folder bool) string {
+// read (append мастером не выбирается); чтение с вопросом — ask; запрет чтения —
+// deny. У сайтов одно решение — оно и есть режим.
+func accessMode(read, write string) string {
 	switch {
 	case read == config.EffectDeny:
 		return access.Deny
