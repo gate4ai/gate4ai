@@ -329,4 +329,133 @@
       });
     }
   }
+  // Просмотр сеанса браузера: кадры по websocket (описание текстом, кадр —
+  // следующим двоичным сообщением) на canvas; под управлением владельца или
+  // во время handoff — мышь, клавиши и текст обратно. Тексты — из атрибутов
+  // страницы (на её языке).
+  var bv = document.querySelector("[data-browser-view]");
+  if (bv) (function () {
+    var canvas = bv.querySelector("[data-browser-canvas]"), g = canvas.getContext("2d");
+    var keys = bv.querySelector("[data-browser-keys]"), note = bv.querySelector("[data-browser-note]");
+    var urlEl = document.querySelector("[data-browser-url]");
+    var rendered = bv.getAttribute("data-state");
+    var control = bv.getAttribute("data-control") === "1";
+    var msg = function (k) { return bv.getAttribute("data-msg-" + k) || ""; };
+    var ws = null, meta = null, ended = false, retry = 0, drawing = false, next = null;
+    var wsURL = function () {
+      var u = new URL(bv.getAttribute("data-browser-view"), location.href);
+      u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+      return u.toString();
+    };
+    var draw = function (blob) {
+      // Пока рисуется кадр, следующий ждёт: на слабом телефоне кадры не копятся.
+      if (drawing) { next = blob; return; }
+      drawing = true;
+      createImageBitmap(blob).then(function (img) {
+        if (canvas.width !== img.width || canvas.height !== img.height) { canvas.width = img.width; canvas.height = img.height; }
+        g.drawImage(img, 0, 0);
+        if (img.close) img.close();
+      }).catch(function () {}).then(function () {
+        drawing = false;
+        if (next) { var b = next; next = null; draw(b); }
+      });
+    };
+    var stateEl = document.querySelector("[data-browser-state]");
+    var controlled = function (st) { return st === "user" || st === "waiting"; };
+    var state = function (st) {
+      if (!st || st === rendered) return;
+      // Кнопки (взять / вернуть) и ввод зависят от того, у кого сеанс: это
+      // сменилось — страница заново; работает / простаивает — только надпись.
+      if (controlled(st) !== controlled(rendered)) { location.reload(); return; }
+      rendered = st;
+      var label = msg("state-" + st);
+      if (stateEl && label) stateEl.innerHTML = '<span class="badge">' + label.replace(/[<>&]/g, "") + "</span>";
+    };
+    var connect = function () {
+      ws = new WebSocket(wsURL());
+      ws.binaryType = "blob";
+      ws.onopen = function () { retry = 0; };
+      ws.onmessage = function (ev) {
+        if (typeof ev.data !== "string") { if (meta) { note.textContent = ""; draw(ev.data); } return; }
+        var m = JSON.parse(ev.data);
+        if (m.type === "frame") { meta = m; if (urlEl && m.url) urlEl.textContent = m.url; state(m.state); }
+        else if (m.type === "state") state(m.state);
+        else if (m.type === "closed") { ended = true; note.textContent = msg("closed") + (m.message ? " " + m.message : ""); }
+        else if (m.type === "error") note.textContent = m.message;
+      };
+      ws.onclose = function () {
+        if (ended) return;
+        note.textContent = msg("lost");
+        setTimeout(connect, Math.min(10000, 500 * Math.pow(2, retry++)));
+      };
+    };
+    connect();
+    if (!control) return;
+    var send = function (o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+    var clamp = function (v) { return Math.max(0, Math.min(1, v)); };
+    var pos = function (e) {
+      var r = canvas.getBoundingClientRect();
+      return { x: clamp((e.clientX - r.left) / r.width), y: clamp((e.clientY - r.top) / r.height) };
+    };
+    var mods = function (e) { return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0); };
+    var btn = function (b) { return b === 2 ? "right" : b === 1 ? "middle" : "left"; };
+    var pressed = false, lastMove = 0;
+    canvas.style.cursor = "pointer";
+    canvas.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      keys.focus({ preventScroll: true }); // клавиатура телефона открывается от касания
+      pressed = true;
+      var p = pos(e);
+      send({ type: "mouse", action: "down", x: p.x, y: p.y, button: btn(e.button), clicks: Math.min(e.detail || 1, 3), modifiers: mods(e) });
+    });
+    window.addEventListener("pointerup", function (e) {
+      if (!pressed) return;
+      pressed = false;
+      var p = pos(e);
+      send({ type: "mouse", action: "up", x: p.x, y: p.y, button: btn(e.button), clicks: Math.min(e.detail || 1, 3), modifiers: mods(e) });
+    });
+    canvas.addEventListener("pointermove", function (e) {
+      var now = Date.now();
+      if (now - lastMove < 40) return;
+      lastMove = now;
+      var p = pos(e);
+      send({ type: "mouse", action: "move", x: p.x, y: p.y, clicks: pressed ? 1 : 0, modifiers: mods(e) });
+    });
+    canvas.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      var p = pos(e);
+      send({ type: "wheel", x: p.x, y: p.y, dx: e.deltaX, dy: e.deltaY, modifiers: mods(e) });
+    }, { passive: false });
+    canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+    // Клавиши: печатный символ и служебные клавиши — нажатиями; IME и
+    // клавиатура телефона (key «Unidentified» / «Process») — текстом из поля.
+    var held = {}, sentChar = "";
+    keys.addEventListener("keydown", function (e) {
+      if (e.isComposing || e.key === "Process" || e.key === "Unidentified") return;
+      var ch = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) return; // вставка — событием paste
+      e.preventDefault();
+      held[e.code] = true;
+      if (ch) sentChar = e.key; // символ ушёл нажатием: тот же символ в поле (событие char) — не слать второй раз
+      send({ type: "key", action: "down", key: e.key, code: e.code, keyCode: e.keyCode, text: ch ? e.key : "", modifiers: mods(e) });
+    });
+    keys.addEventListener("keyup", function (e) {
+      if (!held[e.code]) return;
+      delete held[e.code];
+      e.preventDefault();
+      send({ type: "key", action: "up", key: e.key, code: e.code, keyCode: e.keyCode, modifiers: mods(e) });
+    });
+    keys.addEventListener("input", function () {
+      var v = keys.value;
+      keys.value = "";
+      if (v && v === sentChar) { sentChar = ""; return; }
+      sentChar = "";
+      if (v) send({ type: "text", text: v });
+    });
+    keys.addEventListener("paste", function (e) {
+      var t = (e.clipboardData || window.clipboardData).getData("text");
+      e.preventDefault();
+      if (t) send({ type: "text", text: t });
+    });
+  })();
 })();

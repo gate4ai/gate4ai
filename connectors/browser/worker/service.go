@@ -25,6 +25,7 @@ type Settings struct {
 	MaxTextChars int
 	RedactParams []string // параметры адресов и поля JSON, скрытые в network
 	DownloadDir  string   // куда Chrome молча сохраняет обычные загрузки (по умолчанию — папка загрузок пользователя)
+	Display      string   // auto (по умолчанию) | virtual | headless | host — см. ResolveDisplay
 }
 
 // EngineFactory создаёт движок (подменяется в тестах).
@@ -45,7 +46,9 @@ func DefaultEngine(ctx context.Context, s Settings, cdpURL string) (Engine, erro
 // временных вкладках (Tab), не больше MaxTabs.
 type Service struct {
 	NewEngine EngineFactory
-	Launch    func(ctx context.Context, chrome, profile string, extra ...string) (string, *os.Process, error)
+	Launch    func(ctx context.Context, chrome, profile string, env []string, extra ...string) (string, *os.Process, error)
+	// Env — окружение для режима display: auto (подменяется в тестах; нулевое — этого процесса).
+	Env DisplayEnv
 
 	mu       sync.Mutex
 	exec     *Executor
@@ -59,11 +62,12 @@ type Service struct {
 	freed    chan struct{} // закрывается, когда освобождается сессия или вкладка
 	dl       *Downloads    // загрузки без диалога (download.go); nil — подключиться не удалось
 	dlOf     string        // Chrome, к которому подключение для загрузок не удалось (сообщено в лог)
+	disp     display       // режим дисплея и Xvfb
 }
 
 // New — воркер с движками по умолчанию.
 func New() *Service {
-	return &Service{NewEngine: DefaultEngine, Launch: Launch}
+	return &Service{NewEngine: DefaultEngine, Launch: LaunchEnv}
 }
 
 // normalize — значения по умолчанию.
@@ -83,7 +87,7 @@ func normalize(st Settings) Settings {
 
 // settingsKey — настройки, при смене которых движок и Chrome пересоздаются.
 func settingsKey(st Settings) string {
-	return fmt.Sprint(st.CDPURL, st.ChromePath, st.ProfileDir, st.Engine, st.Model, st.ModelKey)
+	return fmt.Sprint(st.CDPURL, st.ChromePath, st.ProfileDir, st.Engine, st.Model, st.ModelKey, st.Display)
 }
 
 // ErrSettingsChanged — настройки браузера сменили, пока открыты сессии или
@@ -125,7 +129,7 @@ func (s *Service) executor(ctx context.Context, st Settings, others bool) (*Exec
 		if chrome == "" {
 			var err error
 			if chrome, err = FindChrome(); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 			}
 		}
 		if s.proc != nil {
@@ -134,9 +138,17 @@ func (s *Service) executor(ctx context.Context, st Settings, others bool) (*Exec
 			StopChrome(s.proc, 3*time.Second)
 			s.proc = nil
 		}
-		u, proc, err := s.Launch(ctx, chrome, st.ProfileDir, chromeFlags(st)...)
+		env := s.Env
+		if env.Getenv == nil {
+			env = SystemDisplayEnv()
+		}
+		_, denv, flags, err := s.disp.prepare(ctx, st.Display, filepath.Join(filepath.Dir(st.ProfileDir), ".gate4ai-display"), env)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		}
+		u, proc, err := s.Launch(ctx, chrome, st.ProfileDir, denv, flags...)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 		cdp, s.proc = u, proc
 	}
@@ -184,6 +196,11 @@ func (s *Service) downloadsConn() *Downloads {
 	}
 	return s.dl
 }
+
+// ErrUnavailable — браузер на этом компьютере не запускается: нет Chrome,
+// нет нужного дисплея, Chrome падает при старте. Чинит владелец (gate4ai
+// browser setup), агенту повторять бесполезно.
+var ErrUnavailable = errors.New("the browser is not available on this computer")
 
 // ErrBusy — все MaxSessions сессий заняты дольше, чем вызов готов ждать.
 var ErrBusy = errors.New("the browser is busy with other sessions")
@@ -385,7 +402,20 @@ func (s *Service) Close() error {
 		StopChrome(s.proc, 3*time.Second)
 		s.proc = nil
 	}
+	s.disp.stop()
 	return nil
+}
+
+// DisplayMode — режим дисплея Chrome, который воркер запустил ("" — не
+// запускал или подключён к чужому Chrome по cdp_url).
+func (s *Service) DisplayMode() string {
+	s.mu.Lock()
+	own := s.proc != nil
+	s.mu.Unlock()
+	if !own {
+		return ""
+	}
+	return s.disp.current()
 }
 
 // Вид страницы сессии.
@@ -503,17 +533,4 @@ func (ss *Session) Release() {
 		ss.Executor.Sites, ss.Executor.LoginOrigins = domain.Sites{}, nil
 		ss.s.release(func() { ss.s.sessions--; ss.s.mainBusy = false })
 	}
-}
-
-// chromeFlags — флаги запуска Chrome под движок. Расширение Stagehand
-// подключается к DevTools со своим origin (chrome-extension://<id>), а Chrome
-// с версии 111 такие подключения отклоняет; id расширения меняется при каждой
-// распаковке, поэтому разрешить можно только все origin. Порт отладки слушает
-// только 127.0.0.1, адрес websocket содержит случайный id браузера, который
-// чужая страница прочитать не может (/json/version без CORS).
-func chromeFlags(st Settings) []string {
-	if st.Engine == "cdp" {
-		return nil
-	}
-	return []string{"--remote-allow-origins=*"}
 }

@@ -44,6 +44,9 @@ type State struct {
 	OK       bool      `json:"ok"`
 	Pending  []Pending `json:"pending"`
 	Receipts int64     `json:"receipts"`
+	// Browser — сеансов агентов в браузере, BrowserWaiting — из них ждут человека (handoff).
+	Browser        int `json:"browser"`
+	BrowserWaiting int `json:"browser_waiting"`
 }
 
 // Tray — клиент трея к сокету владельца.
@@ -119,6 +122,26 @@ func (t *Tray) LoginURL(ctx context.Context) (string, error) {
 	return res.URL, err
 }
 
+// LoginURLTo — ссылка входа, после которой открывается страница next (/browser).
+func (t *Tray) LoginURLTo(ctx context.Context, next string) (string, error) {
+	var res struct {
+		URL string `json:"url"`
+	}
+	err := t.C.Do(ctx, "POST", "/v1/ui/session", map[string]string{"next": next}, &res)
+	return res.URL, err
+}
+
+// BrowserLine — пункт меню о сеансах браузера ("" — сеансов нет).
+func BrowserLine(st *State) string {
+	switch {
+	case st == nil || st.Browser == 0:
+		return ""
+	case st.BrowserWaiting > 0:
+		return T("browser_wait")
+	}
+	return fmt.Sprintf(T("browser"), st.Browser)
+}
+
 // StatusLine — первая строка меню.
 func StatusLine(st *State) string {
 	if st == nil {
@@ -146,6 +169,7 @@ func MenuKey(st *State) string {
 	}
 	var b strings.Builder
 	b.WriteString("ok")
+	fmt.Fprintf(&b, ",b%d/%d", st.Browser, st.BrowserWaiting)
 	for _, p := range st.Pending {
 		b.WriteString("," + p.ID)
 	}

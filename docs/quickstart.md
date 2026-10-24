@@ -131,6 +131,8 @@ gate4ai policy set config.yaml -m "секреты добавлены"   # пер
 
 Сайты, которые агенты открывают в браузере: `gate4ai sites` — список, `gate4ai sites allow login.example.org` — добавить, `gate4ai sites remove …` — убрать.
 
+**Браузер: экран, сеансы, просмотр.** Chrome запускается с выделенным профилем и без порта отладки (CDP по pipe, клиентам — 127.0.0.1 с секретным токеном в адресе; на Windows пока порт). Экран — `connectors.browser.display`: `auto` (по умолчанию: свой экран; Linux без графики — виртуальный Xvfb, который пакет поднимает сам; без Xvfb — `headless`, с предупреждением), `virtual`, `headless`, `host`. Каждый сеанс агента — своё окно; `browser.open` отвечает `view_url`. Владелец: `gate4ai browser sessions` (`--json`), `gate4ai browser sessions close s-…`, `gate4ai browser watch s-…` (`--remote` — ссылка для другого устройства), Web UI → «Браузер» (просмотр вживую, «Взять управление», ответ на `browser.handoff`), трей — пункт «Браузер». Пока сеанс держит владелец, действия агента в нём отвечают `session_held_by_user`. Chrome нет или экран не поднять — `browser_unavailable`; проверка и установка недостающего — `gate4ai browser setup` (`--dry-run` — только показать команды, `--yes` — поставить без вопроса), `gate4ai doctor` показывает то же. Chrome в Docker: песочнице Chrome нужны пространства имён — `--security-opt seccomp=unconfined` (или профиль seccomp Chrome).
+
 Проверка: `gate4ai doctor`.
 
 **Вход на сайты по учётке.** Чтобы агент или коннектор входил на сайт сам, не видя пароля, опишите учётку в `credentials` (поля — константы или секреты Vault, отправка, признак успеха, кому доступна) и положите секрет в хранилище:
@@ -208,6 +210,8 @@ gate4ai pair --name laptop-claude --wait 5m        # код → владелец
 gate4ai tools
 # или: export GATE4AI_TOKEN=g4a_…                  # gate4ai agents token <agent> на устройстве
 ```
+
+**Сервер без графики рядом с OpenClaw** (агент работает в браузере gate4ai, человека зовёт ссылкой на экран браузера): схема установки и доработки — [headless-server.md](headless-server.md).
 
 **Без relay** (свой сертификат или reverse proxy на этом компьютере):
 

@@ -1,0 +1,29 @@
+{{template "head" .}}
+{{$d := .Data}}
+{{with $d.Session}}
+<div class="row between"><h2 style="margin:0">{{.Who}}</h2><a href="{{$.Base}}/browser">{{T "All sessions →"}}</a></div>
+{{with $d.Handoff}}<div class="card ask-card"><p>{{TH "<b>%s</b> handed the page over to you and asks:" .Agent}}</p><blockquote>{{.Message}}</blockquote>
+<p class="help">{{T "Do it right here: click and type in the page below. The agent continues when the page changes. Never give passwords to the agent in chat."}}</p>
+<form method="post" action="{{$.Base}}/browser/{{$d.ID}}/handoff" class="row"><input type="hidden" name="csrf" value="{{$.CSRF}}">
+<button class="primary" name="result" value="done">{{T "Done"}}</button><button name="result" value="declined">{{T "I will not do it"}}</button></form></div>{{end}}
+<div class="row" style="margin:.6rem 0" data-browser-bar>
+<span data-browser-state>{{template "bstate" .State}}</span><code class="muted" data-browser-url style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40rem">{{.URL}}</code><span class="sp"></span>
+<form method="post" action="{{$.Base}}/browser/{{$d.ID}}/control" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}">
+{{if eq .State "user"}}<button name="on" value="0" class="primary">{{T "Give back to the agent"}}</button>{{else if ne .State "waiting"}}<button name="on" value="1">{{T "Take control"}}</button>{{end}}</form>
+<form method="post" action="{{$.Base}}/browser/{{$d.ID}}/close" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">{{T "Close the session"}}</button></form>
+</div>
+{{if and $d.NeedTelegram (ne .State "user")}}<p class="help">{{T "From another device you take control with a confirmation in Telegram."}}</p>{{end}}
+<div class="card" style="padding:.4rem;text-align:center" data-browser-view="{{$.Base}}/browser/{{$d.ID}}/ws" data-state="{{.State}}" data-control="{{if or (eq .State "user") (eq .State "waiting")}}1{{end}}"
+ data-msg-lost="{{T "Connection lost, reconnecting…"}}" data-msg-closed="{{T "The session is closed."}}"
+ data-msg-state-working="{{T "the agent is working"}}" data-msg-state-idle="{{T "idle"}}">
+<canvas data-browser-canvas tabindex="0" aria-label="{{T "The agent's browser page"}}" style="max-width:100%;height:auto;outline:none;touch-action:none;background:var(--bg)"></canvas>
+<textarea data-browser-keys aria-label="{{T "Type into the page"}}" autocapitalize="off" autocomplete="off" spellcheck="false" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0"></textarea>
+<p class="muted" data-browser-note>{{T "Connecting…"}}</p>
+<noscript><p>{{T "The live view needs JavaScript."}}</p></noscript>
+</div>
+<p class="help" data-browser-hint>{{if or (eq .State "user") (eq .State "waiting")}}{{T "Click the page to type into it; on a phone tap it, then use the keyboard."}}{{else}}{{T "You are watching. Take control to click and type yourself."}}{{end}}</p>
+{{else}}
+<h2>{{T "Browser session"}}</h2>
+<div class="card"><p>{{T "The browser session %s is closed or unknown." $d.ID}}</p><a href="{{.Base}}/browser">{{T "All sessions →"}}</a></div>
+{{end}}
+{{template "foot"}}

@@ -63,7 +63,7 @@ actions:
   # сайты — params.sites вызывающего ({mode, domains, blocked}).
   - name: open
     class: read
-    description: "Open a page. Agent: without session starts a browser session in a tab of its own (the page stays open between calls until browser.close; other agents' sessions are in other tabs) and returns its id; with session navigates in it. A page that asks before leaving (unsaved changes) is left: you asked to go. When the browser is full (sessions of other agents), busy says whose sessions they are, since when and when they close; wait_for_browser waits in the queue. Connectors: the page of the root call"
+    description: "Open a page. Agent: without session starts a browser session in a window of its own (the page stays open between calls until browser.close; other agents' sessions are in other windows) and returns its id and view_url — a link where the user watches the session live and can take control (it opens only after the user signs in to gate4ai: give it to the user when they may want to see the work); with session navigates in it. While the user holds the session, its actions answer session_held_by_user: wait, do not go around them. A page that asks before leaving (unsaved changes) is left: you asked to go. When the browser is full (sessions of other agents), busy says whose sessions they are, since when and when they close; wait_for_browser waits in the queue. Connectors: the page of the root call"
     input_schema:
       type: object
       properties:
@@ -81,6 +81,7 @@ actions:
         url: { type: string, description: address after redirects }
         title: { type: string }
         session: { type: string, description: "agents: pass it to the next page actions and to browser.close" }
+        view_url: { type: string, description: "agents, a new session: the link where the user watches it live and can take control (after signing in to gate4ai)" }
         still_loading: { type: boolean, description: "the page was still loading after 5 s (requests in flight): wait for its content with observe --wait_for_text / --wait_for_selector" }
         login_required:
           type: object
@@ -230,7 +231,7 @@ actions:
       required: [url, title]
   - name: handoff
     class: read
-    description: "Hand the open page over to the user and wait: the user is notified (Web UI, desktop, Telegram) with your message and does the step in the gate4ai Chrome window — signs in on a site without an account in gate4ai, solves a captcha, confirms by SMS. Ends when the address changes (default) or until_selector appears; status done or timeout. Never ask the user for passwords in chat"
+    description: "Hand the open page over to the user and wait: the user is notified (Web UI, desktop, Telegram, push) with your message and the session link (its view_url), opens it on any device and does the step — signs in on a site without an account in gate4ai, solves a captcha, confirms by SMS. Send the user the view_url in your own chat too if they may miss the gate4ai notification. Ends when the address changes (default) or until_selector appears; status done or timeout. Never ask the user for passwords in chat"
     input_schema:
       type: object
       properties:
@@ -244,7 +245,7 @@ actions:
       type: object
       properties:
         url: { type: string, description: address when the wait ended }
-        status: { type: string, enum: [done, timeout] }
+        status: { type: string, enum: [done, timeout, declined], description: "done — the page changed (or the user pressed Done), timeout — the user did not finish in time, declined — the user said they will not do it" }
       required: [url, status]
     example: gate4ai browser handoff --session s-… --message "Sign in to habr.com" --until_selector .user-menu
   - name: network

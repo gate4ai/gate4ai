@@ -3,12 +3,14 @@
 package webui
 
 import (
+	"context"
 	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/config"
@@ -147,6 +149,11 @@ func (u *UI) overview(m mount) func(r *http.Request) (string, map[string]any, er
 		recent, _ := u.D.Journal.List(audit.Filter{Limit: 8, Desc: true})
 		seen, _ := u.D.State.LastSeen()
 		data := map[string]any{"Pending": u.approvalViews(l, pend), "Recent": u.entryViews(l, recent), "Seen": seen, "Pairings": u.pairingViews()}
+		bctx, bcancel := context.WithTimeout(r.Context(), 2*time.Second)
+		if bs, berr := u.D.BrowserStatus(bctx); berr == nil {
+			data["Browser"] = bs
+		}
+		bcancel()
 		if m.remote {
 			return "overview", data, err
 		}

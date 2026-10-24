@@ -80,6 +80,7 @@ func setup(ctx context.Context, d *daemon.Daemon, log *slog.Logger) error {
 		srv := &http.Server{Handler: u.Handler(), ReadHeaderTimeout: 10 * time.Second}
 		d.TrackServer(srv)
 		go srv.Serve(l)
+		d.SetLocalUI("http://" + u.Addr)
 		log.Info("web UI", "addr", "http://"+u.Addr, "login", "gate4ai ui")
 	}
 	return nil

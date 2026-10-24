@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
@@ -61,6 +62,7 @@ type Process struct {
 	closed  bool
 
 	calls sync.Map // id вызова → *hostfuncs.Dispatcher
+	sink  atomic.Pointer[func(kind string, data json.RawMessage)]
 }
 
 type running struct {
@@ -196,8 +198,17 @@ func (p *Process) stderr(r io.Reader) {
 	}
 }
 
-// handle — запросы процесса: функции хоста в рамках его вызова.
+// handle — запросы процесса: функции хоста в рамках его вызова; события — в SetEventSink.
 func (p *Process) handle(_ context.Context, method string, params json.RawMessage) (any, error) {
+	if method == sdknative.MethodEvent {
+		var e sdknative.EventParams
+		if err := json.Unmarshal(params, &e); err == nil {
+			if f := p.sink.Load(); f != nil {
+				(*f)(e.Kind, e.Data)
+			}
+		}
+		return nil, nil
+	}
 	if method != sdknative.MethodHost {
 		return nil, fmt.Errorf("unknown method %q", method)
 	}
@@ -297,6 +308,48 @@ func (p *Process) Verify(ctx context.Context, req abi.VerifyRequest) (abi.Verify
 	}
 	res.Evidence = append(res.Evidence, ev...)
 	return res, nil
+}
+
+// SetEventSink — куда идут события процесса (MethodEvent); nil — никуда.
+// Обработчик вызывается по порядку событий и не должен ждать.
+func (p *Process) SetEventSink(f func(kind string, data json.RawMessage)) {
+	if f == nil {
+		p.sink.Store(nil)
+		return
+	}
+	p.sink.Store(&f)
+}
+
+// ErrNotRunning — процесс не запущен: запросу владельца отвечать некому
+// (у браузера, например, нет сеансов).
+var ErrNotRunning = errors.New("the connector process is not running")
+
+// Owner — запрос владельца op к процессу (MethodOwner); процесс не
+// запускается ради него (ErrNotRunning).
+func (p *Process) Owner(ctx context.Context, op string, args, out any) error {
+	p.mu.Lock()
+	r := p.run
+	p.mu.Unlock()
+	if r == nil {
+		return ErrNotRunning
+	}
+	select {
+	case <-r.done:
+		return ErrNotRunning
+	case <-r.peer.Done():
+		return ErrNotRunning
+	default:
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(p.man.Limits.WithDefaults().TimeoutS)*time.Second)
+	defer cancel()
+	if err := r.peer.Call(ctx, sdknative.MethodOwner, sdknative.OwnerParams{Op: op, Args: raw}, out); err != nil {
+		return fmt.Errorf("connector %s: %s: %w", p.man.Connector, op, err)
+	}
+	return nil
 }
 
 // Состояния процесса.

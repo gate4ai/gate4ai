@@ -3,6 +3,9 @@
 <h2>{{T "Waiting for your decision"}}</h2>
 <div data-live-pending data-back="/">{{template "pending" (dict "V" . "List" $d.Pending "Back" "/")}}</div>
 {{template "pairings" (dict "V" . "List" .Data.Pairings "Back" "/")}}
+{{with $d.Browser}}{{if .Sessions}}<h2>{{T "Now in the browser"}}</h2>
+<div class="card" style="padding:.3rem 1rem"><table>{{range .Sessions}}<tr><td><b>{{.Who}}</b></td><td>{{with .URL}}<code>{{.}}</code>{{end}}</td><td>{{template "bstate" .State}}</td>
+<td style="text-align:right"><a class="btn small{{if eq .State "waiting"}} primary{{end}}" href="{{$.Base}}/browser/{{.ID}}">{{T "Watch"}}</a></td></tr>{{end}}</table></div>{{end}}{{end}}
 
 {{if not .Remote}}
 {{if $d.StepsLeft}}

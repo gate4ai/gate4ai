@@ -114,6 +114,9 @@ func buildMenu(t *tray.Tray, st *tray.State, refresh chan<- struct{}) {
 		}
 	}
 	systray.AddSeparator()
+	if line := tray.BrowserLine(st); line != "" {
+		onClick(systray.AddMenuItem(line, ""), func() { openPage(t, "/browser") })
+	}
 	onClick(systray.AddMenuItem(tray.T("open_ui"), ""), func() { openUI(t) })
 	onClick(systray.AddMenuItem(tray.T("quit"), ""), systray.Quit)
 }
@@ -135,6 +138,19 @@ func decide(t *tray.Tray, id string, approve bool, refresh chan<- struct{}) {
 		notifyProblem(tray.T("not_decided"), err)
 	}
 	nudge(refresh)
+}
+
+// openPage — Web UI на странице next (вход по одноразовой ссылке).
+func openPage(t *tray.Tray, next string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	u, err := t.LoginURLTo(ctx, next)
+	if err == nil {
+		err = cli.OpenLoginURL(u)
+	}
+	if err != nil {
+		notifyProblem(tray.T("ui_failed"), err)
+	}
 }
 
 func openUI(t *tray.Tray) {

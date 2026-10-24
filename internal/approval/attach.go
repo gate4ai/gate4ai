@@ -81,9 +81,9 @@ func (s *switchable) Denied(ag, ac, r string) {
 		s.async(func() { n.Denied(ag, ac, r) })
 	}
 }
-func (s *switchable) HandedOff(text string) {
+func (s *switchable) HandedOff(text, path string) {
 	if h, ok := s.get().(daemon.HandedOff); ok {
-		s.async(func() { h.HandedOff(text) })
+		s.async(func() { h.HandedOff(text, path) })
 	}
 }
 func (s *switchable) PairRequested(p *state.Pairing) {

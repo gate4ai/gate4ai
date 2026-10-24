@@ -20,12 +20,22 @@ type HandoffRequest struct {
 	UntilURLChange bool
 	UntilSelector  string
 	Timeout        time.Duration
+	// Stop — человек ответил в просмотре сеанса: HandoffDone (готово, хотя
+	// условие не наступило) или HandoffDeclined (не будет делать).
+	Stop <-chan string
 }
+
+// Чем закончилось ожидание.
+const (
+	HandoffDone     = "done"
+	HandoffTimeout  = "timeout"
+	HandoffDeclined = "declined"
+)
 
 // HandoffResult — чем закончилось ожидание.
 type HandoffResult struct {
 	URL    string `json:"url"`
-	Status string `json:"status"` // done | timeout
+	Status string `json:"status"` // done | timeout | declined
 }
 
 // CheckHandoff проверяет запрос до уведомления человека.
@@ -71,9 +81,22 @@ func (x *Executor) Handoff(ctx context.Context, r HandoffRequest) (HandoffResult
 		if ok {
 			break
 		}
+		if r.Stop != nil {
+			select {
+			case st := <-r.Stop:
+				if st == HandoffDeclined {
+					return HandoffResult{URL: u, Status: HandoffDeclined}, nil
+				}
+				ok = true
+			default:
+			}
+			if ok {
+				break
+			}
+		}
 		if time.Now().After(deadline) {
 			// Человек не закончил: агент решает сам — подождать ещё или спросить.
-			return HandoffResult{URL: u, Status: "timeout"}, nil
+			return HandoffResult{URL: u, Status: HandoffTimeout}, nil
 		}
 		if err := wait(ctx, HandoffPoll); err != nil {
 			return HandoffResult{}, err
@@ -88,7 +111,7 @@ func (x *Executor) Handoff(ctx context.Context, r HandoffRequest) (HandoffResult
 		return HandoffResult{}, fmt.Errorf("the page left the allowed sites: %w", err)
 	}
 	x.HookNetwork(ctx)
-	return HandoffResult{URL: u, Status: "done"}, nil
+	return HandoffResult{URL: u, Status: HandoffDone}, nil
 }
 
 // HandoffPoll — шаг опроса страницы в Handoff.

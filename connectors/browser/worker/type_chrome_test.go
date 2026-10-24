@@ -80,7 +80,7 @@ func chromeEngines(t *testing.T, ctx context.Context, page string) (string, map[
 	dir := t.TempDir()
 	wrapper := filepath.Join(dir, "chrome")
 	os.WriteFile(wrapper, []byte("#!/bin/sh\nexec '"+chrome+"' --headless=new --disable-gpu --window-size=1000,700 \"$@\"\n"), 0o755)
-	cdpURL, proc, err := Launch(ctx, wrapper, filepath.Join(dir, "profile"), chromeFlags(Settings{Engine: "stagehand"})...)
+	cdpURL, proc, err := Launch(ctx, wrapper, filepath.Join(dir, "profile"))
 	if err != nil {
 		t.Skip("chrome did not start:", err)
 	}

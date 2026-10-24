@@ -5,6 +5,8 @@ package native
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -60,6 +62,16 @@ func (echo) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.Ex
 
 func (echo) Verify(context.Context, *abi.Host, abi.VerifyRequest) (abi.VerifyResult, error) {
 	return abi.VerifyResult{Status: abi.Verified}, nil
+}
+
+// emitter — запросы владельца: echo отвечает и шлёт событие с теми же аргументами.
+var emitter func(kind string, data any)
+
+func (echo) SetEmit(f func(kind string, data any)) { emitter = f }
+
+func (echo) Owner(_ context.Context, op string, args json.RawMessage) (any, error) {
+	emitter(op, args)
+	return map[string]string{"op": op}, nil
 }
 
 func TestMain(m *testing.M) {
@@ -220,5 +232,29 @@ func TestStderrMasked(t *testing.T) {
 	p.stderr(strings.NewReader("debug: password fake-secret-123\n"))
 	if strings.Contains(buf.String(), "fake-secret-123") || !strings.Contains(buf.String(), "***") {
 		t.Fatal(buf.String())
+	}
+}
+
+func TestOwnerAndEvents(t *testing.T) {
+	p, _ := setup(t)
+	if err := p.Owner(context.Background(), "sessions", nil, nil); !errors.Is(err, ErrNotRunning) {
+		t.Fatal("an owner request does not start the process:", err)
+	}
+	if _, err := p.Execute(context.Background(), abi.ExecRequest{Action: "read", Args: map[string]any{"path": "~/notes/a.md"}, Settings: map[string]any{"root": "~/notes"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan string, 1)
+	p.SetEventSink(func(kind string, data json.RawMessage) { got <- kind + " " + string(data) })
+	var out map[string]string
+	if err := p.Owner(context.Background(), "view", map[string]string{"session": "s-1"}, &out); err != nil || out["op"] != "view" {
+		t.Fatal(out, err)
+	}
+	select {
+	case e := <-got:
+		if e != `view {"session":"s-1"}` {
+			t.Fatal(e)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no event")
 	}
 }

@@ -12,9 +12,10 @@
 <label class="inline" for="q-{{.ID}}">{{T "Code"}}</label><input id="q-{{.ID}}" name="value" type="password" autocomplete="one-time-code"><button class="primary" name="decision" value="answer">{{T "Enter"}}</button><button name="decision" value="decline">{{T "Decline"}}</button></form></div>
 {{end}}{{end}}
 
-{{if $d.Handoffs}}<h2 id="handoffs">{{T "An agent is waiting for you in Chrome"}}</h2>
+{{if $d.Handoffs}}<h2 id="handoffs">{{T "An agent is waiting for you in the browser"}}</h2>
 {{range $d.Handoffs}}<div class="card"><p>{{TH "<b>%s</b> handed the browser over to you %s and asks:" .Agent (ago .Created)}}</p><blockquote>{{.Message}}</blockquote>
-<p class="help">{{T "Do it yourself in the gate4ai Chrome window: the agent continues when the page changes. Never give passwords to the agent in chat."}}</p></div>
+{{if .Session}}<p><a class="btn primary" href="{{$.Base}}/browser/{{.Session}}">{{T "Open the page"}}</a></p>{{end}}
+<p class="help">{{T "Do it yourself in the page: the agent continues when the page changes. Never give passwords to the agent in chat."}}</p></div>
 {{end}}{{end}}
 
 <h2>{{T "History"}}</h2>
