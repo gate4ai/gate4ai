@@ -49,6 +49,10 @@ const (
 	MaxDownloadWait     = 120 * time.Second
 )
 
+// DownloadElementWait — сколько ждать элемент, по которому кликнуть (как у
+// act): timeout_ms — ожидание файла после клика, не элемента.
+var DownloadElementWait = 10 * time.Second
+
 // DownloadRequest — browser.download: клик по элементу страницы (Selector,
 // Text) или запрос со страницы (URL).
 type DownloadRequest struct {
@@ -156,7 +160,7 @@ func (ss *Session) clickDownload(ctx context.Context, r DownloadRequest) (File, 
 		}
 		defer c.end()
 	}
-	if _, err := x.Act(ctx, ActRequest{Selector: r.Selector, Text: r.Text, Method: "click", TimeoutMS: r.TimeoutMS}); err != nil {
+	if _, err := x.Act(ctx, ActRequest{Selector: r.Selector, Text: r.Text, Method: "click", TimeoutMS: int(DownloadElementWait.Milliseconds())}); err != nil {
 		return File{}, err
 	}
 	timeout := time.Duration(r.TimeoutMS) * time.Millisecond
