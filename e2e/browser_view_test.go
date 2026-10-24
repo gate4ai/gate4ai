@@ -97,7 +97,9 @@ connectors:
 	}
 
 	login := strings.TrimSpace(g.run("", "", "ui", "--print").out)
-	actx, cancel := chromedp.NewExecAllocator(context.Background(), append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chrome))...)
+	// Окно просмотрщика — большое: canvas целиком в видимой области,
+	// иначе клик CDP ниже края окна headless (800×600 по умолчанию) ни во что не попадает.
+	actx, cancel := chromedp.NewExecAllocator(context.Background(), append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chrome), chromedp.WindowSize(1280, 1600))...)
 	defer cancel()
 	ctx, cancel := chromedp.NewContext(actx)
 	defer cancel()
@@ -125,16 +127,24 @@ connectors:
 		var s string
 		js := "(() => { const a = document.activeElement, n = document.querySelector('[data-browser-note]'), c = document.querySelector('[data-browser-canvas]');" +
 			" return 'activeElement=' + (a ? a.tagName + Object.keys(a.dataset).map(k => '[data-' + k + ']').join('') : 'none') +" +
-			" ' note=' + JSON.stringify(n ? n.textContent : null) + ' frames=' + (c ? c.getAttribute('data-frames') : null) })()"
+			" ' note=' + JSON.stringify(n ? n.textContent : null) + ' frames=' + (c ? c.getAttribute('data-frames') : null) +" +
+			" ' canvas=' + (c ? JSON.stringify(c.getBoundingClientRect()) : null) + ' viewport=' + innerWidth + 'x' + innerHeight +" +
+			" ' hasFocus=' + document.hasFocus() + ' pointerdowns=' + window.__pointerdowns })()"
 		chromedp.Run(ctx, chromedp.Evaluate(js, &s))
 		return s
 	}
-	// canvasPoint — точка на canvas по долям его размера (координаты окна).
+	// click — клик по canvas в точке, заданной долями его размера. Точка должна
+	// быть в видимой области окна: клик CDP за её краем не попадает ни в один элемент.
 	click := func(fx, fy float64) chromedp.Action {
 		return chromedp.ActionFunc(func(ctx context.Context) error {
 			var p []float64
-			if err := chromedp.Evaluate(fmt.Sprintf(`(() => { const r = document.querySelector('[data-browser-canvas]').getBoundingClientRect(); return [r.left + r.width*%v, r.top + r.height*%v] })()`, fx, fy), &p).Do(ctx); err != nil {
+			js := `(() => { const c = document.querySelector('[data-browser-canvas]'); c.scrollIntoView({ block: "nearest" });` +
+				` const r = c.getBoundingClientRect(); return [r.left + r.width*%v, r.top + r.height*%v, innerWidth, innerHeight] })()`
+			if err := chromedp.Evaluate(fmt.Sprintf(js, fx, fy), &p).Do(ctx); err != nil {
 				return err
+			}
+			if p[0] < 0 || p[1] < 0 || p[0] >= p[2] || p[1] >= p[3] {
+				return fmt.Errorf("click (%v, %v) of the canvas is at (%.0f, %.0f), outside the viewport %.0fx%.0f", fx, fy, p[0], p[1], p[2], p[3])
 			}
 			return chromedp.MouseClickXY(p[0], p[1]).Do(ctx)
 		})
@@ -149,6 +159,8 @@ connectors:
 		chromedp.Poll(frame, nil),
 		// ws просмотрщика после перезагрузки страницы открыт: кадр пришёл и надпись «Connecting…» снята.
 		chromedp.Poll(`document.querySelector('[data-browser-note]').textContent === ''`, nil, chromedp.WithPollingTimeout(15*time.Second)),
+		// Диагностика: сколько pointerdown дошло до canvas (клик CDP мимо canvas его не даёт).
+		chromedp.Evaluate(`(() => { window.__pointerdowns = 0; document.querySelector('[data-browser-canvas]').addEventListener('pointerdown', () => window.__pointerdowns++, true); return 0 })()`, new(int)),
 		click(0.1, 0.1),
 		nextFrame(), // клик дошёл до страницы агента (кнопка перерисовалась)
 		click(0.3, 0.65),
