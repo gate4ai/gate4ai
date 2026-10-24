@@ -1023,3 +1023,46 @@ func TestDownloadActionTimeout(t *testing.T) {
 		}
 	}
 }
+
+// browser.close во время действия, которое не отвечает на отмену дольше
+// AgentWait: close отвечает сразу, а страница освобождается только после
+// действия — без гонки за Executor и Session (go test -race).
+func TestCloseSessionReleasesAfterAction(t *testing.T) {
+	old := AgentWait
+	AgentWait = 50 * time.Millisecond
+	t.Cleanup(func() { AgentWait = old })
+	_, b, _ := setup(t, nil)
+	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	done := make(chan error, 1)
+	go func() {
+		_, err := agentExec(t, b, "act", map[string]any{"session": id, "selector": "#missing", "method": "click", "timeout_ms": 30000.0})
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	start := time.Now()
+	if _, err := agentExec(t, b, "close", map[string]any{"session": id}); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("close waited for the action's timeout")
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), abi.CodeCancelled) {
+			t.Fatal("the running action is cancelled:", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the action never finished")
+	}
+	if _, err := agentExec(t, b, "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed by browser.close") {
+		t.Fatal(err)
+	}
+	// Страница снова свободна: новый сеанс открывается.
+	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"}); err != nil {
+		t.Fatal("page not released after close:", err)
+	}
+}

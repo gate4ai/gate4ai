@@ -171,3 +171,16 @@ func TestStdioToolsListChanged(t *testing.T) {
 		}
 	}
 }
+
+// Строковый id (разрешён JSON-RPC 2.0 и MCP) возвращается как есть.
+func TestStringID(t *testing.T) {
+	s := NewServer(&fakeBackend{})
+	out, err := s.HandleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":"req-1","method":"ping"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if json.Unmarshal(out, &m) != nil || m["id"] != "req-1" || m["error"] != nil {
+		t.Fatal(string(out))
+	}
+}

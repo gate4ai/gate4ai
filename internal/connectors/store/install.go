@@ -462,7 +462,9 @@ func (o Options) Install(p *Plan, consent []string) (Info, error) {
 	}
 	_ = os.RemoveAll(old)
 	if err := o.claimData(p); err != nil {
-		o.log().Warn("connector data not claimed", "connector", name, "err", err)
+		// Данные прежнего издателя не стёрты: новый коннектор не должен их прочитать.
+		_ = os.RemoveAll(dst)
+		return Info{}, fmt.Errorf("connector %s: claim data: %w", name, err)
 	}
 	return info, nil
 }

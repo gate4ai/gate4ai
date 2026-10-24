@@ -193,3 +193,24 @@ func TestSignedByVerifiesSignature(t *testing.T) {
 		t.Fatal("key claimed by the package reported without a valid signature")
 	}
 }
+
+// Данные прежнего издателя не удалось отдать новому (claimData): установка
+// не проходит — иначе новый коннектор прочитал бы чужие токены.
+func TestInstallFailsWhenDataNotClaimed(t *testing.T) {
+	dir := t.TempDir()
+	pub, priv := keys(t)
+	o := Options{Dir: filepath.Join(dir, "connectors"), TrustedKeys: []string{pub}}
+	// На месте каталога данных — файл: ни прочитать владельца, ни создать каталог.
+	os.MkdirAll(filepath.Join(o.Dir, DataDir), 0o700)
+	os.WriteFile(filepath.Join(o.Dir, DataDir, "bank"), []byte("x"), 0o600)
+	p, err := o.Prepare(context.Background(), write(t, dir, "bank-1.g4c", pack(t, "1", "api.bank.example", false, priv)), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Install(p, p.Capabilities); err == nil || !strings.Contains(err.Error(), "claim data") {
+		t.Fatal("install with unclaimed data:", err)
+	}
+	if _, err := os.Stat(filepath.Join(o.Dir, "bank")); !os.IsNotExist(err) {
+		t.Fatal("half-installed connector left behind")
+	}
+}

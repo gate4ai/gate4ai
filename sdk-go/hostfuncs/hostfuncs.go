@@ -122,6 +122,12 @@ func (d *Dispatcher) secret(alias, scheme, host string, port int) (string, error
 	if err := d.Check.Secret(alias, scheme, host, port); err != nil {
 		return "", err
 	}
+	return d.Reveal(alias)
+}
+
+// Reveal — значение алиаса из capabilities.reveal (нативный пакет получает
+// его в запросе); значение запоминается для маскирования, как у secret.
+func (d *Dispatcher) Reveal(alias string) (string, error) {
 	if d.Secrets == nil {
 		return "", abi.Errorf(abi.CodeNotSupported, "no vault")
 	}

@@ -57,3 +57,11 @@ func TestEvidenceMasked(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Код в маршруте SPA внутри фрагмента (#/cb?code=…) тоже маскируется.
+func TestMaskURLSPAFragment(t *testing.T) {
+	got := maskURLs("https://app.example/#/cb?code=fake&state=s")
+	if got != "https://app.example/#/cb?code=***&state=***" {
+		t.Fatal(got)
+	}
+}

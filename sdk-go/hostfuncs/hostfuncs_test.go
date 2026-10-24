@@ -400,3 +400,20 @@ func TestServiceCallAndLog(t *testing.T) {
 		t.Fatal(logs)
 	}
 }
+
+// Значение, раскрытое через Reveal (нативный пакет), маскируется так же, как
+// подставленное в соединение.
+func TestRevealIsMasked(t *testing.T) {
+	d := &Dispatcher{Secrets: secrets{"@api": "tok-SECRET-123"}, Timeout: time.Second}
+	v, err := d.Reveal("@api")
+	if err != nil || v != "tok-SECRET-123" {
+		t.Fatal(v, err)
+	}
+	if got := d.Mask("saw tok-SECRET-123 in log"); got != "saw [secret] in log" {
+		t.Fatal(got)
+	}
+	d.Secrets = nil
+	if _, err := d.Reveal("@api"); err == nil {
+		t.Fatal("no vault")
+	}
+}

@@ -6,11 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/gate4ai/gate4ai/sdk-go/redact"
 )
 
 // Element — интерактивный элемент страницы для act: CSS-селектор, по которому
@@ -523,43 +524,9 @@ func (x *Executor) redactURL(u string) string {
 	return RedactURL(u, x.redacted)
 }
 
-// RedactURL заменяет на *** значения параметров запроса, для которых hide
-// (или SecretParam) истинно; порядок и остальные параметры — как были. Так же
-// разбирается фрагмент: токены implicit-входа OAuth и OIDC приходят в нём
-// (#access_token=…&id_token=…), у маршрутов SPA — после «?» (#/cb?code=…).
-func RedactURL(u string, hide func(string) bool) string {
-	rest, frag, hasFrag := strings.Cut(u, "#")
-	base, query, hasQuery := strings.Cut(rest, "?")
-	out := base
-	if hasQuery {
-		out += "?" + redactPairs(query, hide)
-	}
-	if hasFrag {
-		if route, q, ok := strings.Cut(frag, "?"); ok {
-			frag = route + "?" + redactPairs(q, hide)
-		} else if strings.Contains(frag, "=") {
-			frag = redactPairs(frag, hide)
-		}
-		out += "#" + frag
-	}
-	return out
-}
-
-// redactPairs — то же для строки k=v&k=v.
-func redactPairs(query string, hide func(string) bool) string {
-	parts := strings.Split(query, "&")
-	for i, p := range parts {
-		k, _, hasVal := strings.Cut(p, "=")
-		name, err := url.QueryUnescape(k)
-		if err != nil {
-			name = k
-		}
-		if hasVal && (SecretParam(name) || (hide != nil && hide(name))) {
-			parts[i] = k + "=***"
-		}
-	}
-	return strings.Join(parts, "&")
-}
+// RedactURL — redact.URL: значения секретных параметров и параметров, для
+// которых hide истинно, заменяются на ***.
+func RedactURL(u string, hide func(string) bool) string { return redact.URL(u, hide) }
 
 func (x *Executor) redacted(k string) bool {
 	return slices.ContainsFunc(x.RedactParams, func(p string) bool { return strings.EqualFold(p, k) })
@@ -578,8 +545,5 @@ func (x *Executor) redactValues(body string) string {
 	return string(b)
 }
 
-// secretParam — параметры адреса с одноразовыми кодами и токенами (OAuth).
-var secretParam = regexp.MustCompile(`(?i)^(code|token|access_token|id_token|refresh_token|state|ticket|sid|session.*|auth.*|.*_token)$`)
-
 // SecretParam — параметр адреса, значение которого не показывается.
-func SecretParam(k string) bool { return secretParam.MatchString(k) }
+func SecretParam(k string) bool { return redact.SecretParam(k) }

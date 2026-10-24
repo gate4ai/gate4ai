@@ -297,19 +297,8 @@ func (s *Server) HandleMessage(ctx context.Context, body []byte) ([]byte, error)
 		return json.Marshal(rpc.Message{JSONRPC: "2.0", Error: &rpc.Error{Code: rpc.CodeParse, Message: err.Error()}})
 	}
 	res, err := s.Handle(ctx, m.Method, m.Params)
-	if m.ID == nil {
+	if len(m.ID) == 0 {
 		return nil, nil
 	}
-	out := rpc.Message{JSONRPC: "2.0", ID: m.ID}
-	if err != nil {
-		re, ok := err.(*rpc.Error)
-		if !ok {
-			re = &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
-		}
-		out.Error = re
-	} else {
-		b, _ := json.Marshal(res)
-		out.Result = b
-	}
-	return json.Marshal(out)
+	return json.Marshal(rpc.Reply(m.ID, res, err))
 }

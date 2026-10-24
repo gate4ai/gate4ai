@@ -18,11 +18,31 @@ import (
 // Message — запрос, ответ или уведомление JSON-RPC 2.0.
 type Message struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      *int64          `json:"id,omitempty"`
+	ID      json.RawMessage `json:"id,omitempty"` // число или строка (JSON-RPC 2.0); нет — уведомление
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *Error          `json:"error,omitempty"`
+}
+
+// Reply — ответ на запрос id: результат или ошибка (не *Error — CodeApp).
+func Reply(id json.RawMessage, res any, err error) Message {
+	out := Message{JSONRPC: "2.0", ID: id}
+	if err != nil {
+		var re *Error
+		if !errors.As(err, &re) {
+			re = &Error{Code: CodeApp, Message: err.Error()}
+		}
+		out.Error = re
+		return out
+	}
+	b, merr := json.Marshal(res)
+	if merr != nil {
+		out.Error = &Error{Code: CodeInternal, Message: merr.Error()}
+		return out
+	}
+	out.Result = b
+	return out
 }
 
 // Error — ошибка JSON-RPC.
@@ -103,25 +123,10 @@ func ServeWith(ctx context.Context, r io.Reader, w io.Writer, h Handler, start f
 			defer wg.Done()
 			defer func() { <-sem }()
 			res, err := h(ctx, m.Method, m.Params)
-			if m.ID == nil {
+			if len(m.ID) == 0 {
 				return
 			}
-			out := Message{JSONRPC: "2.0", ID: m.ID}
-			if err != nil {
-				var re *Error
-				if !errors.As(err, &re) {
-					re = &Error{Code: CodeApp, Message: err.Error()}
-				}
-				out.Error = re
-			} else {
-				b, merr := json.Marshal(res)
-				if merr != nil {
-					out.Error = &Error{Code: CodeInternal, Message: merr.Error()}
-				} else {
-					out.Result = b
-				}
-			}
-			send(out)
+			send(Reply(m.ID, res, err))
 		}(m)
 	}
 	// EOF: начатые вызовы получают DrainTimeout на завершение, затем их

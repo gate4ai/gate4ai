@@ -62,7 +62,7 @@ func Open(path string, ks keys.Store) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema + uiSchema + pairSchema); err != nil {
+	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, err
 	}

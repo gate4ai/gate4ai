@@ -50,31 +50,31 @@ func TestRoundTrip(t *testing.T) {
 		got = append(got, m)
 	}
 	// Ответ без id — только на нераспознанную строку; на уведомление ответа нет.
-	byID := map[int64]Message{}
+	byID := map[string]Message{}
 	parseErrs := 0
 	for _, m := range got {
-		if m.ID == nil {
+		if len(m.ID) == 0 {
 			if m.Error != nil && m.Error.Code == CodeParse {
 				parseErrs++
 			}
 			continue
 		}
-		byID[*m.ID] = m
+		byID[string(m.ID)] = m
 	}
 	if len(got) != 5 || parseErrs != 1 {
 		t.Fatalf("%+v", got)
 	}
 	// Конкурентные вызовы не блокируют друг друга: slow отвечает последним.
-	if got[4].ID == nil || *got[4].ID != 1 || string(byID[1].Result) != `"slow"` {
+	if string(got[4].ID) != "1" || string(byID["1"].Result) != `"slow"` {
 		t.Fatal("calls are serialized:", out.String())
 	}
-	if string(byID[2].Result) != `{"a":1}` {
-		t.Fatal(string(byID[2].Result))
+	if string(byID["2"].Result) != `{"a":1}` {
+		t.Fatal(string(byID["2"].Result))
 	}
-	if e := byID[3].Error; e == nil || e.Code != CodeApp || e.Message != "boom" {
+	if e := byID["3"].Error; e == nil || e.Code != CodeApp || e.Message != "boom" {
 		t.Fatal(e)
 	}
-	if e := byID[4].Error; e == nil || e.Code != CodeMethodNotFound {
+	if e := byID["4"].Error; e == nil || e.Code != CodeMethodNotFound {
 		t.Fatal(e)
 	}
 }
