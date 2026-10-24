@@ -33,3 +33,6 @@ func StopChrome(p *os.Process, grace time.Duration) {
 	// Дочерние процессы группы, пережившие главный.
 	_ = syscall.Kill(-p.Pid, syscall.SIGKILL)
 }
+
+// pipeSupported — Chrome получает CDP-pipe в fd 3 и 4 (exec.Cmd.ExtraFiles).
+const pipeSupported = true

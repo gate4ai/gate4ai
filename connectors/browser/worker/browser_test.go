@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -115,7 +113,7 @@ func (f *fakeChrome) ws(w http.ResponseWriter, r *http.Request) {
 }
 
 func service(f *fakeChrome) (*Service, Settings) {
-	return &Service{NewEngine: DefaultEngine, Launch: Launch}, Settings{CDPURL: f.srv.URL, Engine: "cdp"}
+	return &Service{NewEngine: DefaultEngine, Launch: LaunchEnv}, Settings{CDPURL: f.srv.URL, Engine: "cdp"}
 }
 
 var allowed = domain.Sites{Domains: []string{"*.example.com", "app.example.org"}}
@@ -290,49 +288,6 @@ func TestModelKeyValue(t *testing.T) {
 	s.Release()
 }
 
-func TestLaunchDedicatedProfile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script")
-	}
-	f := newFakeChrome(t)
-	port := strings.TrimPrefix(f.srv.URL, "http://127.0.0.1:")
-	dir := t.TempDir()
-	script := filepath.Join(dir, "chrome")
-	argsFile := filepath.Join(dir, "args")
-	os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" > "+argsFile+"\nfor a in \"$@\"; do case $a in --user-data-dir=*) d=${a#--user-data-dir=};; esac; done\nprintf '"+port+"\\n/devtools/browser/x\\n' > \"$d/DevToolsActivePort\"\nsleep 30\n"), 0o755)
-	profile := filepath.Join(dir, "profile")
-	u, proc, err := Launch(context.Background(), script, profile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer StopChrome(proc, 3*time.Second)
-	if u != f.srv.URL {
-		t.Fatal(u)
-	}
-	b, _ := os.ReadFile(argsFile)
-	for _, want := range []string{"--user-data-dir=" + profile, "--remote-debugging-port=0", "--enable-unsafe-extension-debugging"} {
-		if !strings.Contains(string(b), want) {
-			t.Errorf("missing %s in %s", want, b)
-		}
-	}
-	if strings.Contains(string(b), "headless") {
-		t.Error("must not be headless")
-	}
-	// Служба запускает Chrome сама, если cdp_url не задан.
-	svc := &Service{NewEngine: DefaultEngine,
-		Launch: func(ctx context.Context, chrome, p string, _ ...string) (string, *os.Process, error) {
-			return f.srv.URL, nil, nil
-		}}
-	s, err := svc.Acquire(context.Background(), Settings{Engine: "cdp", ChromePath: "/nonexistent/chrome"}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Release()
-	if _, err := s.Open(context.Background(), "https://app.example.org/", allowed); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // closableEngine — движок, который можно «закрыть» (окно Chrome закрыли).
 type closableEngine struct{ dead bool }
 
@@ -358,7 +313,7 @@ func TestDeadChromeReconnects(t *testing.T) {
 	var dialed []string
 	launches, failDial := 0, false
 	svc := &Service{
-		Launch: func(context.Context, string, string, ...string) (string, *os.Process, error) {
+		Launch: func(context.Context, string, string, []string, ...string) (string, *os.Process, error) {
 			launches++
 			return "http://127.0.0.1:" + string(rune('0'+launches)), nil, nil
 		},
@@ -402,6 +357,9 @@ func TestDeadChromeReconnects(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
+	if os.Getenv("GATE4AI_FAKE_PIPE_CHROME") != "" {
+		fakePipeChromeMain()
+	}
 	// Ожидание возврата на сайт после редиректа (SSO) — в тестах короткое:
 	// страницы вне списка в тестах не возвращаются.
 	SettleTimeout = 300 * time.Millisecond
