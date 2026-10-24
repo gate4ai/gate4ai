@@ -131,9 +131,6 @@ func TestLatestResolveRevoked(t *testing.T) {
 	if CompareVersions("1.10", "1.9") <= 0 || CompareVersions("2", "2") != 0 {
 		t.Fatal("CompareVersions")
 	}
-	if !(Release{URL: "https://x/browser-6.platforms.json"}).Native() || (Release{URL: "x.g4c"}).Native() {
-		t.Fatal("Native")
-	}
 }
 
 // Откат индекса (старее виденного, пропал отзыв при той же отметке) и

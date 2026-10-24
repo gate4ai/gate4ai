@@ -32,8 +32,8 @@ import (
 // установленный из магазина коннектор daemon добавляет туда же с ask.
 const emptyConfig = `# gate4ai: no agents yet. Files are built in, limited to ~/Documents (every action
 # asks you first; hidden files and keys are always closed);
-# the browser connector is installed from the store and added to profile default
-# the same way. Add agents and your rules (see the README), then: gate4ai policy set config.yaml
+# the browser is built in too and asks about every action until you allow sites.
+# Add agents and your rules (see the README), then: gate4ai policy set config.yaml
 store:
   registry: https://raw.githubusercontent.com/gate4ai/registry/main/index.json
   registry_keys: ["ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="]
@@ -41,17 +41,14 @@ connectors:
   files: { roots: ["~/Documents"] }
 profiles:
   default:
-    connectors: [files]
+    connectors: [files, browser]
     rules:
       - { id: files-read-ask, action: files.read, effect: ask }
       - { id: files-list-ask, action: files.list, effect: ask }
       - { id: files-append-ask, action: files.append, effect: ask }
       - { id: files-write-ask, action: files.write, effect: ask }
+      - { id: browser-ask, action: "browser.*", effect: ask }
 `
-
-// defaultConnectors — коннекторы, которые свежая установка без --config ставит
-// из магазина сама (с согласием на возможности, пока магазин доступен — в фоне).
-var defaultConnectors = []string{"browser"}
 
 // runDaemon — `gate4ai daemon`: политики, подтверждения, секреты, журнал.
 func runDaemon(args []string, tty bool) int {
@@ -106,17 +103,16 @@ func daemonMain(args []string, tty bool) error {
 		return err
 	}
 	// Без --config пустое хранилище получает начальную политику: агентов нет, значит
-	// агентам ничего не разрешено; коннекторы по умолчанию ставятся из магазина.
-	initial, defaults := []byte(emptyConfig), defaultConnectors
+	// агентам ничего не разрешено.
+	initial := []byte(emptyConfig)
 	if *cfgFile != "" {
 		if initial, err = os.ReadFile(*cfgFile); err != nil {
 			return err
 		}
-		defaults = nil
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	d, err := daemon.New(daemon.Options{Home: *home, InitialConfig: initial, DefaultConnectors: defaults, Keys: ks, ConnectorsDir: *connDir, Log: log})
+	d, err := daemon.New(daemon.Options{Home: *home, InitialConfig: initial, Keys: ks, ConnectorsDir: *connDir, Log: log})
 	if err != nil {
 		return err
 	}
@@ -133,8 +129,7 @@ func daemonMain(args []string, tty bool) error {
 	default:
 		d.Callers = agentid.Identify
 	}
-	// Порядок остановки: сначала отмена ctx (relay, Telegram, установка по
-	// умолчанию, тикер), потом серверы и базы — не наоборот.
+	// Порядок остановки: сначала отмена ctx (relay, Telegram, тикер), потом серверы и базы — не наоборот.
 	defer func() {
 		cancel()
 		d.Close()
@@ -142,7 +137,6 @@ func daemonMain(args []string, tty bool) error {
 	if err := setup(ctx, d, log); err != nil {
 		return err
 	}
-	go d.InstallDefaults(ctx)
 	// Установленный навык Claude Code прежней версии (полный текст каталога)
 	// заменяется обёрткой «выполни gate4ai skill»: он не устаревает с бинарником.
 	if ok, err := agentsetup.Default().RefreshSkill(skill.Stub()); err != nil {

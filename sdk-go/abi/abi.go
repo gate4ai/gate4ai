@@ -130,7 +130,7 @@ type ExecRequest struct {
 	Settings map[string]any `json:"settings"`
 	// Caller — вызывающий коннектор, если действие вызвано через service_call.
 	Caller *Caller `json:"caller,omitempty"`
-	// Revealed — значения алиасов из capabilities.reveal (только runtime native);
+	// Revealed — значения алиасов из capabilities.reveal (только runtime builtin);
 	// для browser.login и browser.fill_secret — ещё значения секретных полей
 	// учётки Login (по алиасу секрета) и ответ человека (HumanValue).
 	Revealed map[string]string `json:"revealed,omitempty"`

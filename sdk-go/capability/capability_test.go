@@ -91,7 +91,7 @@ func TestServiceParams(t *testing.T) {
 		`capabilities: { services: [ { target: browser, contract: 1, actions: [] } ] }`,
 		`capabilities: { services: [ { target: Browser, contract: 1, actions: [open] } ] }`,
 		`capabilities: { services: [ { target: b, contract: 1, actions: [open], params: { x: "${bad}" } } ] }`,
-		`capabilities: { reveal: ["@key"] }`, // reveal — только native
+		`capabilities: { reveal: ["@key"] }`, // reveal — только builtin
 	} {
 		if _, err := manifest.Parse([]byte("connector: x\n" + bad)); err == nil {
 			t.Errorf("accepted: %s", bad)

@@ -32,7 +32,6 @@ func TestServiceCallToNativeBrowser(t *testing.T) {
 	defer srv.Close()
 
 	g := startGate(t)
-	g.install("browser")
 	reader, _ := filepath.Abs(filepath.Join("testdata", "pagereader"))
 	g.installFrom(reader)
 	dir := t.TempDir()

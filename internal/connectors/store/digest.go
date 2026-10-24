@@ -15,8 +15,7 @@ import (
 
 // PrepareDevWasm — своя сборка агента из папки (install_dev_connector):
 // манифест читается один раз и должен совпасть с manifestSHA256 (тем, что
-// одобрил человек); собирается только WASM — нативный код из папки агента не
-// собирается вовсе. Пакет проходит обычный Prepare (доверие local), источник
+// одобрил человек); собирается только WASM. Пакет проходит обычный Prepare (доверие local), источник
 // установки — сама папка (update пересоберёт из неё).
 func (o Options) PrepareDevWasm(ctx context.Context, dir, manifestSHA256 string) (*Plan, error) {
 	man, err := os.ReadFile(filepath.Join(dir, ManifestFile))
@@ -60,7 +59,7 @@ func (o Options) PrepareDevWasm(ctx context.Context, dir, manifestSHA256 string)
 	}
 	// Сверка по собранному пакету (а не по отдельному чтению манифеста): тот же
 	// манифест, что показали человеку, только WASM.
-	if SHA256(p.pkg.ManifestYAML) != manifestSHA256 || p.pkg.Native() || p.pkg.Manifest.Runtime != manifest.RuntimeWasm {
+	if SHA256(p.pkg.ManifestYAML) != manifestSHA256 || p.pkg.Manifest.Runtime != manifest.RuntimeWasm {
 		return nil, errors.New("the built package does not match the approved manifest")
 	}
 	p.Source = SourceDir + dir

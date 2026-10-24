@@ -1,5 +1,4 @@
-# Релиз по тегу v*: один на всё — gate4ai и трей, gate4ai-relay, пакеты коннекторов
-# (версия коннектора в manifest.yaml = версия тега без «v»). Сначала те же проверки,
+# Релиз по тегу v*: один на всё — gate4ai и трей, gate4ai-relay. Сначала те же проверки,
 # что в ci.yml; черновик релиза публикуется, только когда в нём есть всё, — до этого
 # его не видят https://gate4.ai/latest и установщики. Потом relay выкатывается на сервер.
 name: release
@@ -60,40 +59,8 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" gate4ai-tray_*_darwin_*.tar.gz tray-darwin-checksums.txt*
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # Пакеты коннекторов: воспроизводимая сборка, подпись ключом издателя; <коннектор>.pack.json —
-  # для записи в gate4ai/registry (dev/scripts/deploy.sh registry).
-  connectors:
-    needs: [release]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: pack
-        env:
-          PUBLISHER_KEY: ${{ secrets.GATE4AI_PUBLISHER_KEY }}
-        run: |
-          set -euo pipefail
-          go build -o "$RUNNER_TEMP/gate4ai" ./cmd/gate4ai
-          umask 077
-          printf '%s\n' "$PUBLISHER_KEY" > "$RUNNER_TEMP/publisher.key"
-          mkdir out
-          for m in connectors/*/manifest.yaml; do
-            dir=${m%/manifest.yaml}
-            name=$(sed -nE 's/^connector: *"?([a-z0-9-]+)"?.*/\1/p' "$m")
-            version=$(sed -nE 's/^version: *"?([^"]+)"?.*/\1/p' "$m")
-            [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "$m: version $version, tag $GITHUB_REF_NAME" >&2; exit 1; }
-            (cd out && "$RUNNER_TEMP/gate4ai" connectors pack "../$dir" --key "$RUNNER_TEMP/publisher.key") | tee "out/$name.pack.json"
-          done
-          rm "$RUNNER_TEMP/publisher.key"
-      - run: gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" out/*
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   publish:
-    needs: [tray-darwin, connectors]
+    needs: [tray-darwin]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -3,7 +3,6 @@
 #   sdk-go/      — только sdk-go (Apache-2.0: AGPL-код не тянет)
 #   relay/       — relay и sdk-go
 #   ядро         — (cmd/, internal/) ядро, sdk-go; relay — только в тестах
-#   connectors/X — свой каталог, sdk-go, ядро; другой коннектор — никогда
 #   e2e/         — что угодно; e2e не импортирует никто
 # Проверяются прямые импорты пакетов и их тестов под linux, darwin, windows и wasip1:
 # если каждое ребро разрешено, запрещённого пути нет и транзитивно.
@@ -25,7 +24,6 @@ part() {
     sdk-go | sdk-go/*) echo sdk-go ;;
     relay | relay/*) echo relay ;;
     e2e | e2e/*) echo e2e ;;
-    connectors/*) rel=${rel#connectors/}; echo "connector:${rel%%/*}" ;;
     *) echo core ;;
   esac
 }
@@ -38,7 +36,6 @@ allowed() {
   case $from:$to in
     e2e:*) [ "$to" != e2e ] ;;
     core:relay) [ "$kind" = test ] ;;
-    connector:*:core) return 0 ;;
     *) return 1 ;;
   esac
 }

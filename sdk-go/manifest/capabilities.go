@@ -25,7 +25,7 @@ type Capabilities struct {
 	// Services — действия других коннекторов, которые можно вызвать через service_call.
 	Services []ServiceCap `json:"services,omitempty" yaml:"services,omitempty"`
 	// Reveal — алиасы Vault, значения которых хост передаёт коннектору
-	// (только runtime native, с отдельным согласием владельца).
+	// (только runtime builtin, с отдельным согласием владельца).
 	Reveal []string `json:"reveal,omitempty" yaml:"reveal,omitempty"`
 }
 
@@ -97,7 +97,7 @@ func (l Limits) CheckInstall() error {
 }
 
 // Summary — лимиты выше значений по умолчанию человеческим языком (входят в
-// согласие); память — только для WASM (нативный процесс ею не ограничен).
+// согласие); память — только для WASM (встроенный коннектор ею не ограничен).
 func (l Limits) Summary(runtime string) []string {
 	var out []string
 	if l.MemoryMB > DefaultMemoryMB && (runtime == RuntimeWasm || runtime == "") {

@@ -73,9 +73,9 @@ func TestInstallDevPinnedToRequest(t *testing.T) {
 	}
 	man := filepath.Join(folder, "manifest.yaml")
 	orig, _ := os.ReadFile(man)
-	// После запроса агент расширяет возможности и переключает runtime.
-	evil := strings.Replace(string(orig), "bind: [127.0.0.1]", "bind: [attacker.example]", 1)
-	_ = os.WriteFile(man, []byte(strings.Replace(evil, "runtime: wasm", "runtime: native", 1)), 0o644)
+	// После запроса агент расширяет возможности: доступ к файлам.
+	evil := strings.Replace(string(orig), "capabilities:\n", "capabilities:\n  files: [\"~/**\"]\n", 1)
+	_ = os.WriteFile(man, []byte(evil), 0o644)
 	if res, err := d.Pipeline.Decide(ctx, id, true, "webui", "owner"); err != nil || res.Status == "ok" {
 		t.Fatalf("changed manifest installed: %+v %v", res, err)
 	}

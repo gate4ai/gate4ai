@@ -59,9 +59,6 @@ type selfPin struct {
 func (p selfPin) lines() []string {
 	var out []string
 	rt := "runtime wasm (sandbox)"
-	if p.Runtime == manifest.RuntimeNative {
-		rt = "runtime native: runs WITHOUT a sandbox, with your user's rights"
-	}
 	if p.Op == config.OpInstallDev {
 		out = append(out, fmt.Sprintf("%s %s, own build (not reviewed), %s", p.Connector, p.Version, rt))
 	} else {
@@ -88,8 +85,8 @@ func (p selfPin) lines() []string {
 	return out
 }
 
-// matches — план установки совпадает с закреплённым: имя, версия,
-// возможности и runtime.
+// matches — план установки совпадает с закреплённым: имя, версия и
+// возможности.
 func (p selfPin) matches(plan *store.Plan) error {
 	sorted := func(s []string) []string { return slices.Sorted(slices.Values(s)) }
 	switch {
@@ -97,8 +94,6 @@ func (p selfPin) matches(plan *store.Plan) error {
 		return fmt.Errorf("the package is %s %s, the owner approved %s %s", plan.Connector, plan.Version, p.Connector, p.Version)
 	case !slices.Equal(sorted(plan.Capabilities), sorted(p.Capabilities)):
 		return errors.New("the package capabilities differ from those the owner approved; ask again")
-	case plan.Native != (p.Runtime == manifest.RuntimeNative):
-		return errors.New("the package runtime differs from the one the owner approved; ask again")
 	}
 	return nil
 }
@@ -200,11 +195,7 @@ func (d *Daemon) pinStore(name string) (selfPin, error) {
 	if err != nil {
 		return selfPin{}, fmt.Errorf("install_connector: %v", err)
 	}
-	rt := manifest.RuntimeWasm
-	if rel.Native() {
-		rt = manifest.RuntimeNative
-	}
-	return selfPin{Op: config.OpInstallConnector, Connector: name, Version: rel.Version, Runtime: rt, Publisher: e.Publisher,
+	return selfPin{Op: config.OpInstallConnector, Connector: name, Version: rel.Version, Runtime: manifest.RuntimeWasm, Publisher: e.Publisher,
 		Trust: ix.Publishers[e.Publisher].Trust, Capabilities: slices.Clone(rel.Capabilities), Digest: rel.Digest}, nil
 }
 

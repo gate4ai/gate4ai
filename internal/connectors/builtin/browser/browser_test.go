@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+package browser
 
 import (
 	"bytes"
@@ -24,7 +24,7 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/hosttest"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
-	"github.com/gate4ai/gate4ai/connectors/browser/worker"
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/browser/worker"
 )
 
 // fakeEngine — страница без Chrome: переходы, текст, поиск элемента для act.
@@ -305,8 +305,8 @@ func TestManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Runtime != manifest.RuntimeNative || m.Contract != 1 || len(m.Platforms) < 4 {
-		t.Fatal(m.Runtime, m.Contract, m.Platforms)
+	if m.Runtime != manifest.RuntimeBuiltin || m.Contract != 1 {
+		t.Fatal(m.Runtime, m.Contract)
 	}
 	for _, a := range m.Actions {
 		if a.ServiceOnly {

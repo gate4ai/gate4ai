@@ -41,7 +41,6 @@ func TestBrowserAgentProfile(t *testing.T) {
 	}))
 	defer srv.Close()
 	g := startGate(t)
-	g.install("browser")
 	dir := t.TempDir()
 	wrapper := filepath.Join(dir, "chrome")
 	os.WriteFile(wrapper, []byte("#!/bin/sh\nexec '"+chrome+"' --headless=new --disable-gpu \"$@\"\n"), 0o755)

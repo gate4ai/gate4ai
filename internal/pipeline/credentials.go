@@ -21,8 +21,8 @@ import (
 	"github.com/gate4ai/gate4ai/internal/policy"
 )
 
-// BrowserConnector — нативный коннектор браузера: только ему хост передаёт
-// учётки входа (credentials), и только в действиях входа — значения.
+// BrowserConnector — встроенный браузер: только ему хост передаёт учётки
+// входа (credentials), и только в действиях входа — значения.
 const BrowserConnector = "browser"
 
 // Действия браузера, которым передаются значения полей учётки.

@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package main
+// Package browser — встроенный компонент «Браузер» (runtime: builtin): воркер
+// выделенного профиля Chrome (CDP, Stagehand) в процессе daemon. Агенту — чтение,
+// снимок, извлечение и сеанс страницы (open, observe, act, network, login,
+// fill_secret, page_extract, page_screenshot, close) на сайтах по спискам
+// доступа; WASM-коннекторам — те же действия с открытой страницей через
+// service_call на их сайтах. Ключ модели для extract хост передаёт по
+// capabilities.reveal.
+package browser
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,8 +24,9 @@ import (
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
+	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
-	"github.com/gate4ai/gate4ai/connectors/browser/worker"
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/browser/worker"
 )
 
 // SessionIdle — страница вызывающего коннектора освобождается, если end_call
@@ -82,8 +91,26 @@ type agentSession struct {
 	last    time.Time          // последнее действие: сеанс закроется в last + AgentIdle
 }
 
+// Name — имя встроенного браузера (действия browser.*).
+const Name = "browser"
+
 // New — коннектор с воркером по умолчанию.
 func New() *Browser { return &Browser{W: worker.New()} }
+
+//go:embed manifest.yaml
+var manifestYAML []byte
+
+// Manifest — манифест встроенного браузера.
+func Manifest() manifest.Manifest {
+	m, err := manifest.Parse(manifestYAML)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
+
+// Close останавливает запущенный воркером Chrome (остановка daemon).
+func (b *Browser) Close() error { return b.W.Close() }
 
 func str(m map[string]any, k string) string { s, _ := m[k].(string); return s }
 

@@ -20,7 +20,6 @@ import (
 // Среды исполнения.
 const (
 	RuntimeWasm    = "wasm"    // WASM-модуль в хосте (wazero), только функции хоста
-	RuntimeNative  = "native"  // процесс под надзором хоста (только проверенный издатель)
 	RuntimeBuiltin = "builtin" // внутренний коннектор хоста (не из магазина)
 )
 
@@ -38,9 +37,7 @@ type Manifest struct {
 	// их схем — только с его повышением (contract.Diff).
 	Contract int `json:"contract,omitempty" yaml:"contract,omitempty"`
 	// Services — действия, которые другие коннекторы могут вызвать через service_call.
-	Services []string `json:"services,omitempty" yaml:"services,omitempty"`
-	// Platforms — платформы сборки "os/arch" (обязательны для runtime native).
-	Platforms    []string     `json:"platforms,omitempty" yaml:"platforms,omitempty"`
+	Services     []string     `json:"services,omitempty" yaml:"services,omitempty"`
 	Capabilities Capabilities `json:"capabilities" yaml:"capabilities"`
 	// Credentials — слоты учёток, с которыми коннектор входит на сайты
 	// (browser.login / browser.fill_secret): владелец связывает слот со своей
@@ -204,9 +201,8 @@ func (a Action) CallsAction(target, action string) bool {
 	return slices.Contains(a.Calls, target+"."+action)
 }
 
-// Summary — возможности, учётки, подвызовы действий, среда исполнения без
-// песочницы (native), действия классов выше read и лимиты выше значений по
-// умолчанию человеческим языком: то, на что владелец соглашается при установке
+// Summary — возможности, учётки, подвызовы действий, действия классов выше
+// read и лимиты выше значений по умолчанию человеческим языком: то, на что владелец соглашается при установке
 // (изменение — повторное согласие).
 func (m *Manifest) Summary() []string {
 	out := m.Capabilities.Summary()
@@ -231,9 +227,6 @@ func (m *Manifest) Summary() []string {
 			out = append(out, fmt.Sprintf("action %s calls %s", a.Name, a.CallsText()))
 		}
 		byClass[a.Class] = append(byClass[a.Class], a.Name)
-	}
-	if m.Runtime == RuntimeNative {
-		out = append(out, "runs as a separate program without a sandbox, with your user's rights")
 	}
 	for _, c := range []string{"write", "external", "money"} {
 		if names := byClass[c]; len(names) > 0 {
@@ -267,28 +260,15 @@ func (m *Manifest) Validate() error {
 		return fmt.Errorf("manifest: bad connector name %q", m.Connector)
 	}
 	switch m.Runtime {
-	case "", RuntimeWasm, RuntimeNative, RuntimeBuiltin:
+	case "", RuntimeWasm, RuntimeBuiltin:
 	default:
 		return fmt.Errorf("manifest %s: bad runtime %q", m.Connector, m.Runtime)
 	}
 	if err := m.Capabilities.validate(); err != nil {
 		return fmt.Errorf("manifest %s: %w", m.Connector, err)
 	}
-	if len(m.Capabilities.Reveal) > 0 && m.Runtime != RuntimeNative {
-		return fmt.Errorf("manifest %s: capabilities.reveal is only for runtime native", m.Connector)
-	}
-	if m.Runtime == RuntimeNative && len(m.Platforms) == 0 {
-		return fmt.Errorf("manifest %s: runtime native needs platforms", m.Connector)
-	}
-	if m.Runtime != RuntimeNative && len(m.Platforms) > 0 {
-		return fmt.Errorf("manifest %s: platforms are only for runtime native", m.Connector)
-	}
-	seenPlat := map[string]bool{}
-	for _, p := range m.Platforms {
-		if !Platforms[p] || seenPlat[p] {
-			return fmt.Errorf("manifest %s: bad or duplicate platform %q", m.Connector, p)
-		}
-		seenPlat[p] = true
+	if len(m.Capabilities.Reveal) > 0 && m.Runtime != RuntimeBuiltin {
+		return fmt.Errorf("manifest %s: capabilities.reveal is only for runtime builtin", m.Connector)
 	}
 	if m.Contract < 0 || (len(m.Services) > 0 && m.Contract == 0) {
 		return fmt.Errorf("manifest %s: services need contract >= 1", m.Connector)
@@ -391,10 +371,6 @@ func (m *Manifest) Validate() error {
 	}
 	return nil
 }
-
-// Platforms — платформы, под которые собираются нативные пакеты (как у ядра gate4ai).
-var Platforms = map[string]bool{"linux/amd64": true, "linux/arm64": true, "darwin/amd64": true, "darwin/arm64": true,
-	"windows/amd64": true, "windows/arm64": true}
 
 // IsService — действие доступно другим коннекторам через service_call.
 func (m *Manifest) IsService(action string) bool { return slices.Contains(m.Services, action) }

@@ -55,7 +55,6 @@ func TestBrowserTypeAndScreenshot(t *testing.T) {
 	}))
 	t.Cleanup(site.Close)
 	g := startGate(t)
-	g.install("browser")
 	dir := t.TempDir()
 	wrapper := filepath.Join(dir, "chrome")
 	os.WriteFile(wrapper, []byte("#!/bin/sh\nexec '"+chrome+"' --headless=new --disable-gpu --window-size=1000,700 \"$@\"\n"), 0o755)

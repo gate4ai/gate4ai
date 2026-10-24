@@ -159,7 +159,7 @@ func TestManifestMustMatchPackage(t *testing.T) {
 	if _, err := e.Load(context.Background(), bin, man); err == nil || !strings.Contains(err.Error(), "differs") {
 		t.Fatal("package manifest with wider capabilities accepted:", err)
 	}
-	man.Runtime = manifest.RuntimeNative
+	man.Runtime = manifest.RuntimeBuiltin
 	if _, err := e.Load(context.Background(), bin, man); err == nil {
 		t.Fatal("non-wasm runtime accepted")
 	}

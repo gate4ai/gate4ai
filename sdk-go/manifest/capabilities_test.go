@@ -67,7 +67,7 @@ func TestParseAndResolve(t *testing.T) {
 		t.Fatalf("%#v", r)
 	}
 	// reveal: значение настройки — только алиас Vault.
-	rm, err := Parse([]byte("connector: x\nruntime: native\nplatforms: [linux/amd64]\ncapabilities: { reveal: [\"${setting:key}\"] }"))
+	rm, err := Parse([]byte("connector: x\nruntime: builtin\ncapabilities: { reveal: [\"${setting:key}\"] }"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestValidateRejects(t *testing.T) {
 		"zero quota":       "capabilities: { storage: { quota_mb: 0 } }",
 		"service no acts":  "capabilities: { services: [ { target: browser, contract: 1, actions: [] } ] }",
 		"service contract": "capabilities: { services: [ { target: browser, contract: 0, actions: [open] } ] }",
-		"reveal not alias": "runtime: native\nplatforms: [linux/amd64]\ncapabilities: { reveal: [ \"x\" ] }",
+		"reveal not alias": "runtime: builtin\ncapabilities: { reveal: [ \"x\" ] }",
 		"network removed":  "capabilities: { network: [ { host: a.com, scheme: https } ] }",
 		"secrets removed":  "capabilities: { secrets: [ { alias: \"@x\", bind: [a.com] } ] }",
 		"money no verify":  "actions: [ { name: pay, class: money } ]",

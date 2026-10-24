@@ -631,7 +631,7 @@ func (p *Pipeline) invoke(ctx context.Context, agent, action string, cli connect
 	var prep *loginPrep
 	// Учётки — только нативному пакету browser (проверенный издатель): WASM-коннектор
 	// с тем же именем их не получает.
-	if strings.SplitN(action, ".", 2)[0] == BrowserConnector && cli.Manifest().Runtime == manifest.RuntimeNative {
+	if strings.SplitN(action, ".", 2)[0] == BrowserConnector && cli.Manifest().Runtime == manifest.RuntimeBuiltin {
 		var err error
 		if prep, err = p.prepareBrowser(ctx, agent, act, &req); err != nil {
 			return abi.ExecResult{}, err
@@ -651,7 +651,7 @@ func (p *Pipeline) invoke(ctx context.Context, agent, action string, cli connect
 			return abi.ExecResult{}, err
 		}
 	}
-	if act.Name == ActionHandoff && strings.SplitN(action, ".", 2)[0] == BrowserConnector && cli.Manifest().Runtime == manifest.RuntimeNative && p.Handoff != nil {
+	if act.Name == ActionHandoff && strings.SplitN(action, ".", 2)[0] == BrowserConnector && cli.Manifest().Runtime == manifest.RuntimeBuiltin && p.Handoff != nil {
 		// Сначала браузер проверяет сеанс и страницу, потом уведомление человеку.
 		check := req
 		check.Args = map[string]any{ArgPrecheck: true}

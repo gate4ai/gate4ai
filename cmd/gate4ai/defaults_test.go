@@ -14,9 +14,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gate4ai/gate4ai/internal/config"
+	"github.com/gate4ai/gate4ai/internal/connectors/builtin/browser"
 	"github.com/gate4ai/gate4ai/internal/connectors/builtin/files"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/daemon"
@@ -28,11 +28,11 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/registry"
 )
 
-// defaultActions — действия коннекторов по умолчанию (как в их манифестах):
-// files встроен в ядро, browser ставится из магазина.
+// defaultActions — действия встроенных компонентов ядра (как в их манифестах):
+// files и browser.
 var defaultActions = map[string][]string{
 	"files":   {"read", "list", "append", "write"},
-	"browser": {"read", "screenshot", "extract", "open", "observe", "act", "network", "login", "fill_secret", "page_extract", "page_screenshot", "close"},
+	"browser": {"read", "screenshot", "extract", "open", "observe", "act", "reload", "handoff", "network", "get", "head", "post", "put", "patch", "delete", "download", "login", "fill_secret", "page_extract", "page_screenshot", "dialog", "close"},
 }
 
 var defaultManifests = map[string]string{
@@ -47,29 +47,6 @@ actions:
   - { name: list, class: read }
   - { name: append, class: write }
   - { name: write, class: write }
-`,
-	// Нативный пакет: в магазине — список платформ, ставится пакет этой платформы.
-	"browser": `connector: browser
-version: "6"
-runtime: native
-platforms: [` + store.HostPlatform() + `]
-contract: 1
-services: [open]
-capabilities:
-  reveal: ["${setting:model_key}"]
-actions:
-  - { name: read, class: read }
-  - { name: screenshot, class: read }
-  - { name: extract, class: read }
-  - { name: open, class: read }
-  - { name: observe, class: read }
-  - { name: act, class: write }
-  - { name: network, class: read }
-  - { name: login, class: write }
-  - { name: fill_secret, class: write }
-  - { name: page_extract, class: read }
-  - { name: page_screenshot, class: read }
-  - { name: close, class: read }
 `,
 	// Не по умолчанию: ставит владелец.
 	"bank": `connector: bank
@@ -92,25 +69,14 @@ func TestDefaultActionsMatchManifests(t *testing.T) {
 	if !slices.Equal(got, defaultActions["files"]) {
 		t.Fatalf("files actions %v: update defaultActions", got)
 	}
-	for _, name := range defaultConnectors {
-		want := defaultActions[name]
-		raw, err := os.ReadFile(filepath.Join("..", "..", "..", "connectors", name, "manifest.yaml"))
-		if err != nil {
-			t.Skip("connectors sources are not next to the host:", err)
+	got = nil
+	for _, a := range browser.Manifest().Actions {
+		if !a.ServiceOnly {
+			got = append(got, a.Name)
 		}
-		m, err := manifest.Parse(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var got []string
-		for _, a := range m.Actions {
-			if !a.ServiceOnly {
-				got = append(got, a.Name)
-			}
-		}
-		if !slices.Equal(got, want) {
-			t.Fatalf("%s actions %v, want %v: update defaultActions", name, got, want)
-		}
+	}
+	if !slices.Equal(got, defaultActions["browser"]) {
+		t.Fatalf("browser actions %v: update defaultActions", got)
 	}
 }
 
@@ -124,14 +90,7 @@ func localRegistry(t *testing.T, dir string) (index, regPub string) {
 		Connectors: map[string]registry.Entry{}}
 	os.MkdirAll(filepath.Join(dir, "packages"), 0o755)
 	for name, m := range defaultManifests {
-		mf, _ := manifest.Parse([]byte(m))
-		var b []byte
-		var err error
-		if mf.Runtime == manifest.RuntimeNative {
-			b, err = store.PackNative([]byte(m), []byte("fake native binary"), store.HostPlatform(), k)
-		} else {
-			b, err = store.Pack([]byte(m), []byte("\x00asm\x01\x00\x00\x00"), k)
-		}
+		b, err := store.Pack([]byte(m), []byte("\x00asm\x01\x00\x00\x00"), k)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,14 +99,6 @@ func localRegistry(t *testing.T, dir string) (index, regPub string) {
 		os.WriteFile(filepath.Join(dir, "packages", file), b, 0o644)
 		rel := registry.Release{Version: p.Manifest.Version, URL: "packages/" + file, SHA256: store.SHA256(b),
 			Digest: p.Sig.Digest, Capabilities: p.Manifest.Summary()}
-		if p.Native() {
-			set := store.PlatformSet{Connector: name, Version: p.Manifest.Version,
-				Platforms: map[string]store.Artifact{store.HostPlatform(): {URL: file, SHA256: store.SHA256(b), Digest: p.Sig.Digest}}}
-			sb, _ := json.Marshal(set)
-			setFile := name + "-" + p.Manifest.Version + store.SetExt
-			os.WriteFile(filepath.Join(dir, "packages", setFile), sb, 0o644)
-			rel.URL, rel.SHA256, rel.Digest = "packages/"+setFile, store.SHA256(sb), store.SetDigest(set)
-		}
 		ix.Connectors[name] = registry.Entry{Publisher: "gate4ai", Repo: "https://github.com/gate4ai/gate4ai-" + name, License: "AGPL-3.0-only",
 			Versions: []registry.Release{rel}}
 	}
@@ -162,65 +113,34 @@ func localRegistry(t *testing.T, dir string) (index, regPub string) {
 	return index, regPub
 }
 
-// Свежий home без --config: магазин недоступен — первый запуск не падает;
-// при следующей возможности files и browser ставятся без вопроса владельцу,
-// и каждое их действие идёт на подтверждение.
-func TestFreshInstallDefaultConnectors(t *testing.T) {
+// Свежий home без --config: files и browser встроены и видны в профиле default,
+// каждое их действие идёт на подтверждение; магазин для этого не нужен.
+// Любой коннектор из магазина при установке — тоже в default с ask; правило
+// владельца на действие остаётся; начальный комментарий политики сохраняется.
+func TestFreshInstallBuiltins(t *testing.T) {
 	dir := t.TempDir()
-	regDir := filepath.Join(dir, "registry")
-	index := filepath.Join(regDir, "index.json")
-	regPub, _, _ := registry.GenerateKey()
+	index, regPub := localRegistry(t, filepath.Join(dir, "registry"))
 	cfg := regexp.MustCompile(`registry: \S+`).ReplaceAllString(emptyConfig, "registry: "+index)
+	cfg = regexp.MustCompile(`registry_keys: .*`).ReplaceAllString(cfg, `registry_keys: ["`+regPub+`"]`)
 	home := filepath.Join(dir, "home")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	open := func(cfg string) *daemon.Daemon {
-		d, err := daemon.New(daemon.Options{Home: home, InitialConfig: []byte(cfg), DefaultConnectors: defaultConnectors,
-			Keys: keys.NewMemory(), Log: log})
+	open := func() *daemon.Daemon {
+		d, err := daemon.New(daemon.Options{Home: home, InitialConfig: []byte(cfg), Keys: keys.NewMemory(), Log: log})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return d
 	}
-
-	// Магазина нет: daemon работает, коннекторы ждут следующей возможности.
-	d := open(regexp.MustCompile(`registry_keys: .*`).ReplaceAllString(cfg, `registry_keys: ["`+regPub+`"]`))
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	d.InstallDefaults(ctx)
-	cancel()
+	d := open()
 	if list, _ := store.List(d.ConnectorsDir); len(list) != 0 {
-		t.Fatal("installed without a store:", list)
+		t.Fatal("something installed from the store on a fresh install:", list)
 	}
-	d.Close()
-
-	// Магазин появился; следующий запуск ставит оба коннектора.
-	index2, regPub2 := localRegistry(t, regDir)
-	if index2 != index {
-		t.Fatal(index2)
-	}
-	d = open(cfg)
 	raw, _ := d.Config.CurrentRaw()
-	raw = regexp.MustCompile(`registry_keys: .*`).ReplaceAll(raw, []byte(`registry_keys: ["`+regPub2+`"]`))
 	raw = append(raw, "agents:\n  bot: { profile: default }\n"...)
 	raw = bytes.Replace(raw, []byte("    rules:\n"),
 		[]byte("    rules:\n      - { id: owner-bank, action: bank.balance, effect: deny }\n"), 1)
 	if _, err := d.Config.Put(auth.OwnerVia("test"), raw, "agent"); err != nil {
 		t.Fatal(err)
-	}
-	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	d.InstallDefaults(ctx)
-	cancel()
-
-	list, err := store.List(d.ConnectorsDir)
-	if err != nil || len(list) != 1 || list[0].Name != "browser" {
-		t.Fatal(list, err)
-	}
-	for _, it := range list {
-		if it.Info.Trust != registry.TrustVerified || len(it.Info.Capabilities) == 0 {
-			t.Fatal(it.Name, it.Info)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(home, "default-connectors.json")); !os.IsNotExist(err) {
-		t.Fatal("pending defaults left:", err)
 	}
 	c := d.Config.Current()
 	if !c.Profiles["default"].HasConnector("files") || !c.Profiles["default"].HasConnector("browser") ||
@@ -229,8 +149,8 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 	}
 	for conn, acts := range defaultActions {
 		cli, ok := d.Registry.Get(conn)
-		if !ok {
-			t.Fatal(conn, "not loaded")
+		if !ok || cli.Manifest().Runtime != manifest.RuntimeBuiltin {
+			t.Fatal(conn, "not built in")
 		}
 		var got []string
 		for _, a := range cli.Manifest().Actions {
@@ -239,15 +159,19 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 			}
 			got = append(got, a.Name)
 			action := conn + "." + a.Name
+			wantRule := conn + "-" + a.Name + "-ask"
+			if conn == "browser" {
+				wantRule = "browser-ask"
+			}
 			dec := d.Pipeline.Engine().Decide(policy.Request{Agent: "bot", Action: action, Class: a.Class}, nil)
-			if dec.Effect != config.EffectAsk || dec.Default || !slices.Equal(dec.RuleIDs, []string{conn + "-" + a.Name + "-ask"}) {
+			if dec.Effect != config.EffectAsk || dec.Default || !slices.Equal(dec.RuleIDs, []string{wantRule}) {
 				t.Fatal(action, dec)
+			}
+			if conn != "files" {
+				continue // действия браузера проверяют аргументы и ждут Chrome
 			}
 			args := map[string]map[string]any{"read": {"path": "~/Documents/a"}, "list": {"path": "~/Documents"}, "append": {"path": "~/Documents/a", "text": "x"},
 				"write": {"path": "~/Documents/a", "content": "x"}}[a.Name]
-			if conn != "files" {
-				args = nil
-			}
 			if r := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: action, Args: args}); r.Status != pipeline.StatusPending {
 				t.Fatal(action, r)
 			}
@@ -257,8 +181,6 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 		}
 	}
 
-	// Любой другой коннектор при установке — тоже в default, действия с подтверждения;
-	// правило владельца на действие остаётся.
 	plan, err := d.PrepareConnectorDev(context.Background(), "bank", false)
 	if err != nil {
 		t.Fatal(err)
@@ -275,14 +197,76 @@ func TestFreshInstallDefaultConnectors(t *testing.T) {
 	if !strings.HasPrefix(string(raw), "# gate4ai: no agents yet.") || strings.Count(string(raw), "bank.balance") != 1 {
 		t.Fatalf("policy:\n%s", raw)
 	}
-
-	// Уже установленная система: повторный запуск ничего не ставит заново.
 	d.Close()
-	d = open(cfg)
-	defer d.Close()
-	if _, err := os.Stat(filepath.Join(home, "default-connectors.json")); !os.IsNotExist(err) {
-		t.Fatal("existing install got pending defaults")
+}
+
+// Установка прежней версии: пакеты browser (теперь встроен) и email (удалён)
+// в каталоге коннекторов стираются при старте, почта уходит из политики новой
+// версией; откат возможен.
+func TestLegacyPackagesMigrated(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	cdir := filepath.Join(home, "connectors")
+	for _, name := range []string{"browser", "email"} {
+		os.MkdirAll(filepath.Join(cdir, name), 0o755)
+		os.WriteFile(filepath.Join(cdir, name, "manifest.yaml"), []byte("connector: "+name+"\n"), 0o644)
 	}
+	cfg := `# gate4ai: old install
+store:
+  registry: https://example.invalid/index.json
+  registry_keys: ["ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="]
+agents:
+  bot: { profile: default }
+  mailer: { profile: drafts }
+lists:
+  contacts_trusted: [a@example.com]
+connectors:
+  files: { roots: ["~/Documents"] }
+  email: { address: me@example.com }
+profiles:
+  default:
+    connectors: [files, browser]
+  drafts:
+    connectors: [email, files]
+    rules:
+      - { id: no-send, action: email.send, effect: deny }
+      - { id: files-ro, action: files.write, effect: deny }
+`
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Первый запуск — «старая» установка: кладём политику с почтой напрямую.
+	d, err := daemon.New(daemon.Options{Home: home, InitialConfig: []byte(cfg), Keys: keys.NewMemory(), Log: log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	d, err = daemon.New(daemon.Options{Home: home, InitialConfig: []byte(cfg), Keys: keys.NewMemory(), Log: log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	for _, name := range []string{"browser", "email"} {
+		if _, err := os.Stat(filepath.Join(cdir, name)); !os.IsNotExist(err) {
+			t.Fatal("legacy package left:", name)
+		}
+	}
+	c := d.Config.Current()
+	if _, ok := c.Connectors["email"]; ok || c.Profiles["drafts"].HasConnector("email") || !c.Profiles["drafts"].HasConnector("files") {
+		t.Fatal(c.Connectors, c.Profiles["drafts"])
+	}
+	if ids := ruleIDs(c.Profiles["drafts"].Rules); !slices.Equal(ids, []string{"files-ro"}) {
+		t.Fatal(ids)
+	}
+	if vs, _ := d.Config.Versions(); len(vs) < 2 {
+		t.Fatal("migration must be a new policy version:", vs)
+	}
+}
+
+func ruleIDs(rs []config.Rule) []string {
+	var out []string
+	for _, r := range rs {
+		out = append(out, r.ID)
+	}
+	return out
 }
 
 // Пакет files в магазине не ставится: files — встроенный коннектор ядра.

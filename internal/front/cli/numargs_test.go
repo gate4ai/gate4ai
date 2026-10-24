@@ -60,7 +60,7 @@ var fakePNG = []byte("\x89PNG\r\n\x1a\n-fake-image")
 // --out сохраняет изображение ответа в файл на стороне CLI, путь — в
 // result.file; base64 изображения в вывод не попадает.
 func TestScreenshotOut(t *testing.T) {
-	src, err := os.ReadFile("../../../connectors/browser/manifest.yaml")
+	src, err := os.ReadFile("../../connectors/builtin/browser/manifest.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ profiles:
 // Числовые аргументы CLI (--max_chars, --timeout_ms) доходят до коннектора
 // через daemon без искажения: ровно N, а не значение по умолчанию.
 func TestNumericArgsReachConnector(t *testing.T) {
-	src, err := os.ReadFile("../../../connectors/browser/manifest.yaml")
+	src, err := os.ReadFile("../../connectors/builtin/browser/manifest.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ var (
 // --out пишет файл из ответа (двоичный resource) на диск агента; в выводе —
 // file и bytes вместо base64.
 func TestOutWritesContent(t *testing.T) {
-	src, err := os.ReadFile("../../../connectors/browser/manifest.yaml")
+	src, err := os.ReadFile("../../connectors/builtin/browser/manifest.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

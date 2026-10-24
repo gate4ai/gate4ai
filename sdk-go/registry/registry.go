@@ -64,14 +64,11 @@ type Entry struct {
 // Release — версия коннектора.
 type Release struct {
 	Version      string   `json:"version"`
-	URL          string   `json:"url"`    // пакет .g4c или список платформ .platforms.json: URL или путь относительно индекса
+	URL          string   `json:"url"`    // пакет .g4c: URL или путь относительно индекса
 	SHA256       string   `json:"sha256"` // sha256 файла по URL
 	Digest       string   `json:"digest"` // дайджест пакета (подписан издателем)
 	Capabilities []string `json:"capabilities"`
 }
-
-// Native — запись ссылается на список платформ нативного пакета (runtime: native).
-func (r Release) Native() bool { return strings.HasSuffix(r.URL, ".platforms.json") }
 
 // Revocation — отозванная версия ("*" — все версии).
 type Revocation struct {

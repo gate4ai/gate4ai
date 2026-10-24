@@ -41,9 +41,6 @@ func (b *fakeBrowser) Manifest() manifest.Manifest {
 		{Name: "fill_secret", Class: "write", InputSchema: obj},
 		{Name: "handoff", Class: "read", InputSchema: manifest.MustSchema(`{ type: object, properties: { session: { type: string }, message: { type: string } } }`)},
 	}}
-	if b.runtime == manifest.RuntimeNative {
-		m.Platforms = []string{"linux/amd64"}
-	}
 	return m
 }
 
@@ -250,7 +247,7 @@ func (e *credEnv) journal(t *testing.T) (all string, uses []audit.Receipt) {
 }
 
 func TestAgentLoginGetsValuesOnlyForLogin(t *testing.T) {
-	e := newCredEnv(t, manifest.RuntimeNative)
+	e := newCredEnv(t, manifest.RuntimeBuiltin)
 	ctx := context.Background()
 	// Другие действия: учётки агента (без форм и значений).
 	if r := e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.open", Args: map[string]any{"url": "https://lk.example/"}}); r.Status != StatusOK {
@@ -299,7 +296,7 @@ func TestAgentLoginGetsValuesOnlyForLogin(t *testing.T) {
 }
 
 func TestLoginAccess(t *testing.T) {
-	e := newCredEnv(t, manifest.RuntimeNative)
+	e := newCredEnv(t, manifest.RuntimeBuiltin)
 	ctx := context.Background()
 	n := len(e.br.reqs)
 	// Профиль агента не в use — secret_denied, browser не вызывается, отказ в журнале.
@@ -350,7 +347,7 @@ func TestLoginAccess(t *testing.T) {
 }
 
 func TestLoginViaConnector(t *testing.T) {
-	e := newCredEnv(t, manifest.RuntimeNative)
+	e := newCredEnv(t, manifest.RuntimeBuiltin)
 	ctx := context.Background()
 	e.via.calls = []abi.ServiceCallRequest{{Target: "browser", Action: "fill_secret", Args: map[string]any{"account": "@bank", "field": "sms", "selector": "#sms", "source": "human"}}}
 	e.via.out = map[string]any{"status": "submitted", "extra": "dropped"}
@@ -402,7 +399,7 @@ func TestLoginViaConnector(t *testing.T) {
 	}
 }
 
-func TestAccountsOnlyForNativeBrowser(t *testing.T) {
+func TestAccountsOnlyForBuiltinBrowser(t *testing.T) {
 	e := newCredEnv(t, manifest.RuntimeWasm)
 	r := e.p.Execute(context.Background(), Call{Agent: "dev", Action: "browser.login", Args: map[string]any{"account": "@emias"}})
 	q := e.br.last()
@@ -425,7 +422,7 @@ func TestBrowserAgentInstance(t *testing.T) {
 		{&audit.Caller{Kind: "claude-code", Source: "reported", Session: "f170"}, ""},
 		{nil, ""},
 	} {
-		e := newCredEnv(t, manifest.RuntimeNative)
+		e := newCredEnv(t, manifest.RuntimeBuiltin)
 		e.p.Execute(WithCaller(context.Background(), tc.c), Call{Agent: "dev", Action: "browser.login", Args: map[string]any{"account": "@emias"}})
 		if q := e.br.last(); q.Agent != "dev" || q.AgentInstance != tc.want {
 			t.Fatalf("%+v: agent %q instance %q, want %q", tc.c, q.Agent, q.AgentInstance, tc.want)
@@ -434,7 +431,7 @@ func TestBrowserAgentInstance(t *testing.T) {
 }
 
 func TestApprovalShowsAccount(t *testing.T) {
-	e := newCredEnv(t, manifest.RuntimeNative)
+	e := newCredEnv(t, manifest.RuntimeBuiltin)
 	cfg := e.p.cfg()
 	bm := e.br.Manifest()
 	act, _ := bm.Find("login")
@@ -451,7 +448,7 @@ func TestApprovalShowsAccount(t *testing.T) {
 // Учётка с коннектором входа: он вводит её поля по имени; браузер проверяет
 // страницу до вопроса человеку — при отказе человека не спрашивают.
 func TestViaFieldsAndPrecheck(t *testing.T) {
-	e := newCredEnv(t, manifest.RuntimeNative)
+	e := newCredEnv(t, manifest.RuntimeBuiltin)
 	ctx := context.Background()
 	e.via.calls = []abi.ServiceCallRequest{{Target: "browser", Action: "fill_secret", Args: map[string]any{"account": "@bank", "field": "password", "selector": "#pw"}}}
 	e.via.out = map[string]any{"status": "logged_in"}
@@ -498,7 +495,7 @@ func TestHumanPromptFromAgentIgnored(t *testing.T) {
 // browser.handoff: человек получает уведомление, только когда браузер проверил
 // сеанс; слова агента — одной строкой; запись снимается после ожидания.
 func TestHandoffNotifiesAfterPrecheck(t *testing.T) {
-	e := newCredEnv(t, manifest.RuntimeNative)
+	e := newCredEnv(t, manifest.RuntimeBuiltin)
 	var got []Handoff
 	active := 0
 	e.p.Handoff = func(h Handoff) func() {
