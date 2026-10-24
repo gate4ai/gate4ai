@@ -4,9 +4,9 @@ package native
 
 import (
 	"bytes"
-	"errors"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"

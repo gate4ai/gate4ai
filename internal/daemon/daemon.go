@@ -86,6 +86,8 @@ type Daemon struct {
 	questions questions
 	handoffMu sync.Mutex
 	handoffs  map[string]HandoffNote // browser.handoff, которые ждут человека
+	bviews    browserViews           // зрители сеансов браузера
+	localUI   string                 // адрес Web UI на этом компьютере (SetLocalUI)
 	servers   []*http.Server
 	extra     []func(*http.ServeMux) // доп. маршруты владельца (MCP HTTP, Web UI)
 	oauth     *oauth.Server
@@ -166,6 +168,7 @@ func New(opt Options) (*Daemon, error) {
 	}
 	d.dropRevoked()
 	d.AddRoutes(d.connectorRoutes)
+	d.AddRoutes(d.browserRoutes)
 	eng, err := d.compilePolicy(d.Config.Current())
 	if err != nil {
 		return nil, err
@@ -190,6 +193,7 @@ func New(opt Options) (*Daemon, error) {
 	d.Pipeline.Vault = d.Vault
 	d.Pipeline.Ask = d.ask
 	d.Pipeline.Handoff = d.handoff
+	d.Pipeline.ViewURL = d.BrowserViewURL
 	if opt.Now != nil {
 		d.Pipeline.Now = opt.Now
 		d.State.Now = opt.Now

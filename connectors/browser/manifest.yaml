@@ -244,7 +244,7 @@ actions:
       type: object
       properties:
         url: { type: string, description: address when the wait ended }
-        status: { type: string, enum: [done, timeout] }
+        status: { type: string, enum: [done, timeout, declined], description: "done — the page changed (or the user pressed Done), timeout — the user did not finish in time, declined — the user said they will not do it" }
       required: [url, status]
     example: gate4ai browser handoff --session s-… --message "Sign in to habr.com" --until_selector .user-menu
   - name: network

@@ -1,0 +1,18 @@
+{{template "head" .}}
+{{$d := .Data}}{{$st := $d.Status}}
+<h2>{{T "Browser"}}</h2>
+{{with $st.Warning}}<div class="note warn">{{T "The browser runs without a screen (headless): sites with bot protection ask for a captcha or block more often. Install Xvfb for a virtual screen — see gate4ai browser setup."}}</div>{{end}}
+{{if $st.Missing}}<div class="card"><p>{{T "The browser package is not installed."}}</p>{{if not .Remote}}<a class="btn" href="{{.Base}}/connectors">{{T "Access"}}</a>{{end}}</div>
+{{else}}
+<p class="help">{{T "The sessions agents have open in the gate4ai browser. Watch one live; take control to click and type yourself — the agent waits until you give it back."}}</p>
+<div class="card" style="padding:.3rem 1rem"><table>
+<tr><th>{{T "Agent"}}</th><th>{{T "Page"}}</th><th>{{T "Now"}}</th><th>{{T "Open since"}}</th><th></th></tr>
+{{range $st.Sessions}}<tr><td><b>{{.Who}}</b></td><td>{{with .URL}}<code>{{.}}</code>{{else}}<span class="muted">—</span>{{end}}</td>
+<td>{{template "bstate" .State}}{{with .Running}} <span class="muted">· browser.{{.}}</span>{{end}}</td>
+<td class="muted">{{ago .Since}}{{if not .Closes.IsZero}} · {{T "closes if idle %s" (left .Closes)}}{{end}}</td>
+<td style="text-align:right"><a class="btn small primary" href="{{$.Base}}/browser/{{.ID}}">{{T "Watch"}}</a></td></tr>
+{{else}}<tr><td colspan="5" class="muted">{{T "No agent has the browser open now."}}</td></tr>{{end}}
+</table></div>
+{{if $st.Display}}<p class="hstate">{{T "Screen"}}: {{if eq $st.Display "virtual"}}{{T "virtual (Xvfb)"}}{{else if eq $st.Display "headless"}}<span class="warn">{{T "none (headless)"}}</span>{{else}}{{T "this computer's"}}{{end}}</p>{{end}}
+{{end}}
+{{template "foot"}}

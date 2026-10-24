@@ -59,6 +59,7 @@ type callSession struct {
 	opened bool
 	url    string                 // адрес страницы после последнего действия (под mu)
 	shown  atomic.Pointer[string] // тот же адрес для владельца — без mu, который держит идущее действие
+	stop   atomic.Pointer[chan string] // идущий handoff: ответ человека из просмотра (Owner "handoff")
 	sid    string                 // id сеанса агента ("" — страница вызывающего коннектора): снимки — в файлы
 	shots  int                    // снимков сеанса (номер в имени файла)
 	timer  *time.Timer
@@ -602,6 +603,10 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			return abi.ExecResult{Structured: map[string]any{"url": cleanURL(cs.url)}}, worker.CheckHandoff(hr)
 		}
 		cs.s.Activate(ctx) // человек видит вкладку сеанса
+		stop := make(chan string, 1)
+		cs.stop.Store(&stop)
+		defer cs.stop.Store(nil)
+		hr.Stop = stop
 		res, err := cs.s.Handoff(ctx, hr)
 		if err != nil {
 			return abi.ExecResult{}, err

@@ -239,7 +239,7 @@ func TestDesktopLog(t *testing.T) {
 	d.Notify(a)
 	d.Asked("a_2", "код с сайта")
 	d.Denied("bot", "email.send", "recipient not in allowlist")
-	d.HandedOff("войдите на сайт")
+	d.HandedOff("войдите на сайт", "/browser/s-1")
 	if err := d.Test(); err != nil {
 		t.Fatal(err)
 	}

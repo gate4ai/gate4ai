@@ -257,11 +257,13 @@ func (u *UI) attemptOf(m mount, r *http.Request) (string, *attempt) {
 	return c.Value, a
 }
 
-// startSession выдаёт сессию; protected — вход прошёл защиту.
-func (u *UI) startSession(w http.ResponseWriter, m mount, protected bool) {
+// startSession выдаёт сессию; protected — вход прошёл защиту, telegram — в
+// том числе подтверждение в Telegram (удалённое управление браузером без
+// отдельного подтверждения).
+func (u *UI) startSession(w http.ResponseWriter, m mount, protected, telegram bool) {
 	sid := random()
 	u.mu.Lock()
-	u.sessions[sid] = session{csrf: random(), expires: u.Now().Add(12 * time.Hour), remote: m.remote, protected: protected}
+	u.sessions[sid] = session{csrf: random(), expires: u.Now().Add(12 * time.Hour), remote: m.remote, protected: protected, telegram: telegram}
 	u.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: m.cookie(), Value: sid, Path: m.base + "/", HttpOnly: true, Secure: m.remote,
 		SameSite: http.SameSiteStrictMode, MaxAge: 12 * 3600})
@@ -475,7 +477,7 @@ func (u *UI) loginStep(w http.ResponseWriter, r *http.Request, m mount, id, errM
 	u.mu.Unlock()
 	if done {
 		http.SetCookie(w, &http.Cookie{Name: m.attemptCookie(), Value: "", Path: m.base + "/", MaxAge: -1, Secure: m.remote})
-		u.startSession(w, m, true)
+		u.startSession(w, m, true, a.telegram == tgOK)
 		http.Redirect(w, r, m.base+"/", http.StatusSeeOther)
 		return
 	}

@@ -118,6 +118,7 @@ type ownerArgs struct {
 	MaxWidth int          `json:"max_width"`
 	Quality  int          `json:"quality"`
 	Input    worker.Input `json:"input"`
+	Result   string       `json:"result"` // handoff: done | declined
 }
 
 // Owner — запрос владельца.
@@ -160,6 +161,20 @@ func (b *Browser) Owner(ctx context.Context, op string, raw json.RawMessage) (an
 		return b.infoOf(as), nil
 	case "input":
 		return map[string]any{}, b.input(ctx, as, a.Input)
+	case "handoff":
+		// Ответ человека на handoff из просмотра: готово или не буду.
+		if a.Result != worker.HandoffDone && a.Result != worker.HandoffDeclined {
+			return nil, fmt.Errorf("handoff result %q: done or declined", a.Result)
+		}
+		ch := as.stop.Load()
+		if ch == nil {
+			return nil, errors.New("the agent is not waiting for you in this session")
+		}
+		select {
+		case *ch <- a.Result:
+		default:
+		}
+		return map[string]any{}, nil
 	case "close":
 		_, err := b.closeSession(as, nil, "closed by the user in gate4ai")
 		return map[string]any{"closed": true}, err

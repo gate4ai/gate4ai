@@ -94,7 +94,7 @@ func tplIn(l string) *template.Template {
 var titles = map[string]string{"overview": "Home", "approvals": "Approvals", "telegram": "Telegram", "agents": "Agents", "agent": "Agent",
 	"agent_new": "New agent", "setup": "Getting started", "connectors": "Access", "connector": "Connector", "policy": "Rules", "rule": "Rule", "templates": "Ready-made rules",
 	"policy_yaml": "YAML", "journal": "Journal", "receipt": "Journal entry", "vault": "Passwords and accounts", "settings": "Settings", "relay": "Internet access",
-	"remote_only": "Only on this computer"}
+	"remote_only": "Only on this computer", "browser": "Browser", "browser_view": "Browser session"}
 
 // or — первое непустое.
 var or = cmp.Or[string]
@@ -187,6 +187,7 @@ type session struct {
 	expires   time.Time
 	remote    bool
 	protected bool // вход прошёл защиту (пароль и/или Telegram)
+	telegram  bool // вход подтверждён в Telegram
 }
 
 // mount — где обслуживается Web UI: локально (loopback) или удалённо (/ui/ на
@@ -368,6 +369,12 @@ func (u *UI) handler(m mount) http.Handler {
 	mux.HandleFunc("GET "+b+"/approvals/live", u.livePending(m))
 	get("/journal", u.journal)
 	get("/journal/{hash}", u.receipt)
+	get("/browser", u.browserList)
+	get("/browser/{id}", u.browserView(m))
+	mux.HandleFunc("GET "+b+"/browser/{id}/ws", u.browserWS(m))
+	post("/browser/{id}/control", u.browserControl(m))
+	post("/browser/{id}/close", u.browserClose)
+	post("/browser/{id}/handoff", u.browserHandoff)
 	post("/approvals/{id}", u.decide(m))
 	post("/questions/{id}", u.answer)
 	post("/push/subscribe", u.pushSubscribe(m))
@@ -529,7 +536,7 @@ func (u *UI) login(m mount) http.HandlerFunc {
 			if valid {
 				p := u.Protection()
 				if !p.Extra() {
-					u.startSession(w, m, false)
+					u.startSession(w, m, false, false)
 					sameSiteRedirect(w, m.base+"/")
 					return
 				}
@@ -590,6 +597,8 @@ func (v view) Section() string {
 		return "access"
 	case "journal", "receipt":
 		return "journal"
+	case "browser", "browser_view":
+		return "browser"
 	case "settings", "relay", "vault":
 		return "settings"
 	}

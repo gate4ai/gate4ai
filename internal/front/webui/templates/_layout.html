@@ -95,6 +95,7 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 <a href="{{.Base}}/" class="{{if eq $s "home"}}on{{end}}"{{if eq $s "home"}} aria-current="page"{{end}}>{{T "Home"}}<span class="count" data-pending-count{{if not .Pending}} hidden{{end}} aria-label="{{T "waiting for you"}}">{{.Pending}}</span></a>
 {{if not .Remote}}<a href="{{.Base}}/agents" class="{{if eq $s "agents"}}on{{end}}"{{if eq $s "agents"}} aria-current="page"{{end}}>{{T "Agents"}}</a>
 <a href="{{.Base}}/connectors" class="{{if eq $s "access"}}on{{end}}"{{if eq $s "access"}} aria-current="page"{{end}}>{{T "Access"}}</a>{{end}}
+<a href="{{.Base}}/browser" class="{{if eq $s "browser"}}on{{end}}"{{if eq $s "browser"}} aria-current="page"{{end}}>{{T "Browser"}}</a>
 <a href="{{.Base}}/journal" class="{{if eq $s "journal"}}on{{end}}"{{if eq $s "journal"}} aria-current="page"{{end}}>{{T "Journal"}}</a>
 {{if not .Remote}}<a href="{{.Base}}/settings" class="{{if eq $s "settings"}}on{{end}}"{{if eq $s "settings"}} aria-current="page"{{end}}>{{T "Settings"}}</a>{{end}}
 </nav>
@@ -102,11 +103,13 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 <span class="lang" aria-label="{{T "Language"}}">{{$p := .Path}}{{$b := .Base}}{{range langs}}<a href="{{$b}}/lang?l={{.Code}}&amp;back={{$p}}" class="{{if eq .Code Lang}}on{{end}}" lang="{{.Code}}">{{.Code | printf "%s"}}</a> {{end}}</span>
 <form method="post" action="{{$.Base}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">{{T "Sign out"}}</button></form>
 </header><main id="main">
-{{if .Remote}}<div class="note">{{T "Remote access: approvals and the journal. Agents, access rules and settings change only on the computer itself."}}</div>{{end}}
+{{if .Remote}}<div class="note">{{T "Remote access: approvals, the browser and the journal. Agents, access rules and settings change only on the computer itself."}}</div>{{end}}
 {{if .Flash}}<div class="flash" role="status" data-flash>{{.Flash}}{{with .Detail}}<details><summary>{{T "Details"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}
 {{if .Error}}{{with errView .Error}}<div class="error" role="alert" data-error>{{.Text}}{{with .Detail}}<details><summary>{{T "Details"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}{{end}}
 {{end}}
 {{define "foot"}}</main></body></html>{{end}}
+{{/* bstate — состояние сеанса браузера (раздел «Браузер», Главная). */}}
+{{define "bstate"}}{{if eq . "working"}}<span class="badge ok">{{T "the agent is working"}}</span>{{else if eq . "waiting"}}<span class="badge ask">{{T "waits for you"}}</span>{{else if eq . "user"}}<span class="badge warn">{{T "under your control"}}</span>{{else}}<span class="badge">{{T "idle"}}</span>{{end}}{{end}}
 
 {{define "pending"}}{{$v := .V}}{{$back := .Back}}
 {{range .List}}{{template "approval_card" (dict "V" $v "A" . "Back" $back)}}{{end}}

@@ -168,6 +168,9 @@ type Pipeline struct {
 	// Handoff — человеку передана страница браузера (browser.handoff): уведомить
 	// его; done — ожидание закончилось (убрать из списка).
 	Handoff func(h Handoff) (done func())
+	// ViewURL — ссылка на просмотр сеанса браузера (nil — без неё): ответ
+	// browser.open с новым сеансом несёт её в view_url, уведомление handoff — тоже.
+	ViewURL func(session string) string
 
 	mu     sync.RWMutex
 	engine *policy.Engine
@@ -660,7 +663,12 @@ func (p *Pipeline) invoke(ctx context.Context, agent, action string, cli connect
 			return abi.ExecResult{}, err
 		}
 		msg, _ := req.Args["message"].(string)
-		defer p.Handoff(Handoff{Agent: agent, Message: promptText(msg)})()
+		session, _ := req.Args["session"].(string)
+		h := Handoff{Agent: agent, Message: promptText(msg), Session: session}
+		if p.ViewURL != nil && session != "" {
+			h.URL = p.ViewURL(session)
+		}
+		defer p.Handoff(h)()
 	}
 	if prep != nil && prep.via != nil {
 		session, _ := req.Args["session"].(string)
@@ -676,8 +684,23 @@ func (p *Pipeline) invoke(ctx context.Context, agent, action string, cli connect
 	} else {
 		ex, err = cli.Execute(WithAgent(ctx, agent), req)
 	}
+	if err == nil && act.Name == "open" && strings.SplitN(action, ".", 2)[0] == BrowserConnector && cli.Manifest().Runtime == manifest.RuntimeNative &&
+		p.ViewURL != nil && req.Caller == nil {
+		// Новый сеанс агента: ссылка, по которой человек смотрит его вживую.
+		if m, ok := ex.Structured.(map[string]any); ok {
+			if s, _ := m["session"].(string); s != "" && !hasSession(req.Args) {
+				m["view_url"] = p.ViewURL(s)
+			}
+		}
+	}
 	p.journalUses(agent, action, receiptID, prep, ex, err)
 	return ex, err
+}
+
+// hasSession — вызов в уже открытом сеансе браузера (аргумент session).
+func hasSession(args map[string]any) bool {
+	s, _ := args["session"].(string)
+	return s != ""
 }
 
 func needVerify(act manifest.Action, dec policy.Decision) bool {

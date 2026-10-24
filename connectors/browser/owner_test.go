@@ -152,3 +152,48 @@ func TestOwnerViewRealChrome(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Ответ человека на handoff из просмотра: «Готово» и «Не буду».
+func TestOwnerHandoffAnswer(t *testing.T) {
+	_, b, _ := setup(t, nil)
+	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	if _, err := owner(t, b, "handoff", map[string]any{"session": id, "result": "done"}); err == nil || !strings.Contains(err.Error(), "not waiting") {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"declined", "done"} {
+		got := make(chan map[string]any, 1)
+		go func() {
+			r, err := agentExec(t, b, "handoff", map[string]any{"session": id, "message": "Sign in"})
+			if err != nil {
+				r = map[string]any{"err": err.Error()}
+			}
+			got <- r
+		}()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			st, _ := owner(t, b, "sessions", nil)
+			if ss := st.(BrowserStatus).Sessions; len(ss) == 1 && ss[0].State == StateWaiting {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the handoff did not start")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if _, err := owner(t, b, "handoff", map[string]any{"session": id, "result": want}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case r := <-got:
+			if r["status"] != want {
+				t.Fatal(want, r)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the agent still waits after", want)
+		}
+	}
+}
