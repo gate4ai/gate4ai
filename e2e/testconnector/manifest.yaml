@@ -1,0 +1,68 @@
+connector: testconnector
+title: Test connector
+description: e2e — connector to the gate4ai test site (e2e/testsite) through the built-in browser (service_call) — reads the readings table, signs in to the cabinet with an account from the vault, presses the button in the cabinet and verifies the result on the page
+version: "1"
+runtime: wasm
+capabilities:
+  services:
+    - target: browser
+      contract: 1
+      actions: [open, observe, act, login]
+# Сайт задаёт владелец: connectors.testconnector: { domains: ["127.0.0.1"], site: "http://127.0.0.1:8099", login_site: "http://127.0.0.1:8099", credentials: { site: "@site" } }
+sites:
+  - { domain: "${setting:domains}", access: allow }
+credentials:
+  - { slot: site, bind: ["${setting:login_site}"], types: [form] }
+actions:
+  - name: read
+    title: Read the readings
+    description: the readings table from the test site home page
+    class: read
+    calls: [browser.open, browser.observe]
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: url, description: "site address; default — the site setting" }
+    output_schema:
+      type: object
+      properties:
+        title: { type: string }
+        rows:
+          type: array
+          items:
+            type: object
+            properties: { meter: { type: string }, value: { type: string } }
+            required: [meter, value]
+      required: [title, rows]
+  - name: cabinet
+    title: Open the cabinet
+    description: the cabinet page, signing in with the site account when the site asks
+    class: write
+    calls: [browser.open, browser.login, browser.observe]
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: url, description: "site address; default — the site setting" }
+    output_schema:
+      type: object
+      properties:
+        status: { type: string, description: "already — the session was alive; else the browser.login status" }
+        title: { type: string }
+        text: { type: string }
+      required: [status, title]
+  - name: press
+    title: Send a request
+    description: presses the button in the cabinet; the result is verified by the text on the page
+    class: write
+    verify: cabinet_page
+    calls: [browser.open, browser.login, browser.act, browser.observe]
+    input_schema:
+      type: object
+      properties:
+        url: { type: string, format: url, description: "site address; default — the site setting" }
+    output_schema:
+      type: object
+      properties:
+        number: { type: integer, description: request number from the page }
+        result: { type: string, description: the result line from the page }
+      required: [number, result]

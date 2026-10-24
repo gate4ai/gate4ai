@@ -56,7 +56,7 @@
 | Трей (бинарник `gate4ai-tray`) | `cmd/gate4ai-tray` (меню, fyne.io/systray), `internal/front/tray` (состояние, решения, уведомления) |
 | Магазин: пакеты .g4c (только WASM), индекс registry, установка с согласием, отзыв | `internal/connectors/store`; индекс — отдельный репозиторий `gate4ai/registry` ([repo-structure.md](repo-structure.md)); формат индекса и его подпись — `sdk-go/registry` (те же правила у сайта gate4.ai) |
 | Изоляция: Egress Proxy, `gate4ai run`, `doctor` (в том числе агент без своего ключа, ждущее подключение, прежний токен в env и правило `Bash(gate4ai *)` в настройках Claude Code, устаревший SKILL.md) | `internal/hostsvc/egress`, `internal/sandbox` (`doctor.go`); настройки Claude Code при подключении — `internal/front/agentsetup` |
-| Сквозной тест (хост, relay, встроенные Браузер и Файлы, тестовый WASM-коннектор `e2e/testdata/pagereader` поверх браузера) | `e2e/` |
+| Сквозной тест (хост, relay, встроенные Браузер и Файлы, тестовый сайт `e2e/testsite` и WASM-коннектор к нему `e2e/testconnector` поверх браузера) | `e2e/` |
 | CI, направление зависимостей, SPDX, проверка истории на секреты; выпуск — [publishing.md](publishing.md) | `scripts/ci.sh`, `scripts/deps-check.sh`, `scripts/spdx.sh`, `scripts/secret-scan.sh`, `.github/workflows/` |
 
 ## Журнал: что можно менять

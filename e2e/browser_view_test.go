@@ -14,9 +14,12 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
 	"time"
 
 	"github.com/chromedp/chromedp"
+
+	"github.com/gate4ai/gate4ai/e2e/testsite"
 )
 
 // Просмотр сеанса агента в настоящем браузере: browser.open отдаёт view_url,
@@ -32,13 +35,7 @@ func TestBrowserLiveView(t *testing.T) {
 			t.Skip("needs Chrome")
 		}
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<!doctype html><title>Live</title><body style="margin:0">
-<button id=b style="position:absolute;left:0;top:0;width:50vw;height:40vh" onclick="this.textContent='clicked '+(++window.n)">click me</button>
-<input id=i style="position:absolute;left:0;top:60vh;width:90vw;height:10vh">
-<p id=o style="position:absolute;top:80vh"></p><script>window.n=0;i.oninput=()=>o.textContent='typed '+i.value</script>`)
-	}))
+	srv := httptest.NewServer(testsite.New().Handler()) // /live — крупные кнопка и поле
 	defer srv.Close()
 	g := startGate(t, "--ui", "127.0.0.1:0")
 	dir := t.TempDir()
@@ -65,7 +62,7 @@ connectors:
 		t.Fatal(r.out)
 	}
 	tok := g.run("", "", "agents", "token", "claude-code").json(t)["token"].(string)
-	r := g.run(tok, "", "browser", "open", "--url", srv.URL+"/")
+	r := g.run(tok, "", "browser", "open", "--url", srv.URL+"/live")
 	if r.code != 0 {
 		t.Fatal(r.out)
 	}

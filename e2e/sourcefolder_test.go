@@ -18,13 +18,13 @@ import (
 func TestConnectorFromSourceFolder(t *testing.T) {
 	t.Parallel()
 	g := startGate(t)
-	dir := filepath.Join(t.TempDir(), "pagereader-src")
-	if err := os.CopyFS(dir, os.DirFS(src(t, "e2e/testdata/pagereader"))); err != nil {
+	dir := filepath.Join(t.TempDir(), "testconnector-src")
+	if err := os.CopyFS(dir, os.DirFS(src(t, "e2e/testconnector"))); err != nil {
 		t.Fatal(err)
 	}
 	// Папка вне репозитория, как у стороннего автора: свой go.mod, модуль gate4ai —
 	// из этого репозитория (replace), зависимости — из кэша модулей.
-	mod := "module example.com/pagereader-src\n\ngo 1.27.1\n\nrequire github.com/gate4ai/gate4ai v0.0.0\n\nreplace github.com/gate4ai/gate4ai => " + src(t, "") + "\n"
+	mod := "module example.com/testconnector-src\n\ngo 1.27.1\n\nrequire github.com/gate4ai/gate4ai v0.0.0\n\nreplace github.com/gate4ai/gate4ai => " + src(t, "") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestConnectorFromSourceFolder(t *testing.T) {
 			t.Fatalf("connectors list: %s", r.out)
 		}
 		for _, c := range list {
-			if c := c.(map[string]any); c["connector"] == "pagereader" {
+			if c := c.(map[string]any); c["connector"] == "testconnector" {
 				return c["version"].(string)
 			}
 		}
@@ -68,11 +68,11 @@ func TestConnectorFromSourceFolder(t *testing.T) {
 	}
 
 	setVersion("dev1")
-	if r := g.run("", "", "connectors", "update", "pagereader"); r.code != 0 || version() != "dev1" {
+	if r := g.run("", "", "connectors", "update", "testconnector"); r.code != 0 || version() != "dev1" {
 		t.Fatalf("update from folder: %d %s (version %q)", r.code, r.out, version())
 	}
 
-	w := exec.Command(g.bin, "connectors", "update", "pagereader", "--watch", "--yes")
+	w := exec.Command(g.bin, "connectors", "update", "testconnector", "--watch", "--yes")
 	w.Env = g.env
 	wout := &lockedBuf{}
 	w.Stdout, w.Stderr = wout, wout

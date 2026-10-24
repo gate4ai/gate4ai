@@ -1,0 +1,18 @@
+{
+  "steps": [
+    {"action": "open", "args": {"url": "http://127.0.0.1:8099/"}, "result": {"url": "http://127.0.0.1:8099/", "title": "Показания"}},
+    {"action": "observe", "args": {"selector": "#readings"}, "result": {"url": "http://127.0.0.1:8099/", "title": "Показания", "text": "Счётчик\tПоказание\nЭлектричество\t1 234\nХолодная вода\t56\nГорячая вода\t38"}},
+    {"action": "observe", "args": {"max_chars": 1}, "result": {"url": "http://127.0.0.1:8099/", "title": "Показания", "text": "Т", "truncated": true}},
+
+    {"action": "open", "args": {"url": "http://127.0.0.1:8099/cabinet"}, "result": {"url": "http://127.0.0.1:8099/login?back=/cabinet", "title": "Вход", "login_required": {"account": "@site"}}},
+    {"action": "login", "args": {"account": "site"}, "result": {"url": "http://127.0.0.1:8099/cabinet?t=t1-1", "status": "logged_in", "origin": "http://127.0.0.1:8099"}},
+    {"action": "observe", "args": {}, "result": {"url": "http://127.0.0.1:8099/cabinet", "title": "Кабинет", "text": "Кабинет\nКабинет: долг 1 234,56 ₽\nОтправить заявку\nЗаявок пока нет"}},
+
+    {"action": "open", "args": {"url": "http://127.0.0.1:8099/cabinet"}, "result": {"url": "http://127.0.0.1:8099/cabinet", "title": "Кабинет"}},
+    {"action": "act", "args": {"selector": "#press", "method": "click", "expect_text": "принята"}, "result": {"url": "http://127.0.0.1:8099/cabinet", "text": "Отправить заявку"}},
+    {"action": "observe", "args": {"selector": "#result"}, "result": {"url": "http://127.0.0.1:8099/cabinet", "title": "Кабинет", "text": "Заявка №1 принята"}},
+
+    {"action": "open", "args": {"url": "http://127.0.0.1:8099/cabinet"}, "result": {"url": "http://127.0.0.1:8099/cabinet", "title": "Кабинет"}},
+    {"action": "observe", "args": {"selector": "#result"}, "result": {"url": "http://127.0.0.1:8099/cabinet", "title": "Кабинет", "text": "Заявка №1 принята"}}
+  ]
+}
