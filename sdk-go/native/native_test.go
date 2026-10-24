@@ -5,6 +5,7 @@ package native
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -197,5 +198,64 @@ func TestSendDoesNotHangOnStuckReader(t *testing.T) {
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatal("send hung for", d)
+	}
+}
+
+// ownerEcho — коннектор с запросами владельца и событиями.
+type ownerEcho struct {
+	echo
+	emit func(kind string, data any)
+}
+
+func (o *ownerEcho) SetEmit(emit func(kind string, data any)) { o.emit = emit }
+
+func (o *ownerEcho) Owner(_ context.Context, op string, args json.RawMessage) (any, error) {
+	if op != "ping" {
+		return nil, errors.New("unknown op " + op)
+	}
+	o.emit("pong", map[string]any{"args": args})
+	return map[string]string{"ok": "yes"}, nil
+}
+
+func TestServeOwnerAndEvents(t *testing.T) {
+	m, _ := manifest.Parse([]byte("connector: echo\nruntime: native\nplatforms: [linux/amd64]\nactions:\n  - { name: read, class: read }\n"))
+	toProc, procIn := io.Pipe()
+	procOut, fromProc := io.Pipe()
+	go ServeIO(m, &ownerEcho{}, toProc, fromProc)
+	events := make(chan EventParams, 1)
+	host := NewPeer(procOut, procIn, func(_ context.Context, method string, params json.RawMessage) (any, error) {
+		if method == MethodEvent {
+			var e EventParams
+			json.Unmarshal(params, &e)
+			events <- e
+		}
+		return nil, nil
+	})
+	go host.Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var out map[string]string
+	if err := host.Call(ctx, MethodOwner, OwnerParams{Op: "ping", Args: json.RawMessage(`{"n":1}`)}, &out); err != nil || out["ok"] != "yes" {
+		t.Fatal(out, err)
+	}
+	select {
+	case e := <-events:
+		if e.Kind != "pong" || !strings.Contains(string(e.Data), `"n":1`) {
+			t.Fatal(e)
+		}
+	case <-ctx.Done():
+		t.Fatal("no event")
+	}
+	if err := host.Call(ctx, MethodOwner, OwnerParams{Op: "nope"}, nil); err == nil || !strings.Contains(err.Error(), "unknown op") {
+		t.Fatal(err)
+	}
+	// Коннектор без Owner — понятная ошибка.
+	toProc2, procIn2 := io.Pipe()
+	procOut2, fromProc2 := io.Pipe()
+	go ServeIO(m, &echo{}, toProc2, fromProc2)
+	host2 := NewPeer(procOut2, procIn2, nil)
+	go host2.Run()
+	if err := host2.Call(ctx, MethodOwner, OwnerParams{Op: "ping"}, nil); err == nil || !strings.Contains(err.Error(), "no owner requests") {
+		t.Fatal(err)
 	}
 }

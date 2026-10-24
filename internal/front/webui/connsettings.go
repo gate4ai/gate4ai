@@ -64,6 +64,7 @@ var settingHints = map[string]map[string]fieldHint{
 		"chrome_path":        {Label: "Path to Chrome", Kind: fieldText, Help: "Empty — find the installed Chrome.", Advanced: true},
 		"cdp_url":            {Label: "CDP address", Kind: fieldText, Help: "An already running Chrome; empty — the package starts it.", Advanced: true},
 		"engine":             {Label: "Engine", Kind: fieldChoice, Choices: []string{"stagehand", "cdp"}, Help: "stagehand (default) or cdp.", Advanced: true},
+		"display":            {Label: "Screen", Kind: fieldChoice, Choices: []string{"auto", "virtual", "headless", "host"}, Help: "auto (default): your screen; on a server without one — a virtual screen (Xvfb), without Xvfb — no screen (headless, sites see it more often). You watch the sessions in Browser either way.", Advanced: true},
 		"download_types":     {Label: "File types agents may download", Kind: fieldList, Help: "browser.download returns only these: application/pdf, image/*, .csv. Empty — any type.", Placeholder: "application/pdf", Advanced: true},
 		"max_download_bytes": {Label: "Largest file to download, bytes", Kind: fieldNumber, Help: "20 MiB at most (the default).", Placeholder: "20971520", Advanced: true},
 		"download_dir":       {Label: "Downloads folder", Kind: fieldText, Help: "Where Chrome saves files downloaded in its window, without a Save as dialog; empty — your Downloads folder.", Placeholder: "~/Downloads", Advanced: true},
@@ -197,7 +198,7 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 
 var hintOrder = map[string][]string{
 	"files":   {"roots", "allow_hidden", "allow_paths", "max_bytes"},
-	"browser": {"allowed_domains", "mode", "blocked", "model", "model_key", "profile_dir", "chrome_path", "cdp_url", "engine", "download_types", "max_download_bytes", "download_dir"},
+	"browser": {"allowed_domains", "mode", "blocked", "model", "model_key", "profile_dir", "chrome_path", "cdp_url", "engine", "display", "download_types", "max_download_bytes", "download_dir"},
 	"email":   {"address", "imap.password", "imap.host", "imap.port", "imap.username", "smtp.host", "smtp.port", "smtp.password"},
 }
 

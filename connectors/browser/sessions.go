@@ -150,6 +150,9 @@ func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 		if as == nil {
 			return abi.ExecResult{}, b.closedErr(id, r)
 		}
+		if err := b.heldErr(as); err != nil {
+			return abi.ExecResult{}, err
+		}
 		if r.Action == "close" {
 			return b.closeSession(as, r.Args, "closed by browser.close")
 		}
@@ -167,12 +170,14 @@ func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 	as.cancel, as.running, as.started, as.last = cancel, r.Action, now, now
 	as.timer.Reset(AgentIdle)
 	b.mu.Unlock()
+	b.stateChanged(as)
 	finish := func() {
 		b.mu.Lock()
 		as.cancel, as.running, as.last = nil, "", time.Now()
 		b.mu.Unlock()
 		cancel()
 		<-as.lock
+		b.stateChanged(as)
 	}
 	type outcome struct {
 		res abi.ExecResult
@@ -333,9 +338,10 @@ func (b *Browser) newAgentSession(ctx context.Context, r abi.ExecRequest) (*agen
 // closeIdle — сеанс простоял AgentIdle без действий (агент забыл close).
 func (b *Browser) closeIdle(as *agentSession) {
 	b.mu.Lock()
-	running := as.running != ""
+	running := as.running != "" || !as.held.IsZero() || as.view != nil
 	if running {
-		as.timer.Reset(AgentIdle) // идёт долгое действие (handoff): это не простой
+		// Идёт долгое действие (handoff), сеанс держит или смотрит владелец: это не простой.
+		as.timer.Reset(AgentIdle)
 	}
 	b.mu.Unlock()
 	if !running {
@@ -425,6 +431,8 @@ func (b *Browser) closeAgent(as *agentSession, reason string) {
 	b.closed[as.id] = closedInfo{agent: as.agent, instance: as.instance, reason: reason, at: now}
 	b.mu.Unlock()
 	as.timer.Stop()
+	b.stopView(as)
+	b.send("closed", map[string]any{"session": as.id, "reason": reason})
 	as.s.Release()
 }
 

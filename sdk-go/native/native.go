@@ -2,9 +2,11 @@
 
 // Package native — коннекторы runtime: native: отдельный процесс под надзором
 // хоста. Обмен — JSON-RPC 2.0 построчно через stdin/stdout процесса, вызовы в
-// обе стороны: хост вызывает initialize, execute, verify, end_call, shutdown;
-// коннектор — host (функция хоста в рамках вызова, с той же проверкой
-// возможностей, что у WASM). stderr процесса хост пишет в свой лог.
+// обе стороны: хост вызывает initialize, execute, verify, end_call, shutdown и
+// owner (запросы владельца вне вызовов агентов: список сеансов браузера,
+// просмотр); коннектор — host (функция хоста в рамках вызова, с той же
+// проверкой возможностей, что у WASM) и шлёт уведомления event (кадры
+// просмотра). stderr процесса хост пишет в свой лог.
 //
 // Коннектор пишется на том же PDK (connector.Connector), что и WASM-модуль:
 //
@@ -41,7 +43,23 @@ const (
 	MethodCancel     = "cancel"     // хост → процесс, уведомление: CancelParams — отменить вызов
 	MethodShutdown   = "shutdown"   // хост → процесс, уведомление: завершиться
 	MethodHost       = "host"       // процесс → хост: HostParams → ответ abi (Response)
+	MethodOwner      = "owner"      // хост → процесс: OwnerParams → любой JSON (коннектор — Owner)
+	MethodEvent      = "event"      // процесс → хост, уведомление: EventParams (коннектор — Evented)
 )
+
+// OwnerParams — запрос владельца Op с аргументами Args. Его шлёт только хост
+// и только от имени владельца (Web UI, CLI владельца): политики агентов к
+// нему не относятся.
+type OwnerParams struct {
+	Op   string          `json:"op"`
+	Args json.RawMessage `json:"args,omitempty"`
+}
+
+// EventParams — событие коннектора Kind с данными Data.
+type EventParams struct {
+	Kind string          `json:"kind"`
+	Data json.RawMessage `json:"data,omitempty"`
+}
 
 // InitializeParams — initialize.
 type InitializeParams struct {

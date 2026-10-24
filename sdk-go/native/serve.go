@@ -22,6 +22,21 @@ type CallEnder interface {
 	EndCall(call string)
 }
 
+// Owner — коннектор отвечает на запросы владельца (MethodOwner).
+type Owner interface {
+	Owner(ctx context.Context, op string, args json.RawMessage) (any, error)
+}
+
+// Evented — коннектор шлёт события хосту: Serve даёт ему emit (событие
+// уходит не дольше EventTimeout; хост, переставший читать, его теряет, а
+// коннектор не ждёт).
+type Evented interface {
+	SetEmit(emit func(kind string, data any))
+}
+
+// EventTimeout — сколько ждать записи одного события.
+var EventTimeout = 5 * time.Second
+
 // Serve — main нативного коннектора: обслуживает хост через stdin/stdout до
 // shutdown или конца потока. Манифест проверяется сразу.
 func Serve(manifestYAML []byte, c connector.Connector) {
@@ -98,6 +113,18 @@ func ServeIO(m manifest.Manifest, c connector.Connector, r io.Reader, w io.Write
 				}
 			}
 			return nil, nil
+		case MethodOwner:
+			o, ok := c.(Owner)
+			if !ok {
+				return nil, fmt.Errorf("connector %s takes no owner requests", m.Connector)
+			}
+			var in OwnerParams
+			if err := json.Unmarshal(params, &in); err != nil {
+				return nil, err
+			}
+			cctx, cancel := context.WithTimeout(ctx, time.Duration(lim.TimeoutS)*time.Second)
+			defer cancel()
+			return o.Owner(cctx, in.Op, in.Args)
 		case MethodShutdown:
 			select {
 			case <-done:
@@ -108,6 +135,17 @@ func ServeIO(m manifest.Manifest, c connector.Connector, r io.Reader, w io.Write
 		}
 		return nil, fmt.Errorf("unknown method %q", method)
 	})
+	if e, ok := c.(Evented); ok {
+		e.SetEmit(func(kind string, data any) {
+			raw, err := json.Marshal(data)
+			if err != nil {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), EventTimeout)
+			defer cancel()
+			_ = p.NotifyContext(ctx, MethodEvent, EventParams{Kind: kind, Data: raw})
+		})
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- p.Run() }()
 	select {
