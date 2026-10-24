@@ -36,8 +36,9 @@ var (
 )
 
 // actionTimeout — срок действия сеанса: timeout_ms (у act — ещё ожидание
-// результата и само действие), иначе DefaultActionTimeout; handoff ждёт
-// человека, page_extract — модель, вход — сайт входа.
+// результата и само действие, у download — ещё ожидание элемента), иначе
+// DefaultActionTimeout; handoff ждёт человека, page_extract — модель, вход —
+// сайт входа.
 func actionTimeout(r abi.ExecRequest) time.Duration {
 	ms := time.Duration(num(r.Args, "timeout_ms")) * time.Millisecond
 	switch r.Action {
@@ -59,6 +60,11 @@ func actionTimeout(r abi.ExecRequest) time.Duration {
 			exp = 5 * time.Second
 		}
 		return ms + exp + 20*time.Second
+	case "download":
+		if ms <= 0 {
+			ms = worker.DefaultDownloadWait
+		}
+		return worker.DownloadElementWait + ms + 20*time.Second
 	case "dialog":
 		return 15 * time.Second
 	}
