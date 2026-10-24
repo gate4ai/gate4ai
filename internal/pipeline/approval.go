@@ -229,6 +229,16 @@ func (p *Pipeline) finish(ctx context.Context, a *state.Approval, status, channe
 		// Web UI или трея заканчивается раньше многошагового действия. Срок
 		// задают лимиты коннектора (limits.timeout_s). Политика, лимиты и
 		// профиль проверяются заново перед исполнением (execute → admit).
+		p.mu.Lock()
+		nested := p.nestedRuns[a.ID]
+		delete(p.nestedRuns, a.ID)
+		p.mu.Unlock()
+		if nested != nil {
+			// Вложенный вызов коннектора: исполняется в контексте вызывающего
+			// действия (его страница, срок и квитанция), которое ждёт решения.
+			res = nested(appr)
+			break
+		}
 		res = p.run(context.WithoutCancel(ctx), a.Agent, a.Action, cli, act, a.Args, a.Decision, appr)
 	default:
 		res = p.deny(ctx, a.Agent, act, a.Action, a.Args, a.Decision, appr, "")

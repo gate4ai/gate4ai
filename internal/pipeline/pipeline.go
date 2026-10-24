@@ -177,7 +177,10 @@ type Pipeline struct {
 	// параллельные вызовы не проходят лимит по одному и тому же счётчику.
 	admitMu sync.Mutex
 	waiters map[string][]chan struct{}
-	running sync.WaitGroup
+	// nestedRuns — исполнение вложенных вызовов (service_call), которые ждут
+	// подтверждения: по одобрению finish запускает их в контексте вызывающего действия.
+	nestedRuns map[string]func(*audit.Approval) Result
+	running    sync.WaitGroup
 }
 
 // New создаёт pipeline.

@@ -112,7 +112,19 @@ func (p *Pipeline) ExecuteNested(ctx context.Context, caller string, rule manife
 		if err != nil {
 			return abi.ExecResult{}, abi.Errorf(abi.CodeConnector, "service_call %s: %v", full, err)
 		}
+		nctx := context.WithValue(ctx, nestedKey{}, n)
+		p.mu.Lock()
+		if p.nestedRuns == nil {
+			p.nestedRuns = map[string]func(*audit.Approval) Result{}
+		}
+		p.nestedRuns[a.ID] = func(appr *audit.Approval) Result {
+			return p.run(nctx, parent.Agent, full, cli, act, args, dec, appr)
+		}
+		p.mu.Unlock()
 		r := p.WaitFor(ctx, a.ID, p.nestedWait(ctx))
+		p.mu.Lock()
+		delete(p.nestedRuns, a.ID)
+		p.mu.Unlock()
 		if r.Status != StatusOK {
 			if r.Status == StatusPending {
 				return abi.ExecResult{}, abi.Errorf(abi.CodeCancelled, "service_call %s: the owner did not answer in time", full)
