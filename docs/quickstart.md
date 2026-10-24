@@ -209,6 +209,8 @@ gate4ai tools
 # или: export GATE4AI_TOKEN=g4a_…                  # gate4ai agents token <agent> на устройстве
 ```
 
+**Сервер без графики рядом с OpenClaw** (агент работает в браузере gate4ai, человека зовёт ссылкой на экран браузера): схема установки и доработки — [headless-server.md](headless-server.md).
+
 **Без relay** (свой сертификат или reverse proxy на этом компьютере):
 
 ```sh
