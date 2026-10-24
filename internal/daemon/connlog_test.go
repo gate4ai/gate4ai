@@ -167,7 +167,7 @@ func TestLogByParent(t *testing.T) {
 
 func TestAccessAPI(t *testing.T) {
 	home := t.TempDir()
-	d, err := New(Options{Home: filepath.Join(home, "data"), Keys: keys.NewMemory(), InitialConfig: []byte("agents:\n  bot: { profile: p }\nprofiles:\n  p: { connectors: [] }\naccess:\n  sites: [{ domain: lk.example, access: read }]\n")})
+	d, err := New(Options{Home: filepath.Join(home, "data"), Keys: keys.NewMemory(), InitialConfig: []byte("agents:\n  bot: { profile: p }\nprofiles:\n  p: { connectors: [] }\naccess:\n  sites: [{ domain: lk.example, access: ask }]\n")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,6 +195,9 @@ func TestAccessAPI(t *testing.T) {
 	}
 	if code := owner.do(t, "POST", "/v1/access", map[string]any{"sites": []map[string]any{{"domain": "https://x/y", "access": "allow"}}}, nil); code != 400 {
 		t.Fatal("not a site:", code)
+	}
+	if code := owner.do(t, "POST", "/v1/access", map[string]any{"sites": []map[string]any{{"domain": "ro.example", "access": "read"}}}, nil); code != 400 {
+		t.Fatal("read for a site:", code)
 	}
 	if code := owner.do(t, "POST", "/v1/access", map[string]any{"folders": []map[string]any{{"path": "relative", "access": "read"}}}, nil); code != 400 {
 		t.Fatal("relative folder:", code)

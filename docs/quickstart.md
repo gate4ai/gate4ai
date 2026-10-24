@@ -35,12 +35,12 @@ gate4ai connectors list          # коннекторы магазина (на �
 **Списки доступа** — первый уровень решения для Браузера и Файлов, общий для всех агентов (`access.sites`, `access.folders` в конфигурации):
 
 ```sh
-gate4ai access sites set app.example.org read      # чтение без вопроса, клики и запросы с эффектом — с подтверждением
+gate4ai access sites set app.example.org ask       # каждое действие на сайте — с подтверждением (режима «только чтение» у сайтов нет)
 gate4ai access sites set "*.example.com" allow     # поддомены и сам example.com — всё без вопроса
 gate4ai access sites set "*" deny                  # остальные сайты закрыты
 gate4ai access folders set ~/Documents/notes append   # чтение, список и дописывание без вопроса, перезапись — с подтверждением
 gate4ai access folders remove ~/Documents
-gate4ai sites allow lk.example.org                 # то же, что access sites set lk.example.org read
+gate4ai sites allow lk.example.org                 # то же, что access sites set lk.example.org allow
 ```
 
 Режимы сайтов: `allow`, `read`, `connector` (только через коннектор магазина, агенту напрямую — отказ), `ask`, `deny`; у папок ещё `append`. Побеждает самая конкретная строка, при равенстве — строже. Нет строки или `deny` — отказ; правило политики на действие (`allow` / `ask` / `deny`) побеждает строку, без правила действует режим строки. В Web UI то же — **Доступ → Браузер** и **Файлы**; в запросе подтверждения по сайту или папке есть кнопки «Добавить в разрешённые / запрещённые». Агент просит сайт через `gate4ai.change_policy` (`set_site_access`) — с вашим подтверждением.
@@ -70,7 +70,7 @@ gate4ai connectors install ./lk_example --watch   # пересобирать и 
 ```yaml
 access:                         # списки доступа Браузера и Файлов — для всех агентов
   sites:
-    - { domain: "*.example.com", access: read }    # чтение без вопроса, изменения — с подтверждением
+    - { domain: "*.example.com", access: ask }     # каждое действие — с подтверждением
     - { domain: app.example.org, access: allow }
     - { domain: "*", access: deny }                # остальные сайты закрыты
   folders:

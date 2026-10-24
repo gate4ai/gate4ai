@@ -256,11 +256,12 @@ profiles:
 	if vs, _ := d.Config.Versions(); len(vs) < 2 {
 		t.Fatal("migration must be a new policy version:", vs)
 	}
-	// Прежние папки и сайты — в списках доступа как read; настройки убраны.
+	// Прежние папки — в списке доступа как read, сайты — как allow (у сайтов
+	// режима read нет); настройки убраны.
 	if f, ok := access.MatchFolder(c.Access.Folders, "~/Documents/x", d.Pipeline.Home); !ok || f.Access != access.Read || c.Connectors["files"] != nil {
 		t.Fatal(c.Access.Folders, c.Connectors["files"])
 	}
-	if s, ok := access.MatchSite(c.Access.Sites, "https://lk.example/"); !ok || s.Access != access.Read || c.Connectors["browser"]["allowed_domains"] != nil {
+	if s, ok := access.MatchSite(c.Access.Sites, "https://lk.example/"); !ok || s.Access != access.Allow || c.Connectors["browser"]["allowed_domains"] != nil {
 		t.Fatal(c.Access.Sites, c.Connectors["browser"])
 	}
 }

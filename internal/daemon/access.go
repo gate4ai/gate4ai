@@ -10,12 +10,10 @@ import (
 	"strings"
 
 	"github.com/gate4ai/gate4ai/sdk-go/access"
-	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
-	"github.com/gate4ai/gate4ai/internal/policy"
 	"github.com/gate4ai/gate4ai/internal/state"
 )
 
@@ -95,8 +93,9 @@ func orWord(s, def string) string {
 }
 
 // AddAccess — из запроса подтверждения: добавить его сайт или папку в список
-// доступа как разрешённые (allow — режим по действию: чтение → read, запись →
-// allow / append) или запрещённые (deny). Возвращает, что записано.
+// доступа как разрешённые (сайт — allow; папка — режим по операции: чтение →
+// read, добавление → append, запись → allow) или запрещённые (deny).
+// Возвращает, что записано.
 func (d *Daemon) AddAccess(a *state.Approval, allow bool) (string, error) {
 	kind, value, ok := strings.Cut(a.Decision.Scope, ":")
 	if !ok || value == "" {
@@ -107,10 +106,7 @@ func (d *Daemon) AddAccess(a *state.Approval, allow bool) (string, error) {
 	switch kind {
 	case "site":
 		if allow {
-			mode = access.Read
-			if manifest.ClassRank(a.Class) > manifest.ClassRank(policy.ClassRead) {
-				mode = access.Allow
-			}
+			mode = access.Allow
 		}
 		comment = fmt.Sprintf("Browser: site %s — %s (from approval %s)", value, mode, a.ID)
 		_, err := d.Config.Edit(auth.OwnerVia("approval"), comment, func(c *config.Config) error { return c.SetSiteAccess(value, mode) })

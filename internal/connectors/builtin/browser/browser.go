@@ -1053,7 +1053,7 @@ func siteHint(err error) error {
 	if host == "" || strings.Contains(host, " ") {
 		return err
 	}
-	return fmt.Errorf("%w (the owner opens the site: gate4ai access sites set %s read — or Web UI → Browser; an agent asks the owner for it: "+
-		`gate4ai gate4ai change_policy --summary "open %s" --changes '[{"op":"set_site_access","domain":"%s","access":"read"}]'`+
+	return fmt.Errorf("%w (the owner opens the site: gate4ai access sites set %s allow — or Web UI → Browser; an agent asks the owner for it: "+
+		`gate4ai gate4ai change_policy --summary "open %s" --changes '[{"op":"set_site_access","domain":"%s","access":"allow"}]'`+
 		"; the sites open now: gate4ai gate4ai policy_summary)", err, host, host, host)
 }

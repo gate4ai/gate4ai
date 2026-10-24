@@ -122,7 +122,7 @@ actions:
 ```yaml
 access:
   sites:
-    - { domain: "*.example.com", access: read }
+    - { domain: "*.example.com", access: ask }
     - { domain: app.example.org, access: allow }
     - { domain: "*", access: ask }
   folders:
