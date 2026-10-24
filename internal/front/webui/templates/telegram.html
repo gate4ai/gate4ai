@@ -9,14 +9,14 @@
 <li>{{TH "Send <code>/newbot</code>, choose a name and a username (it ends with <code>bot</code>)."}}</li>
 <li>{{TH "BotFather sends a token like <code>123456789:AA…</code> — copy it."}}</li></ol>
 <form method="post" action="{{.Base}}/channels/telegram" class="row" autocomplete="off"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="token"><input type="hidden" name="for" value="{{$d.For}}">
-<label class="inline" for="tg-tok">{{T "Bot token"}}</label><input id="tg-tok" name="token" type="password" size="50" required><button class="primary">{{T "Check and save"}}</button></form>
+<label class="inline" for="tg-tok">{{T "Bot token"}}</label><input id="tg-tok" name="token" type="password" size="50" required><button class="primary" data-busy="{{T "Checking…"}}">{{T "Check and save"}}</button></form>
 {{if $d.HasToken}}<p class="ok">{{T "The token is saved in gate4.ai passwords (@telegram.bot)."}}{{if $d.Bot}} {{T "Bot @%s." $d.Bot}}{{end}}</p>{{end}}
 </div>
 
 <div class="card"><h3>2. {{T "Find yourself"}}</h3>
 {{if $d.HasToken}}
 <p>{{T "Open your bot"}}{{if $d.Bot}} (<a href="https://t.me/{{$d.Bot}}" target="_blank" rel="noopener">t.me/{{$d.Bot}}</a>){{end}} {{TH "and send it <code>/start</code>. Then press:"}}</p>
-<form method="post" action="{{.Base}}/channels/telegram"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="find"><input type="hidden" name="for" value="{{$d.For}}"><button>{{T "Find who wrote to the bot"}}</button></form>
+<form method="post" action="{{.Base}}/channels/telegram"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="step" value="find"><input type="hidden" name="for" value="{{$d.For}}"><button data-busy="{{T "Searching…"}}">{{T "Find who wrote to the bot"}}</button></form>
 {{if $d.Searched}}{{if $d.Users}}
 <table style="margin-top:.6rem"><tr><th>{{T "Who"}}</th><th>ID</th><th>{{T "Message"}}</th><th></th></tr>
 {{range $d.Users}}<tr><td>{{.Name}}{{if .Username}} <span class="muted">@{{.Username}}</span>{{end}}</td><td><code>{{.ID}}</code></td><td class="muted">{{.Text}}</td>

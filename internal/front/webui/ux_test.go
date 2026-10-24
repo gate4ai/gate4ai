@@ -490,3 +490,22 @@ func TestSuggestCondsOnlyForAmounts(t *testing.T) {
 		t.Fatalf("%+v", conds)
 	}
 }
+
+// Долгие действия подписаны текстом «в процессе» (data-busy): его показывает
+// app.js на кнопке сразу после нажатия, до ответа сервера.
+func TestBusyLabels(t *testing.T) {
+	u, _, _, base := setup(t)
+	_, _, _, get := loginAs(t, u, base)
+	for path, want := range map[string]string{
+		"/connectors":        `data-busy="Обновление…"`,
+		"/settings/advanced": `data-busy="Сохранение…"`,
+		"/settings/internet": `data-busy="Подключение…"`,
+	} {
+		if p := get(path); !strings.Contains(p, want) {
+			t.Errorf("%s: no %s", path, want)
+		}
+	}
+	if js := get("/static/app.js"); !strings.Contains(js, `"a[data-busy]"`) || !strings.Contains(js, `f.method !== "post"`) {
+		t.Error("app.js: no busy handler")
+	}
+}

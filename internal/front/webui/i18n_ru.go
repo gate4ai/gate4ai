@@ -11,6 +11,10 @@ var ru = map[string]string{
 	"Home": "Главная", "Agents": "Агенты", "Access": "Доступ", "Journal": "Журнал", "Settings": "Настройки",
 	"Sections": "Разделы", "Language": "Язык", "Sign out": "Выйти", "Skip to content": "К содержимому",
 	"waiting for you": "ждут вас", "Details": "Подробности", "Technical details": "Технические детали", "Technical": "Технически",
+	// Кнопка, пока действие исполняется (data-busy, app.js)
+	"Loading…": "Загрузка…", "Installing…": "Установка…", "Reinstalling…": "Переустановка…", "Updating…": "Обновление…",
+	"Checking…": "Проверка…", "Saving…": "Сохранение…", "Removing…": "Удаление…", "Sending…": "Отправка…",
+	"Connecting…": "Подключение…", "Disconnecting…": "Отключение…", "Searching…": "Поиск…",
 	"Advanced": "Расширенные", "Advanced settings": "Расширенные настройки", "Copy": "Копировать", "Cancel": "Отмена",
 	"Save": "Сохранить", "Saved": "Сохранено", "Open": "Открыть", "Change": "Изменить", "Remove": "Удалить", "Delete": "Удалить",
 	"Edit": "Изменить", "Back": "Назад", "Done": "Готово", "Set up": "Настроить", "Connect": "Подключить", "Turn on": "Включить",

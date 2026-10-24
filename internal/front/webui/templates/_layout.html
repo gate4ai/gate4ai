@@ -20,6 +20,10 @@ pre.box{background:var(--bg);border:1px solid var(--line);border-radius:8px;padd
 button,.btn{font:inherit;padding:.4rem .9rem;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer;text-decoration:none;display:inline-block}
 button.primary,.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.danger,.btn.danger{color:var(--bad)}button.small,.btn.small{padding:.2rem .6rem;font-size:.85rem}
 button:disabled{opacity:.5;cursor:default}
+/* Действие в процессе (app.js): спиннер перед текстом кнопки или ссылки. */
+.busy{cursor:progress!important;pointer-events:none}button.busy:disabled{opacity:.85}
+.busy::before{content:"";display:inline-block;width:.8em;height:.8em;margin-right:.45em;vertical-align:-.08em;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.busy::before{animation-duration:2.5s}}
 input,select,textarea{font:inherit;padding:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
 textarea{width:100%}textarea.code{font-family:ui-monospace,Menlo,monospace;font-size:13px}
 label{display:block;margin:.5rem 0 .2rem;font-weight:500}label.inline{display:inline-flex;gap:.35rem;align-items:center;font-weight:400;margin:0 .8rem .3rem 0}
@@ -120,7 +124,7 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
   {{with .Preview}}<div class="preview" aria-label="{{T "What will be written or sent"}}">{{if $.A.Append}}<span class="add">+ {{.}}</span>{{else}}{{.}}{{end}}</div>{{end}}
   {{range .Args}}<div class="help"><code>{{.K}}</code>: {{.V}}</div>{{end}}
   <p class="help" style="margin:.4rem 0">{{T "Why you are asked:"}} {{.Why}}</p>
-  <form method="post" action="{{$v.Base}}/approvals/{{.ID}}" class="row" style="margin-top:.5rem" data-decide>
+  <form method="post" action="{{$v.Base}}/approvals/{{.ID}}" class="row" style="margin-top:.5rem" data-decide data-busy="{{T "Sending…"}}">
     <input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}">
     <button class="primary" name="decision" value="approve">{{T "Allow"}}</button>
     {{if and (not $v.Remote) .Always}}<button name="decision" value="approve_always">{{.Always}}</button>{{end}}
@@ -129,7 +133,7 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
   </form>
   <details><summary>{{T "Technical details"}}</summary><p class="help"><code>{{.Action}}</code> · {{class .Class}} · #{{short .PreviewHash}} · {{T "until"}} {{ts .Expires}}{{if .Decision.RuleIDs}} · {{T "rule"}} {{join .Decision.RuleIDs ", "}}{{end}}</p>
   {{with .Desc}}<p class="help">{{.}}</p>{{end}}
-  {{if not $v.Remote}}<form method="post" action="{{$v.Base}}/approvals/{{.ID}}" data-decide><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}"><button class="small" name="decision" value="approve_rule">{{T "Allow and write a custom rule…"}}</button></form>{{end}}</details>
+  {{if not $v.Remote}}<form method="post" action="{{$v.Base}}/approvals/{{.ID}}" data-decide data-busy="{{T "Sending…"}}"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}"><button class="small" name="decision" value="approve_rule">{{T "Allow and write a custom rule…"}}</button></form>{{end}}</details>
 </div>
 {{end}}{{end}}
 
