@@ -33,8 +33,8 @@
 {{if not .Installed}}<span class="warn">{{T "%s was not found on this computer — the settings file will be created anyway." .Title}}</span>{{end}}</p>
 <div class="row">
 <form method="post" action="{{$.Base}}/agents/{{$d.Name}}/client"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="client" value="{{.ID}}">
-<button class="primary">{{if .Connected}}{{T "Reconnect (new key)"}}{{else}}{{T "Connect %s" .Title}}{{end}}</button></form>
-{{if .Connected}}<form method="post" action="{{$.Base}}/agents/{{$d.Name}}/client/remove" data-confirm="{{T "Remove gate4ai from %s and revoke its token?" .Title}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="client" value="{{.ID}}"><button class="danger">{{T "Disconnect"}}</button></form>{{end}}
+<button class="primary" data-busy="{{T "Connecting…"}}">{{if .Connected}}{{T "Reconnect (new key)"}}{{else}}{{T "Connect %s" .Title}}{{end}}</button></form>
+{{if .Connected}}<form method="post" action="{{$.Base}}/agents/{{$d.Name}}/client/remove" data-confirm="{{T "Remove gate4ai from %s and revoke its token?" .Title}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="client" value="{{.ID}}"><button class="danger" data-busy="{{T "Disconnecting…"}}">{{T "Disconnect"}}</button></form>{{end}}
 </div>
 <p class="help">{{T .Restart}}</p>
 </div>{{end}}{{end}}

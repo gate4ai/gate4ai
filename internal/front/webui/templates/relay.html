@@ -32,13 +32,13 @@
 <form method="post" action="{{.Base}}/settings/relay"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="form" value="again">
 <label for="r-url">{{T "Relay address"}}</label><input id="r-url" name="url" value="{{$d.Relay.URL}}" size="40">
 <label class="inline"><input type="checkbox" name="confirm" value="1" required> {{T "I understand that the current address stops working"}}</label>
-<div><button class="danger">{{T "Register again"}}</button></div></form></div>
+<div><button class="danger" data-busy="{{T "Connecting…"}}">{{T "Register again"}}</button></div></form></div>
 {{else}}
 <div class="card" id="custom"><h3>{{T "Your own relay"}}</h3>
 <p>{{TH "Your own relay is a <a href=\"https://github.com/gate4ai/gate4ai/tree/main/relay/cmd/gate4ai-relay\" target=\"_blank\" rel=\"noopener\"><code>gate4ai-relay</code></a> server you run yourself; a DNS zone must be delegated to it (the relay answers for device addresses and their certificates). How to deploy — in the <a href=\"https://github.com/gate4ai/gate4ai/tree/main/relay#readme\" target=\"_blank\" rel=\"noopener\">relay instructions</a>."}}</p>
 <form method="post" action="{{.Base}}/settings/relay" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="form" value="custom">
 <label class="inline" for="r-own">{{T "Relay address"}}</label><input id="r-own" name="url" placeholder="https://relay.example.org" size="34" required>
-<button class="primary">{{T "Connect"}}</button></form>
+<button class="primary" data-busy="{{T "Connecting…"}}">{{T "Connect"}}</button></form>
 <p class="help">{{T "Or"}} <a href="{{.Base}}/settings/internet">{{T "turn it on through %s" $d.RelayDefaultHost}}</a> — {{T "no server of your own is needed."}}</p></div>
 {{end}}
 <div class="card" id="public"><h3>{{T "Your own HTTPS address without a relay"}}</h3>

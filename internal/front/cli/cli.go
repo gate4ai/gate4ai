@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -171,7 +172,7 @@ Agent commands (an agent connects itself: the first command shows a code, the ow
   gate4ai pair [--here] [--name agent] [--wait 5m]   connect this agent (--here: a key only for its directory)
   gate4ai tools [--json] [--as agent]     actions available to this agent (--as: owner, another agent's catalog)
   gate4ai <connector> <action> [--arg v] [--wait 10m] [--json '{...}'] [--as agent]   run an action (--help on the action)
-  gate4ai status <id> [--wait 10m]        result of an action pending approval
+  gate4ai status <id> [--wait 10m] [--out f]   result of an action pending approval (--out: its file to f)
   gate4ai skill                           print SKILL.md for this agent
   gate4ai mcp                             MCP server on stdio
 
@@ -540,7 +541,24 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 	if err := e.Client().Do(ctx, "POST", "/v1/call", body, &res); err != nil {
 		return e.fail(err)
 	}
-	if err := saveImage(res, opts.out); err != nil {
+	return e.printSaved(res, opts.out, "call again with --out <file> to save it")
+}
+
+// printSaved печатает ответ действия или status: файл и изображение ответа —
+// в --out (saveImage), ответ pending — с точной командой status, которая
+// дождётся решения и сохранит файл туда же. retry — подсказка для файла без --out.
+func (e *Env) printSaved(res map[string]any, out, retry string) int {
+	if id, _ := res["id"].(string); res["status"] == "pending" && id != "" {
+		cmd := "gate4ai status " + id + " --wait 10m"
+		if out != "" {
+			if abs, err := filepath.Abs(out); err == nil {
+				out = abs
+			}
+			cmd += " --out " + shellQuote(out)
+		}
+		res["hint"] = "after the decision: " + cmd
+	}
+	if err := saveImage(res, out, retry); err != nil {
 		e.printJSON(res)
 		e.problem(Problem{Code: "io_error", Message: "--out: " + err.Error()})
 		return ExitError
@@ -549,25 +567,44 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 	return ExitForResult(res)
 }
 
-// saveImage — изображения ответа (content) в терминал не выводятся: вместо
-// base64 — размер; --out f сохраняет первое изображение или файл (двоичный
-// resource: browser.download, files.read) в файл f на этом компьютере (daemon
-// пишет только в свой каталог данных), путь — в result.file и у блока.
-func saveImage(res map[string]any, out string) error {
+// shellQuote — путь для команды в подсказке: в одинарных кавычках, если в нём
+// есть что-то кроме безопасных символов.
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+:@=,") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// saveImage — изображения и файлы ответа (content) в терминал не выводятся:
+// вместо base64 — размер (bytes) и у файла sha256; --out f сохраняет первое
+// изображение или файл (двоичный resource: browser.download, files.read) в
+// файл f на этом компьютере (daemon пишет только в свой каталог данных), путь —
+// в result.file и у блока. sha256 записанного файла сверяется с result.sha256.
+// Файл без --out получает подсказку retry.
+func saveImage(res map[string]any, out, retry string) error {
 	blocks, _ := res["content"].([]any)
 	saved := out == ""
+	r, _ := res["result"].(map[string]any)
 	for _, b := range blocks {
 		m, _ := b.(map[string]any)
 		data, _ := m["data"].(string)
-		if (m["type"] != "image" && (m["type"] != "resource" || out == "" || saved)) || data == "" {
+		if (m["type"] != "image" && m["type"] != "resource") || data == "" {
 			continue
 		}
 		raw, err := base64.StdEncoding.DecodeString(data)
 		if err != nil {
 			continue
 		}
+		sum := sha256.Sum256(raw)
 		delete(m, "data")
 		m["bytes"] = len(raw)
+		if m["type"] == "resource" {
+			m["sha256"] = hex.EncodeToString(sum[:])
+			if out == "" && retry != "" {
+				m["hint"] = retry
+			}
+		}
 		if saved {
 			continue
 		}
@@ -583,8 +620,18 @@ func saveImage(res map[string]any, out string) error {
 		if err := os.WriteFile(path, raw, mode); err != nil {
 			return err
 		}
+		written, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if got := sha256.Sum256(written); got != sum {
+			return fmt.Errorf("%s: the written file differs from the result", path)
+		}
+		if want, _ := r["sha256"].(string); m["type"] == "resource" && want != "" && !strings.EqualFold(want, hex.EncodeToString(sum[:])) {
+			return fmt.Errorf("%s: sha256 %x of the file is not result.sha256 %s", path, sum, want)
+		}
 		saved, m["file"] = true, path
-		if r, ok := res["result"].(map[string]any); ok {
+		if r != nil {
 			r["file"] = path
 		}
 	}
@@ -627,7 +674,7 @@ func (e *Env) actionHelp(t skill.Tool) {
 		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, bracket(skill.Limits(p.Schema)))
 	}
 	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n"+
-		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           save the image or the file of the result (page_screenshot, browser.download, files.read) to file f\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
+		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           save the image or the file of the result (page_screenshot, browser.download, files.read) to file f;\n                    pending approval: gate4ai status <id> --wait 10m --out f saves it after the decision\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
 }
 
 func bracket(s string) string {
@@ -859,9 +906,10 @@ func (e *Env) status(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	wait := fs.String("wait", "", "wait for the decision, e.g. 10m")
+	out := fs.String("out", "", "save the image or the file of the result to this file")
 	id, rest := firstPositional(args)
 	if fs.Parse(rest) != nil || id == "" {
-		fmt.Fprintln(e.Stderr, "usage: gate4ai status <id> [--wait 10m]")
+		fmt.Fprintln(e.Stderr, "usage: gate4ai status <id> [--wait 10m] [--out file]")
 		return ExitUsage
 	}
 	if strings.HasPrefix(id, "#") {
@@ -872,7 +920,11 @@ func (e *Env) status(ctx context.Context, args []string) int {
 	if *wait != "" {
 		path += "?wait=" + *wait
 	}
-	return e.callObject(ctx, e.Client(), "GET", path, nil, ExitForResult)
+	var res map[string]any
+	if err := e.Client().Do(ctx, "GET", path, nil, &res); err != nil {
+		return e.fail(err)
+	}
+	return e.printSaved(res, *out, "gate4ai status "+id+" --out <file> saves it")
 }
 
 // firstPositional отделяет первый позиционный аргумент от флагов (в любом порядке).

@@ -281,12 +281,9 @@ func (p *Process) Execute(ctx context.Context, req abi.ExecRequest) (abi.ExecRes
 	var res abi.ExecResult
 	ev, err := p.call(ctx, sdknative.MethodExecute, req.Settings, func(d *hostfuncs.Dispatcher) (any, error) {
 		for _, alias := range d.Check.R.Reveal {
-			if d.Secrets == nil {
-				return nil, abi.Errorf(abi.CodeNotSupported, "no vault")
-			}
-			v, err := d.Secrets.Value(alias)
+			v, err := d.Reveal(alias)
 			if err != nil {
-				return nil, abi.Errorf(abi.CodeNotFound, "secret %s: %v", alias, err)
+				return nil, err
 			}
 			if req.Revealed == nil {
 				req.Revealed = map[string]string{}

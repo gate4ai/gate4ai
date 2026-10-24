@@ -183,6 +183,15 @@ func TestDownloadRealChrome(t *testing.T) {
 	if _, err := s.Download(ctx, DownloadRequest{Selector: "#none", TimeoutMS: 1000}); !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "response_url_contains") {
 		t.Fatal("no download:", err)
 	}
+	// Элемента нет: not_found за DownloadElementWait, а не ожидание файла (timeout_ms).
+	wait := DownloadElementWait
+	DownloadElementWait = 500 * time.Millisecond
+	start := time.Now()
+	_, err = s.Download(ctx, DownloadRequest{Selector: "#absent", TimeoutMS: 60000})
+	DownloadElementWait = wait
+	if !errors.Is(err, ErrNotFound) || time.Since(start) > 5*time.Second {
+		t.Fatal("missing element:", err, time.Since(start))
+	}
 	if _, err := s.Download(ctx, DownloadRequest{URL: "https://evil.example/file.pdf"}); !errors.Is(err, ErrDomain) {
 		t.Fatal("site list:", err)
 	}

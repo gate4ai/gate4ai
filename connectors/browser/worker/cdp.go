@@ -266,7 +266,13 @@ func (c *CDP) readLoop() {
 	}
 }
 
+// WriteTimeout — срок записи сообщения в подключение к Chrome.
+var WriteTimeout = 5 * time.Second
+
 func (c *CDP) call(ctx context.Context, session, method string, params, out any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	if c.closed != nil {
 		// Ответа не будет: иначе вызов ждал бы его до конца ctx (а у нативного
@@ -288,7 +294,16 @@ func (c *CDP) call(ctx context.Context, session, method string, params, out any)
 		msg["sessionId"] = session
 	}
 	b, _ := json.Marshal(msg)
-	if err := c.conn.Write(ctx, websocket.MessageText, b); err != nil {
+	// coder/websocket закрывает подключение, если ctx записи отменён (и даже
+	// если он уже отменён к началу записи): срок действия сеанса убил бы
+	// вкладку. Отмена ctx прекращает только ожидание ответа, у записи — свой срок.
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), WriteTimeout)
+	err := c.conn.Write(wctx, websocket.MessageText, b)
+	cancel()
+	if err != nil {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
 		return fmt.Errorf("cdp %s: %w", method, err)
 	}
 	select {
@@ -304,6 +319,9 @@ func (c *CDP) call(ctx context.Context, session, method string, params, out any)
 		}
 		return nil
 	case <-ctx.Done():
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
 		return ctx.Err()
 	}
 }

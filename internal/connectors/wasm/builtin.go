@@ -49,7 +49,7 @@ func builtinCall[R any](ctx context.Context, b *Builtin, op string, settings map
 	}
 	defer d.Close()
 	in, _ := json.Marshal(req)
-	if err := abi.Decode(connector.Handle(b.man, b.c, d, op, in), &res); err != nil {
+	if err := abi.Decode(connector.HandleContext(ctx, b.man, b.c, d, op, in), &res); err != nil {
 		var zero R
 		return zero, err
 	}

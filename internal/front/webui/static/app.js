@@ -139,26 +139,66 @@
     if (b) b.click();
   });
 
-  // Решение по запросу отправляется один раз: повторное нажатие (или второй
-  // клик, пока действие исполняется) давало «запрос уже решён».
+  // Действие «в процессе»: сразу после нажатия — до ответа сервера, который
+  // бывает долгим (установка коннектора, проверка канала) — кнопка показывает
+  // спиннер и текст из data-busy («Установка…»), кнопки формы выключены, второе
+  // нажатие ничего не отправляет. Так ведёт себя любая POST-форма, а GET-форма
+  // и ссылка — с атрибутом data-busy; data-no-busy — без индикации. Итог
+  // действия показывает сервер: плашка успеха или окно ошибки.
+  var busyOn = function (el, label) {
+    if (!el) return;
+    el.setAttribute("data-busy-html", el.innerHTML);
+    el.classList.add("busy");
+    el.setAttribute("aria-busy", "true");
+    if (label) el.textContent = label;
+  };
+  var busyOff = function (el) {
+    el.innerHTML = el.getAttribute("data-busy-html");
+    el.removeAttribute("data-busy-html");
+    el.classList.remove("busy");
+    el.removeAttribute("aria-busy");
+    el.removeAttribute("aria-disabled");
+  };
   document.addEventListener("submit", function (e) {
     var f = e.target;
-    if (!f.matches("form[data-decide]") || e.defaultPrevented) return;
+    if (e.defaultPrevented || f.target || f.hasAttribute("data-no-busy")) return;
+    if (f.method !== "post" && !f.hasAttribute("data-busy")) return;
     if (f.getAttribute("data-sent")) { e.preventDefault(); return; }
     f.setAttribute("data-sent", "1");
-    var s = e.submitter;
+    f.setAttribute("aria-busy", "true");
+    var s = e.submitter || f.querySelector("button:not([type=button]),input[type=submit]");
     if (s && s.name) {
       // Выключенная кнопка не уходит с формой — её значение передаём скрытым полем.
       var h = document.createElement("input");
-      h.type = "hidden"; h.name = s.name; h.value = s.value;
+      h.type = "hidden"; h.name = s.name; h.value = s.value; h.setAttribute("data-busy-value", "");
       f.appendChild(h);
-      s.textContent = "Отправляю…";
     }
-    f.querySelectorAll("button").forEach(function (b) { b.disabled = true; });
+    if (s && s.tagName === "BUTTON") busyOn(s, s.getAttribute("data-busy") || f.getAttribute("data-busy"));
+    f.querySelectorAll("button,input[type=submit]").forEach(function (b) {
+      if (b.disabled) return;
+      b.disabled = true;
+      b.setAttribute("data-busy-off", "");
+    });
   });
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest("a[data-busy]");
+    if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return; // в новой вкладке — без индикации
+    if (a.classList.contains("busy")) { e.preventDefault(); return; }
+    busyOn(a, a.getAttribute("data-busy"));
+    a.setAttribute("aria-disabled", "true");
+  });
+  // Страница из кэша «назад»: индикация снимается, кнопки снова доступны;
+  // карточки запросов на подтверждение могли устареть — страница обновляется.
   window.addEventListener("pageshow", function (e) {
-    if (!e.persisted) return; // страница из кэша «назад»: кнопки снова доступны
-    if (document.querySelector("form[data-decide][data-sent]")) location.reload();
+    if (!e.persisted) return;
+    if (document.querySelector("form[data-decide][data-sent]")) { location.reload(); return; }
+    document.querySelectorAll("form[data-sent]").forEach(function (f) {
+      f.removeAttribute("data-sent");
+      f.removeAttribute("aria-busy");
+      f.querySelectorAll("[data-busy-value]").forEach(function (h) { h.remove(); });
+      f.querySelectorAll("[data-busy-off]").forEach(function (b) { b.disabled = false; b.removeAttribute("data-busy-off"); });
+    });
+    document.querySelectorAll(".busy[data-busy-html]").forEach(busyOff);
   });
 
   // Очередь подтверждений обновляется сама, пока страница открыта: новые

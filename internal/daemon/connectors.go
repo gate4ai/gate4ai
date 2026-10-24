@@ -4,7 +4,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -248,7 +247,7 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("POST /v1/connectors/install", owner(func(w http.ResponseWriter, r *http.Request) {
 		var req installReq
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Source == "" {
+		if err := readJSON(r, &req); err != nil || req.Source == "" {
 			WriteError(w, 400, "bad_request", "source is required")
 			return
 		}
@@ -259,7 +258,7 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			Name    string   `json:"name"`
 			Consent []string `json:"consent"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		if err := readJSON(r, &req); err != nil || req.Name == "" {
 			WriteError(w, 400, "bad_request", "name is required")
 			return
 		}
@@ -274,7 +273,7 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 		var req struct {
 			Name string `json:"name"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		if err := readJSON(r, &req); err != nil || req.Name == "" {
 			WriteError(w, 400, "bad_request", "name is required")
 			return
 		}

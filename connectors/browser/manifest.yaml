@@ -134,6 +134,7 @@ actions:
               value: { type: string, description: "fields: the start of the value (200 characters); never of a password" }
               value_length: { type: integer, description: "fields: the length of the value in characters" }
               checked: { type: boolean, description: "checkboxes, radio buttons, switches" }
+              icon: { type: boolean, description: "an icon without text inside an interactive element (the cross that removes a selected value); text is its aria-label, title or the text next to it" }
             required: [selector, kind, tag]
         outline:
           type: array

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -113,7 +114,8 @@ func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 			{"kind":"fetch","method":"GET","url":"https://a.example.com/api/bill?id=1","status":200,"mime":"application/json","body":"{\"debt\":10,\"access_token\":\"t0k\"}","size":36},
 			{"kind":"xhr","method":"POST","url":"https://a.example.com/auth/login","status":200,"mime":"application/json","body":"{\"token\":\"t0k\"}","size":15}]`), out)
 	case strings.Contains(expr, "nth-of-type"): // интерактивные элементы
-		return json.Unmarshal([]byte(`[{"selector":"#pay","tag":"button","type":"submit","text":"Оплатить"}]`), out)
+		return json.Unmarshal([]byte(`[{"selector":"#pay","kind":"button","tag":"button","type":"submit","text":"Оплатить"},`+
+			`{"selector":"#kw > svg","kind":"button","tag":"svg","text":"Удалить","icon":true}]`), out)
 	}
 	if strings.HasPrefix(expr, "((secret, max) =>") { // changesJS: что изменилось после type / press
 		return json.Unmarshal([]byte(`{"added":[{"tag":"span","text":"a"}],"closed":[{"tag":"ul","role":"listbox"}]}`), out)
@@ -354,7 +356,7 @@ func TestAgentSession(t *testing.T) {
 	if err != nil || res["text"] != "Задолженность 1 234,56 ₽" {
 		t.Fatal(res, err)
 	}
-	if els := res["elements"].([]worker.Element); len(els) != 1 || els[0].Selector != "#pay" || els[0].Text != "Оплатить" {
+	if els := res["elements"].([]worker.Element); len(els) != 2 || els[0].Selector != "#pay" || els[0].Text != "Оплатить" || !els[1].Icon {
 		t.Fatal(res["elements"])
 	}
 	if res, err = agentExec(t, b, "act", map[string]any{"session": id, "selector": "#pay", "method": "click"}); err != nil || res["url"] != "https://a.example.com/" {
@@ -951,6 +953,37 @@ func TestObserveJSONPage(t *testing.T) {
 	agentExec(t, b, "close", map[string]any{"session": id})
 }
 
+// observe --elements проходит output_schema: элемент-иконка (icon: true) и
+// каждое поле worker.Element есть в схеме (иначе хост отвечает invalid_result).
+func TestObserveElementsSchema(t *testing.T) {
+	h, b, _ := setup(t, nil)
+	r, err := exec(b, "open", map[string]any{"url": "https://a.example.com/"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := r.Structured.(map[string]any)["session"].(string)
+	defer agentExec(t, b, "close", map[string]any{"session": id})
+	r, err = exec(b, "observe", map[string]any{"session": id, "elements": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := mustFind(t, h, "observe").OutputSchema
+	if err := abi.CheckResult(r, schema); err != nil {
+		t.Fatal(err)
+	}
+	if els := r.Structured.(map[string]any)["elements"].([]worker.Element); len(els) != 2 || !els[1].Icon {
+		t.Fatal("an icon element:", els)
+	}
+	items, _ := schema.Properties.Get("elements")
+	et := reflect.TypeOf(worker.Element{})
+	for i := 0; i < et.NumField(); i++ {
+		name, _, _ := strings.Cut(et.Field(i).Tag.Get("json"), ",")
+		if _, ok := items.Items.Properties.Get(name); !ok {
+			t.Errorf("observe output_schema: elements[] has no %q", name)
+		}
+	}
+}
+
 // Уход на сайт входа во время ожидания — код redirected с подсказкой учётки.
 func TestOpenRedirected(t *testing.T) {
 	_, b, _ := setup(t, nil)
@@ -980,4 +1013,58 @@ func mustFind(t *testing.T, h *hosttest.Host, name string) manifest.Action {
 func TestMain(m *testing.M) {
 	worker.SettleTimeout = 200 * time.Millisecond // страницы вне списка в тестах не возвращаются
 	os.Exit(m.Run())
+}
+
+// Срок download — ожидание элемента, файла (timeout_ms) и запас: элемента нет —
+// not_found раньше срока, а не timeout.
+func TestDownloadActionTimeout(t *testing.T) {
+	for ms, want := range map[float64]time.Duration{0: 60 * time.Second, 60000: 90 * time.Second} {
+		got := actionTimeout(abi.ExecRequest{Action: "download", Args: map[string]any{"timeout_ms": ms}})
+		if got != want || got <= worker.DownloadElementWait+time.Duration(ms)*time.Millisecond {
+			t.Fatal(ms, got)
+		}
+	}
+}
+
+// browser.close во время действия, которое не отвечает на отмену дольше
+// AgentWait: close отвечает сразу, а страница освобождается только после
+// действия — без гонки за Executor и Session (go test -race).
+func TestCloseSessionReleasesAfterAction(t *testing.T) {
+	old := AgentWait
+	AgentWait = 50 * time.Millisecond
+	t.Cleanup(func() { AgentWait = old })
+	_, b, _ := setup(t, nil)
+	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["session"].(string)
+	done := make(chan error, 1)
+	go func() {
+		_, err := agentExec(t, b, "act", map[string]any{"session": id, "selector": "#missing", "method": "click", "timeout_ms": 30000.0})
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	start := time.Now()
+	if _, err := agentExec(t, b, "close", map[string]any{"session": id}); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("close waited for the action's timeout")
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), abi.CodeCancelled) {
+			t.Fatal("the running action is cancelled:", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the action never finished")
+	}
+	if _, err := agentExec(t, b, "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed by browser.close") {
+		t.Fatal(err)
+	}
+	// Страница снова свободна: новый сеанс открывается.
+	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"}); err != nil {
+		t.Fatal("page not released after close:", err)
+	}
 }

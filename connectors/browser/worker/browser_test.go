@@ -411,3 +411,27 @@ func TestLimits(t *testing.T) {
 		}
 	}
 }
+
+// Вызов CDP с отменённым или истекающим ctx (срок действия сеанса кончился
+// посреди ожидания) не закрывает подключение к Chrome: сеанс остаётся жив.
+func TestCDPCanceledCallKeepsConnection(t *testing.T) {
+	f := newFakeChrome(t)
+	c, err := dialBrowser(context.Background(), f.srv.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := 0; i < 50; i++ {
+		if err := c.call(done, "", "Browser.getVersion", nil, nil); err == nil {
+			t.Fatal("a call with a canceled ctx succeeded")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
+		_ = c.call(ctx, "", "Browser.getVersion", nil, nil)
+		cancel()
+	}
+	if err := c.call(context.Background(), "", "Browser.getVersion", nil, nil); err != nil || c.lost() {
+		t.Fatal("the connection is lost after canceled calls:", err)
+	}
+}
