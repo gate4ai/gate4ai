@@ -126,7 +126,7 @@ func TestInstallDevConnectorByAgent(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	a, _ := d.State.GetApproval(r.ID)
-	if !strings.Contains(a.Preview, "own build") || !strings.Contains(a.Preview, "probe") || !strings.Contains(a.Preview, "127.0.0.1") {
+	if !strings.Contains(a.Preview, "own build") || !strings.Contains(a.Preview, "probe") || !strings.Contains(a.Preview, "storage 1 MB") {
 		t.Fatal(a.Preview)
 	}
 	res, err := d.Pipeline.Decide(ctx, r.ID, true, "webui", "owner")
