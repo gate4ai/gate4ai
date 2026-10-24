@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/gate4ai/gate4ai/internal/sandbox"
 )
 
 // gate4ai browser setup — что нужно браузеру gate4ai на этом компьютере:
@@ -379,4 +381,36 @@ func (e *Env) printCheck(c BrowserCheck) {
 	for _, n := range c.Notes {
 		fmt.Fprintln(w, "Note: "+n)
 	}
+}
+
+// browserChecks — браузер в gate4ai doctor: Chrome обязателен (fail), экран
+// и шрифты на сервере — предупреждения; режим запущенного браузера — у daemon.
+func (e *Env) browserChecks(ctx context.Context) []sandbox.Check {
+	c := CheckBrowser(setupSysFn())
+	fix := "gate4ai browser setup"
+	var out []sandbox.Check
+	if c.Chrome == "" {
+		out = append(out, sandbox.Check{ID: "browser_chrome", Status: "fail", Detail: "Chrome is not installed: the browser connector does not work", Fix: fix})
+	} else {
+		out = append(out, sandbox.Check{ID: "browser_chrome", Status: "ok", Detail: strings.TrimSpace(c.Chrome + " " + c.Version)})
+	}
+	switch c.Display {
+	case "headless":
+		out = append(out, sandbox.Check{ID: "browser_screen", Status: "warn", Detail: "no screen and no Xvfb: the browser runs headless, sites with bot protection ask for a captcha or block more often", Fix: fix})
+	case "virtual":
+		out = append(out, sandbox.Check{ID: "browser_screen", Status: "ok", Detail: "a virtual screen (Xvfb): the browser starts it itself"})
+	}
+	for _, m := range c.Missing {
+		if m == "fonts" {
+			out = append(out, sandbox.Check{ID: "browser_fonts", Status: "warn", Detail: "few fonts: pages show boxes instead of letters", Fix: fix})
+		}
+	}
+	var st struct {
+		Display string `json:"display"`
+		Warning string `json:"warning"`
+	}
+	if err := e.Client().Do(ctx, "GET", "/v1/browser/sessions", nil, &st); err == nil && st.Display == "headless" && c.Display != "headless" {
+		out = append(out, sandbox.Check{ID: "browser_running_headless", Status: "warn", Detail: "the running browser was started headless; it gets the virtual screen after a restart of the browser package", Fix: "gate4ai daemon restart"})
+	}
+	return out
 }

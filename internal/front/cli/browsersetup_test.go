@@ -53,7 +53,7 @@ func TestCheckBrowser(t *testing.T) {
 			vars: map[string]string{"DISPLAY": ":0"}, display: "host", ok: true},
 		{name: "server, nothing", goos: "linux", arch: "amd64", rel: ubuntu, have: map[string]string{"sudo": "/usr/bin/sudo"}, display: "none",
 			missing: []string{"chrome", "xvfb", "fonts"},
-			cmds: []string{"google-chrome-stable_current_amd64.deb && sudo apt-get install -y /tmp/google-chrome.deb", "sudo apt-get install -y --no-install-recommends xvfb fonts-noto-core"}},
+			cmds:    []string{"google-chrome-stable_current_amd64.deb && sudo apt-get install -y /tmp/google-chrome.deb", "sudo apt-get install -y --no-install-recommends xvfb fonts-noto-core"}},
 		{name: "arm64 server with Chrome", goos: "linux", arch: "arm64", rel: "ID=debian\n", have: map[string]string{"google-chrome": "/usr/bin/google-chrome", "fc-list-out": fonts},
 			display: "headless", missing: []string{"xvfb"}, cmds: []string{"apt-get install -y --no-install-recommends xvfb"}, ok: true},
 		{name: "fedora", goos: "linux", arch: "amd64", rel: "ID=fedora\n", have: map[string]string{"Xvfb": "/usr/bin/Xvfb", "fc-list-out": fonts},

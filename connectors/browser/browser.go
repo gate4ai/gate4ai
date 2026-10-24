@@ -220,6 +220,9 @@ const (
 	// CodeSessionBlocked — в сеансе ещё идёт другое действие (или оно зависло):
 	// кто, с какого времени, что делать.
 	CodeSessionBlocked = "session_blocked"
+	// CodeUnavailable — браузер на компьютере не запускается (нет Chrome,
+	// дисплея, Chrome падает): чинит владелец, повтор не поможет.
+	CodeUnavailable = "browser_unavailable"
 	// CodeHeldByUser — сеанс взял под управление владелец (просмотр в Web UI):
 	// действия агента в нём ждут, пока он не вернёт сеанс.
 	CodeHeldByUser = "session_held_by_user"
@@ -230,6 +233,8 @@ func fail(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, worker.ErrUnavailable):
+		return abi.Errorf(CodeUnavailable, "%v. Do not retry: tell the user — they check and fix it with `gate4ai browser setup` on the computer with gate4ai", err)
 	case errors.Is(err, worker.ErrDomain), errors.Is(err, worker.ErrFileType):
 		return abi.Errorf(abi.CodeCapabilityDenied, "%v", err)
 	case errors.Is(err, worker.ErrTooLarge):

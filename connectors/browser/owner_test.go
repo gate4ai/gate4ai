@@ -6,10 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gate4ai/gate4ai/sdk-go/abi"
 
 	"github.com/gate4ai/gate4ai/connectors/browser/worker"
 )
@@ -195,5 +198,17 @@ func TestOwnerHandoffAnswer(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("the agent still waits after", want)
 		}
+	}
+}
+
+// Chrome нет — browser_unavailable с подсказкой владельцу, а не «ошибка ввода-вывода».
+func TestBrowserUnavailable(t *testing.T) {
+	b := New()
+	defer b.W.Close()
+	b.W.Env = worker.DisplayEnv{GOOS: "linux", Getenv: func(string) string { return "" }, Look: func(string) (string, error) { return "", os.ErrNotExist }}
+	_, err := b.Execute(context.Background(), nil, abi.ExecRequest{Action: "open", Args: map[string]any{"url": "https://a.example.com/"},
+		Settings: map[string]any{"allowed_domains": []any{"a.example.com"}, "chrome_path": "/nonexistent/chrome", "display": "virtual"}})
+	if err == nil || !strings.Contains(err.Error(), CodeUnavailable) || !strings.Contains(err.Error(), "gate4ai browser setup") || !strings.Contains(err.Error(), "Xvfb") {
+		t.Fatal(err)
 	}
 }

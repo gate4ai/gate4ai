@@ -129,7 +129,7 @@ func (s *Service) executor(ctx context.Context, st Settings, others bool) (*Exec
 		if chrome == "" {
 			var err error
 			if chrome, err = FindChrome(); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 			}
 		}
 		if s.proc != nil {
@@ -144,11 +144,11 @@ func (s *Service) executor(ctx context.Context, st Settings, others bool) (*Exec
 		}
 		_, denv, flags, err := s.disp.prepare(ctx, st.Display, filepath.Join(filepath.Dir(st.ProfileDir), ".gate4ai-display"), env)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 		u, proc, err := s.Launch(ctx, chrome, st.ProfileDir, denv, flags...)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 		cdp, s.proc = u, proc
 	}
@@ -196,6 +196,11 @@ func (s *Service) downloadsConn() *Downloads {
 	}
 	return s.dl
 }
+
+// ErrUnavailable — браузер на этом компьютере не запускается: нет Chrome,
+// нет нужного дисплея, Chrome падает при старте. Чинит владелец (gate4ai
+// browser setup), агенту повторять бесполезно.
+var ErrUnavailable = errors.New("the browser is not available on this computer")
 
 // ErrBusy — все MaxSessions сессий заняты дольше, чем вызов готов ждать.
 var ErrBusy = errors.New("the browser is busy with other sessions")

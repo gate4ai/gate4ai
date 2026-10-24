@@ -15,6 +15,7 @@ package webui
 
 import (
 	"cmp"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -319,8 +320,18 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		}
 		_, n := u.D.Config.CurrentRaw()
 		seq, _, _ := u.D.Journal.Head()
+		bctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		bs, _ := u.D.BrowserStatus(bctx)
+		cancel()
+		waiting := 0
+		for _, s := range bs.Sessions {
+			if s.State == "waiting" {
+				waiting++
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pending": items, "config_version": n, "receipts": seq})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pending": items, "config_version": n, "receipts": seq,
+			"browser": len(bs.Sessions), "browser_waiting": waiting})
 	})
 }
 
@@ -525,11 +536,14 @@ func (u *UI) guard(m mount, h http.Handler) http.Handler {
 	})
 }
 
-// Куда вернуться после входа (cookie <сессия>_next): только просмотр сеанса
-// браузера — ссылка view_url, которую агент дал человеку.
+// Куда вернуться после входа (cookie <сессия>_next): только раздел «Браузер»
+// и просмотр сеанса — ссылка view_url, которую агент дал человеку.
 
 // safeNext — адрес возврата: только /browser/<id> этого Web UI.
 func safeNext(p string) string {
+	if p == "/browser" {
+		return p
+	}
 	id, ok := strings.CutPrefix(p, "/browser/")
 	if !ok || id == "" || strings.ContainsAny(id, "/\\?#%") {
 		return ""
