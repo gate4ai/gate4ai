@@ -17,25 +17,22 @@ func TestSecretUses(t *testing.T) {
 		Relay:     config.Relay{URL: "https://relay.example", DeviceID: "d", Token: "@relay.token"},
 		Egress:    config.Egress{Secrets: []config.EgressSecret{{Domain: "api.example", Header: "Authorization", Placeholder: "X", Secret: "@api.key"}}},
 		Connectors: map[string]map[string]any{
-			"email": {"imap": map[string]any{"host": "imap.example", "password": "@email.imap.password"}},
-			"jira":  {"token": "@jira.acme"},
-			"old":   {"key": "@old.key"},
+			"jira": {"token": "@jira.acme"},
+			"old":  {"key": "@old.key"},
 		},
 	}
 	ms := []manifest.Manifest{
-		{Connector: "email", Capabilities: manifest.Capabilities{Secrets: []manifest.SecretCap{{Alias: "${setting:imap.password}", Bind: []string{"imaps://${setting:imap.host}:993"}}}}},
-		{Connector: "jira", Capabilities: manifest.Capabilities{Secrets: []manifest.SecretCap{{Alias: "@jira.fixed", Bind: []string{"https://jira.example"}}}}},
+		{Connector: "jira", Capabilities: manifest.Capabilities{Reveal: []string{"@jira.fixed"}}},
 		{Connector: "browser", Capabilities: manifest.Capabilities{Reveal: []string{"${setting:model_key}"}}},
 	}
 	got := secretUses(cfg, ms)
 	want := map[string][]SecretUse{
-		"@telegram.bot":        {{Name: "Telegram bot", Post: " (approvals)", Link: "/approvals/telegram"}},
-		"@relay.token":         {{Name: "relay", Post: " (device connection)", Link: "/settings/internet"}},
-		"@api.key":             {{Pre: "Egress Proxy: ", Name: "api.example"}},
-		"@email.imap.password": {{Pre: "connector ", Name: "email", Link: "/connectors/email"}},
-		"@jira.fixed":          {{Pre: "connector ", Name: "jira", Link: "/connectors/jira"}},
-		"@jira.acme":           {{Pre: "connector ", Name: "jira", Link: "/connectors/jira"}},
-		"@old.key":             {{Pre: "connector ", Name: "old", Post: " (not installed)"}},
+		"@telegram.bot": {{Name: "Telegram bot", Post: " (approvals)", Link: "/approvals/telegram"}},
+		"@relay.token":  {{Name: "relay", Post: " (device connection)", Link: "/settings/internet"}},
+		"@api.key":      {{Pre: "Egress Proxy: ", Name: "api.example"}},
+		"@jira.fixed":   {{Pre: "connector ", Name: "jira", Link: "/connectors/jira"}},
+		"@jira.acme":    {{Pre: "connector ", Name: "jira", Link: "/connectors/jira"}},
+		"@old.key":      {{Pre: "connector ", Name: "old", Post: " (not installed)"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v\nwant %v", got, want)

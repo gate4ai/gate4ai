@@ -263,9 +263,6 @@ var baseEnvOpts = []cel.EnvOption{
 				}
 				return types.Bool(DomainMatches(string(a.(types.String)), pats.([]string)))
 			}))),
-	cel.Function("email_domain",
-		cel.Overload("email_domain_string", []*cel.Type{cel.StringType}, cel.StringType,
-			cel.UnaryBinding(func(a ref.Val) ref.Val { return types.String(EmailDomain(string(a.(types.String)))) }))),
 }
 
 func compile(r config.Rule, cfg *config.Config, cat Catalog) (cel.Program, error) {

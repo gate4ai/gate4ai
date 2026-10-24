@@ -89,7 +89,7 @@ func binary(t *testing.T, pkg string) string {
 }
 
 // src — абсолютный путь к каталогу репозитория ("" — корень, иначе relay,
-// connectors/mail, …).
+// e2e/testdata/pagereader, …).
 func src(t *testing.T, name string) string {
 	t.Helper()
 	p, err := filepath.Abs(filepath.Join("..", name))
@@ -260,3 +260,6 @@ func (g *gate) installFrom(dir string) {
 		g.t.Fatalf("install %s: %d %s", dir, r.code, r.out)
 	}
 }
+
+// errOf — объект error из ответа gate4ai.
+func errOf(m map[string]any) map[string]any { e, _ := m["error"].(map[string]any); return e }

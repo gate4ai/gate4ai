@@ -3,15 +3,14 @@
 // Package hosttest — хост gate4.ai в том же процессе для нативных тестов
 // коннекторов: те же функции хоста и те же проверки возможностей
 // (hostfuncs, capability), что и в настоящем хосте, но секреты, хранилище
-// и браузер — фейки, а сеть и файлы — настоящие (фейковые серверы теста).
+// и поставщики service_call (браузер) — фейки, а файлы — настоящие. Сети у
+// коннектора нет: внешний мир — только через service_call.
 package hosttest
 
 import (
 	"context"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
@@ -32,8 +31,6 @@ type Host struct {
 	// Services — вызовы других коннекторов (service_call), обычно фейк ServiceFunc.
 	Services hostfuncs.ServiceRouter
 	KV       *MemKV
-	Dial     func(ctx context.Context, network, addr string) (net.Conn, error)
-	RootCAs  *x509.CertPool
 	Timeout  time.Duration
 
 	mu   sync.Mutex
@@ -64,8 +61,8 @@ func (h *Host) Dispatcher() (*hostfuncs.Dispatcher, error) {
 		return nil, err
 	}
 	d := &hostfuncs.Dispatcher{Check: chk, Secrets: secrets(h.Secrets), KV: h.KV, Services: h.Services,
-		Dial: h.Dial, RootCAs: h.RootCAs, Timeout: h.Timeout,
-		Log: func(level, msg string) { h.mu.Lock(); h.Logs = append(h.Logs, level+": "+msg); h.mu.Unlock() }}
+		Timeout: h.Timeout,
+		Log:     func(level, msg string) { h.mu.Lock(); h.Logs = append(h.Logs, level+": "+msg); h.mu.Unlock() }}
 	h.mu.Lock()
 	h.Last = d
 	h.mu.Unlock()

@@ -3,22 +3,20 @@
 package manifest
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 )
 
-const mailYAML = `
-connector: email
+const notesYAML = `
+connector: notes
 version: "2"
 runtime: wasm
 capabilities:
-  network:
-    - { host: "${setting:imap.host}", port: "${setting:imap.port}", scheme: tls }
-    - { host: "${setting:smtp.host}", scheme: tls }
-  secrets:
-    - { alias: "${setting:imap.password}", bind: ["${setting:imap.host}"] }
+  services:
+    - { target: browser, contract: 1, actions: [open, act], params: { domains: ["${setting:sites}"] } }
   files: ["${setting:roots}/**"]
   storage: { quota_mb: 1 }
 limits: { memory_mb: 64 }
@@ -26,6 +24,7 @@ actions:
   - name: send
     class: external
     verify: sent_folder
+    calls: [browser.open, browser.act]
     input_schema:
       type: object
       properties:
@@ -35,7 +34,7 @@ actions:
 `
 
 func TestParseAndResolve(t *testing.T) {
-	m, err := Parse([]byte(mailYAML))
+	m, err := Parse([]byte(notesYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,42 +45,50 @@ func TestParseAndResolve(t *testing.T) {
 		t.Fatalf("default not normalized to float64: %#v", d)
 	}
 	settings := map[string]any{
-		"imap":  map[string]any{"host": "IMAP.example.com", "port": 993.0, "password": "@mail.work"},
-		"smtp":  map[string]any{"host": "smtp.example.com"},
+		"sites": []any{"lk.example", "b.example"},
 		"roots": []any{"~/notes", "/srv/docs"},
 	}
 	r, err := m.Capabilities.Resolve(settings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantNet := []NetworkRule{{"imap.example.com", 993, "tls"}, {"smtp.example.com", 0, "tls"}}
-	if !reflect.DeepEqual(r.Network, wantNet) {
-		t.Fatalf("network %#v", r.Network)
+	if len(r.Services) != 1 || r.Services[0].Target != "browser" || r.Services[0].Contract != 1 || !r.Services[0].Allows("act") || r.Services[0].Allows("close") {
+		t.Fatalf("services %#v", r.Services)
 	}
-	if len(r.Secrets) != 1 || r.Secrets[0].Alias != "@mail.work" || r.Secrets[0].Bind[0] != "IMAP.example.com" {
-		t.Fatalf("secrets %#v", r.Secrets)
+	if fmt.Sprint(r.Services[0].Params["domains"]) != "[lk.example b.example]" {
+		t.Fatalf("params %#v", r.Services[0].Params)
 	}
 	if !reflect.DeepEqual(r.Files, []string{"~/notes/**", "/srv/docs/**"}) || r.StorageBytes != 1<<20 {
 		t.Fatal(r.Files, r.StorageBytes)
 	}
-	// Пустая настройка убирает запись; порт не задан — любой.
-	r, _ = m.Capabilities.Resolve(map[string]any{"imap": map[string]any{"host": "a.example"}})
-	if len(r.Network) != 1 || r.Network[0].Port != 0 || len(r.Secrets) != 0 || len(r.Files) != 0 {
+	// Пустая настройка убирает запись: без sites и roots — нет сайтов и файлов.
+	r, _ = m.Capabilities.Resolve(nil)
+	if len(r.Services) != 1 || fmt.Sprint(r.Services[0].Params["domains"]) != "[]" || len(r.Files) != 0 || r.StorageBytes != 1<<20 {
 		t.Fatalf("%#v", r)
 	}
-	// Значение секрета в настройках — только алиас.
-	if _, err := m.Capabilities.Resolve(map[string]any{"imap": map[string]any{"host": "a", "password": "hunter2"}}); err == nil {
+	// reveal: значение настройки — только алиас Vault.
+	rm, err := Parse([]byte("connector: x\nruntime: native\nplatforms: [linux/amd64]\ncapabilities: { reveal: [\"${setting:key}\"] }"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err := rm.Capabilities.Resolve(map[string]any{"key": "@api"}); err != nil || !reflect.DeepEqual(r.Reveal, []string{"@api"}) {
+		t.Fatal(r, err)
+	}
+	if _, err := rm.Capabilities.Resolve(map[string]any{"key": "hunter2"}); err == nil {
 		t.Fatal("plain secret value accepted")
 	}
 }
 
 func TestValidateRejects(t *testing.T) {
 	cases := map[string]string{
-		"bad scheme":       "capabilities: { network: [ { host: a.com, scheme: ftp } ] }",
-		"secret no bind":   "capabilities: { secrets: [ { alias: \"@x\", bind: [] } ] }",
-		"secret not alias": "capabilities: { secrets: [ { alias: \"x\", bind: [a.com] } ] }",
 		"relative files":   "capabilities: { files: [ \"notes/**\" ] }",
 		"two templates":    "capabilities: { files: [ \"${setting:a}/${setting:b}\" ] }",
+		"zero quota":       "capabilities: { storage: { quota_mb: 0 } }",
+		"service no acts":  "capabilities: { services: [ { target: browser, contract: 1, actions: [] } ] }",
+		"service contract": "capabilities: { services: [ { target: browser, contract: 0, actions: [open] } ] }",
+		"reveal not alias": "runtime: native\nplatforms: [linux/amd64]\ncapabilities: { reveal: [ \"x\" ] }",
+		"network removed":  "capabilities: { network: [ { host: a.com, scheme: https } ] }",
+		"secrets removed":  "capabilities: { secrets: [ { alias: \"@x\", bind: [a.com] } ] }",
 		"money no verify":  "actions: [ { name: pay, class: money } ]",
 		"unknown field":    "capabilites: {}",
 		"bad runtime":      "runtime: docker",
@@ -97,18 +104,18 @@ func TestValidateRejects(t *testing.T) {
 }
 
 func TestSummaryAndSame(t *testing.T) {
-	m, _ := Parse([]byte(mailYAML))
+	m, _ := Parse([]byte(notesYAML))
 	s := strings.Join(m.Capabilities.Summary(), "\n")
-	for _, want := range []string{"network tls://${setting:imap.host}:${setting:imap.port}", "secret ${setting:imap.password} for ${setting:imap.host}", "storage 1 MB"} {
+	for _, want := range []string{"call browser (contract 1): open, act with {\"domains\":[\"${setting:sites}\"]}", "files ${setting:roots}/**", "storage 1 MB"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("summary lacks %q:\n%s", want, s)
 		}
 	}
-	m2, _ := Parse([]byte(mailYAML))
+	m2, _ := Parse([]byte(notesYAML))
 	if !Same(m, m2) || !slices.Equal(m.Capabilities.Summary(), m2.Capabilities.Summary()) {
 		t.Fatal("same manifests differ")
 	}
-	m2.Capabilities.Network = m2.Capabilities.Network[:1]
+	m2.Capabilities.Services[0].Actions = m2.Capabilities.Services[0].Actions[:1]
 	if Same(m, m2) || slices.Equal(m.Capabilities.Summary(), m2.Capabilities.Summary()) {
 		t.Fatal("changed capabilities not detected")
 	}

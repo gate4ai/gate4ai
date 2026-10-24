@@ -5,9 +5,7 @@
 {{if $d.WholeHome}}<p class="warn">{{T "Files are open for the whole home folder. Put only the folders agents need below (hidden folders and keys stay closed anyway)."}}</p>{{end}}
 
 <form method="post" action="{{.Base}}/connectors/{{$d.Name}}/settings" autocomplete="off" data-dirty-warn><input type="hidden" name="csrf" value="{{.CSRF}}">
-{{if or $d.Fields $d.Providers}}<div class="card"><h3>{{T "Settings"}}</h3>
-{{with $d.Providers}}<label for="f-provider">{{T "Mail service"}}</label><select id="f-provider" name="provider"><option value="">{{T "another — I will enter the servers myself"}}</option>{{range .}}<option value="{{.ID}}">{{T .Title}}</option>{{end}}</select>
-<div class="help">{{T "The IMAP/SMTP servers are filled in."}} {{range .}}<br><b>{{T .Title}}:</b> {{T .Help}}{{end}}</div>{{end}}
+{{if $d.Fields}}<div class="card"><h3>{{T "Settings"}}</h3>
 {{range $d.Fields}}{{template "setting_field" (dict "F" . "V" $)}}{{end}}
 </div>{{end}}
 

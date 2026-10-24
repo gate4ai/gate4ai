@@ -85,9 +85,6 @@ func i18nKeys(t *testing.T) []string {
 			add(strconv.Quote(f.Help))
 		}
 	}
-	for _, p := range mailProviders {
-		add(strconv.Quote(p.Help))
-	}
 	for _, t := range Templates {
 		add(strconv.Quote(t.Title))
 		add(strconv.Quote(t.Description))

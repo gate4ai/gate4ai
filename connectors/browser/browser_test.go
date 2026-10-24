@@ -318,7 +318,7 @@ func TestManifest(t *testing.T) {
 			t.Errorf("service %s is not an action", name)
 		}
 	}
-	if len(m.Capabilities.Network) != 0 || len(m.Capabilities.Files) != 0 || len(m.Capabilities.Reveal) != 1 {
+	if len(m.Capabilities.Files) != 0 || len(m.Capabilities.Reveal) != 1 {
 		t.Fatal("browser declares only reveal of the model key", m.Capabilities)
 	}
 }

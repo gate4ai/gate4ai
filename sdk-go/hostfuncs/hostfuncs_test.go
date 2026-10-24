@@ -3,25 +3,11 @@
 package hostfuncs
 
 import (
-	"bufio"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"math/big"
-	"net"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,58 +55,6 @@ func code(err error) string {
 	return ""
 }
 
-func TestHTTPSecretsBindAndMask(t *testing.T) {
-	var gotAuth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		if r.URL.Path == "/redirect" {
-			http.Redirect(w, r, "https://evil.example/steal", http.StatusFound)
-			return
-		}
-		b, _ := io.ReadAll(r.Body)
-		w.Header().Set("X-Echo", gotAuth)
-		w.Write([]byte("echo: " + gotAuth + " " + string(b)))
-	}))
-	defer srv.Close()
-	d := dispatcher(t, `capabilities:
-  network: [ { host: 127.0.0.1, scheme: http } ]
-  secrets: [ { alias: "@api", bind: [127.0.0.1] } ]
-`, nil)
-	var resp abi.HTTPResponse
-	err := call(t, d, abi.FnHTTPRequest, abi.HTTPRequest{Method: "POST", URL: srv.URL + "/x",
-		Headers: map[string]string{"Authorization": "Bearer {{secret:@api}}"}, Body: []byte("k=v")}, &resp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotAuth != "Bearer tok-SECRET-123" {
-		t.Fatal("secret not substituted:", gotAuth)
-	}
-	if strings.Contains(string(resp.Body), "tok-SECRET") || strings.Contains(resp.Headers["X-Echo"], "tok-SECRET") {
-		t.Fatal("secret reflected back to the connector:", string(resp.Body))
-	}
-	// Редирект не выполняется.
-	if err := call(t, d, abi.FnHTTPRequest, abi.HTTPRequest{URL: srv.URL + "/redirect"}, &resp); err != nil || resp.Status != 302 {
-		t.Fatal(resp.Status, err)
-	}
-	// Секрет в URL, неизвестный алиас, чужой адрес.
-	if err := call(t, d, abi.FnHTTPRequest, abi.HTTPRequest{URL: srv.URL + "/?k={{secret:@api}}"}, &resp); code(err) != abi.CodeBadRequest {
-		t.Fatal("secret in URL:", err)
-	}
-	if err := call(t, d, abi.FnHTTPRequest, abi.HTTPRequest{URL: srv.URL, Headers: map[string]string{"X-Api-Key": "{{secret:@mail}}"}}, &resp); code(err) != abi.CodeCapabilityDenied {
-		t.Fatal("undeclared secret:", err)
-	}
-	d2 := dispatcher(t, `capabilities:
-  network: [ { host: 127.0.0.1, scheme: http }, { host: localhost, scheme: http } ]
-  secrets: [ { alias: "@api", bind: [localhost] } ]
-`, nil)
-	if err := call(t, d2, abi.FnHTTPRequest, abi.HTTPRequest{URL: srv.URL, Headers: map[string]string{"X-Api-Key": "{{secret:@api}}"}}, &resp); code(err) != abi.CodeCapabilityDenied {
-		t.Fatal("secret sent to an unbound address:", err)
-	}
-	if err := call(t, d, abi.FnHTTPRequest, abi.HTTPRequest{URL: "https://example.com/"}, &resp); code(err) != abi.CodeCapabilityDenied {
-		t.Fatal("undeclared host:", err)
-	}
-}
-
 func TestFSAndKV(t *testing.T) {
 	root := t.TempDir()
 	d := dispatcher(t, `capabilities: { files: ["${setting:root}/**"], storage: { quota_mb: 1 } }`, map[string]any{"root": root})
@@ -161,15 +95,14 @@ func TestFSAndKV(t *testing.T) {
 	if err := call(t, d, abi.FnKVGet, abi.KVRequest{Key: "k"}, &kv); err != nil || string(kv.Value) != "v" {
 		t.Fatal(kv, err)
 	}
-	// Вызовы других коннекторов и сеть не объявлены.
+	// Вызовы других коннекторов не объявлены; сетевых функций у хоста нет вовсе.
 	if err := call(t, d, abi.FnServiceCall, abi.ServiceCallRequest{Target: "browser", Action: "open"}, nil); code(err) != abi.CodeCapabilityDenied {
 		t.Fatal(err)
 	}
-	if err := call(t, d, abi.FnTLSDial, abi.DialRequest{Host: "127.0.0.1", Port: 1, TLS: abi.TLSNone}, nil); code(err) != abi.CodeCapabilityDenied {
-		t.Fatal(err)
-	}
-	if err := call(t, d, "rm_rf", struct{}{}, nil); code(err) != abi.CodeNotSupported {
-		t.Fatal(err)
+	for _, fn := range []string{"http_request", "tls_dial", "conn_read", "conn_write", "conn_close", "rm_rf"} {
+		if err := call(t, d, fn, struct{}{}, nil); code(err) != abi.CodeNotSupported {
+			t.Fatal(fn, err)
+		}
 	}
 }
 
@@ -184,185 +117,6 @@ func (k *memKV) Set(key string, v []byte, q int64) error {
 	return nil
 }
 func (k *memKV) Delete(key string) error { delete(k.m, key); return nil }
-
-func selfSigned(t *testing.T, host string) (tls.Certificate, *x509.CertPool) {
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: host}, DNSNames: []string{host},
-		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IsCA: true, BasicConstraintsValid: true}
-	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	leaf, _ := x509.ParseCertificate(der)
-	pool := x509.NewCertPool()
-	pool.AddCert(leaf)
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, pool
-}
-
-// fakeIMAP — минимальный IMAP: приветствие, STARTTLS, LOGIN (quoted и литерал), NOOP.
-func fakeIMAP(t *testing.T, cert tls.Certificate, wantUser, wantPass string) string {
-	l, _ := net.Listen("tcp", "127.0.0.1:0")
-	t.Cleanup(func() { l.Close() })
-	go func() {
-		for {
-			c, err := l.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				var conn net.Conn = c
-				r := bufio.NewReader(conn)
-				io.WriteString(conn, "* OK fake ready\r\n")
-				for {
-					line, err := r.ReadString('\n')
-					if err != nil {
-						return
-					}
-					line = strings.TrimRight(line, "\r\n")
-					tag, rest, _ := strings.Cut(line, " ")
-					switch {
-					case rest == "STARTTLS":
-						io.WriteString(conn, tag+" OK begin\r\n")
-						tc := tls.Server(c, &tls.Config{Certificates: []tls.Certificate{cert}})
-						conn, r = tc, bufio.NewReader(tc)
-					case strings.HasPrefix(rest, "LOGIN "):
-						args := rest[6:]
-						// литерал пароля: {n} → "+", затем n байт и CRLF
-						if i := strings.Index(args, "{"); i >= 0 && strings.HasSuffix(args, "}") {
-							io.WriteString(conn, "+ go\r\n")
-							more, _ := r.ReadString('\n')
-							args = args[:i] + `"` + strings.TrimRight(more, "\r\n") + `"`
-						}
-						if args == `"`+wantUser+`" "`+strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(wantPass)+`"` ||
-							args == `"`+wantUser+`" "`+wantPass+`"` {
-							io.WriteString(conn, tag+" OK [CAPABILITY IMAP4rev1] logged in\r\n")
-						} else {
-							io.WriteString(conn, tag+" NO bad credentials\r\n")
-						}
-					default:
-						io.WriteString(conn, tag+" OK "+rest+" done\r\n")
-					}
-				}
-			}(c)
-		}
-	}()
-	return l.Addr().String()
-}
-
-func readAll(t *testing.T, d *Dispatcher, id int, until string) string {
-	t.Helper()
-	var got string
-	for i := 0; i < 100 && !strings.Contains(got, until); i++ {
-		var r abi.ConnReadResponse
-		if err := call(t, d, abi.FnConnRead, abi.ConnRead{Conn: id, WaitMS: 50}, &r); err != nil {
-			t.Fatal(err)
-		}
-		got += string(r.Data)
-	}
-	return got
-}
-
-func TestDialIMAPLoginByHost(t *testing.T) {
-	cert, pool := selfSigned(t, "localhost")
-	addr := fakeIMAP(t, cert, "me@example.com", "pässword \"q\"")
-	_, port, _ := net.SplitHostPort(addr)
-	d := dispatcher(t, `capabilities:
-  network: [ { host: localhost, port: "`+port+`", scheme: tls } ]
-  secrets: [ { alias: "@mail", bind: [localhost] } ]
-`, nil)
-	d.RootCAs = pool
-	var dr abi.DialResponse
-	p, _ := strconv.Atoi(port)
-	req := abi.DialRequest{Host: "localhost", Port: p, TLS: abi.TLSStartTLS, Protocol: abi.ProtoIMAP,
-		Auth: &abi.DialAuth{Scheme: abi.AuthIMAPLogin, Username: "me@example.com", Secret: "@mail"}}
-	if err := call(t, d, abi.FnTLSDial, req, &dr); err != nil {
-		t.Fatal(err)
-	}
-	got := readAll(t, d, dr.Conn, "\r\n")
-	if !strings.HasPrefix(got, "* PREAUTH") {
-		t.Fatal("module did not get PREAUTH greeting:", got)
-	}
-	if err := call(t, d, abi.FnConnWrite, abi.ConnWrite{Conn: dr.Conn, Data: []byte("a1 NOOP\r\n")}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if got := readAll(t, d, dr.Conn, "a1 OK"); !strings.Contains(got, "a1 OK NOOP done") {
-		t.Fatal(got)
-	}
-	if err := call(t, d, abi.FnConnClose, abi.ConnClose{Conn: dr.Conn}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := call(t, d, abi.FnConnRead, abi.ConnRead{Conn: dr.Conn}, nil); code(err) != abi.CodeNotFound {
-		t.Fatal("closed conn:", err)
-	}
-	// Неверный пароль — auth_failed, а значение в ошибку не попадает.
-	d.Secrets = secrets{"@mail": "wrong-password-123"}
-	err := call(t, d, abi.FnTLSDial, req, &dr)
-	if code(err) != abi.CodeAuth || strings.Contains(err.Error(), "wrong-password") {
-		t.Fatal(err)
-	}
-	// Секрет не привязан к этому хосту.
-	req.Host = "127.0.0.1"
-	if err := call(t, d, abi.FnTLSDial, req, &dr); code(err) != abi.CodeCapabilityDenied {
-		t.Fatal(err)
-	}
-}
-
-func TestDialSMTPAuthPlain(t *testing.T) {
-	l, _ := net.Listen("tcp", "127.0.0.1:0")
-	defer l.Close()
-	got := make(chan string, 8)
-	go func() {
-		c, err := l.Accept()
-		if err != nil {
-			return
-		}
-		defer c.Close()
-		r := bufio.NewReader(c)
-		io.WriteString(c, "220 fake ESMTP\r\n")
-		for {
-			line, err := r.ReadString('\n')
-			if err != nil {
-				return
-			}
-			line = strings.TrimRight(line, "\r\n")
-			got <- line
-			switch {
-			case strings.HasPrefix(line, "EHLO"):
-				io.WriteString(c, "250-fake\r\n250 AUTH PLAIN\r\n")
-			case strings.HasPrefix(line, "AUTH PLAIN "):
-				b, _ := base64.StdEncoding.DecodeString(line[11:])
-				if string(b) == "\x00me\x00tok-SECRET-123" {
-					io.WriteString(c, "235 ok\r\n")
-				} else {
-					io.WriteString(c, "535 no\r\n")
-				}
-			default:
-				io.WriteString(c, "250 ok\r\n")
-			}
-		}
-	}()
-	_, port, _ := net.SplitHostPort(l.Addr().String())
-	d := dispatcher(t, `capabilities:
-  network: [ { host: 127.0.0.1, scheme: tcp } ]
-  secrets: [ { alias: "@api", bind: [127.0.0.1] } ]
-`, nil)
-	p, _ := strconv.Atoi(port)
-	var dr abi.DialResponse
-	if err := call(t, d, abi.FnTLSDial, abi.DialRequest{Host: "127.0.0.1", Port: p, TLS: abi.TLSNone, Protocol: abi.ProtoSMTP,
-		Auth: &abi.DialAuth{Scheme: abi.AuthSMTPAuthPlain, Username: "me", Secret: "@api"}}, &dr); err != nil {
-		t.Fatal(err)
-	}
-	call(t, d, abi.FnConnWrite, abi.ConnWrite{Conn: dr.Conn, Data: []byte("MAIL FROM:<me@example.com>\r\n")}, nil)
-	if out := readAll(t, d, dr.Conn, "250"); !strings.HasPrefix(out, "250") {
-		t.Fatal(out)
-	}
-	if <-got != "EHLO gate4ai.local" || !strings.HasPrefix(<-got, "AUTH PLAIN") || <-got != "MAIL FROM:<me@example.com>" {
-		t.Fatal("unexpected SMTP dialogue")
-	}
-}
 
 type fakeRouter struct{ got []abi.ServiceCallRequest }
 

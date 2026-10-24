@@ -35,7 +35,6 @@ var classOrder = []string{"read", "write", "external", "money"}
 var groupTitles = map[string]map[string]string{
 	"files":   {"read": "Read files", "write": "Create and change files"},
 	"browser": {"read": "Read pages", "write": "Click, type and sign in"},
-	"email":   {"read": "Read emails", "write": "Save drafts", "external": "Send emails"},
 }
 
 // groupWarns — предупреждения к группам действий: что значит «разрешать».

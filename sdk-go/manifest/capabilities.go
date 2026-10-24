@@ -20,10 +20,8 @@ import (
 // коннектора шаблоном ${setting:путь} (путь через точку: imap.host); список
 // в настройке раскрывается в несколько записей, пустое значение запись убирает.
 type Capabilities struct {
-	Network []NetworkCap `json:"network,omitempty" yaml:"network,omitempty"`
-	Secrets []SecretCap  `json:"secrets,omitempty" yaml:"secrets,omitempty"`
-	Files   []string     `json:"files,omitempty" yaml:"files,omitempty"` // "<папка>/**" — дерево, иначе один файл
-	Storage *StorageCap  `json:"storage,omitempty" yaml:"storage,omitempty"`
+	Files   []string    `json:"files,omitempty" yaml:"files,omitempty"` // "<папка>/**" — дерево, иначе один файл
+	Storage *StorageCap `json:"storage,omitempty" yaml:"storage,omitempty"`
 	// Services — действия других коннекторов, которые можно вызвать через service_call.
 	Services []ServiceCap `json:"services,omitempty" yaml:"services,omitempty"`
 	// Reveal — алиасы Vault, значения которых хост передаёт коннектору
@@ -39,27 +37,6 @@ type ServiceCap struct {
 	Contract int            `json:"contract" yaml:"contract"`
 	Actions  []string       `json:"actions" yaml:"actions"`
 	Params   map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
-}
-
-// Схемы сетевых возможностей.
-const (
-	SchemeHTTPS = "https" // http_request
-	SchemeHTTP  = "http"  // http_request (только loopback)
-	SchemeTLS   = "tls"   // tls_dial с tls / starttls
-	SchemeTCP   = "tcp"   // tls_dial без TLS (только loopback)
-)
-
-// NetworkCap — разрешённый адрес. Port пустой — любой порт.
-type NetworkCap struct {
-	Host   string `json:"host" yaml:"host"`
-	Port   string `json:"port,omitempty" yaml:"port,omitempty"`
-	Scheme string `json:"scheme" yaml:"scheme"`
-}
-
-// SecretCap — секрет по алиасу Vault и адреса, для которых хост его подставляет.
-type SecretCap struct {
-	Alias string   `json:"alias" yaml:"alias"`
-	Bind  []string `json:"bind" yaml:"bind"`
 }
 
 // StorageCap — собственное KV-хранилище коннектора.
@@ -159,40 +136,6 @@ func checkTemplate(field, v string) error {
 }
 
 func (c Capabilities) validate() error {
-	for _, n := range c.Network {
-		switch n.Scheme {
-		case SchemeHTTPS, SchemeHTTP, SchemeTLS, SchemeTCP:
-		default:
-			return fmt.Errorf("capabilities.network: bad scheme %q", n.Scheme)
-		}
-		if n.Host == "" {
-			return errors.New("capabilities.network: empty host")
-		}
-		if err := checkTemplate("capabilities.network.host", n.Host); err != nil {
-			return err
-		}
-		if err := checkTemplate("capabilities.network.port", n.Port); err != nil {
-			return err
-		}
-		if n.Port != "" && !tmplRe.MatchString(n.Port) {
-			if p, err := strconv.Atoi(n.Port); err != nil || p <= 0 || p > 65535 {
-				return fmt.Errorf("capabilities.network: bad port %q", n.Port)
-			}
-		}
-	}
-	for _, s := range c.Secrets {
-		if !strings.HasPrefix(s.Alias, "@") && !tmplRe.MatchString(s.Alias) {
-			return fmt.Errorf("capabilities.secrets: alias %q must start with @ or be ${setting:…}", s.Alias)
-		}
-		if len(s.Bind) == 0 {
-			return fmt.Errorf("capabilities.secrets: %s: empty bind (a secret must be bound to addresses)", s.Alias)
-		}
-		for _, b := range append([]string{s.Alias}, s.Bind...) {
-			if err := checkTemplate("capabilities.secrets", b); err != nil {
-				return err
-			}
-		}
-	}
 	seenSvc := map[string]bool{}
 	for _, sc := range c.Services {
 		if !nameRe.MatchString(sc.Target) || seenSvc[sc.Target] {
@@ -238,8 +181,6 @@ func (c Capabilities) validate() error {
 
 // Resolved — возможности с подставленными настройками конкретного экземпляра.
 type Resolved struct {
-	Network      []NetworkRule
-	Secrets      []SecretRule
 	Files        []string
 	StorageBytes int64
 	Services     []ServiceRule
@@ -316,19 +257,6 @@ func expandParams(v any, settings map[string]any) any {
 		return out
 	}
 	return v
-}
-
-// NetworkRule — разрешённый адрес; Port 0 — любой.
-type NetworkRule struct {
-	Host   string
-	Port   int
-	Scheme string
-}
-
-// SecretRule — алиас и адреса привязки.
-type SecretRule struct {
-	Alias string
-	Bind  []string
 }
 
 // lookup — значение настройки по пути через точку.
@@ -408,38 +336,6 @@ func expandAll(vs []string, settings map[string]any) []string {
 // Resolve подставляет настройки экземпляра в возможности.
 func (c Capabilities) Resolve(settings map[string]any) (Resolved, error) {
 	var r Resolved
-	for _, n := range c.Network {
-		ports := []int{0}
-		if n.Port != "" {
-			ports = nil
-			for _, p := range Expand(n.Port, settings) {
-				v, err := strconv.Atoi(p)
-				if err != nil || v <= 0 || v > 65535 {
-					return r, fmt.Errorf("capabilities.network: bad port %q", p)
-				}
-				ports = append(ports, v)
-			}
-			if len(ports) == 0 {
-				ports = []int{0} // порт не задан в настройках — любой
-			}
-		}
-		for _, h := range Expand(n.Host, settings) {
-			for _, p := range ports {
-				r.Network = append(r.Network, NetworkRule{Host: strings.ToLower(strings.TrimSuffix(h, ".")), Port: p, Scheme: n.Scheme})
-			}
-		}
-	}
-	for _, s := range c.Secrets {
-		bind := expandAll(s.Bind, settings)
-		for _, a := range Expand(s.Alias, settings) {
-			if !strings.HasPrefix(a, "@") {
-				return r, fmt.Errorf("capabilities.secrets: setting value %q is not a vault alias (@name)", a)
-			}
-			if len(bind) > 0 {
-				r.Secrets = append(r.Secrets, SecretRule{Alias: a, Bind: bind})
-			}
-		}
-	}
 	for _, sc := range c.Services {
 		var p map[string]any
 		if sc.Params != nil {
@@ -463,16 +359,6 @@ func (c Capabilities) Resolve(settings map[string]any) (Resolved, error) {
 // Summary — возможности человеческим языком (согласие при установке).
 func (c Capabilities) Summary() []string {
 	var out []string
-	for _, n := range c.Network {
-		p := ""
-		if n.Port != "" {
-			p = ":" + n.Port
-		}
-		out = append(out, fmt.Sprintf("network %s://%s%s", n.Scheme, n.Host, p))
-	}
-	for _, s := range c.Secrets {
-		out = append(out, fmt.Sprintf("secret %s for %s", s.Alias, strings.Join(s.Bind, ", ")))
-	}
 	for _, sc := range c.Services {
 		line := fmt.Sprintf("call %s (contract %d): %s", sc.Target, sc.Contract, strings.Join(sc.Actions, ", "))
 		if len(sc.Params) > 0 {

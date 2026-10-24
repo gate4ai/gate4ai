@@ -450,10 +450,10 @@ func (e *Env) skill(ctx context.Context) int {
 
 // knownConnectors — коннекторы ядра и магазина по умолчанию: их имена — не
 // опечатки встроенных команд (files ≠ sites), даже когда daemon не отвечает.
-var knownConnectors = map[string]bool{"files": true, "browser": true, "email": true, "gate4ai": true}
+var knownConnectors = map[string]bool{"files": true, "browser": true, "gate4ai": true}
 
 // connectorAliases — привычные имена коннекторов в CLI.
-var connectorAliases = map[string]string{"mail": "email"}
+var connectorAliases = map[string]string{}
 
 // action — `gate4ai <connector> <action> --arg value ...`.
 func (e *Env) action(ctx context.Context, conn string, args []string) int {
@@ -1159,7 +1159,7 @@ func (e *Env) policy(ctx context.Context, args []string) int {
 		argsJSON := fs.String("args", "{}", "")
 		file := fs.String("file", "", "draft policy to test instead of the current one")
 		if fs.Parse(args) != nil || *agent == "" || *action == "" {
-			fmt.Fprintln(e.Stderr, "usage: gate4ai policy test --agent a --action email.send [--args '{...}'] [--file draft.yaml]")
+			fmt.Fprintln(e.Stderr, "usage: gate4ai policy test --agent a --action browser.open [--args '{...}'] [--file draft.yaml]")
 			return ExitUsage
 		}
 		var a map[string]any

@@ -11,12 +11,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"sync"
 	"time"
 
@@ -40,9 +38,6 @@ type Services struct {
 	Log    *slog.Logger
 	// Home — домашний каталог пользователя для "~" в путях.
 	Home string
-	// Dial и RootCAs — сеть (подменяются в тестах).
-	Dial    func(ctx context.Context, network, addr string) (net.Conn, error)
-	RootCAs *x509.CertPool
 	// Mask — маскирование секретов Vault в диагностике коннекторов (stderr
 	// нативных процессов) перед записью в лог daemon; nil — без маскирования.
 	Mask func(string) string
@@ -326,7 +321,7 @@ func (e *Engine) Dispatcher(ctx context.Context, m manifest.Manifest, lim manife
 		router = callerRouter{caller: name, r: e.svc.Router}
 	}
 	return &hostfuncs.Dispatcher{Ctx: ctx, Check: chk, Secrets: e.svc.Secrets, KV: kv, Services: router,
-		Dial: e.svc.Dial, RootCAs: e.svc.RootCAs, Timeout: time.Duration(lim.TimeoutS) * time.Second,
+		Timeout: time.Duration(lim.TimeoutS) * time.Second,
 		Log: func(level, msg string) {
 			lv := map[string]slog.Level{"debug": slog.LevelDebug, "warn": slog.LevelWarn, "error": slog.LevelError}[level]
 			log.Log(context.Background(), lv, msg, "connector", name)

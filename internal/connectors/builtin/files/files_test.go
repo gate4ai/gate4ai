@@ -127,7 +127,7 @@ func TestManifest(t *testing.T) {
 	if w, _ := m.Find("write"); w.Class != "write" {
 		t.Fatal("write must default to ask")
 	}
-	if m.Runtime != "builtin" || len(m.Capabilities.Files) != 1 || m.Capabilities.Network != nil {
+	if m.Runtime != "builtin" || len(m.Capabilities.Files) != 1 {
 		t.Fatal("files connector must have only file capabilities", m.Capabilities)
 	}
 }

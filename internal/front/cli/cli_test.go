@@ -138,20 +138,20 @@ func TestCLIFlow(t *testing.T) {
 		t.Fatal("owner_only: exit 7", code, out)
 	}
 	// Владелец без --as: agent_required — код 7 и подсказка про токен агента.
-	if code, out := h.run(t, "", "mail", "send", "--to", "landlord@example.com", "--subject", "x"); code != ExitAuth ||
+	if code, out := h.run(t, "", "email", "send", "--to", "landlord@example.com", "--subject", "x"); code != ExitAuth ||
 		errOf(jsonOf(t, out))["code"] != "agent_required" || !strings.Contains(errOf(jsonOf(t, out))["hint"].(string), "--as <agent>") {
 		t.Fatal("agent_required:", code, out)
 	}
 	// Строковый аргумент из файла (--<name>_file) и из stdin (-).
 	f := filepath.Join(t.TempDir(), "subject.txt")
 	os.WriteFile(f, []byte("from file"), 0o600)
-	if code, out := h.run(t, tok, "mail", "send", "--to", "landlord@example.com", "--subject_file", f); code != ExitOK || !strings.Contains(out, `"subject": "from file"`) {
+	if code, out := h.run(t, tok, "email", "send", "--to", "landlord@example.com", "--subject_file", f); code != ExitOK || !strings.Contains(out, `"subject": "from file"`) {
 		t.Fatal("--subject_file:", code, out)
 	}
-	if code, out := h.run(t, tok, "mail", "send", "--to", "landlord@example.com", "--subject_file", "-"); code != ExitOK || !strings.Contains(out, `"subject": "s3cret-value"`) {
+	if code, out := h.run(t, tok, "email", "send", "--to", "landlord@example.com", "--subject_file", "-"); code != ExitOK || !strings.Contains(out, `"subject": "s3cret-value"`) {
 		t.Fatal("--subject_file -:", code, out)
 	}
-	if code, out := h.run(t, tok, "mail", "send", "--to", "landlord@example.com", "--subject_file", "/nonexistent"); code != ExitUsage || errOf(jsonOf(t, out))["code"] != "invalid_arguments" {
+	if code, out := h.run(t, tok, "email", "send", "--to", "landlord@example.com", "--subject_file", "/nonexistent"); code != ExitUsage || errOf(jsonOf(t, out))["code"] != "invalid_arguments" {
 		t.Fatal("missing file:", code, out)
 	}
 	// Каталог и skill.
@@ -163,13 +163,13 @@ func TestCLIFlow(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "gate4ai email send --to name@example.com") {
 		t.Fatal(out)
 	}
-	code, out = h.run(t, tok, "mail", "send", "--help")
+	code, out = h.run(t, tok, "email", "send", "--help")
 	if code != 0 || !strings.Contains(out, "--to") || !strings.Contains(out, "repeatable") {
 		t.Fatal(out)
 	}
 
-	// Разрешено и проверено (алиас mail → email, повтор --to, булев флаг).
-	code, out = h.run(t, tok, "mail", "send", "--to", "landlord@example.com", "--subject", "rent", "--urgent")
+	// Разрешено и проверено (повтор --to, булев флаг).
+	code, out = h.run(t, tok, "email", "send", "--to", "landlord@example.com", "--subject", "rent", "--urgent")
 	if code != ExitOK || jsonOf(t, out)["verified"] != true {
 		t.Fatal(code, out)
 	}

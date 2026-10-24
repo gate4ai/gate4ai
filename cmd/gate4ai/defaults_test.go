@@ -76,7 +76,7 @@ actions:
 version: "1"
 runtime: wasm
 capabilities:
-  network: [ { host: api.bank.example, scheme: https } ]
+  files: [ "/srv/api.bank.example/**" ]
 actions:
   - { name: balance, class: read }
   - { name: pay, class: external }

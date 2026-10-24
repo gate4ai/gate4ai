@@ -3,12 +3,8 @@
 package connector_test
 
 import (
-	"bufio"
 	"context"
 	"errors"
-	"io"
-	"net"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -18,8 +14,8 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
-// echo — коннектор, который разговаривает с сервером через abi.Conn: читающая
-// горутина и пишущая горутина одновременно, как go-imap.
+// echo — коннектор, который ходит в функции хоста: хранилище (kv) и
+// доказательства. Слова накапливаются в kv под ключом из настроек.
 type echo struct{}
 
 func (echo) Execute(ctx context.Context, h *abi.Host, req abi.ExecRequest) (abi.ExecResult, error) {
@@ -29,32 +25,18 @@ func (echo) Execute(ctx context.Context, h *abi.Host, req abi.ExecRequest) (abi.
 	case "fail":
 		return abi.ExecResult{}, errors.New("nope")
 	}
-	ps, _ := req.Settings["dial_port"].(string)
-	if ps == "" {
-		ps = req.Settings["port"].(string)
-	}
-	port, _ := strconv.Atoi(ps)
-	c, err := h.Dial(abi.DialRequest{Host: "127.0.0.1", Port: port, TLS: abi.TLSNone})
-	if err != nil {
-		return abi.ExecResult{}, err
-	}
-	defer c.Close()
-	lines := make(chan string)
-	go func() {
-		r := bufio.NewReader(c)
-		for {
-			l, err := r.ReadString('\n')
-			if err != nil {
-				close(lines)
-				return
-			}
-			lines <- strings.TrimSpace(l)
-		}
-	}()
+	key, _ := req.Settings["key"].(string)
 	var out []string
 	for _, w := range req.Args["words"].([]any) {
-		io.WriteString(c, w.(string)+"\n")
-		out = append(out, <-lines)
+		prev, _, err := h.KVGet(key)
+		if err != nil {
+			return abi.ExecResult{}, err
+		}
+		up := strings.ToUpper(w.(string))
+		if err := h.KVSet(key, append(append(prev, up...), '\n')); err != nil {
+			return abi.ExecResult{}, err
+		}
+		out = append(out, up)
 	}
 	_ = h.Evidence("log.txt", "text/plain", []byte(strings.Join(out, ",")))
 	return abi.ExecResult{Structured: map[string]any{"echo": out}, Content: []abi.Content{abi.Text(strings.Join(out, " "))}}, nil
@@ -67,7 +49,7 @@ func (echo) Verify(context.Context, *abi.Host, abi.VerifyRequest) (abi.VerifyRes
 const yaml = `
 connector: echo
 capabilities:
-  network: [ { host: 127.0.0.1, port: "${setting:port}", scheme: tcp } ]
+  storage: { quota_mb: 1 }
 actions:
   - name: say
     class: read
@@ -84,33 +66,11 @@ actions:
 `
 
 func TestConnectorOnTestHost(t *testing.T) {
-	l, _ := net.Listen("tcp", "127.0.0.1:0")
-	defer l.Close()
-	go func() {
-		for {
-			c, err := l.Accept()
-			if err != nil {
-				return
-			}
-			go func() {
-				r := bufio.NewReader(c)
-				for {
-					s, err := r.ReadString('\n')
-					if err != nil {
-						c.Close()
-						return
-					}
-					io.WriteString(c, strings.ToUpper(s))
-				}
-			}()
-		}
-	}()
 	m, err := manifest.Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, port, _ := net.SplitHostPort(l.Addr().String())
-	h := hosttest.New(m, map[string]any{"port": port}, nil)
+	h := hosttest.New(m, map[string]any{"key": "words"}, nil)
 	res, err := h.Execute(echo{}, "say", map[string]any{"words": []any{"a", "bb", "ccc"}})
 	if err != nil {
 		t.Fatal(err)
@@ -121,9 +81,13 @@ func TestConnectorOnTestHost(t *testing.T) {
 	if len(res.Evidence) != 1 || string(res.Evidence[0].Data) != "A,BB,CCC" {
 		t.Fatal(res.Evidence)
 	}
-	// Порт не из настроек — capability_denied.
-	h.Settings = map[string]any{"port": port, "dial_port": "1"}
-	if _, err := h.Execute(echo{}, "say", map[string]any{"words": []any{"a"}}); err == nil || !strings.Contains(err.Error(), "capability_denied") {
+	if v, ok, _ := h.KV.Get("words"); !ok || string(v) != "A\nBB\nCCC\n" {
+		t.Fatalf("kv: %q %v", v, ok)
+	}
+	// Хранилище не объявлено — capability_denied.
+	m2, _ := manifest.Parse([]byte(strings.Replace(yaml, "storage: { quota_mb: 1 }", "{}", 1)))
+	h2 := hosttest.New(m2, map[string]any{"key": "words"}, nil)
+	if _, err := h2.Execute(echo{}, "say", map[string]any{"words": []any{"a"}}); err == nil || !strings.Contains(err.Error(), "capability_denied") {
 		t.Fatal(err)
 	}
 	if _, err := h.Execute(echo{}, "boom", nil); err == nil || !strings.Contains(err.Error(), "panic: boom") {

@@ -6,7 +6,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -49,12 +48,9 @@ type Options struct {
 	Connectors []connectors.Client
 	// UserHome — каталог для "~" в путях коннекторов ("" — домашний каталог).
 	UserHome string
-	// WasmDial и WasmRootCAs — сеть коннекторов (тесты).
-	WasmDial    func(ctx context.Context, network, addr string) (net.Conn, error)
-	WasmRootCAs *x509.CertPool
-	Notifier    pipeline.Notifier
-	Log         *slog.Logger
-	Now         func() time.Time
+	Notifier pipeline.Notifier
+	Log      *slog.Logger
+	Now      func() time.Time
 }
 
 // Daemon — собранное ядро.
@@ -419,7 +415,7 @@ func (d *Daemon) startWasm(opt Options) error {
 	e, err := wasm.NewEngine(filepath.Join(opt.Home, "cache", "wasm"), wasm.Services{
 		Secrets: vaultSecrets{d.Vault},
 		KV:      func(name string) hostfuncs.KV { return kv(name) },
-		Router:  d, Log: d.Log, Home: home, Dial: opt.WasmDial, RootCAs: opt.WasmRootCAs, Mask: d.Vault.MaskString})
+		Router:  d, Log: d.Log, Home: home, Mask: d.Vault.MaskString})
 	if err != nil {
 		return err
 	}

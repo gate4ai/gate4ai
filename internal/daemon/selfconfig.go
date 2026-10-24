@@ -40,7 +40,7 @@ const changeSchema = `{ type: object, properties: {
   profile: { type: string, description: "profile to change (add_rule, remove_rule, add_connector, install_connector); empty — your own profile" },
   rule_id: { type: string, description: "rule id as policy_summary shows it (remove_rule; optional for add_rule — the same id replaces the rule)" },
   id: { type: string, description: "the same as rule_id" },
-  action: { type: string, description: "add_rule: action name or glob, e.g. files.append or email.*" },
+  action: { type: string, description: "add_rule: action name or glob, e.g. files.append or browser.*" },
   when: { type: string, description: "add_rule: CEL condition over the action arguments, e.g. glob(path, \"~/notes/**\")" },
   effect: { type: string, enum: [allow, ask, deny] },
   rule_reason: { type: string, description: "add_rule: reason shown to agents and in approvals" },

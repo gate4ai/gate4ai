@@ -4,13 +4,6 @@ package abi
 
 import (
 	"encoding/json"
-	"errors"
-	"io"
-	"net"
-	"os"
-	"runtime"
-	"sync"
-	"time"
 )
 
 // Transport — вызов функции хоста: запрос JSON → Response JSON. В WASM-модуле —
@@ -37,11 +30,6 @@ func callAs[T any](h *Host, fn string, req any) (T, error) {
 	var out T
 	err := h.call(fn, req, &out)
 	return out, err
-}
-
-// HTTP — http_request.
-func (h *Host) HTTP(r HTTPRequest) (HTTPResponse, error) {
-	return callAs[HTTPResponse](h, FnHTTPRequest, r)
 }
 
 // FSRead — fs_read.
@@ -122,109 +110,3 @@ func (h *Host) ServiceCall(target, action string, args any, out any) (ExecResult
 	}
 	return res, nil
 }
-
-// Dial — tls_dial: соединение (net.Conn) поверх conn_read / conn_write.
-func (h *Host) Dial(r DialRequest) (net.Conn, error) {
-	var out DialResponse
-	if err := h.call(FnTLSDial, r, &out); err != nil {
-		return nil, err
-	}
-	return &Conn{h: h, id: out.Conn, remote: r.Host}, nil
-}
-
-// Conn — соединение, открытое хостом. Чтение опрашивает хост с короткими
-// ожиданиями и уступает планировщику: в WASM один поток, и долгий блокирующий
-// вызов хоста остановил бы остальные горутины модуля (например, ту, что пишет).
-type Conn struct {
-	h      *Host
-	id     int
-	remote string
-
-	mu       sync.Mutex
-	buf      []byte
-	eof      bool
-	closed   bool
-	deadline time.Time
-}
-
-// ErrClosed — соединение закрыто.
-var ErrClosed = errors.New("connection closed")
-
-func (c *Conn) Read(p []byte) (int, error) {
-	for {
-		c.mu.Lock()
-		if len(c.buf) > 0 {
-			n := copy(p, c.buf)
-			c.buf = c.buf[n:]
-			c.mu.Unlock()
-			return n, nil
-		}
-		if c.closed {
-			c.mu.Unlock()
-			return 0, ErrClosed
-		}
-		if c.eof {
-			c.mu.Unlock()
-			return 0, io.EOF
-		}
-		dl := c.deadline
-		c.mu.Unlock()
-		if !dl.IsZero() && time.Now().After(dl) {
-			return 0, os.ErrDeadlineExceeded
-		}
-		var out ConnReadResponse
-		if err := c.h.call(FnConnRead, ConnRead{Conn: c.id, Max: 64 << 10, WaitMS: 20}, &out); err != nil {
-			return 0, err
-		}
-		c.mu.Lock()
-		c.buf = append(c.buf, out.Data...)
-		c.eof = c.eof || out.EOF
-		c.mu.Unlock()
-		if len(out.Data) == 0 && !out.EOF {
-			runtime.Gosched()
-		}
-	}
-}
-
-func (c *Conn) Write(p []byte) (int, error) {
-	c.mu.Lock()
-	closed := c.closed
-	c.mu.Unlock()
-	if closed {
-		return 0, ErrClosed
-	}
-	out, err := callAs[ConnWriteResponse](c.h, FnConnWrite, ConnWrite{Conn: c.id, Data: p})
-	return out.N, err
-}
-
-// Close — conn_close.
-func (c *Conn) Close() error {
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return nil
-	}
-	c.closed = true
-	c.mu.Unlock()
-	return c.h.call(FnConnClose, ConnClose{Conn: c.id}, nil)
-}
-
-type addr string
-
-func (a addr) Network() string { return "gate4ai" }
-func (a addr) String() string  { return string(a) }
-
-func (c *Conn) LocalAddr() net.Addr  { return addr("connector") }
-func (c *Conn) RemoteAddr() net.Addr { return addr(c.remote) }
-
-// SetDeadline — срок чтения (запись выполняет хост с собственным таймаутом).
-func (c *Conn) SetDeadline(t time.Time) error { return c.SetReadDeadline(t) }
-
-func (c *Conn) SetReadDeadline(t time.Time) error {
-	c.mu.Lock()
-	c.deadline = t
-	c.mu.Unlock()
-	return nil
-}
-
-func (c *Conn) SetWriteDeadline(time.Time) error { return nil }

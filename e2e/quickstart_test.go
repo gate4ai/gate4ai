@@ -31,9 +31,7 @@ func quickstartYAML(t *testing.T) string {
 func TestQuickstartFlow(t *testing.T) {
 	t.Parallel()
 	g := startGate(t)
-	for _, c := range []string{"mail", "browser"} {
-		g.install(c)
-	}
+	g.install("browser")
 	cfgFile := filepath.Join(t.TempDir(), "quickstart.yaml")
 	os.WriteFile(cfgFile, []byte(quickstartYAML(t)), 0o600)
 	if r := g.run("", "", "policy", "set", cfgFile, "-m", "docs/quickstart.md"); r.code != 0 {

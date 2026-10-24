@@ -284,9 +284,6 @@ func (u *UI) connectorPage(r *http.Request) (string, map[string]any, error) {
 		"Profiles": profiles, "Config": cfg, "Info": in.Info, "Builtin": in.Name == "", "Actions": acts, "Calls": calls, "Access": access,
 		"Profile": prof, "Grants": grantsFor(cfg, name), "Groups": u.groups(name, cfg.Profiles[prof]), "ProfileAgents": profileAgents(cfg, prof),
 		"WholeHome": name == "files" && filesWholeHome(cfg)}
-	if name == "email" {
-		data["Providers"] = mailProviders
-	}
 	return "connector", data, nil
 }
 
@@ -300,22 +297,6 @@ func (u *UI) saveConnectorSettings(w http.ResponseWriter, r *http.Request) map[s
 	f := r.PostForm
 	cur := map[string]any{}
 	maps.Copy(cur, u.D.Config.Current().Connectors[name])
-	// Почтовый сервис: серверы по умолчанию.
-	if p := f.Get("provider"); p != "" {
-		for _, mp := range mailProviders {
-			if mp.ID == p {
-				if f.Get("imap.host") == "" {
-					f.Set("imap.host", mp.IMAP)
-				}
-				if f.Get("smtp.host") == "" {
-					f.Set("smtp.host", mp.SMTP)
-				}
-				if f.Get("imap.username") == "" {
-					f.Set("imap.username", f.Get("address"))
-				}
-			}
-		}
-	}
 	for _, fl := range settingFields(c.Manifest(), cur) {
 		raw := f.Get(fl.Key)
 		if fl.Kind == fieldSecret {

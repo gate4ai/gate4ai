@@ -3,15 +3,10 @@
 package wasm
 
 import (
-	"bufio"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
-	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,98 +95,13 @@ func TestCapabilityDeniedForEveryFunction(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := res.Structured.(map[string]any)
-	if len(got) != 9 {
+	if len(got) != 6 {
 		t.Fatal(got)
 	}
 	for fn, code := range got {
 		if code != abi.CodeCapabilityDenied {
 			t.Errorf("%s: %v", fn, code)
 		}
-	}
-}
-
-func TestSecretNeverReachesModule(t *testing.T) {
-	var seen string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = r.Header.Get("Authorization")
-		io.WriteString(w, "you sent "+seen)
-	}))
-	defer srv.Close()
-	logs := &logBuf{}
-	c := load(t, logs)
-	res, err := run(t, c, "http", map[string]any{"url": srv.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if seen != "Bearer s3cr3t-value" {
-		t.Fatal("host did not substitute the secret:", seen)
-	}
-	body := res.Structured.(map[string]any)["body"].(string)
-	if strings.Contains(body, "s3cr3t") || !strings.Contains(body, "[secret]") {
-		t.Fatal("secret reached the module:", body)
-	}
-	if strings.Contains(logs.String(), "s3cr3t") || !strings.Contains(logs.String(), "connector=probe") {
-		t.Fatal("log:", logs.String())
-	}
-	res, _ = run(t, c, "settings", nil)
-	if res.Structured.(map[string]any)["token"] != "@probe" {
-		t.Fatal("module must see only the alias", res.Structured)
-	}
-}
-
-// stubIMAP — минимальный IMAP: приветствие, LOGIN (запоминает строку), ответ OK на любую команду.
-func stubIMAP(t *testing.T) (port int, login <-chan string) {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { l.Close() })
-	ch := make(chan string, 1)
-	go func() {
-		c, err := l.Accept()
-		if err != nil {
-			return
-		}
-		defer c.Close()
-		r := bufio.NewReader(c)
-		io.WriteString(c, "* OK stub ready\r\n")
-		for {
-			line, err := r.ReadString('\n')
-			if err != nil {
-				return
-			}
-			tag, cmd, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
-			if strings.HasPrefix(cmd, "LOGIN ") {
-				ch <- cmd
-			}
-			io.WriteString(c, tag+" OK "+strings.Fields(cmd)[0]+" done\r\n")
-		}
-	}()
-	return l.Addr().(*net.TCPAddr).Port, ch
-}
-
-func TestDialAuthenticatedByHost(t *testing.T) {
-	port, login := stubIMAP(t)
-	c := load(t, io.Discard)
-	res, err := run(t, c, "imap", map[string]any{"port": float64(port)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case got := <-login:
-		if got != `LOGIN "probe" "s3cr3t-value"` {
-			t.Fatal("host login:", got)
-		}
-	default:
-		t.Fatal("host did not log in")
-	}
-	out := res.Structured.(map[string]any)
-	if !strings.HasPrefix(out["greeting"].(string), "* PREAUTH") || out["reply"] != "a1 OK NOOP done\r\n" {
-		t.Fatal("module side:", out)
-	}
-	if strings.Contains(fmt.Sprint(out), "s3cr3t") {
-		t.Fatal("secret reached the module:", out)
 	}
 }
 
@@ -245,7 +155,7 @@ func TestLimits(t *testing.T) {
 func TestManifestMustMatchPackage(t *testing.T) {
 	bin, man := probe(t)
 	e, _ := NewEngine("", Services{})
-	man.Capabilities.Network = append(man.Capabilities.Network, manifest.NetworkCap{Host: "evil.example", Scheme: "https"})
+	man.Capabilities.Files = append(man.Capabilities.Files, "/**")
 	if _, err := e.Load(context.Background(), bin, man); err == nil || !strings.Contains(err.Error(), "differs") {
 		t.Fatal("package manifest with wider capabilities accepted:", err)
 	}

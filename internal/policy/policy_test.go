@@ -225,14 +225,13 @@ profiles:
 
 func TestCompileErrors(t *testing.T) {
 	cases := map[string]string{
-		"to.all(r, r in lists.nope)":   `unknown list "nope"`,
-		"too == 1":                     `unknown variable "too"`,
-		"glob(path)":                   "CEL:",
-		"'x' +":                        "CEL:",
-		"path":                         "",
-		"domain_matches(path, 'x')":    "CEL:",
-		"size(to) > 0 && hour < 23":    "",
-		"email_domain(to[0]) == 'x.y'": "",
+		"to.all(r, r in lists.nope)": `unknown list "nope"`,
+		"too == 1":                   `unknown variable "too"`,
+		"glob(path)":                 "CEL:",
+		"'x' +":                      "CEL:",
+		"path":                       "",
+		"domain_matches(path, 'x')":  "CEL:",
+		"size(to) > 0 && hour < 23":  "",
 	}
 	for when, want := range cases {
 		y := "lists: {ok: []}\nagents: {a: {profile: p}}\nprofiles: {p: {connectors: [email], rules: [{id: r, action: email.send, effect: deny, when: \"" + strings.ReplaceAll(when, `"`, `\"`) + "\"}]}}\n"
@@ -290,9 +289,6 @@ func TestDomainMatches(t *testing.T) {
 		if got := DomainMatches(u, pats); got != want {
 			t.Errorf("%q: %v", u, got)
 		}
-	}
-	if EmailDomain("Bob <Bob@Example.COM>") != "example.com" || EmailDomain("nope") != "" {
-		t.Fatal("email domain")
 	}
 }
 

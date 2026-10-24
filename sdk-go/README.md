@@ -13,16 +13,15 @@ SDK — каталог `sdk-go/` модуля `github.com/gate4ai/gate4ai` (од
 | `contract` | контракт для вызовов между коннекторами (`service_call`): `Diff` / `Check` — несовместимые изменения, `Gen` — типизированный Go-клиент |
 | `capability` | проверка вызовов по возможностям манифеста (`capability_denied`) |
 | `hostfuncs` | реализация функций хоста поверх служб хоста; та же, что в хосте gate4.ai |
-| `netauth` | TLS, STARTTLS и аутентификация хостом в IMAP/SMTP — коннектор не видит пароль |
 | `hosttest` | хост в том же процессе для нативных тестов коннектора; `Replay` — фейк поставщика по шагам, записанным в сеансе браузера агента (`browser.close`), `LoadFixture` — их файл |
 | `domain` | сопоставление адресов с шаблонами доменов, списки сайтов (белый / чёрный) |
 | `registry` | индекс registry коннекторов (`index.json`): формат, проверка, последняя и отозванные версии; подпись индекса (Ed25519 над hex(sha256)) и ключи `ed25519:` — у хоста и у сайта gate4.ai одни правила |
 
 ## Принципы
 
-- Коннектор пользуется только функциями хоста: сети, файлов, процессов и переменных окружения у WASM-модуля нет.
+- Коннектор пользуется только функциями хоста: файлы (`files`), своё KV-хранилище (`storage`), доказательства, лог и вызовы других коннекторов (`service_call`). Сети, процессов и переменных окружения у WASM-модуля нет; во внешний мир коннектор выходит только через `service_call` к браузеру gate4.ai.
 - Всё, что не объявлено в `capabilities` манифеста, недоступно: функция хоста вернёт `capability_denied`. Политика пользователя может возможности только сузить.
-- Коннектор не видит секреты: в настройках — только алиасы (`@mail.work`), значения подставляет хост (`{{secret:@alias}}` в `http_request`, аутентификация в `tls_dial`) и только для адресов из `bind`.
+- Коннектор не видит секреты: в настройках — только алиасы (`@mail.work`), в формы сайтов их подставляет браузер хоста. Значения получает лишь `runtime: native` с `capabilities.reveal` и отдельным согласием владельца; всё раскрытое вырезается из доказательств и логов.
 
 ## Коннектор за пять минут
 
@@ -43,12 +42,15 @@ var manifestYAML []byte
 type Hello struct{}
 
 func (Hello) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.ExecResult, error) {
-	resp, err := h.HTTP(abi.HTTPRequest{URL: "https://api.example.com/hello",
-		Headers: map[string]string{"Authorization": "Bearer {{secret:@example}}"}})
+	name, _ := r.Args["name"].(string)
+	seen, _, err := h.KVGet("seen")
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	return abi.ExecResult{Content: []abi.Content{abi.Text(string(resp.Body))}}, nil
+	if err := h.KVSet("seen", append(seen, name+"\n"...)); err != nil {
+		return abi.ExecResult{}, err
+	}
+	return abi.ExecResult{Content: []abi.Content{abi.Text("hello, " + name)}}, nil
 }
 
 func (Hello) Verify(_ context.Context, _ *abi.Host, r abi.VerifyRequest) (abi.VerifyResult, error) {
@@ -64,8 +66,7 @@ connector: hello
 version: 1.0.0
 runtime: wasm
 capabilities:
-  network: [ { host: api.example.com, scheme: https } ]
-  secrets: [ { alias: "@example", bind: [api.example.com] } ]
+  storage: { quota_mb: 1 }
 actions:
   - name: say
     class: read
@@ -80,7 +81,7 @@ actions:
 GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o connector.wasm .
 ```
 
-Тесты — нативно, на `hosttest` (те же проверки возможностей, что в хосте). Примеры — коннекторы [`connectors/mail`](../connectors/mail) (WASM), [`connectors/browser`](../connectors/browser) (`runtime: native`, поставщик действий для других коннекторов).
+Тесты — нативно, на `hosttest` (те же проверки возможностей, что в хосте). Пример — коннектор [`connectors/browser`](../connectors/browser) (`runtime: native`, поставщик действий для других коннекторов). Сайты и сервисы коннектор открывает через него: см. «Вызовы других коннекторов».
 
 ## Вызовы других коннекторов
 

@@ -351,12 +351,6 @@ func (d *Daemon) bindSettings(conn string) map[string][]string {
 			}
 		}
 	}
-	for _, n := range m.Capabilities.Network {
-		add("network "+n.Scheme+"://"+n.Host, n.Host, n.Port)
-	}
-	for _, s := range m.Capabilities.Secrets {
-		add("secret "+s.Alias+" for "+strings.Join(s.Bind, ", "), append([]string{s.Alias}, s.Bind...)...)
-	}
 	for _, a := range m.Capabilities.Reveal {
 		add("reveals secret "+a, a)
 	}

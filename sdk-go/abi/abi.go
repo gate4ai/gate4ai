@@ -40,11 +40,6 @@ const (
 
 // Функции хоста.
 const (
-	FnHTTPRequest = "http_request"
-	FnTLSDial     = "tls_dial"
-	FnConnRead    = "conn_read"
-	FnConnWrite   = "conn_write"
-	FnConnClose   = "conn_close"
 	FnFSRead      = "fs_read"
 	FnFSWrite     = "fs_write"
 	FnFSAppend    = "fs_append"
@@ -344,97 +339,6 @@ type VerifyResult struct {
 	Method       string         `json:"method"`
 	Detail       string         `json:"detail,omitempty"`
 	Evidence     []EvidenceItem `json:"evidence,omitempty"`
-}
-
-// HTTPRequest — http_request. Плейсхолдер {{secret:@alias}} — только целиком в
-// заголовке аутентификации ("Authorization: Bearer {{secret:@alias}}"): хост
-// заменяет его значением секрета, только если адрес входит в bind секрета.
-// Редиректы хост не выполняет: 3xx возвращается модулю.
-type HTTPRequest struct {
-	Method    string            `json:"method"`
-	URL       string            `json:"url"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	Body      []byte            `json:"body,omitempty"`
-	TimeoutMS int               `json:"timeout_ms,omitempty"`
-}
-
-// HTTPResponse — ответ http_request (значения подставленных секретов замаскированы).
-type HTTPResponse struct {
-	Status  int               `json:"status"`
-	Headers map[string]string `json:"headers"`
-	Body    []byte            `json:"body"`
-}
-
-// Режимы TLS для tls_dial.
-const (
-	TLSDirect   = "tls"      // TLS сразу
-	TLSStartTLS = "starttls" // STARTTLS протокола (imap, smtp)
-	TLSNone     = "none"     // без TLS — только loopback
-)
-
-// Протоколы tls_dial, для которых хост выполняет STARTTLS и аутентификацию.
-const (
-	ProtoIMAP = "imap"
-	ProtoSMTP = "smtp"
-)
-
-// Схемы аутентификации хостом.
-const (
-	AuthIMAPLogin     = "imap-login"      // IMAP LOGIN; модуль получает приветствие PREAUTH
-	AuthSMTPAuthPlain = "smtp-auth-plain" // SMTP EHLO + AUTH PLAIN; модуль начинает с MAIL FROM
-)
-
-// DialAuth — аутентификация в протоколе, выполняемая хостом.
-type DialAuth struct {
-	Scheme   string `json:"scheme"`
-	Username string `json:"username"`
-	Secret   string `json:"secret"` // алиас Vault (@name)
-}
-
-// DialRequest — tls_dial. Для Protocol imap хост читает приветствие сервера
-// (и выполняет STARTTLS / LOGIN) и отдаёт модулю синтетическое приветствие:
-// "* PREAUTH …" после входа или "* OK …" без него. Для smtp хост читает 220,
-// выполняет EHLO (STARTTLS, AUTH) — модуль начинает сразу с MAIL FROM.
-type DialRequest struct {
-	Host     string    `json:"host"`
-	Port     int       `json:"port"`
-	TLS      string    `json:"tls"`
-	Protocol string    `json:"protocol,omitempty"`
-	Auth     *DialAuth `json:"auth,omitempty"`
-}
-
-// DialResponse — идентификатор соединения.
-type DialResponse struct {
-	Conn int `json:"conn"`
-}
-
-// ConnRead — conn_read: до Max байт, ждать данных не дольше WaitMS (≤ 200).
-type ConnRead struct {
-	Conn   int `json:"conn"`
-	Max    int `json:"max"`
-	WaitMS int `json:"wait_ms"`
-}
-
-// ConnReadResponse — прочитанные данные; пусто без EOF — данных пока нет.
-type ConnReadResponse struct {
-	Data []byte `json:"data,omitempty"`
-	EOF  bool   `json:"eof,omitempty"`
-}
-
-// ConnWrite — conn_write.
-type ConnWrite struct {
-	Conn int    `json:"conn"`
-	Data []byte `json:"data"`
-}
-
-// ConnWriteResponse — записано байт.
-type ConnWriteResponse struct {
-	N int `json:"n"`
-}
-
-// ConnClose — conn_close.
-type ConnClose struct {
-	Conn int `json:"conn"`
 }
 
 // FSRequest — fs_read, fs_write, fs_append, fs_list, fs_stat. Путь — абсолютный

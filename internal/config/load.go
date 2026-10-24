@@ -136,7 +136,7 @@ func (c *Config) Validate() Errors {
 			}
 			seen[r.ID] = true
 			if r.Action == "" {
-				add(rp+".action", "action is required (e.g. email.send or payments.*)")
+				add(rp+".action", "action is required (e.g. files.append or browser.*)")
 			} else if !actionRe.MatchString(r.Action) {
 				add(rp+".action", "invalid action %q (expected connector.action, connector.* or *)", r.Action)
 			}

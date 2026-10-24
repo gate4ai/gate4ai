@@ -126,7 +126,7 @@ func TestAgentPairsItself(t *testing.T) {
 		t.Fatalf("key file mode %v", fi.Mode())
 	}
 	// Повтор до решения — тот же код, новых запросов нет.
-	if code, out := p.run(t, "mail", "read"); code != ExitPending || jsonOf(t, out)["code"] != pairCode {
+	if code, out := p.run(t, "email", "read"); code != ExitPending || jsonOf(t, out)["code"] != pairCode {
 		t.Fatalf("repeat: %d %s", code, out)
 	}
 	ps, _ := p.d.State.PendingPairings()
@@ -144,7 +144,7 @@ func TestAgentPairsItself(t *testing.T) {
 	if _, err := p.d.DecidePairing(context.Background(), ps[0].ID, true, "assistant", "webui"); err != nil {
 		t.Fatal(err)
 	}
-	code, out = p.run(t, "mail", "send", "--to", "landlord@example.com", "--subject", "rent")
+	code, out = p.run(t, "email", "send", "--to", "landlord@example.com", "--subject", "rent")
 	if code != ExitOK {
 		t.Fatalf("after approval: %d %s", code, out)
 	}
@@ -173,19 +173,19 @@ func TestAgentPairsItself(t *testing.T) {
 		t.Fatalf("pair --here after approval: %d %s", code, out)
 	}
 	p.as(agentid.Caller{Agent: "claude-code", Dir: "/home/u/proj/sub"})
-	code, out = p.run(t, "mail", "send", "--to", "landlord@example.com", "--subject", "x")
+	code, out = p.run(t, "email", "send", "--to", "landlord@example.com", "--subject", "x")
 	if code != ExitDenied || !strings.Contains(out, "drafts only") {
 		t.Fatalf("bound key in the project: %d %s", code, out)
 	}
 	// Другой проект — общий ключ claude-code.
 	p.as(agentid.Caller{Agent: "claude-code", Dir: "/home/u/other"})
-	if code, out := p.run(t, "mail", "send", "--to", "landlord@example.com", "--subject", "y"); code != ExitOK {
+	if code, out := p.run(t, "email", "send", "--to", "landlord@example.com", "--subject", "y"); code != ExitOK {
 		t.Fatalf("shared key elsewhere: %d %s", code, out)
 	}
 	// Чужой ключ проекта из другого каталога (GATE4AI_AGENT указывает на него) —
 	// отказ daemon.
 	tok := PickKeyFile(t, p.keys, "claude-code-proj")
-	if code, out := p.harness.run(t, tok, "mail", "read"); code != ExitAuth || !strings.Contains(out, "works only for an agent started in /home/u/proj") {
+	if code, out := p.harness.run(t, tok, "email", "read"); code != ExitAuth || !strings.Contains(out, "works only for an agent started in /home/u/proj") {
 		t.Fatalf("bound key from another directory: %d %s", code, out)
 	}
 }

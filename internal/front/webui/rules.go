@@ -330,26 +330,6 @@ var Templates = []Template{
 			}
 			return nil
 		}},
-	{ID: "safe-mail", Title: "Safe email", Needs: []string{"email.send"},
-		Description: "Emails to trusted recipients go without asking, recipients taken from incoming emails are denied, everything else asks you.",
-		Params:      []TemplateParam{{Name: "trusted", Label: "Trusted recipients", Placeholder: "landlord@example.com, accountant@example.com", Multiline: true}},
-		Apply: func(c *config.Config, profile string, p map[string]string, _ []daemon.Tool) error {
-			if items := splitItems(p["trusted"]); len(items) > 0 {
-				if err := c.SetList("contacts_trusted", items); err != nil {
-					return err
-				}
-				if err := putRule(c, profile, config.Rule{ID: "email-send-trusted", Action: "email.send", When: "to.all(r, r in lists.contacts_trusted)", Effect: config.EffectAllow}); err != nil {
-					return err
-				}
-			}
-			return putRule(c, profile, config.Rule{ID: "email-no-untrusted-recipients", Action: "email.send",
-				When: `"to" in provenance && 'untrusted_content' in provenance["to"]`, Effect: config.EffectDeny, Reason: "The recipient was taken from an incoming email"})
-		}},
-	{ID: "drafts-only", Title: "Drafts only", Needs: []string{"email.send"},
-		Description: "The agent prepares email drafts but cannot send them.",
-		Apply: func(c *config.Config, profile string, _ map[string]string, _ []daemon.Tool) error {
-			return putRule(c, profile, config.Rule{ID: "no-send", Action: "email.send", Effect: config.EffectDeny, Reason: "Drafts only"})
-		}},
 	{ID: "notes-folder", Title: "Notes in a folder", Needs: []string{"files.read"},
 		Description: "Reading and appending in the folder go without asking, overwriting asks you, everything outside the folder is denied. The folder is added to the Files settings.",
 		Params:      []TemplateParam{{Name: "folder", Label: "Folder", Placeholder: "~/Documents/notes"}},

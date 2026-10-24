@@ -31,43 +31,9 @@ func checker(t *testing.T, yaml string, settings map[string]any, home string) *C
 	return c
 }
 
-func TestNetworkAndSecrets(t *testing.T) {
-	c := checker(t, `capabilities:
-  network:
-    - { host: api.example.com, port: "443", scheme: https }
-    - { host: "*.cdn.example.com", scheme: https }
-    - { host: localhost, scheme: http }
-    - { host: mail.example.com, scheme: tls }
-  secrets:
-    - { alias: "@api", bind: [api.example.com] }
-`, nil, "")
-	ok := []struct {
-		s, h string
-		p    int
-	}{{"https", "api.example.com", 443}, {"https", "img.cdn.example.com", 8443}, {"http", "localhost", 8080}, {"tls", "MAIL.example.com.", 993}}
-	for _, x := range ok {
-		if err := c.Network(x.s, x.h, x.p); err != nil {
-			t.Errorf("%v: %v", x, err)
-		}
-	}
-	bad := []struct {
-		s, h string
-		p    int
-	}{{"https", "api.example.com", 8443}, {"https", "cdn.example.com", 443}, {"http", "api.example.com", 80}, {"tcp", "mail.example.com", 25}, {"https", "evil.com", 443}}
-	for _, x := range bad {
-		if err := c.Network(x.s, x.h, x.p); !isDenied(err) {
-			t.Errorf("%v allowed: %v", x, err)
-		}
-	}
-	if err := c.Secret("@api", "https", "api.example.com", 443); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Secret("@api", "https", "evil.com", 443); !isDenied(err) {
-		t.Fatal("secret for unbound host")
-	}
-	if err := c.Secret("@other", "https", "api.example.com", 443); !isDenied(err) {
-		t.Fatal("undeclared secret")
-	}
+// Ничего не объявлено — всё запрещено: вызовы других коннекторов, хранилище, файлы.
+func TestUndeclaredDenied(t *testing.T) {
+	c := checker(t, `capabilities: {}`, nil, "")
 	if _, err := c.Service("browser", "open"); !isDenied(err) {
 		t.Fatal("service not declared")
 	}
@@ -76,44 +42,6 @@ func TestNetworkAndSecrets(t *testing.T) {
 	}
 	if _, err := c.Path("/tmp/x"); !isDenied(err) {
 		t.Fatal("files not declared")
-	}
-}
-
-// Алиас объявлен несколько раз (пароль IMAP и для SMTP): подходит любая
-// привязка; wildcard в привязке секрета не действует; привязка-origin
-// проверяет схему и порт.
-func TestSecretBinds(t *testing.T) {
-	c := checker(t, `capabilities:
-  secrets:
-    - { alias: "@mail.pw", bind: [imap.example.com] }
-    - { alias: "@mail.pw", bind: [smtp.example.com] }
-    - { alias: "@wild", bind: ["*.example.com"] }
-    - { alias: "@origin", bind: ["https://api.example.com:8443", "imaps://imap.example.com"] }
-`, nil, "")
-	for _, h := range []string{"imap.example.com", "smtp.example.com"} {
-		if err := c.Secret("@mail.pw", "tls", h, 465); err != nil {
-			t.Errorf("%s: %v", h, err)
-		}
-	}
-	if err := c.Secret("@mail.pw", "tls", "evil.example.com", 465); !isDenied(err) {
-		t.Fatal("unbound host")
-	}
-	if err := c.Secret("@wild", "https", "a.example.com", 443); !isDenied(err) {
-		t.Fatal("wildcard bind matched")
-	}
-	if err := c.Secret("@origin", "https", "api.example.com", 8443); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Secret("@origin", "tls", "imap.example.com", 993); err != nil {
-		t.Fatal(err)
-	}
-	for _, x := range []struct {
-		s, h string
-		p    int
-	}{{"https", "api.example.com", 443}, {"http", "api.example.com", 8443}, {"tls", "api.example.com", 8443}, {"tls", "imap.example.com", 143}, {"https", "imap.example.com", 993}} {
-		if err := c.Secret("@origin", x.s, x.h, x.p); !isDenied(err) {
-			t.Errorf("%v allowed", x)
-		}
 	}
 }
 

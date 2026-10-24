@@ -290,7 +290,7 @@ func TestTemplatesRelevant(t *testing.T) {
 	_, _, _, get := loginAs(t, u, base)
 	p := get("/policy/templates")
 	main, rest, _ := strings.Cut(p, "Нужен неустановленный коннектор")
-	if !strings.Contains(main, "Только чтение") || strings.Contains(main, "Безопасная почта") || !strings.Contains(rest, "Безопасная почта") || !strings.Contains(rest, "Деньги") {
+	if !strings.Contains(main, "Только чтение") || strings.Contains(main, "Деньги") || !strings.Contains(rest, "Деньги") {
 		t.Fatal(p)
 	}
 }

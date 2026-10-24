@@ -68,26 +68,6 @@ var settingHints = map[string]map[string]fieldHint{
 		"max_download_bytes": {Label: "Largest file to download, bytes", Kind: fieldNumber, Help: "20 MiB at most (the default).", Placeholder: "20971520", Advanced: true},
 		"download_dir":       {Label: "Downloads folder", Kind: fieldText, Help: "Where Chrome saves files downloaded in its window, without a Save as dialog; empty — your Downloads folder.", Placeholder: "~/Downloads", Advanced: true},
 	},
-	"email": {
-		"address":       {Label: "Email address", Kind: fieldText, Placeholder: "me@example.com"},
-		"imap.password": {Label: "App password", Kind: fieldSecret, Help: "Not your main password but an app password from the mail settings. gate4.ai keeps it; the connector never sees it."},
-		"imap.host":     {Label: "IMAP server", Kind: fieldText, Placeholder: "imap.gmail.com", Help: "Filled in for the chosen mail service.", Advanced: true},
-		"imap.port":     {Label: "IMAP port", Kind: fieldNumber, Help: "Usually 993.", Placeholder: "993", Advanced: true},
-		"imap.username": {Label: "Login", Kind: fieldText, Help: "Usually the same as the address.", Placeholder: "me@example.com", Advanced: true},
-		"smtp.host":     {Label: "SMTP server", Kind: fieldText, Placeholder: "smtp.gmail.com", Help: "Filled in for the chosen mail service.", Advanced: true},
-		"smtp.port":     {Label: "SMTP port", Kind: fieldNumber, Help: "Usually 465.", Placeholder: "465", Advanced: true},
-		"smtp.password": {Label: "SMTP password", Kind: fieldSecret, Help: "Empty — the same as for IMAP.", Advanced: true},
-	},
-}
-
-// mailProviders — серверы популярных почтовых сервисов (спецификация: Gmail,
-// Яндекс, Mail.ru, iCloud, Fastmail).
-var mailProviders = []struct{ ID, Title, IMAP, SMTP, Help string }{
-	{"gmail", "Gmail", "imap.gmail.com", "smtp.gmail.com", "App password: myaccount.google.com → Security → App passwords (2-Step Verification is required)."},
-	{"yandex", "Yandex", "imap.yandex.ru", "smtp.yandex.ru", "App password: id.yandex.ru → Security → App passwords → Mail."},
-	{"mailru", "Mail.ru", "imap.mail.ru", "smtp.mail.ru", "Password for an external app: Mail ID settings → Security."},
-	{"icloud", "iCloud", "imap.mail.me.com", "smtp.mail.me.com", "App password: account.apple.com → Sign-In and Security → App-Specific Passwords."},
-	{"fastmail", "Fastmail", "imap.fastmail.com", "smtp.fastmail.com", "App password: Settings → Privacy & Security → App passwords."},
 }
 
 var settingRe = regexp.MustCompile(`\$\{setting:([a-zA-Z0-9_.]+)\}`)
@@ -103,16 +83,6 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 		}
 	}
 	c := m.Capabilities
-	for _, n := range c.Network {
-		add(n.Host, fieldText)
-		add(n.Port, fieldNumber)
-	}
-	for _, s := range c.Secrets {
-		add(s.Alias, fieldSecret)
-		for _, b := range s.Bind {
-			add(b, fieldText)
-		}
-	}
 	// Параметры вызовов других коннекторов: шаблон в списке — список, иначе текст.
 	var params func(v any, inList bool)
 	params = func(v any, inList bool) {
@@ -198,7 +168,6 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 var hintOrder = map[string][]string{
 	"files":   {"roots", "allow_hidden", "allow_paths", "max_bytes"},
 	"browser": {"allowed_domains", "mode", "blocked", "model", "model_key", "profile_dir", "chrome_path", "cdp_url", "engine", "download_types", "max_download_bytes", "download_dir"},
-	"email":   {"address", "imap.password", "imap.host", "imap.port", "imap.username", "smtp.host", "smtp.port", "smtp.password"},
 }
 
 // getPath — значение по ключу с точками (imap.host → settings["imap"]["host"]).

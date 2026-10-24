@@ -7,15 +7,11 @@ package capability
 
 import (
 	"errors"
-	"net"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
-	"github.com/gate4ai/gate4ai/sdk-go/domain"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
@@ -36,85 +32,6 @@ func New(m manifest.Manifest, settings map[string]any, home string) (*Checker, e
 }
 
 func denied(f string, a ...any) error { return abi.Errorf(abi.CodeCapabilityDenied, f, a...) }
-
-// IsLoopback — адрес локальной машины.
-func IsLoopback(host string) bool {
-	ip := net.ParseIP(host)
-	return host == "localhost" || (ip != nil && ip.IsLoopback())
-}
-
-// Network — соединение с host:port по схеме разрешено.
-func (c *Checker) Network(scheme, host string, port int) error {
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	if (scheme == manifest.SchemeHTTP || scheme == manifest.SchemeTCP) && !IsLoopback(host) {
-		return denied("%s without TLS is allowed only for localhost (%s)", scheme, host)
-	}
-	for _, n := range c.R.Network {
-		if n.Scheme == scheme && domain.HostMatches(host, n.Host) && (n.Port == 0 || n.Port == port) {
-			return nil
-		}
-	}
-	return denied("network %s://%s:%d is not declared in capabilities.network", scheme, host, port)
-}
-
-// Secret — алиас можно подставить для соединения scheme://host:port (scheme —
-// https/http для http_request, tls/tcp для tls_dial). Привязка (bind) — точный
-// хост ("api.example.com", без wildcard: поддомены — только явным списком) или
-// точный origin ("https://api.example.com:8443", "imaps://imap.example.com:993").
-// Для привязки-хоста схему и порт ограничивает Network (без TLS — только
-// loopback). Алиас может быть объявлен несколько раз с разными привязками
-// (пароль IMAP для SMTP): подходит любая.
-func (c *Checker) Secret(alias, scheme, host string, port int) error {
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	declared := false
-	for _, s := range c.R.Secrets {
-		if s.Alias != alias {
-			continue
-		}
-		declared = true
-		for _, b := range s.Bind {
-			if bindMatches(b, scheme, host, port) {
-				return nil
-			}
-		}
-	}
-	if declared {
-		return denied("secret %s is not bound to %s", alias, host)
-	}
-	return denied("secret %s is not declared in capabilities.secrets", alias)
-}
-
-var defaultPorts = map[string]int{"https": 443, "http": 80, "imaps": 993, "smtps": 465}
-
-func bindMatches(b, scheme, host string, port int) bool {
-	b = strings.TrimSpace(b)
-	if !strings.Contains(b, "://") {
-		if strings.Contains(b, "*") {
-			return false
-		}
-		return host != "" && strings.ToLower(strings.TrimSuffix(b, ".")) == host
-	}
-	u, err := url.Parse(b)
-	if err != nil || u.User != nil || (u.Path != "" && u.Path != "/") {
-		return false
-	}
-	bs := strings.ToLower(u.Scheme)
-	bp := defaultPorts[bs]
-	if p := u.Port(); p != "" {
-		bp, _ = strconv.Atoi(p)
-	}
-	web := bs == "https" || bs == "http"
-	switch {
-	case scheme == "https" || scheme == "http":
-		if bs != scheme {
-			return false
-		}
-	case !web && scheme == manifest.SchemeTLS:
-	default:
-		return false
-	}
-	return strings.TrimSuffix(strings.ToLower(u.Hostname()), ".") == host && bp != 0 && bp == port
-}
 
 // Service — действие action поставщика target объявлено в capabilities.services.
 func (c *Checker) Service(target, action string) (manifest.ServiceRule, error) {

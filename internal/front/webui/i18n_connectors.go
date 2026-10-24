@@ -8,7 +8,7 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 )
 
-// Названия и переводы официальных коннекторов (browser, email), которых нет в
+// Названия и переводы официального коннектора browser, которых нет в
 // их манифестах и в каталоге магазина. Своё i18n в манифесте важнее этих строк.
 
 type actText struct{ Title, RuTitle, RuDesc string }
@@ -34,13 +34,6 @@ var officialText = map[string]connText{
 			"page_extract":    {"Extract data from the open page", "Извлечь данные с открытой страницы", "Извлечь данные с открытой страницы по инструкции (моделью из настроек владельца)"},
 			"page_screenshot": {"Screenshot the open page", "Снимок открытой страницы", "Снимок элемента, окна или всей открытой страницы"},
 			"close":           {"Close the browser session", "Закрыть сеанс браузера", "Закончить сеанс браузера и вернуть записанные шаги"},
-		}},
-	"email": {Title: "Email", RuTitle: "Почта", RuDesc: "Почта по IMAP/SMTP",
-		Actions: map[string]actText{
-			"list":  {"List emails", "Посмотреть письма", "Письма в папке, новые первыми"},
-			"read":  {"Read an email", "Прочитать письмо", "Прочитать одно письмо (не отмечает прочитанным)"},
-			"draft": {"Save a draft", "Сохранить черновик", "Сохранить черновик (без отправки)"},
-			"send":  {"Send an email", "Отправить письмо", "Отправить письмо"},
 		}},
 }
 
