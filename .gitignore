@@ -5,3 +5,4 @@
 *.g4c
 *.wasm
 /dist/
+/browser

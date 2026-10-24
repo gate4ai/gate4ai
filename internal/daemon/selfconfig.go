@@ -283,8 +283,9 @@ func PolicySummary(cfg *config.Config, agent string) map[string]any {
 			others[n] = op.Connectors
 		}
 	}
-	// Несекретные настройки коннекторов профиля: агент видит, например, свои
-	// сайты браузера, прежде чем просить добавить сайт (add_setting_items).
+	// Несекретные настройки коннекторов профиля (сайты и папки коннекторов —
+	// в них) и списки доступа Браузера и Файлов: агент видит, какие сайты и
+	// папки открыты, прежде чем просить (set_site_access / set_folder_access).
 	settings := map[string]map[string]any{}
 	for _, conn := range p.Connectors {
 		for k, v := range cfg.Connectors[conn] {
@@ -298,7 +299,9 @@ func PolicySummary(cfg *config.Config, agent string) map[string]any {
 		}
 	}
 	out := map[string]any{"agent": agent, "profile": a.Profile, "connectors": p.Connectors, "rules": rules, "limits": limits, "settings": settings,
-		"lists": lists, "other_profiles": others, "defaults": "no rule matched: read → allow; write / external / money → ask; deny beats ask beats allow; " +
+		"access": map[string]any{"sites": cfg.Access.Sites, "folders": cfg.Access.Folders},
+		"lists": lists, "other_profiles": others, "defaults": "sites and folders: the most specific access line decides (allow | read | connector | ask | deny, folders also append), deny in a line always wins, no line → denied; " +
+			"no rule matched and no line: read → allow; write / external / money → ask; deny beats ask beats allow; " +
 			"gate4ai.change_policy always asks the owner; browser.post / put / patch / delete / login / fill_secret are allowed only by a rule that names them (not browser.*)"}
 	pre := "profiles." + a.Profile + " "
 	var warns []string

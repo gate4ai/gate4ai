@@ -8,96 +8,97 @@
 
 ```sh
 make bin             # bin/gate4ai, bin/gate4ai-tray, bin/gate4ai-relay
-make connectors      # bin/connectors/{mail,browser}.g4c — пакеты официальных коннекторов
-./scripts/ci.sh      # SPDX, направление зависимостей, build / vet / test, WASM + кросс-сборка darwin и windows (в CI — матрицей build)
+./scripts/ci.sh      # SPDX, направление зависимостей, build / vet / test, WASM-сборка sdk-go + кросс-сборка darwin и windows (в CI — матрицей build)
 ./scripts/ci.sh e2e  # сквозные тесты e2e/
 ```
 
-Всё — один репозиторий и один Go-модуль: ядро, `sdk-go/`, `relay/`, коннекторы (`connectors/`) и сквозные тесты (`e2e/`).
+Всё — один репозиторий и один Go-модуль: ядро (в нём встроенные Браузер и Файлы — `internal/connectors/builtin/`), `sdk-go/`, `relay/` и сквозные тесты (`e2e/`). Пакетов коннекторов сборка не делает: коннекторы магазина — отдельные репозитории издателей.
 
 Положите `gate4ai` в `PATH`.
 
 | Бинарник | Что это |
 |---|---|
-| `gate4ai` | единственный бинарник ядра: `gate4ai daemon` — политики, подтверждения, секреты, журнал, коннекторы, Web UI, Egress Proxy, туннель к relay; `gate4ai mcp` — MCP-сервер на stdio; остальные команды — CLI для агентов, скриптов и человека |
+| `gate4ai` | единственный бинарник ядра: `gate4ai daemon` — политики, списки доступа, подтверждения, секреты, журнал, встроенные Браузер и Файлы, коннекторы магазина, Web UI, Egress Proxy, туннель к relay; `gate4ai mcp` — MCP-сервер на stdio; остальные команды — CLI для агентов, скриптов и человека |
 | `gate4ai-relay` | relay (необязателен — нужен, только если нет своего HTTPS до daemon): публичный адрес устройства, TLS-passthrough, DNS для ACME, свидетель журнала |
 | `gate4ai-tray` | трей (необязателен): статус daemon, уведомления о запросах подтверждения, «Разрешить / Отклонить» (для `gate4ai.*` — самонастройки агентом — только «Отклонить» и переход в Web UI: разрешить можно там, где видны все правки), открытие Web UI. Ссылку входа трей и `gate4ai ui` передают браузеру через страницу-файл 0600 в личном кэше (`~/.cache/gate4ai/open/`, на macOS — `~/Library/Caches/…`), а не в командной строке, которую видят другие пользователи компьютера (кроме Windows и snap-браузеров). Ходит в сокет владельца, как CLI. На macOS собирается с cgo (`CGO_ENABLED=1 go build ./cmd/gate4ai-tray` на macOS) |
 
-## 1. Daemon и коннекторы
+## 1. Daemon, Браузер и Файлы
 
 ```sh
-gate4ai daemon start             # в фоне; первый запуск: агентов нет, files встроен, магазин подключён, browser ставится из него (автозапуск: gate4ai service install)
-gate4ai connectors install bin/connectors/mail.g4c --dev
-gate4ai connectors install bin/connectors/browser.g4c --dev
-gate4ai connectors list
+gate4ai daemon start             # в фоне; первый запуск: агентов нет, Браузер и Файлы встроены, магазин подключён (автозапуск: gate4ai service install)
+gate4ai access                   # списки доступа: сайты Браузера и папки Файлов
+gate4ai connectors list          # коннекторы магазина (на свежей установке пусто)
 ```
 
-Файлы — встроенный коннектор `files` (часть ядра, из магазина не ставится): в начальной конфигурации он в профиле `default` с корнем `~/Documents` (`connectors.files.roots`; скрытые файлы и папки ниже корня, ключи и данные приложений закрыты всегда — открывают `allow_hidden: true` и `allow_paths`) и правилом `ask` на каждое действие. Первый запуск без `--config` сам ставит из магазина `browser` (проверенный gate4.ai, согласие на его возможности — без вопроса; без сети — повтор в фоне и при следующем запуске). Своя сборка (`--dev`, как выше) заменяет поставленную из магазина; поставленный владельцем коннектор daemon не трогает. С `--config` и на уже настроенной установке сам ничего не ставит.
+Браузер и Файлы — часть ядра (`runtime: builtin`, из магазина не ставятся). Начальная конфигурация без `--config`: профиль `default` с `files` и `browser`, списки доступа — любой сайт (`*`) и `~/Documents` в режиме `ask` (каждое действие спрашивает вас), правил нет; скрытые файлы и папки, ключи и данные приложений Файлы не открывают никогда (открывают `allow_hidden: true` и `allow_paths`). Из магазина daemon сам ничего не ставит. Старая установка с пакетами `browser` / `email` из магазина при старте новой версии удаляет их, убирает почту из политики и переносит прежние `connectors.browser.allowed_domains` / `blocked` / `mode` и `connectors.files.roots` в списки доступа (`read` / `deny`) — новой версией политики, с откатом.
 
-Каждый установленный или обновлённый коннектор daemon добавляет в профиль `default` (если он есть) и пишет туда правило `ask` (`<коннектор>-<действие>-ask`) на каждое действие, для которого в этом профиле ещё нет правила, — в том числе на чтение, у которого по умолчанию `allow`; действия только для других коннекторов (`service_only`) — без правила. Правила владельца на эти действия остаются как есть.
+**Списки доступа** — первый уровень решения для Браузера и Файлов, общий для всех агентов (`access.sites`, `access.folders` в конфигурации):
 
-Коннекторы магазина — WASM-модули: всё, что им можно, объявлено в манифесте (`capabilities`) и показывается при установке; без согласия владельца коннектор не ставится, а обновление с новыми возможностями требует согласия заново. Исключение — нативные пакеты (`runtime: native`: `browser`): отдельный процесс под надзором daemon, без песочницы, с правами пользователя; ставятся только от gate4.ai (или как своя сборка с `--dev`), на экране согласия — предупреждение.
+```sh
+gate4ai access sites set app.example.org read      # чтение без вопроса, клики и запросы с эффектом — с подтверждением
+gate4ai access sites set "*.example.com" allow     # поддомены и сам example.com — всё без вопроса
+gate4ai access sites set "*" deny                  # остальные сайты закрыты
+gate4ai access folders set ~/Documents/notes append   # чтение, список и дописывание без вопроса, перезапись — с подтверждением
+gate4ai access folders remove ~/Documents
+gate4ai sites allow lk.example.org                 # то же, что access sites set lk.example.org read
+```
 
-**Вызовы между коннекторами.** Коннектор вызывает действия другого через `service_call` (поставщик перечисляет их в `services`, потребитель — в `capabilities.services` с мажором `contract` и `params`, например сайтами для браузера); каждое действие потребителя перечисляет свои подвызовы (`calls`), и хост пропускает из него только их, не выше его класса. Подвызовы видны в описании инструмента, запросе подтверждения и на экране согласия, поэтому разрешение действия покрывает их — повторно не спрашивается; правило `deny` на действие поставщика действует и во вложенном вызове. Типизированный клиент — `gate4ai contract gen <манифест поставщика> -o client.go`, совместимость нового манифеста — `gate4ai contract diff old.yaml new.yaml`. `--dev` — пакет собственной сборки без подписи доверенного издателя. Из магазина: `gate4ai connectors install email` (нужны `store.registry` и `store.registry_keys` в конфигурации), `gate4ai connectors update <имя>`, `gate4ai connectors refresh` — список отозванных версий. `connectors install` принимает и адрес `https://…/*.g4c` (пакет скачивается и проверяется так же, как файл). Голое имя (`browser`, `browser@1.2.0`) — всегда коннектор из магазина, даже если в текущем каталоге есть одноимённый файл или папка (CLI лишь подскажет путь); файл или папку указывайте путём — с `/` (`./browser`, `./connectors/mail`) или с расширением `.g4c`. В Web UI: **Коннекторы → Поставить не из магазина** — путь к папке с исходниками или файлу `.g4c` на этом компьютере либо адрес сборки; галочка «своя сборка» — то же, что `--dev`.
+Режимы сайтов: `allow`, `read`, `connector` (только через коннектор магазина, агенту напрямую — отказ), `ask`, `deny`; у папок ещё `append`. Побеждает самая конкретная строка, при равенстве — строже. Нет строки или `deny` — отказ; правило политики на действие (`allow` / `ask` / `deny`) побеждает строку, без правила действует режим строки. В Web UI то же — **Доступ → Браузер** и **Файлы**; в запросе подтверждения по сайту или папке есть кнопки «Добавить в разрешённые / запрещённые». Агент просит сайт через `gate4ai.change_policy` (`set_site_access`) — с вашим подтверждением.
+
+Каждый установленный или обновлённый коннектор магазина daemon добавляет в профиль `default` (если он есть) и пишет туда правило `ask` (`<коннектор>-<действие>-ask`) на каждое действие, для которого в этом профиле ещё нет правила, — в том числе на чтение, у которого по умолчанию `allow`; действия только для других коннекторов (`service_only`) — без правила. Правила владельца на эти действия остаются как есть. Сайты и папки коннектора (`sites` / `folders` манифеста) при установке копируются в `connectors.<имя>.sites` / `folders` — их вы правите на странице коннектора.
+
+Коннекторы магазина — WASM-модули без сети: сайт им доступен только страницей встроенного браузера (`service_call`), файлы — папками из манифеста в пределах списка Файлов. Всё, что им можно, объявлено в манифесте (`capabilities`, `sites`, `folders`, `credentials`) и показывается при установке; без согласия владельца коннектор не ставится, а обновление с новыми возможностями требует согласия заново.
+
+**Вызовы между коннекторами.** Коннектор вызывает действия другого через `service_call` (поставщик перечисляет их в `services`, потребитель — в `capabilities.services` с мажором `contract`); каждое действие потребителя перечисляет свои подвызовы (`calls`), и хост пропускает из него только их, не выше его класса. Подвызовы видны в описании инструмента, запросе подтверждения и на экране согласия, поэтому разрешение действия покрывает их — повторно не спрашивается; правило `deny` на действие поставщика действует и во вложенном вызове; вызов браузера проходит, только если сайт разрешают и строка коннектора, и список Браузера (строка коннектора `ask` ждёт вашего решения). Типизированный клиент — `gate4ai contract gen <манифест поставщика> -o client.go` (манифест браузера — `internal/connectors/builtin/browser/manifest.yaml`), совместимость нового манифеста — `gate4ai contract diff old.yaml new.yaml`. `--dev` — пакет собственной сборки без подписи доверенного издателя. Из магазина: `gate4ai connectors install <имя>` (нужны `store.registry` и `store.registry_keys` в конфигурации), `gate4ai connectors update <имя>`, `gate4ai connectors refresh` — список отозванных версий. `connectors install` принимает и адрес `https://…/*.g4c` (пакет скачивается и проверяется так же, как файл). Голое имя (`lk_example`, `lk_example@1.2.0`) — всегда коннектор из магазина, даже если в текущем каталоге есть одноимённый файл или папка (CLI лишь подскажет путь); файл или папку указывайте путём — с `/` (`./lk_example`) или с расширением `.g4c`. В Web UI: **Доступ → Коннекторы → Поставить не из магазина** — путь к папке с исходниками или файлу `.g4c` на этом компьютере либо адрес сборки; галочка «своя сборка» — то же, что `--dev`.
 
 **Разработка коннектора — прямо из папки с исходниками** (без `pack` и `.g4c`):
 
 ```sh
-gate4ai connectors install ./connectors/mail           # собрать в WASM и поставить (своя сборка, как --dev)
-gate4ai connectors update email                        # пересобрать из той же папки после правок
-gate4ai connectors install ./connectors/mail --watch   # пересобирать и переставлять на каждое сохранение
+gate4ai connectors install ./lk_example           # собрать в WASM и поставить (своя сборка, как --dev)
+gate4ai connectors update lk_example              # пересобрать из той же папки после правок
+gate4ai connectors install ./lk_example --watch   # пересобирать и переставлять на каждое сохранение
 ```
 
-Заготовка коннектора к сайту поверх браузера — `gate4ai connectors new <имя> --site <домен>`; как исследовать сайт в сеансе браузера и писать коннектор вместе с агентом — [connector-authoring.md](connector-authoring.md). Лог коннектора — `gate4ai connectors logs <имя>` (вместе с ошибками действий); у своей сборки строки лога за вызов приходят и в ответе (поле `log`). Подвызовы действия — `gate4ai log --parent '#хэш'`. Агент ставит свою сборку без сокета владельца — `gate4ai.change_policy` с `install_dev_connector {folder}` (подтверждает владелец). Личные данные из записанного сеанса браузера перед фикстурой — `gate4ai fixture scrub`.
+Заготовка коннектора к сайту поверх браузера — `gate4ai connectors new <имя> --site <домен>`; как исследовать сайт в сеансе браузера и писать коннектор вместе с агентом — [connector-authoring.md](connector-authoring.md); пример — `e2e/testdata/pagereader`. Лог коннектора — `gate4ai connectors logs <имя>` (вместе с ошибками действий); у своей сборки строки лога за вызов приходят и в ответе (поле `log`). Подвызовы действия — `gate4ai log --parent '#хэш'`. Агент ставит свою сборку без сокета владельца — `gate4ai.change_policy` с `install_dev_connector {folder}` (подтверждает владелец). Личные данные из записанного сеанса браузера перед фикстурой — `gate4ai fixture scrub`.
 
 Сборку делает CLI в вашем окружении (ваш Go, `go.mod` папки или выше, `GOFLAGS`), ошибки компиляции видны сразу; daemon записывает папку источником установки (`dir:<путь>` в `gate4ai connectors list`). `--watch` следит за `.go`, `go.mod`, `go.sum` и `manifest.yaml`; ошибка сборки печатается, наблюдение продолжается. Если изменились возможности в манифесте — согласие спрашивается заново (`--yes` — согласиться без вопроса).
 
 ## 2. Конфигурация
 
-Правила ссылаются на действия установленных коннекторов, поэтому политику задают после установки. Минимальный `config.yaml` (полная модель — раздел «Политики» [спецификации](specification.md#политики)):
+Правила ссылаются на действия установленных коннекторов, поэтому политику задают после установки (Браузер и Файлы установлены всегда). Минимальный `config.yaml` (полная модель — раздел «Политики» [спецификации](specification.md#политики)):
 
 ```yaml
+access:                         # списки доступа Браузера и Файлов — для всех агентов
+  sites:
+    - { domain: "*.example.com", access: read }    # чтение без вопроса, изменения — с подтверждением
+    - { domain: app.example.org, access: allow }
+    - { domain: "*", access: deny }                # остальные сайты закрыты
+  folders:
+    - { path: "~/Documents/obsidian", access: append }   # чтение, список, дописывание; перезапись — с подтверждением
 agents:
   claude-ai:   { profile: assistant }
   claude-code: { profile: dev }
-lists:
-  contacts_trusted: ["accountant@example.com"]
 profiles:
   assistant:
-    connectors: [email, files, browser]
-    rules:
-      - id: email-send-trusted
-        action: email.send
-        when: to.all(r, r in lists.contacts_trusted)
-        effect: allow
-      - id: email-no-untrusted-recipients
-        action: email.send
-        when: "'untrusted_content' in provenance.to"
+    connectors: [files, browser]
+    rules:                      # правила уточняют списки доступа: явное правило побеждает строку
+      - id: obsidian-journal-protect
+        action: files.write
+        when: glob(path, "~/Documents/obsidian/journal.md")
         effect: deny
-        reason: "Адресат взят из входящего письма"
-      - id: obsidian-append
-        action: files.append
-        when: glob(path, "~/Documents/obsidian/**")
-        effect: allow
+        reason: "Дневник не перезаписывать"
     limits:
-      - { id: mail-per-day, action: email.send, per_day: 20 }
+      - { id: clicks-per-day, action: browser.act, per_day: 200 }
   dev:
     connectors: [files]
     sandbox:
       allow_domains: [api.anthropic.com, registry.npmjs.org, github.com]
       ask_domains: ["*.githubusercontent.com"]
 connectors:
-  email:
-    address: me@example.com
-    imap: { host: imap.gmail.com, username: me@example.com, password: "@mail.work" }
-    smtp: { host: smtp.gmail.com, port: 465 }
-  files:
-    roots: ["~/Documents/obsidian"]
-  browser:                    # нативный пакет: сайты агента, движок, модель для extract
-    allowed_domains: ["*.example.com", "app.example.org"]
+  browser:                    # встроенный: движок и модель для extract; сайты — в access.sites
     engine: stagehand
     model: openai/gpt-5.4-mini
-    model_key: "@llm.key"         # значение передаётся только пакету browser (capabilities.reveal)
+    model_key: "@llm.key"         # значение передаётся только встроенному браузеру (capabilities.reveal)
 egress:
   secrets:
     # env: каждый `gate4ai run` получает в ANTHROPIC_API_KEY свою одноразовую заглушку,
@@ -110,26 +111,26 @@ approvals:
   telegram: { token: "@telegram.bot", owner_id: 123456789 }
 ```
 
-Строки `@имя` — алиасы секретов: сами секреты в конфигурации не хранятся, и коннекторы их не видят. Коннектор получает настройки с алиасами, а значение подставляет хост — при входе в IMAP/SMTP, в заголовке HTTP-запроса — и только для адресов, к которым секрет привязан в манифесте коннектора (`capabilities.secrets`). Пароль вместо алиаса в настройках коннектора не принимается.
+Строки `@имя` — алиасы секретов: сами секреты в конфигурации не хранятся, и коннекторы их не видят. Значение алиаса получает только ядро — и встроенный браузер там, где манифест объявляет `capabilities.reveal` (ключ модели). У коннекторов магазина собственных секретов нет: входят они учётками (`credentials`), которые вводит в форму сайта встроенный браузер. Пароль вместо алиаса в настройках коннектора не принимается.
 
 ```sh
 gate4ai policy set config.yaml -m "первая политика"
 ```
 
-`gate4ai daemon --config config.yaml` при первом запуске сразу берёт эту конфигурацию — если коннекторы уже установлены.
+`gate4ai daemon --config config.yaml` при первом запуске сразу берёт эту конфигурацию — если коннекторы магазина, на которые она ссылается, уже установлены.
 
 Данные — в `~/.local/state/gate4ai` (Linux), `~/Library/Application Support/gate4ai` (macOS), `%LOCALAPPDATA%\gate4ai` (Windows); `GATE4AI_HOME` переопределяет. Ключи — в системном keychain; если его нет (headless Linux), `--keystore file`.
 
 Секреты (значение — из stdin, в историю shell не попадает):
 
 ```sh
-gate4ai vault set mail.work                               # спросит значение (ввод скрыт, Enter — готово)
-printf %s 'пароль-приложения' | gate4ai vault set mail.work # или из stdin (скрипты); --from-env VAR — из переменной
-printf %s '123456:ABC…'       | gate4ai vault set telegram.bot
+gate4ai vault set llm.key                                  # спросит значение (ввод скрыт, Enter — готово)
+printf %s 'sk-…'        | gate4ai vault set llm.key        # или из stdin (скрипты); --from-env VAR — из переменной
+printf %s '123456:ABC…' | gate4ai vault set telegram.bot
 gate4ai policy set config.yaml -m "секреты добавлены"   # перечитать каналы
 ```
 
-Сайты, которые агенты открывают в браузере: `gate4ai sites` — список, `gate4ai sites allow login.example.org` — добавить, `gate4ai sites remove …` — убрать.
+Сайты и папки без правки YAML: `gate4ai access` — списки, `gate4ai access sites set <сайт> <режим>` / `remove`, `gate4ai access folders set <папка> <режим>` / `remove`, `gate4ai sites allow <сайт>` — чтение без вопроса.
 
 Проверка: `gate4ai doctor`.
 
@@ -164,7 +165,8 @@ gate4ai browser login --session s-… --account @site     # logged_in | submitte
 ```sh
 gate4ai tools                              # первый раз — код подключения, потом — что доступно профилю
 gate4ai pair --here --wait 5m              # ключ только для этой папки, ждать решения владельца
-gate4ai mail send --to landlord@example.com --subject "Аренда" --body "…" --wait 10m
+gate4ai files append --path ~/Documents/obsidian/log.md --text "- done" --wait 10m
+gate4ai browser read --url https://app.example.org/
 gate4ai skill > SKILL.md                   # навык для Claude Code / Hermes / OpenClaw
 gate4ai browser page_screenshot --session s-… --selector main --out main.png   # картинка — в файл, путь — result.file
 ```
@@ -220,12 +222,12 @@ gate4ai daemon --public 127.0.0.1:8080 --public-url https://gate.example.com   #
 
 ## 4. Подтверждения, Web UI, журнал
 
-- Подтверждения: Telegram-бот (кнопки «Разрешить / Отклонить / Показать текст»), уведомления ОС, трей, Web UI, `gate4ai approvals approve <id>`.
-- Web UI: `gate4ai ui` — откроет браузер по одноразовой ссылке (http://127.0.0.1:7431); на свежей установке — мастер первого запуска (`/setup`). Интерфейс — английский, русский перевод (переключатель в шапке, cookie `g4a_lang`; по умолчанию — `Accept-Language`). С телефона: `gate4ai ui --remote` выдаёт одноразовую ссылку на `<публичный адрес>/ui/` (действует 2 минуты, открывается один раз); удалённо доступны подтверждения и журнал, политики, агенты и секреты меняются только на этом компьютере. Пока устройство не подключено к relay (`gate4ai relay status`: `"online": false`, причина — в `error`, например не выпущен сертификат), ссылка не выдаётся: она бы не открылась. Выпуск сертификата при неудаче повторяется сам (через 5 минут, затем реже, до часа).
+- Подтверждения: Telegram-бот (кнопки «Разрешить / Отклонить / Показать текст», у запроса по сайту или папке — «В разрешённые / В запрещённые»), уведомления ОС, трей, Web UI, `gate4ai approvals approve <id>`.
+- Web UI: `gate4ai ui` — откроет браузер по одноразовой ссылке (http://127.0.0.1:7431); на свежей установке — мастер первого запуска (`/setup`): выбранные папки и сайты он записывает в списки доступа. Интерфейс — английский, русский перевод (переключатель в шапке, cookie `g4a_lang`; по умолчанию — `Accept-Language`). С телефона: `gate4ai ui --remote` выдаёт одноразовую ссылку на `<публичный адрес>/ui/` (действует 2 минуты, открывается один раз); удалённо доступны подтверждения и журнал, политики, агенты и секреты меняются только на этом компьютере. Пока устройство не подключено к relay (`gate4ai relay status`: `"online": false`, причина — в `error`, например не выпущен сертификат), ссылка не выдаётся: она бы не открылась. Выпуск сертификата при неудаче повторяется сам (через 5 минут, затем реже, до часа).
 - Защита входа (**Настройки → Вход**): три способа — одноразовая ссылка, пароль (хранится хэшем argon2id в State Store; «Задать» / «Сменить» / «Снять» — в окне), подтверждение входа в Telegram-боте (без подключённого бота «Включить» ведёт в мастер бота, он заканчивается кнопкой включения); сочетаются как угодно, нужно пройти все включённые, хотя бы один включён всегда. По умолчанию — только ссылка. С паролем или Telegram ссылка из `gate4ai ui`, `--print`, `--remote` и трея сама сессию не даёт: открывает попытку входа (5 минут, привязана к браузеру cookie), сессию дают пароль и «Разрешить вход» в Telegram (в сообщении — код со страницы входа; Telegram спрашивается после пароля). Без ссылки вход — на постоянном адресе (кнопка «Войти»): `http://127.0.0.1:7431/` и с телефона `<публичный адрес>/ui/` (закладка работает и через неделю). От перебора: после 5 неверных паролей подряд задержка 1 с, удваивается до 15 минут, у удалённого входа свой счётчик; в Telegram одновременно ждёт ответа один запрос входа. `gate4ai ui` пишет, что ещё нужно. Менять защиту можно только из сессии, открытой с защитой, а при заданном пароле — с вводом текущего; смена закрывает остальные сессии. Восстановление: `gate4ai daemon stop && gate4ai daemon --reset-ui-login` (в Telegram придёт уведомление о сбросе). Флаг разовый: `gate4ai daemon restart` его не повторяет, а `gate4ai service install -- …` не записывает в автозапуск.
 - Telegram вебхуком вместо polling: `approvals.telegram.webhook: true` (нужен публичный адрес).
 - Журнал: `gate4ai log`, `gate4ai show '#a3f9c21e'`, `gate4ai journal verify`, `gate4ai export -o backup.tar.gz --passphrase-env PASS`, офлайн-проверка `gate4ai verify backup.tar.gz --pubkey <hex>`.
-- Политики: `gate4ai policy test --agent claude-ai --action email.send --args '{"to":["x@y.z"],"subject":"s"}'`, `gate4ai policy versions`, `gate4ai policy rollback <n>`.
+- Политики: `gate4ai policy test --agent claude-ai --action browser.act --args '{"session":"s-1","selector":"button","method":"click"}'`, `gate4ai policy versions`, `gate4ai policy rollback <n>`.
 
 ## 5. Свой relay
 
@@ -240,7 +242,7 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 
 ## Тесты
 
-`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe` (в том числе вход хостом в IMAP на заглушке). Поток из спецификации на собранных бинарниках и настоящих коннекторах — `e2e/` (`./scripts/ci.sh e2e`). Daemon в e2e и на стенде (`dev/scripts/stand.sh`) запускается с `GATE4AI_DESKTOP_NOTIFY=log`: уведомления daemon на рабочем столе (запросы подтверждения вроде «codex хочет выполнить browser.post», запросы агента на подключение, коды, отказы) не всплывают, а пишутся в журнал daemon (`desktop notification` с заголовком и текстом); решения — как обычно, в Web UI, Telegram или CLI.
+`go test ./...` — модульные тесты всех пакетов, интеграционные тесты daemon по сокетам, OAuth-поток, relay с passthrough, Egress Proxy, WASM-хост на тестовом коннекторе `testdata/probe`, браузер на фейковом CDP. Поток из спецификации на собранных бинарниках, встроенных Браузере и Файлах и тестовом WASM-коннекторе `e2e/testdata/pagereader` — `e2e/` (`./scripts/ci.sh e2e`). Daemon в e2e и на стенде (`dev/scripts/stand.sh`) запускается с `GATE4AI_DESKTOP_NOTIFY=log`: уведомления daemon на рабочем столе (запросы подтверждения вроде «codex хочет выполнить browser.post», запросы агента на подключение, коды, отказы) не всплывают, а пишутся в журнал daemon (`desktop notification` с заголовком и текстом); решения — как обычно, в Web UI, Telegram или CLI.
 
 ## Тестовый стенд
 
@@ -253,7 +255,7 @@ export GATE4AI_DESKTOP_NOTIFY=log   # уведомления daemon — в ег�
 # стенд, который запускает сам агент (Claude Code): сборка go build -tags gate4ai_devstand ./cmd/gate4ai
 # и GATE4AI_OWNER_CHECK=off — сокет владельца не отличает агента от человека (в выпуске переменная не действует)
 gate4ai daemon --ui 127.0.0.1:7531 --keystore file &       # ключи в файле, а не в связке ОС
-gate4ai connectors install connectors/mail --yes --watch   # коннектор из каталога исходников, пересобирается при правках
+gate4ai connectors install e2e/testdata/pagereader --yes --watch   # коннектор из каталога исходников, пересобирается при правках
 gate4ai ui --print                                         # одноразовая ссылка на Web UI (2 минуты)
 gate4ai relay register --url https://relay.gate4.ai        # адрес для claude.ai: gate4ai relay status
 ```

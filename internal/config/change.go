@@ -59,7 +59,8 @@ const (
 	// сокета владельца — под подтверждением change_policy.
 	OpInstallDev = "install_dev_connector"
 	// OpAddSettingItems / OpRemoveSettingItems — дополнить или сократить
-	// настройку-список коннектора (сайты браузера), не заменяя её целиком.
+	// настройку-список коннектора (redact_params, download_types), не заменяя её целиком;
+	// сайты и папки — set_site_access / set_folder_access.
 	OpAddSettingItems    = "add_setting_items"
 	OpRemoveSettingItems = "remove_setting_items"
 	// OpAddCredential — учётка входа на сайт (метаданные; значения секретов
