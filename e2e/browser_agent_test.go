@@ -113,7 +113,7 @@ connectors:
 	// режима read у сайтов нет — доступ к домену либо есть, либо нет.
 	// change_policy — всегда владелец.
 	call(tokB, 0, "browser", "post", "--session", sB, "--url", srv.URL+"/api/items", "--body", `{"x":1}`)
-	if r := g.run("", "", "access", "sites", "set", "127.0.0.1", "read"); r.code == 0 || !strings.Contains(r.out, "allow | connector | ask | deny") {
+	if r := g.run("", "", "access", "sites", "set", "127.0.0.1", "read"); r.code == 0 || !strings.Contains(r.out, "allow, connector, ask, deny") {
 		t.Fatalf("read accepted for a site: %d %s", r.code, r.out)
 	}
 	if r := g.run("", "", "access", "sites", "set", "127.0.0.1", "allow"); r.code != 0 {
