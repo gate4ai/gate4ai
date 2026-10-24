@@ -3,19 +3,16 @@
 package pipeline
 
 import (
-	"net/url"
 	"regexp"
 	"strings"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
+	"github.com/gate4ai/gate4ai/sdk-go/redact"
 )
 
 // mask — известные секреты (Vault) и одноразовые коды и токены в адресах:
 // OAuth-редирект `…/auth?code=…` не должен лечь в журнал и ответ агенту.
 func (p *Pipeline) mask(v any) any { return maskURLs(p.Secrets.Mask(v)) }
-
-// secretParam — параметры адреса с одноразовыми кодами, токенами и сессиями.
-var secretParam = regexp.MustCompile(`(?i)^(code|token|access_token|id_token|refresh_token|state|ticket|sid|session.*|auth.*|.*_token)$`)
 
 var urlInText = regexp.MustCompile(`https?://[^\s"'<>]+`)
 
@@ -45,38 +42,8 @@ func maskURLs(v any) any {
 }
 
 // maskURL — адрес с *** вместо значений секретных параметров в query и во
-// фрагменте (implicit flow и response_mode=fragment: #access_token=…).
-func maskURL(u string) string {
-	rest, frag, hasFrag := strings.Cut(u, "#")
-	base, query, hasQuery := strings.Cut(rest, "?")
-	out := base
-	if hasQuery {
-		out += "?" + maskParams(query)
-	}
-	if hasFrag {
-		if strings.Contains(frag, "=") {
-			frag = maskParams(frag)
-		}
-		out += "#" + frag
-	}
-	return out
-}
-
-// maskParams — k=v&… с *** вместо значений секретных параметров.
-func maskParams(query string) string {
-	parts := strings.Split(query, "&")
-	for i, part := range parts {
-		k, _, hasVal := strings.Cut(part, "=")
-		name, err := url.QueryUnescape(k)
-		if err != nil {
-			name = k
-		}
-		if hasVal && secretParam.MatchString(name) {
-			parts[i] = k + "=***"
-		}
-	}
-	return strings.Join(parts, "&")
-}
+// фрагменте (общее правило с коннекторами — sdk-go/redact).
+func maskURL(u string) string { return redact.URL(u, nil) }
 
 // evidenceData — данные доказательства для хранения: текстовые (text/*, JSON,
 // XML, HTML, пустой MIME) проходят маскирование секретов и адресов, как ответы;
