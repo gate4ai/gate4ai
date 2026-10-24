@@ -58,12 +58,12 @@ func (b *fakeBrowser) Execute(_ context.Context, r abi.ExecRequest) (abi.ExecRes
 		if r.Login.Alias == "@broken" {
 			return abi.ExecResult{}, abi.Errorf("form_mismatch", "#password: not found")
 		}
-		return abi.ExecResult{Structured: map[string]any{"url": "https://lk.example/", "status": "logged_in", "origin": "https://login.example"}, ResultRef: "logged_in"}, nil
+		return abi.ExecResult{Structured: map[string]any{"url": "https://account.example/", "status": "logged_in", "origin": "https://login.example"}, ResultRef: "logged_in"}, nil
 	case "handoff":
 		if r.Args["session"] == "s-closed" {
 			return abi.ExecResult{}, abi.Errorf(abi.CodeNotFound, "browser session s-closed is closed or unknown")
 		}
-		return abi.ExecResult{Structured: map[string]any{"url": "https://lk.example/", "status": "done"}}, nil
+		return abi.ExecResult{Structured: map[string]any{"url": "https://account.example/", "status": "done"}}, nil
 	case "fill_secret":
 		if r.Args["selector"] == "#elsewhere" {
 			return abi.ExecResult{}, abi.Errorf("wrong_origin", "the page is not at the sign-in site")
@@ -158,7 +158,7 @@ credentials:
         - { selector: "#login", value: "+70000000000" }
         - { selector: "#password", secret: "@emias.password" }
       submit: { selector: "#bind" }
-      success: { url_prefix: "https://lk.example/" }
+      success: { url_prefix: "https://account.example/" }
     use: [connector-dev]
     connectors: [lk_emias]
     prompts: { sms: "Код из SMS" }
@@ -250,7 +250,7 @@ func TestAgentLoginGetsValuesOnlyForLogin(t *testing.T) {
 	e := newCredEnv(t, manifest.RuntimeBuiltin)
 	ctx := context.Background()
 	// Другие действия: учётки агента (без форм и значений).
-	if r := e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.open", Args: map[string]any{"url": "https://lk.example/"}}); r.Status != StatusOK {
+	if r := e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.open", Args: map[string]any{"url": "https://account.example/"}}); r.Status != StatusOK {
 		t.Fatal(r)
 	}
 	q := e.br.last()
@@ -264,7 +264,7 @@ func TestAgentLoginGetsValuesOnlyForLogin(t *testing.T) {
 	}
 	q = e.br.last()
 	if q.Login == nil || q.Login.Alias != "@emias" || len(q.Login.Fields) != 2 || q.Login.Fields[1].Name != "@emias.password" ||
-		q.Login.Submit.Selector != "#bind" || q.Login.Success != "https://lk.example/" || q.Revealed["@emias.password"] != fakePassword ||
+		q.Login.Submit.Selector != "#bind" || q.Login.Success != "https://account.example/" || q.Revealed["@emias.password"] != fakePassword ||
 		q.Args["account"] != "@emias" || len(q.Revealed) != 1 {
 		t.Fatalf("%+v", q)
 	}

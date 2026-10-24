@@ -217,7 +217,7 @@ lists:
   contacts_trusted: [a@example.com]
 connectors:
   files: { roots: ["~/Documents"] }
-  browser: { allowed_domains: [lk.example], engine: cdp }
+  browser: { allowed_domains: [account.example], engine: cdp }
   email: { address: me@example.com }
 profiles:
   default:
@@ -260,7 +260,7 @@ profiles:
 	if f, ok := access.MatchFolder(c.Access.Folders, "~/Documents/x", d.Pipeline.Home); !ok || f.Access != access.Read || c.Connectors["files"] != nil {
 		t.Fatal(c.Access.Folders, c.Connectors["files"])
 	}
-	if s, ok := access.MatchSite(c.Access.Sites, "https://lk.example/"); !ok || s.Access != access.Read || c.Connectors["browser"]["allowed_domains"] != nil {
+	if s, ok := access.MatchSite(c.Access.Sites, "https://account.example/"); !ok || s.Access != access.Read || c.Connectors["browser"]["allowed_domains"] != nil {
 		t.Fatal(c.Access.Sites, c.Connectors["browser"])
 	}
 }

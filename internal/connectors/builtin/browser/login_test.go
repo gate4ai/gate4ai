@@ -29,7 +29,7 @@ type formEngine struct {
 
 const (
 	testSign  = "https://login.example/sign"
-	testLK    = "https://lk.example/home"
+	testLK    = "https://account.example/home"
 	testPass  = "fake-pass-5678"
 	testLogin = "+70000000000"
 )
@@ -107,7 +107,7 @@ func (f *formEngine) Type(_ context.Context, t string, _ time.Duration) error {
 func (f *formEngine) Close() error { return nil }
 
 // emias — учётка, как её передаёт хост: форма без значений, значения секретов — в Revealed.
-var emias = abi.Account{Alias: "@emias", Bind: []string{"https://login.example"}, Success: "https://lk.example/",
+var emias = abi.Account{Alias: "@emias", Bind: []string{"https://login.example"}, Success: "https://account.example/",
 	Submit: &abi.AccountSubmit{Selector: "#bind"},
 	Fields: []abi.AccountField{{Name: "login", Selector: "#login", Value: testLogin},
 		{Name: "@emias.password", Selector: "#password", Secret: "@emias.password"},
@@ -121,7 +121,7 @@ func loginSetup(t *testing.T) (*hosttest.Host, *Browser, *formEngine) {
 	}
 	eng := &formEngine{}
 	b := &Browser{W: &worker.Service{NewEngine: func(context.Context, worker.Settings, string) (worker.Engine, error) { return eng, nil }}}
-	return hosttest.New(m, map[string]any{"allowed_domains": []any{"lk.example"}, "cdp_url": "http://127.0.0.1:1"}, nil), b, eng
+	return hosttest.New(m, map[string]any{"allowed_domains": []any{"account.example"}, "cdp_url": "http://127.0.0.1:1"}, nil), b, eng
 }
 
 // req — запрос хоста агента: учётки агента; для login / fill_secret — форма и значения.
@@ -261,7 +261,7 @@ func TestLoginThroughConnector(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Коннектор входа, вызванный хостом для сеанса агента, работает на странице этого сеанса.
-	caller := &abi.Caller{Connector: "mos_login", Call: "root1", Params: map[string]any{"domains": []any{"lk.example"}}, Session: session}
+	caller := &abi.Caller{Connector: "mos_login", Call: "root1", Params: map[string]any{"domains": []any{"account.example"}}, Session: session}
 	fill := req("fill_secret", map[string]any{"account": "@emias", "field": "password"}, true)
 	fill.Caller = caller
 	if _, err := h.ExecuteRequest(b, fill); err != nil {
@@ -277,7 +277,7 @@ func TestLoginThroughConnector(t *testing.T) {
 
 func TestConnectorLoginOnRootPage(t *testing.T) {
 	h, b, eng := loginSetup(t)
-	caller := &abi.Caller{Connector: "lk_emias", Call: "root9", Params: map[string]any{"domains": []any{"lk.example"}}}
+	caller := &abi.Caller{Connector: "lk_emias", Call: "root9", Params: map[string]any{"domains": []any{"account.example"}}}
 	open := req("open", map[string]any{"url": testLK}, false)
 	open.Caller = caller
 	res, err := h.ExecuteRequest(b, open)

@@ -58,7 +58,7 @@ func (f *fakeBrowserPkg) Owner(_ context.Context, op string, args, out any) erro
 	f.ops = append(f.ops, op)
 	switch op {
 	case "sessions":
-		b, _ := json.Marshal(map[string]any{"sessions": []any{map[string]any{"id": "s-1", "agent": "bot", "who": "bot", "state": f.state, "url": "https://lk.example/"}}, "display": "virtual"})
+		b, _ := json.Marshal(map[string]any{"sessions": []any{map[string]any{"id": "s-1", "agent": "bot", "who": "bot", "state": f.state, "url": "https://account.example/"}}, "display": "virtual"})
 		return json.Unmarshal(b, out)
 	case "control":
 		a := args.(map[string]any)
@@ -73,7 +73,7 @@ func (f *fakeBrowserPkg) Owner(_ context.Context, op string, args, out any) erro
 	case "view":
 		go func() {
 			time.Sleep(50 * time.Millisecond)
-			f.emit("frame", map[string]any{"session": "s-1", "jpeg": []byte{0xff, 0xd8, 1}, "width": 800, "height": 600, "url": "https://lk.example/", "state": "idle"})
+			f.emit("frame", map[string]any{"session": "s-1", "jpeg": []byte{0xff, 0xd8, 1}, "width": 800, "height": 600, "url": "https://account.example/", "state": "idle"})
 		}()
 	}
 	return nil
@@ -122,7 +122,7 @@ func TestBrowserPages(t *testing.T) {
 		t.Fatal("the live view without a session")
 	}
 	c, _, post, get := loginAs(t, u, base)
-	if p := get("/browser"); !strings.Contains(p, `href="/browser/s-1"`) || !strings.Contains(p, "lk.example") || !strings.Contains(p, "виртуальный (Xvfb)") {
+	if p := get("/browser"); !strings.Contains(p, `href="/browser/s-1"`) || !strings.Contains(p, "account.example") || !strings.Contains(p, "виртуальный (Xvfb)") {
 		t.Fatal(p)
 	}
 	u.BrowserEnv = func() browserenv.Sys {

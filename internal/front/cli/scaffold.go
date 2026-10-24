@@ -35,7 +35,7 @@ func (e *Env) scaffold(args []string) int {
 	pos, fl := splitFlags(args, map[string]bool{"site": true, "o": true})
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
-	site := fs.String("site", "", "the site's domain, e.g. lk.example.org (more: edit sites in the manifest)")
+	site := fs.String("site", "", "the site's domain, e.g. account.example.org (more: edit sites in the manifest)")
 	out := fs.String("o", "", "folder (default: ./<name>)")
 	if fs.Parse(fl) != nil || len(pos) != 1 || *site == "" {
 		fmt.Fprintln(e.Stderr, newUsage)
@@ -47,7 +47,7 @@ func (e *Env) scaffold(args []string) int {
 	}
 	host := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(*site, "https://"), "http://"), "/"))
 	if host == "" || strings.ContainsAny(host, "/ ") || !(domain.Sites{Domains: []string{host}}).Allows("https://"+host+"/") {
-		return e.fail(fmt.Errorf("--site %q: give a domain like lk.example.org", *site))
+		return e.fail(fmt.Errorf("--site %q: give a domain like account.example.org", *site))
 	}
 	dir := *out
 	if dir == "" {

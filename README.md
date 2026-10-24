@@ -52,7 +52,7 @@ Daemon держит политики, списки доступа, секрет�
 gate4ai access                                      # оба списка
 gate4ai access sites set app.example.org read       # читать без вопроса, менять — с подтверждением (allow — всё, deny — закрыть)
 gate4ai access folders set ~/Documents/notes append # читать и дописывать без вопроса, перезаписывать — с подтверждением
-gate4ai sites allow lk.example.org                  # то же, что access sites set … read
+gate4ai sites allow account.example.org                  # то же, что access sites set … read
 ```
 
 То же в Web UI — **Доступ → Браузер** и **Файлы**. Побеждает самая конкретная строка; нет строки или `deny` — отказ; правило политики на действие побеждает строку. Режим `connector` открывает сайт только коннектору магазина, а не агенту напрямую.
