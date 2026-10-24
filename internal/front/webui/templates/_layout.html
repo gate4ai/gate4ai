@@ -103,7 +103,7 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 <span class="lang" aria-label="{{T "Language"}}">{{$p := .Path}}{{$b := .Base}}{{range langs}}<a href="{{$b}}/lang?l={{.Code}}&amp;back={{$p}}" class="{{if eq .Code Lang}}on{{end}}" lang="{{.Code}}">{{.Code | printf "%s"}}</a> {{end}}</span>
 <form method="post" action="{{$.Base}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">{{T "Sign out"}}</button></form>
 </header><main id="main">
-{{if .Remote}}<div class="note">{{T "Remote access: approvals, the browser and the journal. Agents, access rules and settings change only on the computer itself."}}</div>{{end}}
+{{if .Remote}}<div class="note">{{T "Remote access: approvals, the browser, the journal and the server status."}} <a href="{{.Base}}/settings/server">{{T "Server"}}</a>. {{T "Agents, access rules and settings change only on the computer itself."}}</div>{{end}}
 {{if .Flash}}<div class="flash" role="status" data-flash>{{.Flash}}{{with .Detail}}<details><summary>{{T "Details"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}
 {{if .Error}}{{with errView .Error}}<div class="error" role="alert" data-error>{{.Text}}{{with .Detail}}<details><summary>{{T "Details"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}{{end}}
 {{end}}

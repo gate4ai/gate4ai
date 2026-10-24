@@ -96,7 +96,7 @@ func tplIn(l string) *template.Template {
 var titles = map[string]string{"overview": "Home", "approvals": "Approvals", "telegram": "Telegram", "agents": "Agents", "agent": "Agent",
 	"agent_new": "New agent", "setup": "Getting started", "connectors": "Access", "connector": "Connector", "policy": "Rules", "rule": "Rule", "templates": "Ready-made rules",
 	"policy_yaml": "YAML", "journal": "Journal", "receipt": "Journal entry", "vault": "Passwords and accounts", "settings": "Settings", "relay": "Internet access",
-	"remote_only": "Only on this computer", "browser": "Browser", "browser_view": "Browser session"}
+	"remote_only": "Only on this computer", "browser": "Browser", "browser_view": "Browser session", "server": "Server"}
 
 // or — первое непустое.
 var or = cmp.Or[string]
@@ -166,6 +166,8 @@ type UI struct {
 	DefaultLang string
 	// BrowserEnv — проверка Chrome и Xvfb для раздела «Браузер» (nil — этот компьютер).
 	BrowserEnv func() browserenv.Sys
+	// Server — окружение страницы «Сервер» (nil — этот компьютер).
+	Server func() ServerEnv
 
 	mu       sync.Mutex
 	logins   map[string]login // одноразовые токены входа
@@ -387,6 +389,7 @@ func (u *UI) handler(m mount) http.Handler {
 	mux.HandleFunc("GET "+b+"/approvals/live", u.livePending(m))
 	get("/journal", u.journal)
 	get("/journal/{hash}", u.receipt)
+	get("/settings/server", u.serverPage(m)) // и удалённо: только чтение
 	get("/browser", u.browserList)
 	get("/browser/{id}", u.browserView(m))
 	mux.HandleFunc("GET "+b+"/browser/{id}/ws", u.browserWS(m))
@@ -655,7 +658,7 @@ func (v view) Section() string {
 		return "journal"
 	case "browser", "browser_view":
 		return "browser"
-	case "settings", "relay", "vault":
+	case "settings", "relay", "vault", "server":
 		return "settings"
 	}
 	return ""

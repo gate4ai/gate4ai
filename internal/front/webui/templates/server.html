@@ -1,0 +1,14 @@
+{{template "head" .}}
+{{$d := .Data}}
+{{if .Remote}}<h2>{{T "Server"}}</h2>{{else}}<div class="layout">{{template "settings_nav" (dict "V" . "On" "server")}}<div><h2>{{T "Server"}}</h2>{{end}}
+<p class="muted">{{T "The parts of this gate4.ai installation and what to do about each."}}{{if $d.Headless}} {{T "This is a computer without a screen: agents work in the browser here, and you watch their sessions in Browser."}}{{end}}
+{{if $d.Warn}} <b class="warn">{{T "needs attention: %d" $d.Warn}}</b>{{else}} <b class="ok">{{T "all good"}}</b>{{end}}</p>
+<div class="card">
+{{range $d.Checks}}<div class="set" id="{{.ID}}"><div class="d"><span class="dot{{if eq .Status "warn"}} warn{{else if eq .Status "bad"}} bad{{else if eq .Status "off"}} off{{end}}" aria-hidden="true"></span><b>{{say .Title}}</b> — <span class="{{if eq .Status "ok"}}ok{{else if eq .Status "warn"}}warn{{else if eq .Status "bad"}}bad{{else}}muted{{end}}">{{say .Detail}}</span>
+{{if .Fix.F}}<div class="help">{{say .Fix}}{{if .Cmd}} <code>{{.Cmd}}</code>{{end}}</div>{{end}}</div>
+{{if and .Link .Button.F (not $.Remote)}}<a class="btn small" href="{{$.Base}}{{.Link}}">{{say .Button}}</a>{{end}}</div>
+{{end}}
+</div>
+<p class="help">{{T "From a terminal on the server: gate4ai doctor, gate4ai browser setup."}}</p>
+{{if not .Remote}}</div></div>{{end}}
+{{template "foot"}}
