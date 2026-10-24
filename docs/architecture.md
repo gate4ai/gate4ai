@@ -2,6 +2,8 @@
 
 Один репозиторий `gate4ai/gate4ai` и один Go-модуль `github.com/gate4ai/gate4ai`: ядро (`cmd/`, `internal/`), `sdk-go/` (Apache-2.0), `relay/`, `connectors/`, `e2e/`. Направление зависимостей проверяет CI (`scripts/deps-check.sh`: прямые импорты пакетов и их тестов под linux, darwin, windows и wasip1; только этот модуль — `GOWORK=off`, ошибка `go list` — провал): `sdk-go` — только сам себя; `relay` — сам себя и `sdk-go`; ядро — себя и `sdk-go`, `relay` — только в тестах; коннектор — свой каталог, `sdk-go` и ядро, другой коннектор — никогда; `e2e` — что угодно, но его не импортирует никто. Остальные репозитории проекта и их лицензии — [repo-structure.md](repo-structure.md).
 
+План рефакторинга (дефекты, структурные этапы, порядок) — [refactoring-plan.md](refactoring-plan.md).
+
 | Компонент [спецификации](specification.md) | Пакет |
 |---|---|
 | Модель конфигурации, Config Store (версии, откат, права владельца) | `internal/config` |
