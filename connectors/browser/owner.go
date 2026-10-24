@@ -55,15 +55,40 @@ type BrowserStatus struct {
 func (b *Browser) SetEmit(f func(kind string, data any)) {
 	b.mu.Lock()
 	b.emit = f
+	b.events = nil // новая очередь — с новым получателем
 	b.mu.Unlock()
 }
 
+// EventQueue — событий ждут отправки хосту; больше — пропускаются (кадры
+// и смены состояния, которые хост не успел забрать).
+const EventQueue = 64
+
+type event struct {
+	kind string
+	data any
+}
+
+// send ставит событие в очередь: хосту события уходят по порядку из одной
+// горутины, а действия сеансов не ждут хост, переставший читать.
 func (b *Browser) send(kind string, data any) {
 	b.mu.Lock()
 	f := b.emit
+	if f != nil && b.events == nil {
+		b.events = make(chan event, EventQueue)
+		go func(ch chan event) {
+			for e := range ch {
+				f(e.kind, e.data)
+			}
+		}(b.events)
+	}
+	ch := b.events
 	b.mu.Unlock()
-	if f != nil {
-		f(kind, data)
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- event{kind, data}:
+	default:
 	}
 }
 

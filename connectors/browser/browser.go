@@ -51,6 +51,7 @@ type Browser struct {
 	closed   map[string]closedInfo       // недавно закрытые сеансы агентов: кто и почему
 	create   sync.Mutex                  // страница корневого действия создаётся один раз
 	emit     func(kind string, data any) // события хосту (кадры просмотра); nil — некуда
+	events   chan event                  // очередь событий к emit (send)
 }
 
 type callSession struct {

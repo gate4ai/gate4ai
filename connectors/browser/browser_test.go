@@ -693,12 +693,14 @@ func TestCloseAllWaitsForAction(t *testing.T) {
 	if res, err := agentExec(t, b, "close", map[string]any{"all": true}); err != nil || res["sessions"] != 1 {
 		t.Fatal(res, err)
 	}
+	// Действие кончилось до ответа close; его ответ доходит до вызывающего
+	// чуть позже — секунда, а не 30 с его timeout_ms.
 	select {
 	case err := <-done:
 		if err == nil || !strings.Contains(err.Error(), abi.CodeCancelled) {
 			t.Fatal("the running action is cancelled:", err)
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("close --all released the page while an action was running")
 	}
 	if time.Since(start) > 5*time.Second {

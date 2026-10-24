@@ -176,8 +176,8 @@ func (b *Browser) agentPage(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 		as.cancel, as.running, as.last = nil, "", time.Now()
 		b.mu.Unlock()
 		cancel()
+		b.stateChanged(as) // до освобождения: следующее действие сеанса — уже после события
 		<-as.lock
-		b.stateChanged(as)
 	}
 	type outcome struct {
 		res abi.ExecResult

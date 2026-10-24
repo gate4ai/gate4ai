@@ -389,13 +389,14 @@
     canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     // Клавиши: печатный символ и служебные клавиши — нажатиями; IME и
     // клавиатура телефона (key «Unidentified» / «Process») — текстом из поля.
-    var held = {};
+    var held = {}, sentChar = "";
     keys.addEventListener("keydown", function (e) {
       if (e.isComposing || e.key === "Process" || e.key === "Unidentified") return;
       var ch = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) return; // вставка — событием paste
       e.preventDefault();
       held[e.code] = true;
+      if (ch) sentChar = e.key; // символ ушёл нажатием: тот же символ в поле (событие char) — не слать второй раз
       send({ type: "key", action: "down", key: e.key, code: e.code, keyCode: e.keyCode, text: ch ? e.key : "", modifiers: mods(e) });
     });
     keys.addEventListener("keyup", function (e) {
@@ -405,7 +406,11 @@
       send({ type: "key", action: "up", key: e.key, code: e.code, keyCode: e.keyCode, modifiers: mods(e) });
     });
     keys.addEventListener("input", function () {
-      if (keys.value) { send({ type: "text", text: keys.value }); keys.value = ""; }
+      var v = keys.value;
+      keys.value = "";
+      if (v && v === sentChar) { sentChar = ""; return; }
+      sentChar = "";
+      if (v) send({ type: "text", text: v });
     });
     keys.addEventListener("paste", function (e) {
       var t = (e.clipboardData || window.clipboardData).getData("text");

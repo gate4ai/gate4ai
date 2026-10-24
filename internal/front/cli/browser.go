@@ -72,10 +72,10 @@ func (e *Env) browserOwner(ctx context.Context, sub string, args []string) int {
 		if err := e.Client().Do(ctx, "GET", "/v1/browser/sessions", nil, &st); err != nil {
 			return e.fail(err)
 		}
-		if st.Warning != "" {
+		if st.Warning != "" && e.human() { // в JSON предупреждение — поле warning
 			fmt.Fprintln(e.Stderr, "gate4ai: "+st.Warning)
 		}
-		if st.Missing {
+		if st.Missing && e.human() {
 			fmt.Fprintln(e.Stderr, "gate4ai: the browser package is not installed (gate4ai connectors install browser)")
 		}
 		e.out(st, func(w io.Writer) {

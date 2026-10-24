@@ -79,10 +79,19 @@ func TestOwnerSessions(t *testing.T) {
 	if _, err := owner(t, b, "view", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "closed or unknown") {
 		t.Fatal(err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if !strings.Contains(strings.Join(events, " "), "state") || events[len(events)-1] != "closed" {
-		t.Fatal(events)
+	// События уходят хосту по очереди и не сразу.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		got := append([]string(nil), events...)
+		mu.Unlock()
+		if len(got) > 0 && got[len(got)-1] == "closed" && strings.Contains(strings.Join(got, " "), "state") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(got)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
