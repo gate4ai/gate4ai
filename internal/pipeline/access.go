@@ -36,7 +36,8 @@ type accessDecision struct {
 }
 
 // accessOf — решение первого уровня для действия: Браузер — по домену адреса
-// (аргумент url или страница сеанса), Файлы — по папке пути. ok=false —
+// (аргумент url или страница сеанса; класс действия не важен — у сайта доступ
+// либо есть, либо нет), Файлы — по папке пути и операции. ok=false —
 // действие не касается сайта или папки (browser.close, другие коннекторы):
 // решает только политика. nested — вызов из WASM-коннектора (service_call):
 // действуют и строки самого коннектора.
@@ -56,20 +57,19 @@ func (p *Pipeline) accessOf(action string, act manifest.Action, args map[string]
 			return accessDecision{}, false
 		}
 		host := domain.HostOf(u)
-		write := manifest.ClassRank(act.Class) > manifest.ClassRank(policy.ClassRead)
 		g, ok := access.MatchSite(cfg.Access.Sites, u)
 		if !ok {
 			return accessDecision{effect: access.Deny, scope: "site:" + host, reason: fmt.Sprintf("site %s is not in the Browser access list", host)}, true
 		}
 		if nested == nil {
-			eff := access.Effect(g.Access, write, false)
-			return accessDecision{effect: eff, scope: "site:" + host, reason: siteReason(g, eff, write)}, true
+			eff := access.Effect(g.Access, false)
+			return accessDecision{effect: eff, scope: "site:" + host, reason: siteReason(g)}, true
 		}
 		cs, ok := access.MatchSite(nested.sites, u)
 		if !ok {
 			return accessDecision{effect: access.Deny, scope: "site:" + host, reason: fmt.Sprintf("connector %s does not list site %s", nested.caller, host)}, true
 		}
-		eff := stricter(access.Effect(cs.Access, write, false), access.Effect(g.Access, write, true))
+		eff := stricter(access.Effect(cs.Access, false), access.Effect(g.Access, true))
 		reason := fmt.Sprintf("site %s: %s for connector %s", cs.Domain, cs.Access, nested.caller)
 		if eff == access.Deny && g.Access == access.Deny {
 			reason = fmt.Sprintf("site %s is denied in the Browser access list", g.Domain)
@@ -92,10 +92,7 @@ func (p *Pipeline) accessOf(action string, act manifest.Action, args map[string]
 	return accessDecision{}, false
 }
 
-func siteReason(s access.Site, eff string, write bool) string {
-	if s.Access == access.Read && write {
-		return fmt.Sprintf("site %s is read-only for agents; this action changes something", s.Domain)
-	}
+func siteReason(s access.Site) string {
 	if s.Access == access.Connector {
 		return fmt.Sprintf("site %s is available only through a connector, not to agents directly", s.Domain)
 	}

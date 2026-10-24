@@ -15,12 +15,12 @@ import (
 const accessUsage = `usage:
   gate4ai access                                    the Browser and Files access lists
   gate4ai access sites                              sites and their access
-  gate4ai access sites set <site> <access>          allow | read | connector | ask | deny; site: app.example.org, *.example.org (also the apex), *
+  gate4ai access sites set <site> <access>          allow | connector | ask | deny; site: app.example.org, *.example.org (also the apex), *
   gate4ai access sites remove <site>
   gate4ai access folders                            folders and their access
   gate4ai access folders set <folder> <access>      allow | append | read | connector | ask | deny; folder: ~/notes, /data, ~/notes/**/*.md
   gate4ai access folders remove <folder>
-  gate4ai sites allow <site>...                     the same as: access sites set <site> read`
+  gate4ai sites allow <site>...                     the same as: access sites set <site> allow`
 
 // accessCmd — списки доступа Браузера и Файлов без правки YAML (команда владельца).
 func (e *Env) accessCmd(ctx context.Context, args []string) int {
@@ -105,7 +105,7 @@ func entry(kind, value, mode string) map[string]any {
 	return map[string]any{"path": value, "access": mode}
 }
 
-// sites — прежняя команда: gate4ai sites allow <site>… — чтение без вопроса.
+// sites — прежняя команда: gate4ai sites allow <site>… — сайт открыт без вопроса.
 func (e *Env) sites(ctx context.Context, args []string) int {
 	if len(args) == 0 {
 		return e.accessCmd(ctx, []string{"sites"})
@@ -114,7 +114,7 @@ func (e *Env) sites(ctx context.Context, args []string) int {
 	case "allow", "add":
 		code := ExitOK
 		for _, s := range args[1:] {
-			if code = e.accessCmd(ctx, []string{"sites", "set", s, access.Read}); code != ExitOK {
+			if code = e.accessCmd(ctx, []string{"sites", "set", s, access.Allow}); code != ExitOK {
 				return code
 			}
 		}

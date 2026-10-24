@@ -21,7 +21,7 @@ capabilities:
   storage: { quota_mb: 1 }
 sites:
   - { domain: "${setting:sites}", access: allow }
-  - { domain: "*.example", access: read }
+  - { domain: "*.example", access: ask }
 folders:
   - { path: "${setting:roots}", access: append }
   - { path: "~/todo.md", access: read }
@@ -66,7 +66,7 @@ func TestParseAndResolve(t *testing.T) {
 	}
 	// Шаблон в домене раскрывается в несколько строк с тем же режимом;
 	// домены — в нижнем регистре, без точки на конце.
-	wantSites := []access.Site{{Domain: "account.example", Access: access.Allow}, {Domain: "b.example", Access: access.Allow}, {Domain: "*.example", Access: access.Read}}
+	wantSites := []access.Site{{Domain: "account.example", Access: access.Allow}, {Domain: "b.example", Access: access.Allow}, {Domain: "*.example", Access: access.Ask}}
 	if got := m.ResolveSites(settings); !reflect.DeepEqual(got, wantSites) {
 		t.Fatalf("sites %#v", got)
 	}
@@ -124,7 +124,7 @@ func TestValidateRejects(t *testing.T) {
 	}
 	for name, body := range map[string]string{
 		"money verified": "actions: [ { name: pay, class: money, verify: payment_status } ]",
-		"site modes":     "sites: [ { domain: a.com, access: allow }, { domain: \"*.b.com\", access: read }, { domain: \"*\", access: ask }, { domain: c.com, access: deny } ]",
+		"site modes":     "sites: [ { domain: a.com, access: allow }, { domain: \"*\", access: ask }, { domain: c.com, access: deny } ]",
 		"folder modes":   "folders: [ { path: /srv, access: allow }, { path: \"~/in\", access: append }, { path: \"~/docs/**/*.md\", access: read }, { path: \"~/.ssh\", access: deny } ]",
 		"site template":  "sites: [ { domain: \"${setting:site}\", access: allow } ]",
 	} {
@@ -140,7 +140,7 @@ func TestSummaryAndSame(t *testing.T) {
 	for _, want := range []string{
 		"call browser (contract 1): open, act",
 		"site ${setting:sites}: allow",
-		"site *.example: read",
+		"site *.example: ask",
 		"folder ${setting:roots}: append",
 		"folder ~/todo.md: read",
 		"storage 1 MB",
