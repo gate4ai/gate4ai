@@ -69,6 +69,7 @@ func daemonMain(args []string, tty bool) error {
 	agentSock := flag.String("agent-socket", paths.AgentSocket(), "agent socket / named pipe")
 	connDir := flag.String("connectors", "", "installed connectors directory (default <home>/connectors)")
 	showVersion := flag.Bool("version", false, "print version")
+	_ = flag.Bool("no-browser", false, "ignored: the browser is built in and Chrome starts with the first browser action (kept for older installers)")
 	flag.StringVar(&uiAddr, "ui", uiAddr, "web UI address (loopback only; empty disables)")
 	flag.BoolVar(&resetUILogin, "reset-ui-login", false, "remove the Web UI login protection (password, Telegram confirmation) if you are locked out")
 	flag.StringVar(&telegramAPI, "telegram-api", telegramAPI, "Telegram Bot API base URL")
