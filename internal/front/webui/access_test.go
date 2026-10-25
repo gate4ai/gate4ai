@@ -120,7 +120,22 @@ func TestBuiltinNoGroups(t *testing.T) {
 		t.Fatal("browser settings", p)
 	}
 	if !strings.Contains(p, "сайт либо открыт, либо нет") || !strings.Contains(p, "Каждое действие отдельно") {
-		t.Fatal("browser page explains the list and keeps per-action rules", p)
+		t.Fatal("browser page explains the list and keeps the action table", p)
+	}
+	// В таблице действий встроенного нет столбцов «Вид» и «Решение»: класс
+	// действия и правило без условия дублировали бы строку списка доступа.
+	for _, path := range []string{"/access/browser?profile=p", "/access/files?profile=p"} {
+		p := get(path)
+		if strings.Contains(p, "<th>Вид</th>") || strings.Contains(p, "<th>Решение</th>") || strings.Contains(p, "/decision\"") || strings.Contains(p, "Решение для ") || strings.Contains(p, "Решение здесь — правило без условия") {
+			t.Fatal(path, "shows kind or decision columns of a builtin", p)
+		}
+		if !strings.Contains(p, "<th>Действие</th><th>Описание</th>") || !strings.Contains(p, `colspan="2"`) {
+			t.Fatal(path, "action table of a builtin", p)
+		}
+	}
+	// Решение по действию для встроенного — ошибка, правил не появляется.
+	if p := post("/connectors/browser/decision", url.Values{"profile": {"p"}, "action": {"act"}, "effect": {"allow"}}); !strings.Contains(p, "нет решений по действиям") {
+		t.Fatal("decision for a builtin", p)
 	}
 	if p := get("/agents/bot"); !strings.Contains(p, "Сайты из списка Браузера") || !strings.Contains(p, "Папки из списка Файлов") {
 		t.Fatal("agent page points to the lists", p)

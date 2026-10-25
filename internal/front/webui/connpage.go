@@ -147,7 +147,9 @@ func (u *UI) actionViews(l, name string, m manifest.Manifest, cfg *config.Config
 			continue
 		}
 		v := ActionView{Action: a, Full: name + "." + a.Name, Default: defaultEffect(a.Class), Title: a.TitleIn(l), Desc: a.DescriptionIn(l)}
-		if profile != "" {
+		// У Браузера и Файлов решения по действию на странице нет (решает
+		// список доступа), поэтому и правила профиля здесь не ищутся.
+		if profile != "" && !builtinRedirect(name) {
 			v.Decision, v.RuleIDs = actionDecision(cfg.Profiles[profile], v.Full)
 		}
 		if t, ok := toolSchema(tools, v.Full); ok {
@@ -177,11 +179,15 @@ func (u *UI) actionViews(l, name string, m manifest.Manifest, cfg *config.Config
 }
 
 // saveActionDecision — решение для действия в профиле: правило без условия;
-// "" (без правил) — убрать его, тогда решает класс действия.
+// "" (без правил) — убрать его, тогда решает класс действия. У Браузера и
+// Файлов решения по действию нет: решает список доступа, исключения — правила.
 func (u *UI) saveActionDecision(w http.ResponseWriter, r *http.Request) map[string]any {
 	name := r.PathValue("name")
 	prof := r.PostForm.Get("profile")
 	back := pageOf(name) + "?profile=" + url.QueryEscape(prof) + "#actions"
+	if builtinRedirect(name) {
+		return redirectErr(back, M("%s has no decisions by action: the access list decides, exceptions are rules", name))
+	}
 	act, effect := r.PostForm.Get("action"), r.PostForm.Get("effect")
 	if effect != "" && effect != config.EffectAllow && effect != config.EffectAsk && effect != config.EffectDeny {
 		return redirectErr(back, M("Unknown decision %q", effect))

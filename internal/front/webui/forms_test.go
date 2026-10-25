@@ -82,7 +82,7 @@ func TestVaultEditAndUses(t *testing.T) {
 func TestConnectorActionDecision(t *testing.T) {
 	u, d, _, base := setup(t)
 	_, _, post, get := loginAs(t, u, base)
-	if p := get("/connectors/notes"); !strings.Contains(p, `<option value="" selected>без правила: спрашивать</option>`) {
+	if p := get("/connectors/notes"); !strings.Contains(p, `<option value="" selected>без правила: спрашивать</option>`) || !strings.Contains(p, "<th>Вид</th><th>Решение</th>") {
 		t.Fatal("default decision", p)
 	}
 	post("/connectors/notes/decision", url.Values{"profile": {"p"}, "action": {"append"}, "effect": {"allow"}})
