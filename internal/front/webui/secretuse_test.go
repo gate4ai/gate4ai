@@ -23,7 +23,7 @@ func TestSecretUses(t *testing.T) {
 	}
 	ms := []manifest.Manifest{
 		{Connector: "jira", Capabilities: manifest.Capabilities{Reveal: []string{"@jira.fixed"}}},
-		{Connector: "browser", Capabilities: manifest.Capabilities{Reveal: []string{"${setting:model_key}"}}},
+		{Connector: "browser"},
 	}
 	got := secretUses(cfg, ms)
 	want := map[string][]SecretUse{

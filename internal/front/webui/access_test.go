@@ -102,3 +102,34 @@ func TestConnectorAccessRows(t *testing.T) {
 		t.Fatal(cf)
 	}
 }
+
+// У Браузера и Файлов нет групп «читать / менять» на их страницах и на странице
+// агента: что можно, решает строка списка доступа, и правило группы перекрывало
+// бы её. Настроек модели у Браузера нет; max_text_chars и redact_params — есть.
+func TestBuiltinNoGroups(t *testing.T) {
+	u, d, _, base := setupCfg(t, "agents:\n  bot: {profile: p}\naccess:\n  sites: [{ domain: \"*\", access: ask }]\nprofiles:\n  p:\n    connectors: [browser, files]\n")
+	_, _, post, get := loginAs(t, u, base)
+	for _, path := range []string{"/access/browser?profile=p", "/access/files?profile=p", "/agents/bot"} {
+		p := get(path)
+		if strings.Contains(p, "Читать страницы") || strings.Contains(p, "Нажимать") || strings.Contains(p, "Читать файлы") || strings.Contains(p, "Создавать и менять") {
+			t.Fatal(path, "shows action groups of a builtin", p)
+		}
+	}
+	p := get("/access/browser?profile=p")
+	if strings.Contains(p, "Модель") || strings.Contains(p, `name="model_key"`) || !strings.Contains(p, `name="max_text_chars"`) || !strings.Contains(p, `name="redact_params"`) {
+		t.Fatal("browser settings", p)
+	}
+	if !strings.Contains(p, "сайт либо открыт, либо нет") || !strings.Contains(p, "Каждое действие отдельно") {
+		t.Fatal("browser page explains the list and keeps per-action rules", p)
+	}
+	if p := get("/agents/bot"); !strings.Contains(p, "Сайты из списка Браузера") || !strings.Contains(p, "Папки из списка Файлов") {
+		t.Fatal("agent page points to the lists", p)
+	}
+	// Решение группы для встроенного — ошибка, правил не появляется.
+	if p := post("/access/group", url.Values{"profile": {"p"}, "connector": {"browser"}, "class": {"read"}, "effect": {"allow"}, "back": {"/agents/bot"}}); !strings.Contains(p, "нет групп действий") {
+		t.Fatal("group for a builtin", p)
+	}
+	if n := len(d.Config.Current().Profiles["p"].Rules); n != 0 {
+		t.Fatal("rules written for a builtin group:", d.Config.Current().Profiles["p"].Rules)
+	}
+}

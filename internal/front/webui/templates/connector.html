@@ -43,6 +43,8 @@
 {{if $d.Profile}}<div class="card" id="actions"><div class="row between"><h3>{{T "What it may do"}}</h3>
 {{if gt (len $d.Access) 1}}<nav class="tabs" style="margin:0;border:0" aria-label="{{T "Agents"}}">{{range $d.Access}}<a href="{{$.Base}}/connectors/{{$d.Name}}?profile={{.}}#actions" class="{{if eq . $d.Profile}}on{{end}}">{{.}}</a>{{end}}</nav>{{end}}</div>
 <p class="help">{{if $d.ProfileAgents}}{{T "For %s." (join $d.ProfileAgents ", ")}}{{else}}{{T "Permissions %s have no agents." $d.Profile}}{{end}}</p>
+{{if eq $d.Name "browser"}}<p class="help">{{T "Which sites and how — the list above, the same for every agent that may use the browser: a site is either open or not, reading and changing are not told apart."}}</p>
+{{else if eq $d.Name "files"}}<p class="help">{{T "Which folders and how — the list above, the same for every agent that may use files: the mode of a folder (read, append, allow) decides."}}</p>{{end}}
 {{range $d.Groups}}{{$g := .}}<form method="post" action="{{$.Base}}/access/group" class="grp"><input type="hidden" name="csrf" value="{{$.CSRF}}">
 <input type="hidden" name="profile" value="{{$d.Profile}}"><input type="hidden" name="connector" value="{{.Connector}}"><input type="hidden" name="class" value="{{.Class}}"><input type="hidden" name="back" value="/connectors/{{$d.Name}}?profile={{$d.Profile}}#actions">
 <span>{{T .Title}}{{if .Scoped}} <span class="muted">— {{T "in the chosen folders"}}</span>{{end}}{{if eq .Effect "mixed"}} <span class="muted">— {{T "different decisions, see below"}}</span>{{end}}{{with .Warn}}<br><span class="help">{{T .}}</span>{{end}}</span>

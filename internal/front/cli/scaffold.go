@@ -128,7 +128,7 @@ capabilities:
     # Действия браузера на странице этого коннектора.
     - target: browser
       contract: 1
-      actions: [open, observe, act, page_extract, page_screenshot]
+      actions: [open, observe, act, page_screenshot]
 # Сайты коннектора и режим доступа (умолчания; владелец меняет на странице коннектора).
 sites:
   - { domain: "{{.Site}}", access: allow }

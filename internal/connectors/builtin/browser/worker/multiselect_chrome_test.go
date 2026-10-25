@@ -60,7 +60,7 @@ func TestMultiSelectRealChrome(t *testing.T) {
 	}))
 	defer srv.Close()
 	sites := domain.Sites{Domains: []string{"127.0.0.1"}}
-	for _, engine := range []string{"cdp", "stagehand"} {
+	for _, engine := range []string{"cdp"} {
 		t.Run(engine, func(t *testing.T) {
 			dir := t.TempDir()
 			wrapper := filepath.Join(dir, "chrome")
@@ -69,7 +69,7 @@ func TestMultiSelectRealChrome(t *testing.T) {
 			defer cancel()
 			svc := New()
 			defer svc.Close()
-			s, err := svc.Acquire(ctx, Settings{Engine: engine, ChromePath: wrapper, ProfileDir: filepath.Join(dir, "profile")}, 0)
+			s, err := svc.Acquire(ctx, Settings{ChromePath: wrapper, ProfileDir: filepath.Join(dir, "profile")}, 0)
 			if err != nil {
 				t.Skip("chrome did not start:", err)
 			}

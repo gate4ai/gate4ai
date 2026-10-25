@@ -19,6 +19,7 @@
 {{if $row.Shared}}<p class="help">{{T "These permissions are shared with other agents (%s): a change applies to all of them." $d.Agent.Profile}}</p>{{end}}
 <div class="card">
 {{range $d.Access}}{{$a := .}}<div style="padding:.4rem 0"><b><a href="{{$.Base}}{{pageOf .Conn.Name}}?profile={{$d.Agent.Profile}}">{{.Conn.Title}}</a></b>
+{{if eq .Conn.Name "browser"}}<div class="help">{{T "Sites from the Browser list, the same for every agent."}}</div>{{else if eq .Conn.Name "files"}}<div class="help">{{T "Folders from the Files list, the same for every agent."}}</div>{{end}}
 {{range .Groups}}{{$g := .}}<form method="post" action="{{$.Base}}/access/group" class="grp"><input type="hidden" name="csrf" value="{{$.CSRF}}">
 <input type="hidden" name="profile" value="{{$d.Agent.Profile}}"><input type="hidden" name="connector" value="{{.Connector}}"><input type="hidden" name="class" value="{{.Class}}"><input type="hidden" name="back" value="/agents/{{$d.Name}}">
 <span>{{T .Title}}{{if .Scoped}} <span class="muted">— {{T "in the chosen folders"}}</span>{{end}}{{if eq .Effect "mixed"}} <span class="muted">— {{T "different rules"}}, <a href="{{$.Base}}/policy?profile={{$d.Agent.Profile}}">{{T "see the rules"}}</a></span>{{end}}{{with .Warn}}<br><span class="help">{{T .}}</span>{{end}}</span>

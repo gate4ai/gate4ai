@@ -155,7 +155,7 @@ func (u *UI) agentPage(r *http.Request) (string, map[string]any, error) {
 	}
 	var acc []access
 	for _, c := range prof.Connectors {
-		acc = append(acc, access{connRef{c, u.connTitle(l, c)}, u.groups(c, prof)})
+		acc = append(acc, access{connRef{c, u.connTitle(l, c)}, u.pageGroups(c, prof)})
 	}
 	data := map[string]any{"Name": name, "Agent": a, "Row": row, "Journal": u.entryViews(l, journal), "Profiles": profiles, "Client": client,
 		"Clients": u.clientTiles(), "Bin": u.bin(), "PublicURL": u.D.PublicURL(), "Relay": u.relay(), "Profile": prof, "Access": acc,

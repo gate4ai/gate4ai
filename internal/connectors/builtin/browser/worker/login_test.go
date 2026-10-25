@@ -247,7 +247,7 @@ func loginSession(t *testing.T) (*loginChrome, *Session) {
 	t.Helper()
 	f := newLoginChrome(t)
 	svc := &Service{NewEngine: DefaultEngine, Launch: LaunchEnv}
-	s, err := svc.Acquire(context.Background(), Settings{CDPURL: f.srv.URL, Engine: "cdp"}, 0)
+	s, err := svc.Acquire(context.Background(), Settings{CDPURL: f.srv.URL}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,9 +359,6 @@ func TestStillOnLoginAndSecretOnPage(t *testing.T) {
 	if _, err := s.ScreenshotElement(ctx, "#password"); err != nil || len(f.covered) != 1 ||
 		!strings.Contains(fmt.Sprint(f.covered[0]), "#password") {
 		t.Fatal("screenshot with covered secret fields:", err, f.covered)
-	}
-	if _, err := s.Extract(ctx, "password"); !errors.Is(err, ErrSecretOnPage) {
-		t.Fatal("extract:", err)
 	}
 	if _, err := s.Act(ctx, ActRequest{Selector: "#title", Method: ActFill, Value: "x"}); !errors.Is(err, ErrSecretOnPage) {
 		t.Fatal("act fill:", err)

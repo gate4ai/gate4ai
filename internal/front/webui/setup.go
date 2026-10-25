@@ -42,6 +42,17 @@ var groupTitles = map[string]map[string]string{
 // менять не делятся; решение группы становится режимом строк списка сайтов.
 const browserSitesClass = "sites"
 
+// pageGroups — группы действий для страниц коннектора и агента. У Браузера и
+// Файлов групп нет: что можно на сайте или в папке, решает строка их списка
+// доступа (одна для всех агентов), а правило группы перекрывало бы её молча.
+// Исключения для одного агента — правила в Доступ → Правила.
+func (u *UI) pageGroups(conn string, prof config.Profile) []groupView {
+	if builtinRedirect(conn) {
+		return nil
+	}
+	return u.groups(conn, prof)
+}
+
 // setupGroups — группы действий для мастера: Браузер — одна группа «Сайты из
 // списка» со всеми действиями, остальные — по классам (groups).
 func (u *UI) setupGroups(conn string) []groupView {
@@ -175,6 +186,9 @@ func (u *UI) setGroup(w http.ResponseWriter, r *http.Request) map[string]any {
 	back := or(f.Get("back"), "/connectors/"+url.PathEscape(conn))
 	if !validEffect(effect) {
 		return redirectErr(back, M("Unknown decision %q", effect))
+	}
+	if builtinRedirect(conn) {
+		return redirectErr(back, M("%s has no action groups: the access list decides, exceptions are rules", conn))
 	}
 	cfg := u.D.Config.Current()
 	p, ok := cfg.Profiles[prof]

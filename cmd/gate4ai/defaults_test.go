@@ -33,7 +33,7 @@ import (
 // files и browser.
 var defaultActions = map[string][]string{
 	"files":   {"read", "list", "append", "write"},
-	"browser": {"read", "screenshot", "extract", "open", "observe", "act", "reload", "handoff", "network", "get", "head", "post", "put", "patch", "delete", "download", "login", "fill_secret", "page_extract", "page_screenshot", "dialog", "close"},
+	"browser": {"read", "screenshot", "open", "observe", "act", "reload", "handoff", "network", "get", "head", "post", "put", "patch", "delete", "download", "login", "fill_secret", "page_screenshot", "dialog", "close"},
 }
 
 var defaultManifests = map[string]string{

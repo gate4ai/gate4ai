@@ -37,7 +37,7 @@ var (
 
 // actionTimeout — срок действия сеанса: timeout_ms (у act — ещё ожидание
 // результата и само действие, у download — ещё ожидание элемента), иначе
-// DefaultActionTimeout; handoff ждёт человека, page_extract — модель, вход —
+// DefaultActionTimeout; handoff ждёт человека, вход —
 // сайт входа.
 func actionTimeout(r abi.ExecRequest) time.Duration {
 	ms := time.Duration(num(r.Args, "timeout_ms")) * time.Millisecond
@@ -47,8 +47,6 @@ func actionTimeout(r abi.ExecRequest) time.Duration {
 			ms = worker.HandoffDefault
 		}
 		return ms + 30*time.Second
-	case "page_extract":
-		return 3 * time.Minute
 	case "login", "fill_secret":
 		return ms + 90*time.Second
 	case "act":
@@ -461,9 +459,9 @@ func (b *Browser) markClosed(as *agentSession, reason string) bool {
 // закроются), и что сделать вместо ожидания.
 func (b *Browser) busy(r abi.ExecRequest, err error) error {
 	if errors.Is(err, worker.ErrTabLimit) {
-		return abi.Errorf(abi.CodeLimit, "%v (%d at most; read, screenshot and extract each use one while they run): try again when they finish, "+
+		return abi.Errorf(abi.CodeLimit, "%v (%d at most; read and screenshot each use one while they run): try again when they finish, "+
 			"or use your open session: browser.get --session <id> --url <url> (a request with the session's cookies) or "+
-			"browser.open --session <id> --url <url> then browser.observe / page_screenshot / page_extract", err, worker.MaxTabs)
+			"browser.open --session <id> --url <url> then browser.observe / page_screenshot", err, worker.MaxTabs)
 	}
 	if !errors.Is(err, worker.ErrBusy) {
 		return err
@@ -487,6 +485,6 @@ func (b *Browser) busy(r abi.ExecRequest, err error) error {
 	b.mu.Unlock()
 	sort.Strings(held)
 	return abi.Errorf(abi.CodeLimit, "%v (%d at most): %s. Wait in the queue: browser.open --wait_for_browser 10m --url <url>; "+
-		"or browser.read / screenshot / extract --url <url> without session (a temporary tab); close your own with browser.close --session <id> (or --all)",
+		"or browser.read / screenshot --url <url> without session (a temporary tab); close your own with browser.close --session <id> (or --all)",
 		err, worker.MaxSessions, strings.Join(held, "; "))
 }

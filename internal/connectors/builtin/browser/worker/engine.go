@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package worker — браузерный воркер нативного коннектора browser:
-// выделенный профиль настоящего Chrome по CDP, движок Stagehand Go SDK v4
+// выделенный профиль настоящего Chrome по CDP
 // (или прямой CDP). Сайты проверяются по списку до и после редиректов. Все
 // переходы, клики и ввод идут через Executor — единую точку исполнения.
 package worker
@@ -26,8 +26,6 @@ type Engine interface {
 	// Screenshot — снимок PNG: clip — прямоугольник от начала документа,
 	// nil — видимое окно; full — clip охватывает всю страницу (за пределами окна).
 	Screenshot(ctx context.Context, clip *Clip, full bool) ([]byte, error)
-	// Extract — извлечение данных по инструкции (LLM внутри движка; только чтение).
-	Extract(ctx context.Context, instruction string) (any, error)
 	// Eval — выражение JS на странице, результат по значению в out.
 	Eval(ctx context.Context, expr string, out any) error
 	// InsertText — ввод текста в элемент в фокусе (как с клавиатуры).
@@ -155,15 +153,6 @@ func (x *Executor) Observe(ctx context.Context, max int) (url, title, text strin
 func (x *Executor) Screenshot(ctx context.Context, selector string) ([]byte, error) {
 	s, err := x.Capture(ctx, ShotRequest{Selector: selector})
 	return s.PNG, err
-}
-
-// Extract — извлечение по инструкции с текущей страницы (Act с естественным
-// языком для изменений не используется: в нём нет точки перехвата политикой).
-func (x *Executor) Extract(ctx context.Context, instruction string) (any, error) {
-	if err := x.readable(ctx); err != nil {
-		return nil, err
-	}
-	return x.Engine.Extract(ctx, instruction)
 }
 
 // ActPoll — шаг ожидания элемента в Act.
@@ -399,7 +388,7 @@ func (x *Executor) keys(ctx context.Context, r ActRequest) error {
 
 // TypedMax — до стольких символов fill / append вводятся как с клавиатуры
 // (Engine.InsertText); длиннее — командой вставки страницы одним шагом
-// (insertJS): Stagehand печатает посимвольно, и 24 КБ шли бы минуты.
+// (insertJS): посимвольный ввод 24 КБ шёл бы минуты.
 const TypedMax = 256
 
 // insertJS вставляет текст в элемент в фокусе вместо выделения: командой

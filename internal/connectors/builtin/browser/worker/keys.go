@@ -123,7 +123,7 @@ func keyName(p string) string {
 	return ""
 }
 
-// String — сочетание в записи Playwright / Stagehand: "Control+Shift+Enter".
+// String — сочетание в записи Playwright: "Control+Shift+Enter".
 func (k Key) String() string {
 	var b strings.Builder
 	for _, m := range []struct {

@@ -47,7 +47,6 @@ func (f *formEngine) Text(context.Context) (string, error)  { return "Логин
 func (f *formEngine) Screenshot(context.Context, *worker.Clip, bool) ([]byte, error) {
 	return []byte("\x89PNG"), nil
 }
-func (f *formEngine) Extract(context.Context, string) (any, error) { return "x", nil }
 func (f *formEngine) Eval(_ context.Context, expr string, out any) error {
 	var v any = map[string]any{"text": ""}
 	var args []any
@@ -203,11 +202,8 @@ func TestFillSecretAndSecretOnPage(t *testing.T) {
 	if err != nil || eng.values["#password"] != testPass || res.Structured.(map[string]any)["origin"] != "https://login.example" {
 		t.Fatal(res, err, eng.values)
 	}
-	for _, a := range []string{"observe", "network", "page_extract"} {
+	for _, a := range []string{"observe", "network"} {
 		args := map[string]any{"session": session}
-		if a == "page_extract" {
-			args["instruction"] = "password"
-		}
 		if _, err := h.ExecuteRequest(b, req(a, args, false)); err == nil || !strings.Contains(err.Error(), "secret_on_page") {
 			t.Errorf("%s with a secret on the page: %v", a, err)
 		}

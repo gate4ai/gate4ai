@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package browser — встроенный компонент «Браузер» (runtime: builtin): воркер
-// выделенного профиля Chrome (CDP, Stagehand) в процессе daemon. Агенту — чтение,
-// снимок, извлечение и сеанс страницы (open, observe, act, network, login,
-// fill_secret, page_extract, page_screenshot, close) на сайтах по спискам
-// доступа; WASM-коннекторам — те же действия с открытой страницей через
-// service_call на их сайтах. Ключ модели для extract хост передаёт по
-// capabilities.reveal.
+// выделенного профиля Chrome по CDP в процессе daemon. Агенту — чтение,
+// снимок и сеанс страницы (open, observe, act, network, login, fill_secret,
+// page_screenshot, close) на сайтах по спискам доступа; WASM-коннекторам — те
+// же действия с открытой страницей через service_call на их сайтах. LLM внутри
+// компонента нет: страницу читает сам агент.
 package browser
 
 import (
@@ -45,9 +44,9 @@ var AgentWait = 5 * time.Second
 // MaxSteps — предел записанных шагов сеанса агента (для фикстур тестов).
 const MaxSteps = 500
 
-// Browser — коннектор: действия агента без сеанса (read, screenshot, extract —
+// Browser — коннектор: действия агента без сеанса (read, screenshot —
 // временная вкладка на время действия: открытые сеансы они не трогают), сеансы
-// агентов (open → observe / act / network / page_extract / page_screenshot →
+// агентов (open → observe / act / network / page_screenshot →
 // close; у каждого своя вкладка; сайты — из настроек) и те же действия для
 // других коннекторов через service_call (страница на корневое действие,
 // сайты — params.sites вызывающего).
@@ -152,14 +151,11 @@ func strs(v any) []string {
 	return nil
 }
 
-// settings — настройки воркера из настроек коннектора и значения ключа модели (reveal).
+// settings — настройки воркера из настроек коннектора.
 func settings(r abi.ExecRequest) worker.Settings {
 	s := r.Settings
-	st := worker.Settings{Engine: str(s, "engine"), CDPURL: str(s, "cdp_url"), ChromePath: str(s, "chrome_path"),
-		ProfileDir: str(s, "profile_dir"), Model: str(s, "model")}
-	if alias := str(s, "model_key"); alias != "" {
-		st.ModelKey = r.Revealed[alias]
-	}
+	st := worker.Settings{CDPURL: str(s, "cdp_url"), ChromePath: str(s, "chrome_path"),
+		ProfileDir: str(s, "profile_dir")}
 	st.MaxTextChars = num(s, "max_text_chars")
 	st.RedactParams = strs(s["redact_params"])
 	st.DownloadDir = str(s, "download_dir")
@@ -297,7 +293,7 @@ func fail(err error) error {
 // Execute исполняет действие.
 func (b *Browser) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.ExecResult, error) {
 	switch r.Action {
-	case "read", "screenshot", "extract":
+	case "read", "screenshot":
 		res, err := b.agent(ctx, r)
 		return res, fail(b.busy(r, siteHint(err)))
 	}
@@ -398,11 +394,7 @@ func (b *Browser) agent(ctx context.Context, r abi.ExecRequest) (abi.ExecResult,
 		return abi.ExecResult{Structured: map[string]any{"url": page.URL, "selector": sel}, Content: []abi.Content{abi.Image("image/png", png)},
 			ResultRef: page.URL, Evidence: []abi.EvidenceItem{{Name: "element.png", MIME: "image/png", Data: png}}}, nil
 	}
-	data, err := s.Extract(ctx, str(r.Args, "instruction"))
-	if err != nil {
-		return abi.ExecResult{}, err
-	}
-	return abi.ExecResult{Structured: map[string]any{"url": page.URL, "data": data}, ResultRef: page.URL, Source: "web:" + page.URL}, nil
+	return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "unknown action %s", r.Action)
 }
 
 // session — страница корневого действия вызывающего (создаётся при первом обращении).
@@ -688,12 +680,6 @@ func (cs *callSession) do(ctx context.Context, r abi.ExecRequest) (abi.ExecResul
 			return abi.ExecResult{}, err
 		}
 		return downloadResult(f, cs.url), nil
-	case "page_extract":
-		data, err := cs.s.Extract(ctx, str(r.Args, "instruction"))
-		if err != nil {
-			return abi.ExecResult{}, err
-		}
-		return abi.ExecResult{Structured: map[string]any{"data": data}, Source: "web:" + cleanURL(cs.url)}, nil
 	case "page_screenshot":
 		sel := str(r.Args, "selector")
 		view, _ := r.Args["viewport"].(bool)

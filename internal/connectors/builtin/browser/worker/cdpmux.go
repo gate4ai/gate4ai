@@ -23,8 +23,8 @@ import (
 )
 
 // Mux — порт отладки Chrome закрыт: Chrome слушает CDP только в pipe
-// (--remote-debugging-pipe), а клиентам — нашим подключениям, Stagehand SDK
-// и его расширению внутри Chrome — Mux отдаёт websocket на 127.0.0.1 под
+// (--remote-debugging-pipe), а клиентам — подключениям воркера к вкладкам и
+// к браузеру — Mux отдаёт websocket на 127.0.0.1 под
 // адресом с секретным токеном (/t/<token>/…). Без токена — 404: другой
 // пользователь ОС или страница в браузере, которые видят порт, к Chrome не
 // подключатся.
@@ -539,9 +539,9 @@ func (m *Mux) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"Browser": v["product"], "Protocol-Version": v["protocolVersion"], "User-Agent": agent,
 			"V8-Version": v["jsVersion"], "webSocketDebuggerUrl": m.wsURL()})
 	case strings.HasPrefix(path, "devtools/browser"):
-		// Origin не проверяем: доступ даёт токен в адресе; расширение
-		// Stagehand подключается со своим chrome-extension://<id>.
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		// Доступ даёт токен в адресе; клиенты воркера идут без Origin, страница
+		// в браузере со своим Origin не проходит.
+		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}

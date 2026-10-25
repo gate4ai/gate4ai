@@ -17,7 +17,7 @@ import (
 )
 
 // CDP — движок на прямом Chrome DevTools Protocol (без LLM): переходы, текст,
-// снимок элемента. Extract недоступен (нужен Stagehand и модель пользователя).
+// снимок элемента.
 type CDP struct {
 	conn    *websocket.Conn
 	session string
@@ -457,10 +457,6 @@ func (c *CDP) Screenshot(ctx context.Context, clip *Clip, full bool) ([]byte, er
 		return nil, err
 	}
 	return base64.StdEncoding.DecodeString(r.Data)
-}
-
-func (c *CDP) Extract(context.Context, string) (any, error) {
-	return nil, errors.New("extract needs engine: stagehand and a model configured by the user")
 }
 
 // Ping — Chrome отвечает (запрос к браузеру, а не к странице: открытый на
