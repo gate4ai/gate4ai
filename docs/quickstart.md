@@ -95,10 +95,10 @@ profiles:
       allow_domains: [api.anthropic.com, registry.npmjs.org, github.com]
       ask_domains: ["*.githubusercontent.com"]
 connectors:
-  browser:                    # встроенный: движок и модель для extract; сайты — в access.sites
+  browser:                    # встроенный: движок (stagehand | cdp), предел текста, скрытые параметры; сайты — в access.sites
     engine: stagehand
-    model: openai/gpt-5.4-mini
-    model_key: "@llm.key"         # значение передаётся только встроенному браузеру (capabilities.reveal)
+    max_text_chars: 30000
+    redact_params: [patient_id]
 egress:
   secrets:
     # env: каждый `gate4ai run` получает в ANTHROPIC_API_KEY свою одноразовую заглушку,

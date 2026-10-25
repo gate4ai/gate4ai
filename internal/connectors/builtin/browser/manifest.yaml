@@ -3,9 +3,7 @@ description: Pages in the user's dedicated Chrome profile; browser sessions for 
 version: "0.7.9"
 runtime: builtin
 contract: 1
-services: [open, observe, act, dialog, download, page_extract, page_screenshot, login, fill_secret]
-capabilities:
-  reveal: ["${setting:model_key}"]
+services: [open, observe, act, dialog, download, page_screenshot, login, fill_secret]
 limits: { timeout_s: 600 } # handoff ждёт человека до 9 минут
 actions:
   - name: read
@@ -46,16 +44,6 @@ actions:
         url: { type: string }
         selector: { type: string }
       required: [url, selector]
-  - name: extract
-    class: read
-    untrusted: true
-    description: "Extract data from a page by instruction (uses the model configured by the user). Works in a temporary tab of the same browser profile (its cookies) that closes afterwards: an open browser session is not touched, so it works while one is open."
-    input_schema:
-      type: object
-      properties:
-        url: { type: string, format: url }
-        instruction: { type: string }
-      required: [url, instruction]
   # Действия со страницей: агенту — в сеансе (open без session начинает его,
   # close заканчивает и отдаёт записанные шаги; сайты — из настроек), другим
   # коннекторам через service_call — страница одна на корневое действие агента,
@@ -426,16 +414,6 @@ actions:
         url: { type: string }
         origin: { type: string }
       required: [url]
-  - name: page_extract
-    class: read
-    untrusted: true
-    description: Extract data from the open page by instruction (uses the model configured by the user)
-    input_schema:
-      type: object
-      properties:
-        session: { type: string, description: "agents: the session from browser.open" }
-        instruction: { type: string }
-      required: [instruction]
   - name: page_screenshot
     class: read
     evidence: png

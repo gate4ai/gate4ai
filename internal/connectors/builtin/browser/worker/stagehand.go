@@ -13,11 +13,11 @@ import (
 )
 
 // Stagehand — движок на Stagehand Go SDK v4 поверх нашего Chrome (ConnectLocalBrowser).
-// Модель указывает пользователь (provider/model + ключ из Vault); обращения к
-// Browserbase не включаются: API-ключ Browserbase не передаётся, SelfHeal выключен,
-// телеметрия не задана. Act с естественным языком не используется — в нём нет точки
-// перехвата политикой; изменения на страницах — только browser_act по селектору
-// (Executor.Act).
+// LLM не настраивается и не вызывается: модель SDK не задана, обращения к
+// Browserbase не включаются (API-ключ Browserbase не передаётся, SelfHeal выключен,
+// телеметрия не задана). Act / Extract с естественным языком не используются — в
+// них нет точки перехвата политикой; изменения на страницах — только browser_act
+// по селектору (Executor.Act).
 //
 // JS-диалоги SDK не показывает, а переход при открытом beforeunload в нём
 // висит: вкладку дополнительно слушает прямое подключение CDP (aux, по id
@@ -31,13 +31,9 @@ type Stagehand struct {
 	aux     *CDP   // прямое подключение к вкладке (nil — не удалось)
 }
 
-// StagehandConfig — модель для extract.
+// StagehandConfig — подключение к Chrome.
 type StagehandConfig struct {
-	CDPURL    string
-	ModelName string
-	APIKey    string
-	// Generate — собственный обработчик LLM (тесты, локальные модели).
-	Generate stagehand.LLMGenerateFunc
+	CDPURL string
 }
 
 // DialStagehand подключает SDK к уже запущенному выделенному профилю Chrome.
@@ -47,12 +43,7 @@ func DialStagehand(ctx context.Context, cfg StagehandConfig) (*Stagehand, error)
 		return nil, fmt.Errorf("stagehand connect: %w", err)
 	}
 	off := false
-	opts := stagehand.CreateOptions{Browser: b, SelfHeal: &off, Generate: cfg.Generate}
-	if cfg.ModelName != "" {
-		key := cfg.APIKey
-		opts.Model = &stagehand.ModelConfig{ModelName: stagehand.ModelName(cfg.ModelName), APIKey: &key}
-	}
-	cl, err := stagehand.Create(ctx, opts)
+	cl, err := stagehand.Create(ctx, stagehand.CreateOptions{Browser: b, SelfHeal: &off})
 	if err != nil {
 		_ = b.Close(ctx)
 		return nil, fmt.Errorf("stagehand: %w", err)
@@ -130,19 +121,6 @@ func (s *Stagehand) Screenshot(ctx context.Context, clip *Clip, full bool) ([]by
 		return s.page.Screenshot(ctx, nil)
 	}
 	return s.page.Screenshot(ctx, &stagehand.ScreenshotOptions{Clip: &stagehand.PageScreenshotClip{X: clip.X, Y: clip.Y, Width: clip.W, Height: clip.H}})
-}
-
-type extracted struct {
-	Answer string `json:"answer"`
-}
-
-func (s *Stagehand) Extract(ctx context.Context, instruction string) (any, error) {
-	// Страница — явно: иначе SDK берёт активную, а это может быть чужая вкладка.
-	r, err := stagehand.Extract[extracted](ctx, s.client, instruction, &stagehand.StagehandClientExtractOptions{Page: s.page})
-	if err != nil {
-		return nil, err
-	}
-	return r.Data.Answer, nil
 }
 
 // NewTab — ещё одна вкладка того же Chrome (тот же профиль и cookie) на

@@ -73,9 +73,6 @@ func (f *fakeEngine) Text(context.Context) (string, error) {
 func (f *fakeEngine) Screenshot(context.Context, *worker.Clip, bool) ([]byte, error) {
 	return []byte("\x89PNG-fake"), nil
 }
-func (f *fakeEngine) Extract(context.Context, string) (any, error) {
-	return map[string]any{"debt": 1234.56}, nil
-}
 func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 	switch {
 	case strings.Contains(expr, "document.contentType"): // тип документа
@@ -170,7 +167,7 @@ func setup(t *testing.T, settings map[string]any) (*hosttest.Host, *Browser, *fa
 	return hosttest.New(m, settings, nil), b, eng
 }
 
-func TestAgentReadScreenshotExtract(t *testing.T) {
+func TestAgentReadScreenshot(t *testing.T) {
 	h, b, _ := setup(t, nil)
 	res, err := h.Execute(b, "read", map[string]any{"url": "https://app.example.org/"})
 	if err != nil {
@@ -182,10 +179,6 @@ func TestAgentReadScreenshotExtract(t *testing.T) {
 	}
 	res, err = h.Execute(b, "screenshot", map[string]any{"url": "https://app.example.org/", "selector": "#debt"})
 	if err != nil || string(res.Evidence[0].Data) != "\x89PNG-fake" || res.Content[0].Type != abi.ContentImage {
-		t.Fatal(res, err)
-	}
-	res, err = h.Execute(b, "extract", map[string]any{"url": "https://app.example.org/", "instruction": "debt"})
-	if err != nil || res.Structured.(map[string]any)["data"].(map[string]any)["debt"] != 1234.56 {
 		t.Fatal(res, err)
 	}
 }
@@ -318,8 +311,8 @@ func TestManifest(t *testing.T) {
 			t.Errorf("service %s is not an action", name)
 		}
 	}
-	if len(m.Folders) != 0 || len(m.Capabilities.Reveal) != 1 {
-		t.Fatal("browser declares only reveal of the model key", m.Capabilities)
+	if len(m.Folders) != 0 || len(m.Capabilities.Reveal) != 0 {
+		t.Fatal("browser declares no folders and no reveal: there is no model key", m.Capabilities)
 	}
 }
 
@@ -432,7 +425,7 @@ func TestAgentSession(t *testing.T) {
 	b.EndCall("root1")
 }
 
-// TestReadDuringSession — read / screenshot / extract без session при
+// TestReadDuringSession — read / screenshot без session при
 // открытом сеансе агента идут во временной вкладке: адрес страницы сеанса не
 // меняется, вкладка закрывается, список сайтов действует как без сеанса;
 // лимит вкладок — ошибка с рабочей альтернативой.
@@ -451,14 +444,8 @@ func TestReadDuringSession(t *testing.T) {
 	if err != nil || r.Structured.(map[string]any)["url"] != "https://b.example.com/status" || !strings.Contains(r.Content[0].Text, "1 234,56") {
 		t.Fatal("read while a session is open:", r, err)
 	}
-	for _, a := range []map[string]any{{"url": "https://b.example.com/", "selector": "#debt"}, {"url": "https://b.example.com/", "instruction": "debt"}} {
-		action := "screenshot"
-		if a["instruction"] != nil {
-			action = "extract"
-		}
-		if _, err := exec(b, action, a, nil); err != nil {
-			t.Fatal(action, "while a session is open:", err)
-		}
+	if _, err := exec(b, "screenshot", map[string]any{"url": "https://b.example.com/", "selector": "#debt"}, nil); err != nil {
+		t.Fatal("screenshot while a session is open:", err)
 	}
 	// Список сайтов — как без сеанса.
 	if _, err := exec(b, "read", map[string]any{"url": "https://evil.example/"}, nil); err == nil || !strings.Contains(err.Error(), abi.CodeCapabilityDenied) {
@@ -468,7 +455,7 @@ func TestReadDuringSession(t *testing.T) {
 	if err != nil || after["url"] != before["url"] || after["url"] != "https://a.example.com/cabinet" || after["title"] != before["title"] {
 		t.Fatal("the session's page did not change:", before, after, err)
 	}
-	if eng.tabs != 4 || eng.closed != 4 {
+	if eng.tabs != 3 || eng.closed != 3 {
 		t.Fatalf("each call opens and closes its tab: opened %d, closed %d", eng.tabs, eng.closed)
 	}
 

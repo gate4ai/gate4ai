@@ -360,9 +360,6 @@ func TestStillOnLoginAndSecretOnPage(t *testing.T) {
 		!strings.Contains(fmt.Sprint(f.covered[0]), "#password") {
 		t.Fatal("screenshot with covered secret fields:", err, f.covered)
 	}
-	if _, err := s.Extract(ctx, "password"); !errors.Is(err, ErrSecretOnPage) {
-		t.Fatal("extract:", err)
-	}
 	if _, err := s.Act(ctx, ActRequest{Selector: "#title", Method: ActFill, Value: "x"}); !errors.Is(err, ErrSecretOnPage) {
 		t.Fatal("act fill:", err)
 	}

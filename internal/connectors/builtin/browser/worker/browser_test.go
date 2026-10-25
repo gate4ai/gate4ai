@@ -153,10 +153,6 @@ func TestOpenObserveScreenshotViaCDP(t *testing.T) {
 	if _, err := s.ScreenshotElement(ctx, "#missing"); err == nil {
 		t.Fatal("missing element")
 	}
-	// Extract на прямом CDP недоступен (нужен Stagehand и модель).
-	if _, err := s.Extract(ctx, "debt"); err == nil {
-		t.Fatal("extract without model")
-	}
 	s.Release()
 	// Один движок на все вызовы: вкладка создана один раз; сессии — по очереди.
 	s2, err := svc.Acquire(ctx, st, 0)
@@ -250,16 +246,13 @@ func (s *stubEngine) URL(context.Context) (string, error)                     { 
 func (s *stubEngine) Title(context.Context) (string, error)                   { return "t", nil }
 func (s *stubEngine) Text(context.Context) (string, error)                    { return strings.Repeat("я", 50), nil }
 func (s *stubEngine) Screenshot(context.Context, *Clip, bool) ([]byte, error) { return nil, nil }
-func (s *stubEngine) Extract(_ context.Context, ins string) (any, error) {
-	return "stub answer for: " + ins, nil // заглушка LLM
-}
-func (s *stubEngine) Close() error                                      { return nil }
-func (s *stubEngine) Eval(context.Context, string, any) error           { return nil }
-func (s *stubEngine) InsertText(context.Context, string) error          { return nil }
-func (s *stubEngine) Key(context.Context, string) error                 { return nil }
-func (s *stubEngine) Type(context.Context, string, time.Duration) error { return nil }
+func (s *stubEngine) Close() error                                            { return nil }
+func (s *stubEngine) Eval(context.Context, string, any) error                 { return nil }
+func (s *stubEngine) InsertText(context.Context, string) error                { return nil }
+func (s *stubEngine) Key(context.Context, string) error                       { return nil }
+func (s *stubEngine) Type(context.Context, string, time.Duration) error       { return nil }
 
-func TestExecutorExtractStub(t *testing.T) {
+func TestExecutorObserveTruncates(t *testing.T) {
 	x := &Executor{Engine: &stubEngine{}, Sites: domain.Sites{Domains: []string{"example.com"}}}
 	ctx := context.Background()
 	if _, err := x.Open(ctx, "https://example.com/"); err != nil {
@@ -269,23 +262,6 @@ func TestExecutorExtractStub(t *testing.T) {
 	if err != nil || !trunc || len([]rune(text)) != 10 {
 		t.Fatal(text, err)
 	}
-	data, err := x.Extract(ctx, "find the total")
-	if err != nil || data != "stub answer for: find the total" {
-		t.Fatal(data, err)
-	}
-}
-
-func TestModelKeyValue(t *testing.T) {
-	var got string
-	svc := &Service{NewEngine: func(_ context.Context, st Settings, _ string) (Engine, error) {
-		got = st.ModelKey
-		return &stubEngine{}, nil
-	}}
-	s, err := svc.Acquire(context.Background(), Settings{CDPURL: "http://x", Model: "m", ModelKey: "sk-test"}, 0)
-	if err != nil || got != "sk-test" {
-		t.Fatal(got, err)
-	}
-	s.Release()
 }
 
 // closableEngine — движок, который можно «закрыть» (окно Chrome закрыли).
@@ -301,7 +277,6 @@ func (e *closableEngine) URL(context.Context) (string, error) {
 func (e *closableEngine) Title(context.Context) (string, error)                   { return "", nil }
 func (e *closableEngine) Text(context.Context) (string, error)                    { return "", nil }
 func (e *closableEngine) Screenshot(context.Context, *Clip, bool) ([]byte, error) { return nil, nil }
-func (e *closableEngine) Extract(context.Context, string) (any, error)            { return nil, nil }
 func (e *closableEngine) Eval(context.Context, string, any) error                 { return nil }
 func (e *closableEngine) InsertText(context.Context, string) error                { return nil }
 func (e *closableEngine) Key(context.Context, string) error                       { return nil }

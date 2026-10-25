@@ -128,7 +128,7 @@ func (x *Executor) SecretOnPage(ctx context.Context) bool {
 
 func itoaStr(s string) string { b, _ := json.Marshal(s); return string(b) }
 
-// readable — страницу можно читать (observe, network, extract, снимки).
+// readable — страницу можно читать (observe, network, снимки).
 func (x *Executor) readable(ctx context.Context) error {
 	if x.SecretOnPage(ctx) {
 		return fmt.Errorf("%w: a secret was entered on this page; reading it is blocked until the page navigates (click, press, wait and fill_secret still work)", ErrSecretOnPage)

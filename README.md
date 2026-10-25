@@ -97,7 +97,7 @@ gate4ai doctor
 printf %s 'пароль' | gate4ai vault set site.password
 ```
 
-Полная модель конфигурации — списки доступа, браузер (движок, модель для `extract`), лимиты, Telegram, песочница — в [docs/quickstart.md](docs/quickstart.md) и разделе «Политики» [спецификации](docs/specification.md#политики).
+Полная модель конфигурации — списки доступа, браузер (движок, предел текста страницы, скрытые параметры), лимиты, Telegram, песочница — в [docs/quickstart.md](docs/quickstart.md) и разделе «Политики» [спецификации](docs/specification.md#политики).
 
 ### 3. Подключение агента
 
