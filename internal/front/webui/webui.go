@@ -602,7 +602,9 @@ func (v view) Section() string {
 		return "journal"
 	case "browser", "browser_view":
 		return "browser"
-	case "settings", "relay", "vault", "server":
+	case "vault":
+		return "vault"
+	case "settings", "relay", "server":
 		return "settings"
 	}
 	return ""

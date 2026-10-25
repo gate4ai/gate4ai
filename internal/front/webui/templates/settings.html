@@ -111,7 +111,6 @@
 {{define "settings_nav"}}{{$v := .V}}<nav class="side" aria-label="{{T "Settings"}}">
 <a href="{{$v.Base}}/settings" class="{{if eq .On "main"}}on{{end}}">{{T "Main"}}</a>
 <a href="{{$v.Base}}/settings/notifications" class="{{if eq .On "notifications"}}on{{end}}">{{T "Notifications"}}</a>
-<a href="{{$v.Base}}/vault" class="{{if eq .On "vault"}}on{{end}}">{{T "Passwords and accounts"}}</a>
 <a href="{{$v.Base}}/settings/login" class="{{if eq .On "login"}}on{{end}}">{{T "Signing in"}}</a>
 <div class="sep">{{T "Advanced"}}</div>
 <a href="{{$v.Base}}/settings/internet" class="{{if eq .On "internet"}}on{{end}}">{{T "Internet access"}}</a>

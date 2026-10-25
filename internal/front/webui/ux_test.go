@@ -538,3 +538,26 @@ func signIn(t *testing.T, u *UI, c *http.Client, base string) *http.Response {
 	}
 	return r
 }
+
+// «Пароли и учётки» — пункт главного меню между «Браузер» и «Журнал», не раздел «Настроек».
+func TestVaultIsTopLevelSection(t *testing.T) {
+	u, _, _, base := setup(t)
+	_, _, _, get := loginAs(t, u, base)
+	p := get("/vault")
+	nav := p[strings.Index(p, `<nav class="main"`):strings.Index(p, `</nav>`)]
+	b, v, j := strings.Index(nav, `href="/browser"`), strings.Index(nav, `href="/vault"`), strings.Index(nav, `href="/journal"`)
+	if b < 0 || v < 0 || j < 0 || !(b < v && v < j) {
+		t.Fatalf("menu order browser < vault < journal: %d %d %d\n%s", b, v, j, nav)
+	}
+	if !strings.Contains(nav, `href="/vault" class="on" aria-current="page">Пароли и учётки`) {
+		t.Fatal("vault not highlighted", nav)
+	}
+	if strings.Contains(nav, `href="/settings" class="on"`) || strings.Contains(p, `<nav class="side"`) {
+		t.Fatal("vault is still under Settings", p)
+	}
+	s := get("/settings")
+	side := s[strings.Index(s, `<nav class="side"`):]
+	if strings.Contains(side[:strings.Index(side, `</nav>`)], `href="/vault"`) {
+		t.Fatal("Settings side menu still links to vault")
+	}
+}
