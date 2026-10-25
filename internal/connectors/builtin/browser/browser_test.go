@@ -358,10 +358,13 @@ func TestAgentSession(t *testing.T) {
 	if _, err := agentExec(t, b, "act", map[string]any{"session": id, "selector": "#missing", "method": "click", "timeout_ms": 1.0}); err == nil {
 		t.Fatal("missing element")
 	}
-	res, err = agentExec(t, b, "network", map[string]any{"session": id, "url_contains": "/"})
-	if err != nil {
-		t.Fatal(err)
+	// Адрес страницы — у каждого действия сеанса (в квитанцию), даже когда его
+	// нет ни в аргументах, ни в ответе.
+	full, err := exec(b, "network", map[string]any{"session": id, "url_contains": "/"}, nil)
+	if err != nil || full.Page != "https://a.example.com/" {
+		t.Fatal("page address of a session action:", full.Page, err)
 	}
+	res, _ = full.Structured.(map[string]any)
 	reqs := res["requests"].([]worker.Request)
 	if h, _ := res["hint"].(string); !strings.Contains(h, "(id)") || !strings.Contains(h, "redact_params") {
 		t.Fatalf("identifiers in addresses: hint %q", h)

@@ -482,6 +482,11 @@ func (cs *callSession) page(ctx context.Context, r abi.ExecRequest) (abi.ExecRes
 	if err != nil {
 		return res, err
 	}
+	// Адрес страницы после действия — в квитанцию (execution.page): по нему
+	// журнал показывает, где действие выполнено, у каждого действия сеанса.
+	if res.Page == "" && cs.url != "" {
+		res.Page = cleanURL(cs.url)
+	}
 	switch r.Action {
 	case "open", "observe", "network":
 		// Страница на сайте входа доступной учётки: подсказать вызвать login.

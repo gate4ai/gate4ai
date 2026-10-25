@@ -530,7 +530,7 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 	// Коннектору не доверяют: результат сверяется с манифестом.
 	if err := abi.CheckResult(ex, act.OutputSchema); err != nil {
 		// Действие могло исполниться: резерв лимита остаётся.
-		receipt.Execution = audit.Execution{Status: "invalid_result", ResultRef: p.maskString(ex.ResultRef), Error: p.maskString(err.Error())}
+		receipt.Execution = audit.Execution{Status: "invalid_result", ResultRef: p.maskString(ex.ResultRef), Page: p.maskString(ex.Page), Error: p.maskString(err.Error())}
 		receipt.Verification = audit.Verification{Status: "not_applicable"}
 		hash := p.appendResult(receipt)
 		res.Status, res.Code = StatusError, CodeInvalidResult
@@ -538,7 +538,7 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 		res.Message = "the connector returned a malformed result (" + p.maskString(err.Error()) + "); the action may have run: report it to the user as NOT confirmed"
 		return res
 	}
-	receipt.Execution = audit.Execution{Status: "ok", ResultRef: p.maskString(ex.ResultRef)}
+	receipt.Execution = audit.Execution{Status: "ok", ResultRef: p.maskString(ex.ResultRef), Page: p.maskString(ex.Page)}
 	var evRefs []string
 	for _, e := range ex.Evidence {
 		if ref, err := p.Journal.Evidence.Put(p.evidenceData(e)); err == nil {
@@ -550,7 +550,7 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 			// Без меток значения из недоверенного ответа выглядели бы чистыми:
 			// ответ агенту не отдаётся (fail-closed).
 			p.Log.Error("state: taint", "action", action, "err", err)
-			receipt.Execution = audit.Execution{Status: "error", ResultRef: p.maskString(ex.ResultRef), Error: "provenance labels not stored: " + err.Error()}
+			receipt.Execution = audit.Execution{Status: "error", ResultRef: p.maskString(ex.ResultRef), Page: p.maskString(ex.Page), Error: "provenance labels not stored: " + err.Error()}
 			receipt.Verification = audit.Verification{Status: "not_applicable"}
 			hash := p.appendResult(receipt)
 			res.Status, res.Code, res.ID, res.Receipt = StatusError, CodeExecution, receipt.ID, audit.Short(hash)
