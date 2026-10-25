@@ -127,7 +127,7 @@ capabilities:
   services:
     # Действия браузера на странице этого коннектора.
     - target: browser
-      contract: 1
+      contract: 2
       actions: [open, observe, act, page_screenshot]
 # Сайты коннектора и режим доступа (умолчания; владелец меняет на странице коннектора).
 sites:

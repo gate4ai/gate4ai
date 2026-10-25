@@ -2,7 +2,7 @@ connector: browser
 description: Pages in the user's dedicated Chrome profile; browser sessions for agents and page actions for other connectors
 version: "0.7.9"
 runtime: builtin
-contract: 1
+contract: 2
 services: [open, observe, act, dialog, download, page_screenshot, login, fill_secret]
 limits: { timeout_s: 600 } # handoff ждёт человека до 9 минут
 actions:

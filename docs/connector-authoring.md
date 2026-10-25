@@ -90,7 +90,7 @@ connectors:
 ```yaml
 capabilities:
   services:
-    - { target: browser, contract: 1, actions: [open, observe, act, login] }
+    - { target: browser, contract: 2, actions: [open, observe, act, login] }
 sites:
   - { domain: account.example.org, access: allow }                                      # умолчание; владелец может сузить (read, ask, deny)
 credentials:

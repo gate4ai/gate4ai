@@ -63,7 +63,7 @@ capabilities:
   storage: { quota_mb: 5 }
   services:                        # действия других коннекторов (service_call)
     - target: browser
-      contract: 1
+      contract: 2
       actions: [open, observe, act, login]
 
 credentials:                       # слоты учёток входа; связь — connectors.<имя>.credentials

@@ -6,7 +6,7 @@ runtime: wasm
 capabilities:
   services:
     - target: browser
-      contract: 1
+      contract: 2
       actions: [open, observe, act, login]
 # Сайт задаёт владелец: connectors.testconnector: { domains: ["127.0.0.1"], site: "http://127.0.0.1:8099", login_site: "http://127.0.0.1:8099", credentials: { site: "@site" } }
 sites:

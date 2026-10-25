@@ -298,7 +298,7 @@ func TestManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Runtime != manifest.RuntimeBuiltin || m.Contract != 1 {
+	if m.Runtime != manifest.RuntimeBuiltin || m.Contract != 2 {
 		t.Fatal(m.Runtime, m.Contract)
 	}
 	for _, a := range m.Actions {
