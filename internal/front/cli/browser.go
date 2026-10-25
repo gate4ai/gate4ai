@@ -117,26 +117,25 @@ func (e *Env) browserOwner(ctx context.Context, sub string, args []string) int {
 			fmt.Fprintln(e.Stderr, "gate4ai: browser session "+id+" is closed or unknown; gate4ai browser sessions lists the open ones")
 			return ExitError
 		}
-		// Вход по одноразовой ссылке — сразу на страницу сеанса.
+		// Адрес страницы сеанса: после входа — сразу на неё.
 		var res struct {
 			URL string `json:"url"`
 		}
-		if err := e.Client().Do(ctx, "POST", "/v1/ui/session", map[string]any{"remote": *remote, "next": "/browser/" + id}, &res); err != nil {
+		if err := e.Client().Do(ctx, "POST", "/v1/ui/url", map[string]any{"remote": *remote, "next": "/browser/" + id}, &res); err != nil {
 			return e.fail(err)
 		}
 		if !*remote && !headless() {
-			if err := OpenLoginURL(res.URL); err == nil {
+			if err := OpenURL(res.URL); err == nil {
 				e.say("Opened the live view of " + id + " in the browser.")
 				e.out(map[string]any{"status": "ok", "session": id, "view_url": s.ViewURL}, nil)
 				return ExitOK
 			}
 		}
 		if !*remote && headless() {
-			fmt.Fprintln(e.Stderr, "gate4ai: no graphical session here: open the link on this computer, forward the port ("+sshHint(res.URL)+") or use gate4ai browser watch --remote "+id)
+			fmt.Fprintln(e.Stderr, "gate4ai: no graphical session here: open the address on this computer, forward the port ("+sshHint(res.URL)+") or use gate4ai browser watch --remote "+id)
 		}
-		e.say("The session (sign-in link, valid for 2 minutes):")
+		e.say("The session (sign in with the password):")
 		fmt.Fprintln(e.Stdout, res.URL)
-		e.say("Its permanent address (after you sign in): " + s.ViewURL)
 		return ExitOK
 	}
 	fmt.Fprintln(e.Stderr, browserUsage)

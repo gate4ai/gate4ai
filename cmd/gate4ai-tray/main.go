@@ -140,13 +140,13 @@ func decide(t *tray.Tray, id string, approve bool, refresh chan<- struct{}) {
 	nudge(refresh)
 }
 
-// openPage — Web UI на странице next (вход по одноразовой ссылке).
+// openPage — Web UI на странице next.
 func openPage(t *tray.Tray, next string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	u, err := t.LoginURLTo(ctx, next)
+	u, err := t.URLTo(ctx, next)
 	if err == nil {
-		err = cli.OpenLoginURL(u)
+		err = cli.OpenURL(u)
 	}
 	if err != nil {
 		notifyProblem(tray.T("ui_failed"), err)
@@ -156,9 +156,9 @@ func openPage(t *tray.Tray, next string) {
 func openUI(t *tray.Tray) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	u, err := t.LoginURL(ctx)
+	u, err := t.URL(ctx)
 	if err == nil {
-		err = cli.OpenLoginURL(u)
+		err = cli.OpenURL(u)
 	}
 	if err != nil {
 		notifyProblem(tray.T("ui_failed"), err)

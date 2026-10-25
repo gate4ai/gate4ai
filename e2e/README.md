@@ -11,7 +11,7 @@
 |---|---|
 | `TestQuickstartFlow` | конфигурация из `docs/quickstart.md` принимается; `files.append` в папку из списка доступа проходит с проверкой, чтение вне списка запрещено |
 | `TestRelayDNSForACME` | DNS собранного `gate4ai-relay` годится для ACME DNS-01: certmagic находит зону relay и её NS (иначе сертификат устройства не выпускается, и ссылки на `<id>.relay.gate4.ai` висят до таймаута) |
-| `TestRemoteLinkThroughRelay` | daemon подключается к локальному relay; ссылка «Вход с телефона» из Настроек открывает Web UI устройства через relay (TLS до устройства), второй раз не открывается (срок ссылки проверяет unit-тест ядра `TestLoginLinkExpires` со сдвигом часов) |
+| `TestRemoteLinkThroughRelay` | daemon подключается к локальному relay; адрес «Вход с телефона» из Настроек открывает через relay (TLS до устройства) страницу входа Web UI устройства, пароль даёт сессию |
 | `TestConnectorFromSourceFolder` | коннектор ставится из папки с исходниками (копия `testconnector`), `update` пересобирает из неё, `--watch` переставляет после правки манифеста |
 | `TestServiceCallToNativeBrowser` | `testconnector.read` через `service_call` к Браузеру в headless Chrome читает таблицу `testsite`; сайт вне `sites` коннектора отклоняется; действия Браузера только для коннекторов агенту не видны |
 | `TestBrowserLoginByAccount` | вход учёткой из Vault: агентом (`browser.open` → `login_required` → `browser.login`) и из `testconnector.cabinet`; `testconnector.press` ждёт подтверждения владельца, после него исполняется и `verified` по странице; пароль не попадает в ответы и журнал |

@@ -113,21 +113,17 @@ func (t *Tray) Decide(ctx context.Context, id string, approve bool) error {
 	return t.C.Do(ctx, "POST", "/v1/approvals/"+id+"/decide", map[string]any{"approve": approve, "channel": "tray"}, nil)
 }
 
-// LoginURL — одноразовая ссылка входа в Web UI.
-func (t *Tray) LoginURL(ctx context.Context) (string, error) {
-	var res struct {
-		URL string `json:"url"`
-	}
-	err := t.C.Do(ctx, "POST", "/v1/ui/session", nil, &res)
-	return res.URL, err
+// URL — адрес Web UI.
+func (t *Tray) URL(ctx context.Context) (string, error) {
+	return t.URLTo(ctx, "")
 }
 
-// LoginURLTo — ссылка входа, после которой открывается страница next (/browser).
-func (t *Tray) LoginURLTo(ctx context.Context, next string) (string, error) {
+// URLTo — адрес страницы next (/browser) Web UI: без сессии — вход, затем она.
+func (t *Tray) URLTo(ctx context.Context, next string) (string, error) {
 	var res struct {
 		URL string `json:"url"`
 	}
-	err := t.C.Do(ctx, "POST", "/v1/ui/session", map[string]string{"next": next}, &res)
+	err := t.C.Do(ctx, "POST", "/v1/ui/url", map[string]string{"next": next}, &res)
 	return res.URL, err
 }
 

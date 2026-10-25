@@ -45,11 +45,16 @@ func TestServerPage(t *testing.T) {
 	_, _, _, get := loginAs(t, u, base)
 	p := get("/settings/server")
 	for _, want := range []string{"требуют внимания", "loginctl enable-linger $USER", "gate4ai service install", "keys.json",
-		"gate4ai relay register", "задайте пароль", "Подключите своего бота", "gate4ai browser setup", "browser_unavailable",
+		"gate4ai relay register", "включите и подтверждение в Telegram", "Подключите своего бота", "gate4ai browser setup", "browser_unavailable",
 		"Экран для браузера", "bot работают через локальный сокет", `href="/settings/login"`} {
 		if !strings.Contains(p, want) {
 			t.Errorf("no %q", want)
 		}
+	}
+	// Пароля ещё нет (сброс): страница зовёт задать его.
+	d.State.Set(protectionKey, "{}")
+	if p := get("/settings/server"); !strings.Contains(p, "пароля ещё нет") || !strings.Contains(p, "Откройте Web UI и задайте пароль.") {
+		t.Error("no password: the page must ask to set it")
 	}
 	// Всё исправлено.
 	u.Autostart = &runningAutostart{}

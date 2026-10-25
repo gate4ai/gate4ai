@@ -113,27 +113,6 @@ func (metaRefresh) RoundTrip(req *http.Request) (*http.Response, error) {
 	return r, nil
 }
 
-// Ссылка входа уводит в UI своей страницей, а не 303: открытая с чужого сайта
-// (страница-передатчик file:// у `gate4ai ui`), она иначе давала межсайтовый
-// редирект, на котором браузер не шлёт новую cookie с SameSite=Strict, и
-// автоматически открытое окно просило вызвать `gate4ai ui` ещё раз.
-func TestLoginLinkLeavesBySameSitePage(t *testing.T) {
-	u, _, _, _ := setup(t)
-	r, err := http.Get(u.LoginURL())
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := body(t, r)
-	var sess bool
-	for _, c := range r.Cookies() {
-		sess = sess || c.Name == "g4a_session" && c.SameSite == http.SameSiteStrictMode
-	}
-	if r.StatusCode != 200 || !sess || r.Header.Get("Location") != "" ||
-		!strings.Contains(p, `http-equiv="refresh" content="0;url=/"`) || r.Header.Get("Referrer-Policy") != "no-referrer" {
-		t.Fatal(r.StatusCode, r.Header, p)
-	}
-}
-
 func TestWebUI(t *testing.T) {
 	u, d, n, base := setup(t)
 	if _, err := u.Listen("0.0.0.0:0"); err == nil {
@@ -143,23 +122,20 @@ func TestWebUI(t *testing.T) {
 	c := &http.Client{Jar: jar, Transport: metaRefresh{}}
 
 	r, _ := c.Get(base + "/")
-	if r.StatusCode != 401 || !strings.Contains(body(t, r), "gate4ai ui") {
-		t.Fatal("no session must show login hint")
+	// Пароля ещё нет: страница первого пароля, обычный вход невозможен.
+	if r.StatusCode != 401 || !strings.Contains(body(t, r), `name="setup"`) {
+		t.Fatal("no password yet must ask to set it")
 	}
-	if r, _ := c.Get(base + "/login?t=bogus"); r.StatusCode != 401 {
-		t.Fatal("bogus login")
+	if r, _ := c.PostForm(base+"/login", url.Values{"start": {"1"}, "password": {"anything"}}); r.StatusCode != 401 || !strings.Contains(body(t, r), `name="setup"`) {
+		t.Fatal("sign-in before the password is set", r.StatusCode)
 	}
-	login := u.LoginURL()
-	r, _ = c.Get(login)
-	if r.StatusCode != 200 || r.Request.URL.Path != "/" {
-		t.Fatal("login failed", r.StatusCode)
-	}
+	r = signIn(t, u, c, base)
 	page := body(t, r)
 	csrf := csrfRe.FindStringSubmatch(page)[1]
-	// Повторное использование ссылки входа.
+	// Без сессии — форма пароля; с чужим паролем — отказ.
 	c2 := &http.Client{Transport: metaRefresh{}}
-	if r, _ := c2.Get(login); r.StatusCode != 401 {
-		t.Fatal("login link reused")
+	if r, _ := c2.PostForm(base+"/login", url.Values{"start": {"1"}, "password": {"wrong password"}}); r.StatusCode != 401 {
+		t.Fatal("wrong password")
 	}
 	// DNS rebinding: чужой Host.
 	req, _ := http.NewRequest("GET", base+"/", nil)
@@ -263,11 +239,11 @@ func TestOwnerRoutesOnSocket(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	owner := ipc.HTTPClient(sock)
-	r, err := owner.Post("http://gate4ai/v1/ui/session", "application/json", nil)
+	r, err := owner.Post("http://gate4ai/v1/ui/url", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := body(t, r); r.StatusCode != 200 || !strings.Contains(p, "http://"+u.Addr+"/login?t=") {
+	if p := body(t, r); r.StatusCode != 200 || !strings.Contains(p, `"url":"http://`+u.Addr+`/"`) || !strings.Contains(p, `"setup":true`) {
 		t.Fatal(r.StatusCode, p)
 	}
 	d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "notes.append", Args: map[string]any{"text": "x"}})
@@ -275,15 +251,15 @@ func TestOwnerRoutesOnSocket(t *testing.T) {
 	if p := body(t, r); !strings.Contains(p, `"pending":[{`) || !strings.Contains(p, `"agent":"bot"`) {
 		t.Fatal(p)
 	}
-	// Агент с токеном не получает ссылку входа владельца.
+	// Агент с токеном адрес Web UI не получает.
 	tok, _ := d.State.IssueToken("bot", "", "")
-	req, _ := http.NewRequest("POST", "http://gate4ai/v1/ui/session", nil)
+	req, _ := http.NewRequest("POST", "http://gate4ai/v1/ui/url", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	if r, _ := ipc.HTTPClient(asock).Do(req); r.StatusCode == 200 {
-		t.Fatal("agent got a login link")
+		t.Fatal("agent got the Web UI address")
 	}
 	if r, _ := ipc.HTTPClient(sock).Do(req); r.StatusCode != 403 {
-		t.Fatal("agent token on owner socket got a login link", r.StatusCode)
+		t.Fatal("agent token on owner socket got the Web UI address", r.StatusCode)
 	}
 }
 
@@ -324,11 +300,11 @@ func TestTrayContract(t *testing.T) {
 	if st := tr.Fetch(ctx); st == nil || len(st.Pending) != 0 || tray.MenuKey(st) != "ok,b0/0" || tray.BrowserLine(st) != "" {
 		t.Fatalf("%+v", st)
 	}
-	if u, err := tr.LoginURL(ctx); err != nil || !strings.Contains(u, "/login?t=") {
-		t.Fatal(u, err)
+	if l, err := tr.URL(ctx); err != nil || l != "http://"+u.Addr+"/" {
+		t.Fatal(l, err)
 	}
-	if u, err := tr.LoginURLTo(ctx, "/browser"); err != nil || !strings.Contains(u, "&next=%2Fbrowser") {
-		t.Fatal(u, err)
+	if l, err := tr.URLTo(ctx, "/browser"); err != nil || l != "http://"+u.Addr+"/browser" {
+		t.Fatal(l, err)
 	}
 	// Агентский сокет трею ничего не отдаёт.
 	if tray.New(cli.NewSocketClient(asock, "")).Fetch(ctx) != nil {
@@ -340,7 +316,7 @@ func TestAccountsAndQuestions(t *testing.T) {
 	u, d, _, base := setup(t)
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{Jar: jar, Transport: metaRefresh{}}
-	r, _ := c.Get(u.LoginURL())
+	r := signIn(t, u, c, base)
 	csrf := csrfRe.FindStringSubmatch(body(t, r))[1]
 	acc := cfg + `credentials:
   "@site":
@@ -392,7 +368,7 @@ func TestLiveApprovals(t *testing.T) {
 	if r, _ := c.Get(base + "/approvals/live"); r.StatusCode != 401 {
 		t.Fatal("live without session", r.StatusCode)
 	}
-	r, _ := c.Get(u.LoginURL())
+	r := signIn(t, u, c, base)
 	csrf := csrfRe.FindStringSubmatch(body(t, r))[1]
 	live := func(known ...string) string {
 		r, _ := c.Get(base + "/approvals/live?back=/approvals&known=" + url.QueryEscape(strings.Join(known, ",")))

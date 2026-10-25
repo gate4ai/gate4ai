@@ -164,7 +164,7 @@ const usage = `gate4ai — actions for AI agents under your policies
 
 Start here (on the computer you protect):
   gate4ai service install                 run the daemon now and at every login (or: gate4ai daemon start)
-  gate4ai ui [--print] [--remote] [--start|--no-start]   open the web UI (one-time link, 2 minutes; starts the daemon at a terminal)
+  gate4ai ui [--print] [--remote] [--start|--no-start]   open the web UI (sign in with the password; starts the daemon at a terminal)
   gate4ai status                          is the daemon running
 
 Agent commands (an agent connects itself: the first command shows a code, the owner approves it in the Web UI;
@@ -1340,21 +1340,21 @@ func (e *Env) relay(ctx context.Context, args []string) int {
 func (e *Env) ui(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("gate4ai ui", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
-	printOnly := fs.Bool("print", false, "only print the login link")
-	remote := fs.Bool("remote", false, "link for the public address (relay or --public), to open on another device")
+	printOnly := fs.Bool("print", false, "only print the address of the web UI")
+	remote := fs.Bool("remote", false, "the address for the phone (relay or --public)")
 	start := fs.Bool("start", false, "start the daemon in the background if it is not running (default when you are at a terminal)")
 	noStart := fs.Bool("no-start", false, "never start the daemon")
 	if fs.Parse(args) != nil {
 		return ExitUsage
 	}
 	var res struct {
-		URL          string   `json:"url"`
-		Requires     []string `json:"requires"`
-		LinkRequired *bool    `json:"link_required"`
+		URL      string   `json:"url"`
+		Requires []string `json:"requires"`
+		Setup    bool     `json:"setup"` // пароля ещё нет: первый, кто откроет адрес, задаст его
 	}
 	c := e.Client()
 	session := func() error {
-		return c.Do(ctx, "POST", "/v1/ui/session", map[string]bool{"remote": *remote}, &res)
+		return c.Do(ctx, "POST", "/v1/ui/url", map[string]bool{"remote": *remote}, &res)
 	}
 	err := session()
 	if NotRunning(err) && e.Getenv("GATE4AI_TOKEN") == "" && !*noStart && (*start || e.Interactive && !*printOnly) {
@@ -1368,14 +1368,16 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 	}
 	if !*printOnly && !*remote {
 		if headless() {
-			fmt.Fprintln(e.Stderr, "gate4ai: no graphical session here, so no browser was opened. Open the link in a browser on this computer, or forward the port: "+sshHint(res.URL)+"; from another device: gate4ai ui --remote (needs relay or --public)")
-		} else if err := OpenLoginURL(res.URL); err != nil {
-			fmt.Fprintln(e.Stderr, "gate4ai: could not open a browser ("+err.Error()+"): open the link yourself")
+			fmt.Fprintln(e.Stderr, "gate4ai: no graphical session here, so no browser was opened. Open the address in a browser on this computer, or forward the port: "+sshHint(res.URL)+"; from another device: gate4ai ui --remote (needs relay or --public)")
+		} else if err := OpenURL(res.URL); err != nil {
+			fmt.Fprintln(e.Stderr, "gate4ai: could not open a browser ("+err.Error()+"): open the address yourself")
 		}
 	}
-	e.say("One-time login link, valid for 2 minutes:")
+	e.say("Web UI:")
 	fmt.Fprintln(e.Stdout, res.URL)
-	if len(res.Requires) > 0 {
+	if res.Setup {
+		fmt.Fprintln(e.Stderr, "gate4ai: no password yet: whoever opens the Web UI on this computer first sets it")
+	} else {
 		need := map[string]string{"password": "the Web UI password", "telegram": "confirmation in your Telegram bot"}
 		var parts []string
 		for _, r := range res.Requires {
@@ -1384,13 +1386,7 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 			}
 			parts = append(parts, need[r])
 		}
-		if res.LinkRequired != nil && !*res.LinkRequired {
-			if pu, err := url.Parse(res.URL); err == nil {
-				fmt.Fprintln(e.Stderr, "gate4ai: no link needed: open "+pu.Scheme+"://"+pu.Host+"/ and log in with "+strings.Join(parts, " and "))
-			}
-		} else {
-			fmt.Fprintln(e.Stderr, "gate4ai: login protection is on: the link alone does not log in, it also needs "+strings.Join(parts, " and "))
-		}
+		fmt.Fprintln(e.Stderr, "gate4ai: sign in with "+strings.Join(parts, " and ")+"; a session lasts 12 hours")
 	}
 	return ExitOK
 }
@@ -1418,5 +1414,5 @@ func sshHint(link string) string {
 	if u, err := url.Parse(link); err == nil && u.Port() != "" {
 		port = u.Port()
 	}
-	return "ssh -L " + port + ":127.0.0.1:" + port + " <this computer>, then open the link"
+	return "ssh -L " + port + ":127.0.0.1:" + port + " <this computer>, then open the address"
 }

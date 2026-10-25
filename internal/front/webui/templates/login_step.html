@@ -6,9 +6,9 @@
 {{with .Error}}<p class="err" role="alert">{{.}}</p>{{end}}
 {{if .Data.Start}}
 <form method="post" action="{{.Base}}/login"><input type="hidden" name="start" value="1">
-{{if .Data.Password}}<p><label>{{T "Web UI password"}}<br><input type="password" name="password" autocomplete="current-password" autofocus required></label></p>{{end}}
-<button>{{if .Data.Password}}{{T "Sign in"}}{{else}}{{T "Sign in — confirm in Telegram"}}{{end}}</button></form>
-{{if .Data.Telegram}}<p>{{if .Data.Password}}{{T "After the password, confirm the sign-in in your Telegram bot."}}{{else}}{{T "Confirm the sign-in in your Telegram bot."}}{{end}}</p>{{end}}
+<p><label>{{T "Web UI password"}}<br><input type="password" name="password" autocomplete="current-password" autofocus required></label></p>
+<button>{{T "Sign in"}}</button></form>
+{{if .Data.Telegram}}<p>{{T "After the password, confirm the sign-in in your Telegram bot."}}</p>{{end}}
 {{else if .Data.Password}}
 <form method="post" action="{{.Base}}/login"><input type="hidden" name="csrf" value="{{.CSRF}}">
 <p><label>{{T "Web UI password"}}<br><input type="password" name="password" autocomplete="current-password" autofocus required></label></p>
@@ -18,9 +18,10 @@
 <p>{{TH "Confirm the sign-in in your Telegram bot: press “Allow sign-in” in the message with the code <b>%s</b>. The page updates itself." .Data.Code}}</p>
 <form method="get" action="{{.Base}}/login"><button>{{T "Check"}}</button></form>
 {{else if eq .Data.Telegram "rejected"}}
-<p class="err">{{T "The sign-in was declined in Telegram. If it was you, get a new link (gate4ai ui)."}}</p>
+<p class="err">{{T "The sign-in was declined in Telegram. If it was you, start signing in again."}}</p>
+<form method="get" action="{{.Base}}/"><button>{{T "Sign in again"}}</button></form>
 {{else if eq .Data.Telegram "error"}}
 <p class="err">{{T "Could not send the confirmation to Telegram:"}} {{.Data.TelegramError}}</p>
 <form method="post" action="{{.Base}}/login"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="retry" value="1"><button>{{T "Send again"}}</button></form>
 {{end}}
-<p style="color:#666">{{T "The ways to sign in are chosen in Settings → Signing in."}}{{if not .Data.Start}} {{T "A sign-in attempt is valid for 5 minutes."}}{{end}}</p></body></html>
+<p style="color:#666">{{if .Data.Start}}{{T "A session lasts 12 hours. Telegram confirmation is turned on in Settings → Signing in."}}{{else}}{{T "A sign-in attempt is valid for 5 minutes."}}{{end}}</p></body></html>

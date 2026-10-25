@@ -19,24 +19,18 @@ func TestLoginProtectionButtons(t *testing.T) {
 	u, _, _, base := setup(t)
 	_, _, post, get := loginAs(t, u, base)
 	p := get("/settings/login")
-	if strings.Contains(p, "argon2id") || !strings.Contains(p, `href="#m-pw-set">Задать`) || !strings.Contains(p, `id="m-pw-set"`) {
-		t.Fatal("password row: no «Задать» window")
+	if strings.Contains(p, "argon2id") || !strings.Contains(p, `href="#m-pw-change">Сменить`) || !strings.Contains(p, `id="m-pw-change"`) {
+		t.Fatal("password row: no «Сменить» window", p)
 	}
-	// Ссылка — единственный способ: её не выключить.
-	if !strings.Contains(p, "<button disabled>Выключить</button>") || !strings.Contains(p, "единственный способ входа") {
-		t.Fatal("the last login method must not be switchable off")
+	// Снять пароль и выключить его нельзя: таких кнопок нет.
+	if strings.Contains(p, "Снять") || strings.Contains(p, "Одноразовая ссылка") || !strings.Contains(p, "http://"+u.Addr+"/") {
+		t.Fatal("password row must only offer a change", p)
 	}
 	// Бота нет — «Включить» ведёт в мастер Telegram.
 	if !strings.Contains(p, `/approvals/telegram?for=login">Включить`) || strings.Contains(p, "сначала подключите бота: ") {
 		t.Fatal("telegram row must lead to the bot wizard")
 	}
-	post("/settings/login/password", url.Values{"password": {"secret-pw"}, "repeat": {"secret-pw"}})
-	_, _, post = protectedSession(t, u, base, "secret-pw")
-	p = post("/settings/login/link", url.Values{"on": {"1"}, "current": {"secret-pw"}}) // уже включена — просто страница
-	if !strings.Contains(p, `href="#m-pw-change">Сменить`) || !strings.Contains(p, `href="#m-pw-remove">Снять`) || !strings.Contains(p, `href="#m-link">Выключить`) {
-		t.Fatal("password set: no «Сменить», «Снять» and a password window for the link", p)
-	}
-	if p := post("/settings/login/password", url.Values{"remove": {"1"}, "current": {"wrong"}}); !strings.Contains(p, "текущий пароль не подошёл") {
+	if p := post("/settings/login/password", url.Values{"current": {"wrong"}, "password": {"secret-pw"}, "repeat": {"secret-pw"}}); !strings.Contains(p, "текущий пароль не подошёл") {
 		t.Fatal("wrong current password message", p)
 	}
 }
@@ -61,7 +55,7 @@ func TestTelegramWizardEnablesLogin(t *testing.T) {
 	if p := get("/approvals/telegram"); !strings.Contains(p, "Включить подтверждение входа в Telegram") || !strings.Contains(p, "← Уведомления") {
 		t.Fatal("the button must be there when opened from the channels too")
 	}
-	p = post("/settings/login/telegram", url.Values{"on": {"1"}, "from": {"telegram"}})
+	p = post("/settings/login/telegram", url.Values{"on": {"1"}, "from": {"telegram"}, "current": {testPassword}})
 	if !u.Protection().Telegram || !strings.Contains(p, "Вход в Web UI подтверждается в Telegram") || !strings.Contains(p, "Подтверждения в Telegram") {
 		t.Fatal("must enable and return to the wizard", p)
 	}
