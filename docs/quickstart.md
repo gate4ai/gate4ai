@@ -95,8 +95,7 @@ profiles:
       allow_domains: [api.anthropic.com, registry.npmjs.org, github.com]
       ask_domains: ["*.githubusercontent.com"]
 connectors:
-  browser:                    # встроенный: движок (stagehand | cdp), предел текста, скрытые параметры; сайты — в access.sites
-    engine: stagehand
+  browser:                    # встроенный: предел текста, скрытые параметры; сайты — в access.sites
     max_text_chars: 30000
     redact_params: [patient_id]
 egress:

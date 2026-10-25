@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package browser — встроенный компонент «Браузер» (runtime: builtin): воркер
-// выделенного профиля Chrome (CDP, Stagehand) в процессе daemon. Агенту — чтение,
+// выделенного профиля Chrome по CDP в процессе daemon. Агенту — чтение,
 // снимок и сеанс страницы (open, observe, act, network, login, fill_secret,
 // page_screenshot, close) на сайтах по спискам доступа; WASM-коннекторам — те
 // же действия с открытой страницей через service_call на их сайтах. LLM внутри
@@ -154,7 +154,7 @@ func strs(v any) []string {
 // settings — настройки воркера из настроек коннектора.
 func settings(r abi.ExecRequest) worker.Settings {
 	s := r.Settings
-	st := worker.Settings{Engine: str(s, "engine"), CDPURL: str(s, "cdp_url"), ChromePath: str(s, "chrome_path"),
+	st := worker.Settings{CDPURL: str(s, "cdp_url"), ChromePath: str(s, "chrome_path"),
 		ProfileDir: str(s, "profile_dir")}
 	st.MaxTextChars = num(s, "max_text_chars")
 	st.RedactParams = strs(s["redact_params"])

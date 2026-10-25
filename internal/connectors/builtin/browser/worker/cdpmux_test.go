@@ -368,12 +368,12 @@ func TestLaunchDedicatedProfile(t *testing.T) {
 	}
 	defer StopChrome(proc, 3*time.Second)
 	b, _ := os.ReadFile(argsFile)
-	for _, want := range []string{"--user-data-dir=" + profile, "--remote-debugging-pipe", "--enable-unsafe-extension-debugging"} {
+	for _, want := range []string{"--user-data-dir=" + profile, "--remote-debugging-pipe"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("missing %s in %s", want, b)
 		}
 	}
-	for _, bad := range []string{"--remote-debugging-port", "headless", "--remote-allow-origins"} {
+	for _, bad := range []string{"--remote-debugging-port", "headless", "--remote-allow-origins", "--enable-unsafe-extension-debugging"} {
 		if strings.Contains(string(b), bad) {
 			t.Errorf("%s in %s", bad, b)
 		}

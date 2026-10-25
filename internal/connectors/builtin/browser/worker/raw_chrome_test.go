@@ -74,7 +74,7 @@ func (a *apiSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 var bigJSON = `{"rules":[` + strings.Repeat(`{"title":"rule with a long enough name"},`, 1000) + `{"title":"last"}]}`
 
 // docOnly — CDP без тела ответа документа: текст JSON-страницы — из DOM
-// (как у Stagehand), без просмотрщика Chrome.
+// без просмотрщика Chrome.
 type docOnly struct{ *CDP }
 
 func (docOnly) DocumentBody(context.Context) (string, bool) { return "", false }

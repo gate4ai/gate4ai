@@ -37,7 +37,7 @@ func TestTabRealChrome(t *testing.T) {
 	}))
 	defer srv.Close()
 	sites := domain.Sites{Domains: []string{"127.0.0.1"}}
-	for _, engine := range []string{"cdp", "stagehand"} {
+	for _, engine := range []string{"cdp"} {
 		t.Run(engine, func(t *testing.T) {
 			dir := t.TempDir()
 			wrapper := filepath.Join(dir, "chrome")
@@ -46,7 +46,7 @@ func TestTabRealChrome(t *testing.T) {
 			defer cancel()
 			svc := New()
 			defer svc.Close()
-			st := Settings{Engine: engine, ChromePath: wrapper, ProfileDir: filepath.Join(dir, "profile")}
+			st := Settings{ChromePath: wrapper, ProfileDir: filepath.Join(dir, "profile")}
 			s, err := svc.Acquire(ctx, st, 0)
 			if err != nil {
 				t.Skip("chrome did not start:", err)

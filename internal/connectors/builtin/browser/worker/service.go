@@ -16,7 +16,6 @@ import (
 
 // Settings — настройки браузера (connectors.browser в конфигурации gate4ai).
 type Settings struct {
-	Engine       string // stagehand (по умолчанию) | cdp
 	CDPURL       string // уже запущенный Chrome; иначе воркер запускает его сам
 	ChromePath   string
 	ProfileDir   string // выделенный профиль (по умолчанию ~/.gate4ai-chrome)
@@ -30,12 +29,9 @@ type Settings struct {
 // EngineFactory создаёт движок (подменяется в тестах).
 type EngineFactory func(ctx context.Context, s Settings, cdpURL string) (Engine, error)
 
-// DefaultEngine — Stagehand или прямой CDP.
-func DefaultEngine(ctx context.Context, s Settings, cdpURL string) (Engine, error) {
-	if s.Engine == "cdp" {
-		return DialCDP(ctx, cdpURL)
-	}
-	return DialStagehand(ctx, StagehandConfig{CDPURL: cdpURL})
+// DefaultEngine — прямой CDP к вкладке Chrome.
+func DefaultEngine(ctx context.Context, _ Settings, cdpURL string) (Engine, error) {
+	return DialCDP(ctx, cdpURL)
 }
 
 // Service — браузерный воркер: один Chrome и движок между вызовами. Сессии
@@ -86,7 +82,7 @@ func normalize(st Settings) Settings {
 
 // settingsKey — настройки, при смене которых движок и Chrome пересоздаются.
 func settingsKey(st Settings) string {
-	return fmt.Sprint(st.CDPURL, st.ChromePath, st.ProfileDir, st.Engine, st.Display)
+	return fmt.Sprint(st.CDPURL, st.ChromePath, st.ProfileDir, st.Display)
 }
 
 // ErrSettingsChanged — настройки браузера сменили, пока открыты сессии или

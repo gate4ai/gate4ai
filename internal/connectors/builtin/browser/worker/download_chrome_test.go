@@ -90,7 +90,7 @@ func chromeService(t *testing.T, h http.Handler) (*Session, string, string, cont
 	svc := New()
 	t.Cleanup(func() { svc.Close() })
 	user := filepath.Join(dir, "Downloads")
-	st := Settings{Engine: "cdp", ChromePath: wrapper, ProfileDir: filepath.Join(dir, "profile"), DownloadDir: user}
+	st := Settings{ChromePath: wrapper, ProfileDir: filepath.Join(dir, "profile"), DownloadDir: user}
 	s, err := svc.Acquire(ctx, st, 0)
 	if err != nil {
 		t.Skip("chrome did not start:", err)

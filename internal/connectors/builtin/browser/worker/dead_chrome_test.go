@@ -38,7 +38,7 @@ func TestClosedRealChrome(t *testing.T) {
 			StopChrome(p, 3*time.Second)
 		}
 	})
-	st := Settings{Engine: "cdp", ChromePath: wrapper, ProfileDir: filepath.Join(dir, "profile")}
+	st := Settings{ChromePath: wrapper, ProfileDir: filepath.Join(dir, "profile")}
 	ctx := context.Background() // как у нативного пакета: без срока
 	s, err := svc.Acquire(ctx, st, 0)
 	if err != nil {

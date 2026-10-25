@@ -38,13 +38,13 @@ func TestViewRealChrome(t *testing.T) {
 	}))
 	defer srv.Close()
 	sites := domain.Sites{Domains: []string{"127.0.0.1"}}
-	for _, engine := range []string{"cdp", "stagehand"} {
+	for _, engine := range []string{"cdp"} {
 		t.Run(engine, func(t *testing.T) {
 			svc := &Service{NewEngine: DefaultEngine, Launch: LaunchEnv, Env: envOf("linux", nil, false)}
 			defer svc.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 			defer cancel()
-			st := Settings{Engine: engine, ProfileDir: filepath.Join(t.TempDir(), "p")}
+			st := Settings{ProfileDir: filepath.Join(t.TempDir(), "p")}
 			var ss []*Session
 			for range 2 {
 				s, err := svc.Acquire(ctx, st, 0)

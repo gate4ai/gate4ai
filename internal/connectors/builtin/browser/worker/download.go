@@ -140,7 +140,7 @@ func (ss *Session) clickDownload(ctx context.Context, r DownloadRequest) (File, 
 	if r.ResponseURLContains != "" {
 		ce, ok := x.Engine.(responseCatcher)
 		if !ok {
-			return File{}, errors.New("download: response_url_contains needs the cdp engine (connectors.browser.engine: cdp)")
+			return File{}, errors.New("download: the engine cannot catch responses")
 		}
 		var err error
 		if rc, err = ce.CatchResponses(ctx, r.ResponseURLContains); err != nil {
@@ -203,7 +203,7 @@ type frameOwner interface {
 }
 
 // owner — проверка, что загрузка начата во вкладке сессии; движок без
-// кадров (Stagehand) — nil: своя — первая начавшаяся.
+// кадров — nil: своя — первая начавшаяся.
 func (ss *Session) owner(ctx context.Context) func(string) bool {
 	fo, ok := ss.Executor.Engine.(frameOwner)
 	if !ok {

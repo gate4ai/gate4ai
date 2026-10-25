@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package worker — браузерный воркер нативного коннектора browser:
-// выделенный профиль настоящего Chrome по CDP, движок Stagehand Go SDK v4
+// выделенный профиль настоящего Chrome по CDP
 // (или прямой CDP). Сайты проверяются по списку до и после редиректов. Все
 // переходы, клики и ввод идут через Executor — единую точку исполнения.
 package worker
@@ -388,7 +388,7 @@ func (x *Executor) keys(ctx context.Context, r ActRequest) error {
 
 // TypedMax — до стольких символов fill / append вводятся как с клавиатуры
 // (Engine.InsertText); длиннее — командой вставки страницы одним шагом
-// (insertJS): Stagehand печатает посимвольно, и 24 КБ шли бы минуты.
+// (insertJS): посимвольный ввод 24 КБ шёл бы минуты.
 const TypedMax = 256
 
 // insertJS вставляет текст в элемент в фокусе вместо выделения: командой

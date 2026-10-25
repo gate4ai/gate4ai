@@ -34,7 +34,7 @@ func chromeBrowser(t *testing.T, engine string, srvURL string) (*Browser, func(a
 	os.WriteFile(wrapper, []byte("#!/bin/sh\nexec '"+chrome+"' --headless=new --disable-gpu \"$@\"\n"), 0o755)
 	b := New()
 	t.Cleanup(func() { b.W.Close() })
-	settings := map[string]any{"engine": engine, "chrome_path": wrapper, "profile_dir": filepath.Join(dir, "profile"), "allowed_domains": []any{"127.0.0.1"}}
+	settings := map[string]any{"chrome_path": wrapper, "profile_dir": filepath.Join(dir, "profile"), "allowed_domains": []any{"127.0.0.1"}}
 	return b, func(agent, client, action string, args map[string]any) (map[string]any, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
@@ -64,7 +64,7 @@ func formPage() *httptest.Server {
 func TestReloadBeforeUnloadRealChrome(t *testing.T) {
 	srv := formPage()
 	defer srv.Close()
-	for _, engine := range []string{"cdp", "stagehand"} {
+	for _, engine := range []string{"cdp"} {
 		t.Run(engine, func(t *testing.T) {
 			_, call := chromeBrowser(t, engine, srv.URL)
 			res, err := call("dev", "c1", "open", map[string]any{"url": srv.URL + "/form"})

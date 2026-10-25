@@ -62,7 +62,6 @@ func LaunchEnv(ctx context.Context, chrome, profileDir string, env []string, ext
 	}
 	args := []string{
 		"--user-data-dir=" + profileDir,
-		"--enable-unsafe-extension-debugging", // Stagehand ставит своё расширение через CDP Extensions.loadUnpacked
 		// С отладкой Chrome выставляет navigator.webdriver = true — прямой признак
 		// автоматизации для антифрода и reCAPTCHA (login.mos.ru: «подозрительная активность»).
 		"--disable-blink-features=AutomationControlled",
@@ -122,10 +121,9 @@ func LaunchEnv(ctx context.Context, chrome, profileDir string, env []string, ext
 func launchPort(ctx context.Context, chrome, profileDir string, env, args []string) (string, *os.Process, error) {
 	portFile := filepath.Join(profileDir, "DevToolsActivePort")
 	_ = os.Remove(portFile)
-	args = append(args, "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1",
-		// Расширение Stagehand подключается со своим origin (chrome-extension://<id>),
-		// id меняется при каждой распаковке: разрешить можно только все origin.
-		"--remote-allow-origins=*")
+	// Подключения воркера идут без заголовка Origin: Chrome их пускает и без
+	// --remote-allow-origins.
+	args = append(args, "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1")
 	cmd := exec.Command(chrome, append(args, "about:blank")...)
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)

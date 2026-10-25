@@ -62,7 +62,7 @@ hub.addEventListener('keydown', e => {
 });
 </script>`
 
-// chromeEngines — headless Chrome и движки CDP и Stagehand к нему.
+// chromeEngines — headless Chrome и движок CDP к нему.
 func chromeEngines(t *testing.T, ctx context.Context, page string) (string, map[string]Engine) {
 	t.Helper()
 	if testing.Short() || runtime.GOOS == "windows" {
@@ -90,12 +90,7 @@ func chromeEngines(t *testing.T, ctx context.Context, page string) (string, map[
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cdp.Close() })
-	sh, err := DialStagehand(ctx, StagehandConfig{CDPURL: cdpURL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { sh.Close() })
-	return srv.URL + "/", map[string]Engine{"cdp": cdp, "stagehand": sh}
+	return srv.URL + "/", map[string]Engine{"cdp": cdp}
 }
 
 // TestTypeAndScreenshotRealChrome — type и press в поле тегов и списке с

@@ -113,7 +113,7 @@ func (f *fakeChrome) ws(w http.ResponseWriter, r *http.Request) {
 }
 
 func service(f *fakeChrome) (*Service, Settings) {
-	return &Service{NewEngine: DefaultEngine, Launch: LaunchEnv}, Settings{CDPURL: f.srv.URL, Engine: "cdp"}
+	return &Service{NewEngine: DefaultEngine, Launch: LaunchEnv}, Settings{CDPURL: f.srv.URL}
 }
 
 var allowed = domain.Sites{Domains: []string{"*.example.com", "app.example.org"}}
