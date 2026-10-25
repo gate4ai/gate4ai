@@ -295,7 +295,9 @@ func (u *UI) connectorData(r *http.Request, name string) (string, map[string]any
 	data := map[string]any{"Name": name, "Title": m.TitleIn(l), "Desc": m.DescriptionIn(l), "Manifest": m, "Fields": main, "AdvFields": adv,
 		"Profiles": profiles, "Config": cfg, "Info": in.Info, "Builtin": in.Name == "", "Actions": acts, "Calls": calls, "Access": access,
 		"Profile": prof, "Grants": grantsFor(cfg, name), "Groups": u.pageGroups(name, cfg.Profiles[prof]), "ProfileAgents": profileAgents(cfg, prof),
-		"WholeHome": name == "files" && filesWholeHome(cfg)}
+		"WholeHome": name == "files" && filesWholeHome(cfg),
+		// ListDecides — Браузер и Файлы: что можно, решает список доступа, столбцов «Вид» и «Решение» у действий нет.
+		"ListDecides": builtinRedirect(name)}
 	return "connector", data, nil
 }
 
