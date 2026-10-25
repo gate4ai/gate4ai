@@ -1,7 +1,7 @@
 {{template "head" .}}
 <div class="layout">{{template "settings_nav" (dict "V" . "On" "vault")}}<div>
 <h2>{{T "Passwords and accounts"}}</h2>
-<p class="muted">{{T "Passwords and tokens are kept in the system keychain. Agents and connectors see only names like @mail.work; gate4.ai enters the value itself and only for the addresses it is bound to."}}</p>
+<p class="muted">{{TH "Passwords and tokens are kept in the system keychain. Agents and connectors see only names like @mail.work; gate4.ai enters the value itself and only for the addresses it is bound to in <a href=\"#accounts\">Accounts for signing in to sites</a>."}}</p>
 <table><tr><th>{{T "Name"}}</th><th>{{T "Used by"}}</th><th></th></tr>{{range .Data.Aliases}}<tr id="{{secAnchor .}}"><td><code>{{.}}</code></td>
 <td>{{with index $.Data.Uses .}}{{range $i, $u := .}}{{if $i}}<br>{{end}}{{T $u.Pre}}{{if $u.Link}}<a href="{{if eq (slice $u.Link 0 1) "#"}}{{$u.Link}}{{else}}{{$.Base}}{{$u.Link}}{{end}}">{{T $u.Name}}</a>{{else}}{{T $u.Name}}{{end}}{{T $u.Post}}{{end}}{{else}}<span class="muted">{{T "not used"}}</span>{{end}}</td>
 <td><div class="row" style="flex-wrap:nowrap"><a class="btn small" href="#m-{{secAnchor .}}">{{T "Replace"}}</a>
@@ -12,7 +12,7 @@
 <p class="help">{{T "The current value is never shown: type the new one in full. It is used everywhere this name is used."}}</p>
 <div class="actions"><a class="btn" href="#{{secAnchor .}}" data-close>{{T "Cancel"}}</a><button class="primary" data-busy="{{T "Saving…"}}">{{T "Save"}}</button></div></form></div></div></td></tr>
 {{else}}<tr><td colspan="3" class="muted">{{T "No passwords yet. A mail password is easier to enter in the mail connector settings — it gets linked there."}}</td></tr>{{end}}</table>
-<details class="adv card"><summary>{{T "Save a password or a token"}}</summary>
+<details class="adv card"><summary>{{T "Add a password or a token"}}</summary>
 <form method="post" action="{{$.Base}}/vault" class="row" autocomplete="off"><input type="hidden" name="csrf" value="{{.CSRF}}">
 <label class="inline" for="v-name">{{T "Name"}}</label><input id="v-name" name="name" placeholder="{{T "e.g. work mail"}}" required>
 <label class="inline" for="v-value">{{T "Value"}}</label><input id="v-value" name="value" type="password" required>
@@ -20,21 +20,24 @@
 
 <h2 id="accounts">{{T "Accounts for signing in to sites"}}</h2>
 <p class="muted">{{T "The browser signs in with them itself: gate4.ai types the password; agents and connectors never see it."}}</p>
-<table><tr><th>{{T "Account"}}</th><th>{{T "Site"}}</th><th>{{T "What is entered"}}</th><th>{{T "Who may use it"}}</th></tr>
+<table><tr><th>{{T "Account"}}</th><th>{{T "Site"}}</th><th>{{T "What is entered"}}</th><th>{{T "Who may use it"}}</th><th></th></tr>
 {{range .Data.Accounts}}<tr id="{{accAnchor .Alias}}"><td><code>{{.Alias}}</code>{{range .Missing}}<form method="post" action="{{$.Base}}/vault" class="row" autocomplete="off"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="alias" value="{{.}}"><span class="bad help">{{T "%s is missing" .}}</span><input name="value" type="password" aria-label="{{.}}" required size="14"><button class="small primary">{{T "Set"}}</button></form>{{end}}</td>
 <td>{{range $i, $b := .Bind}}{{if $i}}<br>{{end}}{{$b}}{{end}}</td>
-<td>{{if .Via}}{{T "sign-in connector"}} <code>{{.Via}}</code>{{range .Fields}}<br><code>{{or .Name .Secret}}</code> ← {{if .Secret}}{{T "password"}} {{template "acc_secret" .}}{{else}}«{{.Value}}»{{end}}{{end}}{{else}}{{range .Fields}}{{if .Secret}}{{T "password"}} {{template "acc_secret" .}}{{else}}{{T "login"}} «{{.Value}}»{{end}}<br>{{end}}<details><summary class="help">{{T "fields"}}</summary><p class="help">{{range .Fields}}<code>{{.Selector}}</code><br>{{end}}{{T "submit:"}} <code>{{.Submit}}</code></p></details>{{end}}</td>
-<td>{{range .Use}}{{.}}<br>{{end}}{{range .Connectors}}{{T "connector"}} <code>{{.}}</code><br>{{end}}{{if and (not .Use) (not .Connectors)}}<span class="muted">{{T "nobody"}}{{if .Via}} ({{T "except the sign-in connector"}}){{end}}</span>{{end}}</td></tr>
-{{else}}<tr><td colspan="4" class="muted">{{T "No accounts yet."}}</td></tr>{{end}}</table>
-<div class="card"><h3>{{T "Add an account"}}</h3>
-<form method="post" action="{{.Base}}/vault/account" autocomplete="off"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<label for="a-site">{{T "Sign-in page"}}</label><input id="a-site" name="site" placeholder="https://login.example.com" required size="40">
-<label for="a-login">{{T "Login"}}</label><input id="a-login" name="login" autocomplete="off" required size="30">
-<label for="a-pass">{{T "Password"}}</label><input id="a-pass" name="password" type="password" autocomplete="new-password" required size="30">
-{{if .Data.Grants}}<fieldset style="border:0;padding:0;margin-top:.6rem"><legend><b>{{T "Who may sign in with it"}}</b></legend>
-{{range .Data.Grants}}{{if .Agents}}<label class="inline"><input type="checkbox" name="profiles" value="{{.Profile}}" checked> {{join .Agents ", "}}</label>{{end}}{{end}}</fieldset>{{end}}
-<p class="help">{{TH "The login and password fields of a usual sign-in form are found automatically. A complex sign-in (several steps, a code) — in the <a href=\"%s/policy/yaml\">YAML</a> (<code>credentials</code>)." $.Base}}</p>
-<p><button class="primary">{{T "Save the account"}}</button></p></form></div>
+<td>{{if .Via}}{{T "sign-in connector"}} <code>{{.Via}}</code>{{range .Fields}}<br><code>{{or .Name .Secret}}</code> ← {{if .Secret}}{{T "password"}} {{template "acc_secret" .}}{{else}}«{{.Value}}»{{end}}{{end}}{{else}}{{$s := .Submit}}{{range .Fields}}{{if .Secret}}<span title="{{.Selector}} · {{T "submit:"}} {{$s}}">{{T "password"}}</span> {{template "acc_secret" .}}{{else}}<span title="{{.Selector}}">{{T "login"}} «{{.Value}}»</span>{{end}}<br>{{end}}{{end}}</td>
+<td>{{range .Use}}{{.}}<br>{{end}}{{range .Connectors}}{{T "connector"}} <code>{{.}}</code><br>{{end}}{{if and (not .Use) (not .Connectors)}}<span class="muted">{{T "nobody"}}{{if .Via}} ({{T "except the sign-in connector"}}){{end}}</span>{{end}}</td>
+<td><div class="row" style="flex-wrap:nowrap"><a class="btn small" href="#m-{{accAnchor .Alias}}">{{T "Edit"}}</a>
+<form method="post" action="{{$.Base}}/vault/account/delete" data-confirm="{{T "Delete the account %s? Its passwords are removed from the keychain." .Alias}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="alias" value="{{.Alias}}"><button class="small danger">{{T "Delete"}}</button></form></div>
+<div class="modal" id="m-{{accAnchor .Alias}}" data-back="#{{accAnchor .Alias}}" role="dialog" aria-modal="true" aria-labelledby="h-{{accAnchor .Alias}}"><div class="box"><h3 id="h-{{accAnchor .Alias}}">{{T "Edit"}} <code>{{.Alias}}</code></h3>
+<form method="post" action="{{$.Base}}/vault/account/edit" autocomplete="off"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="alias" value="{{.Alias}}">
+{{$acc := .}}<fieldset style="border:0;padding:0;margin:0 0 .6rem"><legend><b>{{T "Who may sign in with it"}}</b></legend>
+{{range $.Data.Grants}}<label class="inline"><input type="checkbox" name="profiles" value="{{.Profile}}"{{if has $acc.Use .Profile}} checked{{end}}> {{if .Agents}}{{join .Agents ", "}}{{else}}{{.Profile}}{{end}}</label>{{else}}<span class="muted">{{T "No agents yet."}}</span>{{end}}</fieldset>
+{{if .Connectors}}<p class="help">{{T "Connectors (%s) keep their access; it is changed on the connector page." (join .Connectors ", ")}}</p>{{end}}
+<label for="b-{{accAnchor .Alias}}">{{T "Sign-in addresses"}}</label><textarea id="b-{{accAnchor .Alias}}" name="bind" rows="2" required>{{join .Bind "\n"}}</textarea>
+<p class="help">{{T "Exact addresses (https://login.example.com), one per line. The password is entered only there."}}</p>
+{{range .Fields}}{{if .Secret}}<label for="s-{{accAnchor $acc.Alias}}-{{secAnchor .Secret}}">{{T "New value of %s" .Secret}}</label><input id="s-{{accAnchor $acc.Alias}}-{{secAnchor .Secret}}" name="secret.{{.Secret}}" type="password" autocomplete="new-password" placeholder="{{T "leave empty to keep"}}">{{end}}{{end}}
+<div class="actions"><a class="btn" href="#{{accAnchor .Alias}}" data-close>{{T "Cancel"}}</a><button class="primary" data-busy="{{T "Saving…"}}">{{T "Save"}}</button></div></form></div></div></td></tr>
+{{else}}<tr><td colspan="5" class="muted">{{T "No accounts yet."}}</td></tr>{{end}}</table>
+<p class="help">{{TH "New accounts: in the <a href=\"%s/policy/yaml\">YAML</a> (<code>credentials</code>) or by an agent through gate4ai.change_policy with your confirmation." .Base}}</p>
 </div></div>
 {{template "foot"}}
 {{/* acc_secret — секрет поля учётки: заданный — ссылка на его строку и ✓. */}}
