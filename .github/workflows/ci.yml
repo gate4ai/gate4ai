@@ -41,6 +41,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go build ./... && go vet ./...
+      # Настоящий Chrome раннера: запуск нашим Launch и CDP к нему (на Windows —
+      # порт без --remote-allow-origins, на macOS — pipe и Mux).
+      - run: go test -count=1 -run TestLaunchRealChrome -v ./internal/connectors/builtin/browser/worker/
   # Сквозные тесты: хост, relay и коннекторы из этого же коммита.
   e2e:
     runs-on: ubuntu-latest
