@@ -85,7 +85,9 @@ const (
 type Execution struct {
 	Status    string `json:"status"` // ok | error | invalid_result | skipped | started | interrupted
 	ResultRef string `json:"result_ref,omitempty"`
-	Error     string `json:"error,omitempty"`
+	// Page — адрес страницы, на которой выполнено действие (Браузер).
+	Page  string `json:"page,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // Verification — проверка результата по независимому каналу.

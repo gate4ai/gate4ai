@@ -270,12 +270,15 @@ func (c Content) Validate() error {
 // VerifyAfterS > 0 — действие отправлено, но синхронно проверить его нельзя:
 // хост вызовет verify через VerifyAfterS секунд (verify_after).
 type ExecResult struct {
-	Content      []Content      `json:"content,omitempty"`
-	Structured   any            `json:"structured,omitempty"`
-	ResultRef    string         `json:"result_ref,omitempty"` // идентификатор результата (Message-ID, путь, URL)
-	Evidence     []EvidenceItem `json:"evidence,omitempty"`
-	Source       string         `json:"source,omitempty"` // источник недоверенного контента: "email:<id>", "web:<url>"
-	VerifyAfterS int            `json:"verify_after_s,omitempty"`
+	Content    []Content      `json:"content,omitempty"`
+	Structured any            `json:"structured,omitempty"`
+	ResultRef  string         `json:"result_ref,omitempty"` // идентификатор результата (Message-ID, путь, URL)
+	Evidence   []EvidenceItem `json:"evidence,omitempty"`
+	Source     string         `json:"source,omitempty"` // источник недоверенного контента: "email:<id>", "web:<url>"
+	// Page — адрес страницы, на которой выполнено действие (Браузер: после
+	// действия, без секретов в параметрах); попадает в квитанцию (execution.page).
+	Page         string `json:"page,omitempty"`
+	VerifyAfterS int    `json:"verify_after_s,omitempty"`
 }
 
 // CheckResult проверяет результат коннектора: блоки содержимого и

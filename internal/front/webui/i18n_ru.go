@@ -147,7 +147,7 @@ var ru = map[string]string{
 	"Turn off": "Выключить", "Show": "Показать", "Check": "Проверить", "Choose": "Выбрать", "Create": "Создать", "Add": "Добавить",
 	"Apply": "Применить", "Preview": "Посмотреть, что изменится", "Install": "Установить", "Set": "Задать", "Replace": "Заменить",
 	"Enter": "Ввести", "Decline": "Отказать", "More": "Подробнее", "Empty": "Пусто", "Test": "Тест", "Send a test": "Отправить тест",
-	"Send again": "Отправить ещё раз", "Status": "Состояние", "When": "Когда", "Who": "Кто", "What": "Что", "Where": "Где",
+	"Send again": "Отправить ещё раз", "Status": "Состояние", "When": "Когда", "Who": "Кто", "What": "Что", "Where": "Где", "Path": "Путь",
 	"Agent": "Агент", "Action": "Действие", "Decision": "Решение", "Result": "Итог", "Condition": "Условие", "Reason": "Причина",
 	"Kind": "Вид", "Description": "Описание", "Name": "Название", "Value": "Значение", "Label": "Метка", "Message": "Сообщение",
 	"Today": "Сегодня", "Rules": "Правила", "Rule": "Правило", "Versions": "Версии", "Lists": "Списки", "Tokens": "Токены",

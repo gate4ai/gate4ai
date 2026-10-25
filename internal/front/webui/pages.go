@@ -126,15 +126,40 @@ func setupSkipped(r *http.Request) bool {
 type entryView struct {
 	audit.Entry
 	Title, Target string
+	// Path — где выполнено действие: путь к файлу (с ~) или полный адрес
+	// страницы; FullPath — путь без сокращения (для подсказки).
+	Path, FullPath string
 }
 
 func (u *UI) entryViews(l string, es []audit.Entry) []entryView {
 	out := make([]entryView, len(es))
 	for i, e := range es {
 		t, _ := u.actionText(l, e.Receipt.Action)
-		out[i] = entryView{Entry: e, Title: t, Target: argTarget(e.Receipt.Args)}
+		p, full := entryPath(e.Receipt)
+		out[i] = entryView{Entry: e, Title: t, Target: argTarget(e.Receipt.Args), Path: p, FullPath: full}
 	}
 	return out
+}
+
+// entryPath — столбец «Путь» журнала: для Файлов — путь из аргументов (с ~
+// вместо домашнего каталога), для Браузера — полный адрес страницы: из
+// аргументов (open, read, get…) или записанный коннектором после действия
+// (execution.page — act, login, dialog, network…).
+func entryPath(r audit.Receipt) (short, full string) {
+	for _, k := range []string{"path", "folder", "file"} {
+		if s := argString(r.Args[k]); s != "" {
+			return shortPath(s), s
+		}
+	}
+	for _, k := range []string{"url", "site"} {
+		if s := argString(r.Args[k]); s != "" {
+			return s, s
+		}
+	}
+	if p := r.Execution.Page; p != "" {
+		return p, p
+	}
+	return "", ""
 }
 
 func (u *UI) overview(m mount) func(r *http.Request) (string, map[string]any, error) {

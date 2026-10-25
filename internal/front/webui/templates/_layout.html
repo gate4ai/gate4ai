@@ -15,7 +15,7 @@ a{color:var(--accent)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1rem;margin:0 0 1rem}
 .card h3:first-child{margin-top:0}
 table{width:100%;border-collapse:collapse}td,th{padding:.45rem .5rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-th{color:var(--muted);font-weight:500}pre{white-space:pre-wrap;margin:0;font:13px/1.45 ui-monospace,Menlo,monospace}
+th{color:var(--muted);font-weight:500}td.path code{word-break:break-all}pre{white-space:pre-wrap;margin:0;font:13px/1.45 ui-monospace,Menlo,monospace}
 pre.box{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:.7rem;overflow:auto}
 button,.btn{font:inherit;padding:.4rem .9rem;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer;text-decoration:none;display:inline-block}
 button.primary,.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.danger,.btn.danger{color:var(--bad)}button.small,.btn.small{padding:.2rem .6rem;font-size:.85rem}
@@ -166,4 +166,6 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 </div>{{end}}{{end}}{{end}}
 
 {{/* entry_line — действие из журнала одной строкой. */}}
-{{define "entry_line"}}{{.Title}}{{with .Target}} · <code>{{.}}</code>{{end}}{{with .Receipt.Execution.Status}}{{if and (ne . "ok") (ne . "") (ne . "skipped")}} · <span class="bad">{{T "not done"}}: {{T .}}</span>{{end}}{{end}}{{end}}
+{{define "entry_line"}}{{.Title}}{{with .Target}} · <code>{{.}}</code>{{end}}{{template "entry_status" .Receipt.Execution.Status}}{{end}}
+{{/* entry_status — « · не сделано: ошибка», если действие не выполнено. */}}
+{{define "entry_status"}}{{if and (ne . "ok") (ne . "") (ne . "skipped")}} · <span class="bad">{{T "not done"}}: {{T .}}</span>{{end}}{{end}}
