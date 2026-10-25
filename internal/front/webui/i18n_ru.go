@@ -167,7 +167,7 @@ var ru = map[string]string{
 	"set": "задан", "not set": "не задан", "active": "активен", "revoked": "отозван", "installed": "установлен",
 	"built in": "встроен", "not loaded": "не загружен", "version revoked": "версия отозвана", "optional": "по желанию",
 	"done": "готово", "error": "ошибка", "you": "вы", "you decided": "решили вы", "never": "никогда", "just now": "только что",
-	"time is up": "время вышло", "always": "всегда", "always on": "всегда включён", "connector": "коннектор", "password": "пароль",
+	"time is up": "время вышло", "always": "всегда", "connector": "коннектор", "password": "пароль",
 	"login": "логин", "value": "значение", "webhook": "вебхук", "tray": "трей", "socket": "сокет", "agent socket": "сокет агентов",
 	"remote CLI": "удалённый CLI", "remote MCP": "remote MCP", "MCP (stdio)": "MCP (stdio)", "the server": "сервером",
 	"login required": "нужен вход", "sign in": "вход", "Sign in": "Войти",
@@ -193,7 +193,6 @@ var ru = map[string]string{
 	"Click, type and sign in": "Нажимать, вводить, входить", "Read emails": "Читать письма", "Save drafts": "Сохранять черновики",
 	"Send emails": "Отправлять письма", "Web UI on the phone": "Web UI с телефона", "notification on this computer": "уведомление на этом компьютере",
 	"browser push": "браузерный push", "Notifications on this computer": "Уведомления на этом компьютере", "Browser push": "Браузерный push",
-	"Web UI (this page; remotely — /ui/)": "Web UI (эта страница; удалённо — /ui/)",
 
 	// Заголовки страниц
 	"Approvals": "Подтверждения", "New agent": "Новый агент", "Getting started": "Начало работы", "Ready-made rules": "Готовые правила",
