@@ -100,6 +100,7 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 {{if not .Remote}}<a href="{{.Base}}/agents" class="{{if eq $s "agents"}}on{{end}}"{{if eq $s "agents"}} aria-current="page"{{end}}>{{T "Agents"}}</a>
 <a href="{{.Base}}/access/browser" class="{{if eq $s "access"}}on{{end}}"{{if eq $s "access"}} aria-current="page"{{end}}>{{T "Access"}}</a>{{end}}
 <a href="{{.Base}}/browser" class="{{if eq $s "browser"}}on{{end}}"{{if eq $s "browser"}} aria-current="page"{{end}}>{{T "Browser"}}</a>
+{{if not .Remote}}<a href="{{.Base}}/vault" class="{{if eq $s "vault"}}on{{end}}"{{if eq $s "vault"}} aria-current="page"{{end}}>{{T "Passwords and accounts"}}</a>{{end}}
 <a href="{{.Base}}/journal" class="{{if eq $s "journal"}}on{{end}}"{{if eq $s "journal"}} aria-current="page"{{end}}>{{T "Journal"}}</a>
 {{if not .Remote}}<a href="{{.Base}}/settings" class="{{if eq $s "settings"}}on{{end}}"{{if eq $s "settings"}} aria-current="page"{{end}}>{{T "Settings"}}</a>{{end}}
 </nav>

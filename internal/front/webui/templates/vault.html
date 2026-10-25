@@ -1,5 +1,4 @@
 {{template "head" .}}
-<div class="layout">{{template "settings_nav" (dict "V" . "On" "vault")}}<div>
 <h2>{{T "Passwords and accounts"}}</h2>
 <p class="muted">{{T "Passwords and tokens are kept in the system keychain. Agents and connectors see only names like @mail.work; gate4.ai enters the value itself and only for the addresses it is bound to."}}</p>
 <table><tr><th>{{T "Name"}}</th><th>{{T "Used by"}}</th><th></th></tr>{{range .Data.Aliases}}<tr id="{{secAnchor .}}"><td><code>{{.}}</code></td>
@@ -35,7 +34,6 @@
 {{range .Data.Grants}}{{if .Agents}}<label class="inline"><input type="checkbox" name="profiles" value="{{.Profile}}" checked> {{join .Agents ", "}}</label>{{end}}{{end}}</fieldset>{{end}}
 <p class="help">{{TH "The login and password fields of a usual sign-in form are found automatically. A complex sign-in (several steps, a code) — in the <a href=\"%s/policy/yaml\">YAML</a> (<code>credentials</code>)." $.Base}}</p>
 <p><button class="primary">{{T "Save the account"}}</button></p></form></div>
-</div></div>
 {{template "foot"}}
 {{/* acc_secret — секрет поля учётки: заданный — ссылка на его строку и ✓. */}}
 {{define "acc_secret"}}{{if .Set}}<a href="#{{secAnchor .Secret}}"><code>{{.Secret}}</code></a> ✓{{else}}<code>{{.Secret}}</code>{{end}}{{end}}

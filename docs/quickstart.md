@@ -157,7 +157,7 @@ gate4ai browser open --url https://account.example.org/      # сайт увёл
 gate4ai browser login --session s-… --account @site     # logged_in | submitted | still_on_login
 ```
 
-Сложный вход (несколько шагов, SMS) — коннектор входа: `via: { connector: site_login, action: login }` вместо `form`. Код из SMS он спрашивает у вас: вопрос — в уведомлении и Web UI («Подтверждения»), ответ — `printf %s 123456 | gate4ai approvals answer <id>`. Учётки видны в Web UI (**Настройки → Пароли и учётки**), простая учётка заводится там же, сложная — в YAML политики. Подробнее — [secret-architecture.md](secret-architecture.md) («Учётки входа на сайты»), [connector-authoring.md](connector-authoring.md).
+Сложный вход (несколько шагов, SMS) — коннектор входа: `via: { connector: site_login, action: login }` вместо `form`. Код из SMS он спрашивает у вас: вопрос — в уведомлении и Web UI («Подтверждения»), ответ — `printf %s 123456 | gate4ai approvals answer <id>`. Учётки видны в Web UI (раздел **Пароли и учётки**), простая учётка заводится там же, сложная — в YAML политики. Подробнее — [secret-architecture.md](secret-architecture.md) («Учётки входа на сайты»), [connector-authoring.md](connector-authoring.md).
 
 ## 3. Агенты
 
