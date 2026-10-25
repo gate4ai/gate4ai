@@ -34,10 +34,7 @@ func loginAs(t *testing.T, u *UI, base string) (*http.Client, string, func(path 
 	t.Helper()
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{Jar: jar, Transport: metaRefresh{}}
-	r, err := c.Get(u.LoginURL())
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := signIn(t, u, c, base)
 	csrf := csrfRe.FindStringSubmatch(body(t, r))[1]
 	post := func(path string, v url.Values) string {
 		t.Helper()
@@ -257,7 +254,7 @@ func TestRemoteUIIsLimited(t *testing.T) {
 	u, d, _, _ := setup(t)
 	d.AddPublicURL(func() string { return "https://dev.example" })
 	h := u.RemoteHandler()
-	l := strings.TrimPrefix(func() string { s, _ := u.RemoteLoginURL(); return s }(), "https://dev.example")
+	u.D.State.Set(protectionKey, `{"password":"`+hashPassword(testPassword)+`"}`)
 	do := func(method, path string, cookie *http.Cookie, form url.Values) *http.Response {
 		var rd *strings.Reader
 		if form != nil {
@@ -277,7 +274,7 @@ func TestRemoteUIIsLimited(t *testing.T) {
 		h.ServeHTTP(rec, req)
 		return &http.Response{StatusCode: rec.code, Header: rec.h, Body: ioNop(rec.buf.String())}
 	}
-	r := do("GET", l, nil, nil)
+	r := do("POST", "/ui/login", nil, url.Values{"start": {"1"}, "password": {testPassword}})
 	var ck *http.Cookie
 	for _, c := range (&http.Response{Header: r.Header}).Cookies() {
 		ck = c
@@ -440,17 +437,23 @@ func TestRemoteLinkRelayOffline(t *testing.T) {
 		Error: "obtaining certificate: no NS"}
 	u.Relay = func() relayclient.Status { return st }
 	d.AddPublicURL(func() string { return "https://abc.relay.test" })
-	if _, err := u.RemoteLoginURL(); !errors.Is(err, errRelayOffline) || !strings.Contains(err.Error(), "no NS") {
+	if _, err := u.RemoteURL(""); !errors.Is(err, errRelayOffline) || !strings.Contains(err.Error(), "no NS") {
 		t.Fatal(err)
 	}
 	_, _, _, get := loginAs(t, u, base)
 	if p := get("/settings/internet?link=1"); !strings.Contains(p, "не подключён к relay") || !strings.Contains(p, "Последняя ошибка: obtaining certificate: no NS") ||
-		strings.Contains(p, "/ui/login?t=") {
+		strings.Contains(p, `id="rlink"`) {
 		t.Fatal(p)
 	}
 	st.Online, st.Phase, st.Error = true, relayclient.PhaseOnline, ""
-	if l, err := u.RemoteLoginURL(); err != nil || !strings.HasPrefix(l, "https://abc.relay.test/ui/login?t=") {
+	if l, err := u.RemoteURL(""); err != nil || l != "https://abc.relay.test/ui/" {
 		t.Fatal(l, err)
+	}
+	if l, err := u.RemoteURL("/browser/s-1"); err != nil || l != "https://abc.relay.test/ui/browser/s-1" {
+		t.Fatal(l, err)
+	}
+	if p := get("/settings/internet?link=1"); !strings.Contains(p, `id="rlink">https://abc.relay.test/ui/</pre>`) || !strings.Contains(p, "data:image/png;base64,") {
+		t.Fatal("no address and QR code:", p)
 	}
 }
 
@@ -508,4 +511,26 @@ func TestBusyLabels(t *testing.T) {
 	if js := get("/static/app.js"); !strings.Contains(js, `"a[data-busy]"`) || !strings.Contains(js, `f.method !== "post"`) {
 		t.Error("app.js: no busy handler")
 	}
+}
+
+// testPassword — пароль Web UI в тестах.
+const testPassword = "correct horse battery staple"
+
+// signIn — вход в Web UI тестовым паролем (задаёт его, если пароля ещё нет);
+// ответ — главная страница с сессией.
+func signIn(t *testing.T, u *UI, c *http.Client, base string) *http.Response {
+	t.Helper()
+	if !u.Protection().Set() {
+		if err := u.D.State.Set(protectionKey, `{"password":"`+hashPassword(testPassword)+`"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := c.PostForm(base+"/login", url.Values{"start": {"1"}, "password": {testPassword}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.StatusCode != 200 || r.Request.URL.Path == "/login" {
+		t.Fatalf("sign in: %d %s", r.StatusCode, body(t, r))
+	}
+	return r
 }

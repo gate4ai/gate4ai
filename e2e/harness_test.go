@@ -7,8 +7,12 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +22,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/chromedp/chromedp"
 
 	"github.com/gate4ai/gate4ai/internal/platform/agentid"
 )
@@ -260,3 +266,60 @@ func (g *gate) installFrom(dir string) {
 
 // errOf — объект error из ответа gate4ai.
 func errOf(m map[string]any) map[string]any { e, _ := m["error"].(map[string]any); return e }
+
+// uiPassword — пароль Web UI, который харнесс задаёт первым входом.
+const uiPassword = "e2e correct horse"
+
+// uiBase — адрес локального Web UI (`gate4ai ui --print`), без завершающего «/».
+func (g *gate) uiBase() string {
+	g.t.Helper()
+	r := g.run("", "", "ui", "--print")
+	u := strings.TrimSpace(strings.SplitN(r.out, "\n", 2)[0]) // дальше — подсказки в stderr
+	if r.code != 0 || !strings.HasPrefix(u, "http://127.0.0.1:") {
+		g.t.Fatalf("ui --print: %d %s", r.code, r.out)
+	}
+	return strings.TrimSuffix(u, "/")
+}
+
+// owner — браузер владельца с сессией Web UI: на свежей установке первый вход
+// задаёт пароль uiPassword, дальше входит с ним.
+func (g *gate) owner() (*http.Client, string) {
+	g.t.Helper()
+	base := g.uiBase()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar, Timeout: 10 * time.Second}
+	resp, err := c.PostForm(base+"/login", url.Values{"setup": {"1"}, "password": {uiPassword}, "repeat": {uiPassword}})
+	if err != nil {
+		g.t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == 401 { // пароль уже задан
+		if resp, err = c.PostForm(base+"/login", url.Values{"start": {"1"}, "password": {uiPassword}}); err != nil {
+			g.t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	if resp.StatusCode != 200 {
+		g.t.Fatalf("owner sign-in: %d", resp.StatusCode)
+	}
+	return c, base
+}
+
+// chromeSignIn — вход владельца в настоящем браузере: первый пароль или пароль.
+func chromeSignIn(base string) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		if err := chromedp.Run(ctx, chromedp.Navigate(base+"/"), chromedp.WaitVisible(`input[name="password"]`)); err != nil {
+			return err
+		}
+		var setup bool
+		if err := chromedp.Run(ctx, chromedp.Evaluate(`!!document.querySelector('input[name="setup"]')`, &setup)); err != nil {
+			return err
+		}
+		acts := []chromedp.Action{chromedp.SendKeys(`input[name="password"]`, uiPassword)}
+		if setup {
+			acts = append(acts, chromedp.SendKeys(`input[name="repeat"]`, uiPassword))
+		}
+		acts = append(acts, chromedp.Submit(`input[name="password"]`), chromedp.WaitReady(`form[action="/logout"]`))
+		return chromedp.Run(ctx, acts...)
+	})
+}

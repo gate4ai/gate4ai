@@ -202,7 +202,7 @@ func TestBrowserRemoteControl(t *testing.T) {
 	h := u.RemoteHandler()
 	sid := random()
 	u.mu.Lock()
-	u.sessions[sid] = session{csrf: "c1", expires: u.Now().Add(time.Hour), remote: true, protected: true}
+	u.sessions[sid] = session{csrf: "c1", expires: u.Now().Add(time.Hour), remote: true}
 	u.mu.Unlock()
 	do := func(method, path string, form url.Values) *httptest.ResponseRecorder {
 		var rd *strings.Reader
@@ -264,12 +264,11 @@ func TestBrowserLinkAfterLogin(t *testing.T) {
 	if _, p := b.get(base + "/browser/s-1"); !strings.Contains(p, "login") && !strings.Contains(p, "Вход") {
 		t.Fatal("login first:", p)
 	}
-	if _, p := b.get(u.LoginURL()); !strings.Contains(p, "Взять управление") {
-		t.Fatal("after login — the session:", p)
+	if r := signIn(t, u, b.c, base); !strings.Contains(body(t, r), "Взять управление") {
+		t.Fatal("after login — the session")
 	}
-	b2 := newBrowser(t, base)
-	if _, p := b2.get(u.LoginURL() + "&next=" + url.QueryEscape("/browser/s-1")); !strings.Contains(p, "Взять управление") {
-		t.Fatal("next in the link:", p)
+	if u.URL("/browser/s-1") != "http://"+u.Addr+"/browser/s-1" || u.URL("/settings") != "http://"+u.Addr+"/" {
+		t.Fatal("page address", u.URL("/browser/s-1"))
 	}
 	for _, bad := range []string{"//evil.example/x", "/browser/../settings", "/settings", "https://evil.example/browser/x"} {
 		if safeNext(bad) != "" {

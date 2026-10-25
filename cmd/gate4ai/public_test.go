@@ -138,8 +138,21 @@ func newEnv(t *testing.T) *env {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	return &env{d: d, ui: u, base: "http://" + addr, local: "http://" + u.Addr, bot: bot, cancel: cancel}
+	e := &env{d: d, ui: u, base: "http://" + addr, local: "http://" + u.Addr, bot: bot, cancel: cancel}
+	// Первый вход на этом компьютере задаёт пароль Web UI.
+	resp, err := noRedirect.PostForm(e.local+"/login", url.Values{"setup": {"1"}, "password": {uiPassword}, "repeat": {uiPassword}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("first password: %d", resp.StatusCode)
+	}
+	return e
 }
+
+// uiPassword — пароль Web UI в тестах.
+const uiPassword = "correct horse battery staple"
 
 var noRedirect = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
@@ -161,23 +174,27 @@ func headerCred(name, h, val string) cred {
 
 var csrfRe = regexp.MustCompile(`name="csrf" value="([0-9a-f]+)"`)
 
-// login входит по одноразовой ссылке; возвращает cookie сессии и CSRF-токен.
-func login(t *testing.T, link, host string) (*http.Cookie, string) {
+// login входит с паролем по адресу Web UI base (…/ или …/ui/); возвращает cookie сессии и CSRF-токен.
+func login(t *testing.T, base, host string) (*http.Cookie, string) {
 	t.Helper()
-	u, _ := url.Parse(link)
-	req, _ := http.NewRequest("GET", link, nil)
+	req, _ := http.NewRequest("POST", base+"login", strings.NewReader(url.Values{"start": {"1"}, "password": {uiPassword}}.Encode()))
 	req.Host = host
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := noRedirect.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	// Ссылка уводит в UI своей страницей (meta refresh), а не 303.
-	if resp.StatusCode != http.StatusOK || len(resp.Cookies()) != 1 {
-		t.Fatalf("login %s: %d", u.Path, resp.StatusCode)
+	var ck *http.Cookie
+	for _, c := range resp.Cookies() {
+		if strings.HasSuffix(c.Name, "session") && c.Value != "" {
+			ck = c
+		}
 	}
-	ck := resp.Cookies()[0]
-	page := link[:strings.Index(link, "/login")] + "/"
+	if resp.StatusCode != http.StatusSeeOther || ck == nil {
+		t.Fatalf("login %s: %d", base, resp.StatusCode)
+	}
+	page := base
 	req, _ = http.NewRequest("GET", page, nil)
 	req.Host = host
 	req.AddCookie(ck)
@@ -207,18 +224,18 @@ func TestPublicIsolation(t *testing.T) {
 	oauthTok, _ := e.d.State.IssueTokenTTL("bot", "client", "oauth", time.Hour)
 	refreshTok, _ := e.d.State.IssueTokenTTL("bot", "client", "refresh", time.Hour)
 
-	rlink, err := e.ui.RemoteLoginURL()
+	rlink, err := e.ui.RemoteURL("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(rlink, "https://"+publicHost+"/ui/login?t=") {
-		t.Fatalf("remote link %s", rlink)
+	if rlink != "https://"+publicHost+"/ui/" {
+		t.Fatalf("remote address %s", rlink)
 	}
-	rck, rcsrf := login(t, strings.Replace(rlink, "https://"+publicHost, e.base, 1), publicHost)
+	rck, rcsrf := login(t, e.base+"/ui/", publicHost)
 	if rck.Name != "g4a_rsession" || !rck.Secure || rck.Path != "/ui/" {
 		t.Fatalf("remote cookie %+v", rck)
 	}
-	lck, _ := login(t, e.ui.LoginURL(), strings.TrimPrefix(e.local, "http://"))
+	lck, _ := login(t, e.local+"/", strings.TrimPrefix(e.local, "http://"))
 
 	creds := []cred{
 		{"none", func(*http.Request) {}},
@@ -256,7 +273,7 @@ func TestPublicIsolation(t *testing.T) {
 	}
 	// API владельца на публичном адресе отсутствует при любых учётных данных.
 	for _, p := range []string{"GET /v1/health", "GET /v1/log", "GET /v1/policy", "PUT /v1/policy", "GET /v1/vault",
-		"PUT /v1/vault/@x", "POST /v1/agents/bot/token", "POST /v1/agents/bot/connect", "POST /v1/ui/session",
+		"PUT /v1/vault/@x", "POST /v1/agents/bot/token", "POST /v1/agents/bot/connect", "POST /v1/ui/url",
 		"GET /v1/approvals", "POST /v1/relay/register", "GET /ui/../v1/log"} {
 		mp := strings.SplitN(p, " ", 2)
 		routes = append(routes, route{"owner " + p, mp[0], mp[1], "{}", func(string) bool { return false }, 0, 404})
@@ -298,8 +315,7 @@ func TestPublicIsolation(t *testing.T) {
 // ссылки входа не взаимозаменяемы.
 func TestPublicRemoteUI(t *testing.T) {
 	e := newEnv(t)
-	rlink, _ := e.ui.RemoteLoginURL()
-	rck, csrf := login(t, strings.Replace(rlink, "https://"+publicHost, e.base, 1), publicHost)
+	rck, csrf := login(t, e.base+"/ui/", publicHost)
 
 	do := func(method, path, form, host, origin string) *http.Response {
 		req, _ := http.NewRequest(method, e.base+path, strings.NewReader(form))
@@ -338,24 +354,19 @@ func TestPublicRemoteUI(t *testing.T) {
 		t.Errorf("remote decide: %d", r.StatusCode)
 	}
 
-	// Локальная ссылка входа не работает на публичном адресе, удалённая — локально.
-	ll := e.ui.LoginURL()
-	lu, _ := url.Parse(ll)
-	req, _ := http.NewRequest("GET", e.base+"/ui/login?"+lu.RawQuery, nil)
-	req.Host = publicHost
-	if resp, _ := noRedirect.Do(req); resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("local login link on public: %d", resp.StatusCode)
+	// Первый пароль с публичного адреса не задаётся, даже когда пароля нет.
+	if err := e.ui.ResetProtection(); err != nil {
+		t.Fatal(err)
 	}
-	rl, _ := e.ui.RemoteLoginURL()
-	ru, _ := url.Parse(rl)
-	if resp, _ := noRedirect.Get(e.local + "/login?" + ru.RawQuery); resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("remote login link locally: %d", resp.StatusCode)
-	}
-	// …и не сгорает от попытки не в том месте.
-	req, _ = http.NewRequest("GET", e.base+"/ui/login?"+ru.RawQuery, nil)
+	req, _ := http.NewRequest("POST", e.base+"/ui/login", strings.NewReader("setup=1&password=remote+horse+1&repeat=remote+horse+1"))
 	req.Host = publicHost
-	if resp, _ := noRedirect.Do(req); resp.StatusCode != http.StatusOK || len(resp.Cookies()) != 1 {
-		t.Errorf("remote login link after a local attempt: %d", resp.StatusCode)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://"+publicHost)
+	if resp, _ := noRedirect.Do(req); resp.StatusCode != http.StatusUnauthorized || e.ui.Protection().Set() {
+		t.Errorf("first password set from the public address: %d", resp.StatusCode)
+	}
+	if resp, _ := noRedirect.Get(e.local + "/"); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("local UI after reset: %d", resp.StatusCode)
 	}
 }
 

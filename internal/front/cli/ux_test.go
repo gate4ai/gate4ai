@@ -109,9 +109,9 @@ func TestUIWithoutDaemon(t *testing.T) {
 	if !strings.Contains(errb.String(), "Start it: gate4ai daemon start") {
 		t.Fatal(errb)
 	}
-	// В терминале: daemon запускается в фоне, затем выдаётся ссылка.
+	// В терминале: daemon запускается в фоне, затем выдаётся адрес Web UI.
 	e, out, _ = envAt(sock, true)
-	if code := Run(context.Background(), e, []string{"ui"}); code != ExitOK || started != 1 || !strings.Contains(out.String(), "/login?t=") {
+	if code := Run(context.Background(), e, []string{"ui"}); code != ExitOK || started != 1 || !strings.Contains(out.String(), "http://127.0.0.1:7431/") {
 		t.Fatalf("code %d started %d: %s", code, started, out)
 	}
 	// daemon status / status без id.
@@ -135,11 +135,11 @@ func TestUIWithoutDaemon(t *testing.T) {
 	}
 }
 
-// fakeUIRoutes — маршрут ссылки входа без настоящего Web UI.
+// fakeUIRoutes — маршрут адреса Web UI без настоящего Web UI.
 func fakeUIRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/ui/session", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /v1/ui/url", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"url":"http://127.0.0.1:7431/login?t=abc"}`)
+		fmt.Fprint(w, `{"url":"http://127.0.0.1:7431/","requires":["password"]}`)
 	})
 }
 

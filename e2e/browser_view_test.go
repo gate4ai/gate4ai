@@ -96,7 +96,7 @@ connectors:
 		}
 	}
 
-	login := strings.TrimSpace(g.run("", "", "ui", "--print").out)
+	base := g.uiBase()
 	// Окно просмотрщика — большое: canvas целиком в видимой области,
 	// иначе клик CDP ниже края окна headless (800×600 по умолчанию) ни во что не попадает.
 	actx, cancel := chromedp.NewExecAllocator(context.Background(), append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chrome), chromedp.WindowSize(1280, 1600))...)
@@ -150,8 +150,7 @@ connectors:
 		})
 	}
 	err = chromedp.Run(ctx,
-		chromedp.Navigate(login),
-		chromedp.WaitReady(`form[action="/logout"]`),
+		chromeSignIn(base),
 		chromedp.Navigate(view),
 		chromedp.Poll(frame, nil),
 		chromedp.Click(`//button[text()="Take control"]`),

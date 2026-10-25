@@ -200,7 +200,7 @@ func (u *UI) settingsPage(r *http.Request) (string, map[string]any, error) {
 		data["Autostart"], data["AutostartState"] = st, autostartState(st)
 	}
 	p := u.Protection()
-	data["Protection"] = map[string]bool{"Link": !p.NoLink, "Password": p.Password != "", "Telegram": p.Telegram}
+	data["Protection"] = map[string]bool{"Password": p.Set(), "Telegram": p.Telegram}
 	return "settings", data, nil
 }
 
@@ -237,18 +237,15 @@ func (u *UI) channelStatus() []approval.ChannelStatus {
 func (u *UI) loginSettingsPage(r *http.Request) (string, map[string]any, error) {
 	// Хэш пароля на страницу не попадает — только «задан / не задан».
 	p := u.Protection()
-	data := map[string]any{"Sub": "login", "Protection": map[string]bool{"Link": !p.NoLink, "Password": p.Password != "", "Telegram": p.Telegram},
-		"LastMethod": p.lastMethod(), "Addr": u.Addr, "PublicURL": u.D.PublicURL(), "TelegramReady": u.confirmer() != nil}
-	if _, s, ok := u.session(local, r); ok {
-		data["SessionUnprotected"] = p.Custom() && !s.protected
-	}
+	data := map[string]any{"Sub": "login", "Protection": map[string]bool{"Password": p.Set(), "Telegram": p.Telegram},
+		"Addr": u.Addr, "PublicURL": u.D.PublicURL(), "TelegramReady": u.confirmer() != nil}
 	return "settings", data, nil
 }
 
 func (u *UI) internetPage(r *http.Request) (string, map[string]any, error) {
 	data := map[string]any{"Sub": "internet", "PublicURL": u.D.PublicURL()}
 	if link := r.URL.Query().Get("link"); link == "1" {
-		if l, err := u.RemoteLoginURL(); err == nil {
+		if l, err := u.RemoteURL(""); err == nil {
 			data["RemoteLink"] = l
 			if code, err := qr.Encode(l, qr.M); err == nil {
 				// template.URL: иначе html/template не пускает data: в src и подставляет #ZgotmplZ

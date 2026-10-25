@@ -4,8 +4,6 @@ package e2e
 
 import (
 	"io"
-	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/exec"
@@ -61,21 +59,10 @@ func TestAgentPairing(t *testing.T) {
 		t.Fatalf("pairing request not in the daemon log:\n%s", g.log.String())
 	}
 
-	// Владелец: Web UI по одноразовой ссылке, запрос с тем же кодом, «Разрешить».
-	lr := g.run("", "", "ui", "--print")
-	login := strings.TrimSpace(lr.out)
-	if lr.code != 0 || !strings.HasPrefix(login, "http://127.0.0.1:") {
-		t.Fatalf("ui --print: %d %s", lr.code, lr.out)
-	}
-	base := login[:strings.Index(login, "/login")]
-	jar, _ := cookiejar.New(nil)
-	c := &http.Client{Jar: jar}
-	resp, err := c.Get(login) // свежая установка: вход ведёт в мастер первого запуска
+	// Владелец: Web UI (первый вход задаёт пароль), запрос с тем же кодом, «Разрешить».
+	c, base := g.owner()
+	resp, err := c.Get(base + "/agents")
 	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp, err = c.Get(base + "/agents"); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := io.ReadAll(resp.Body)

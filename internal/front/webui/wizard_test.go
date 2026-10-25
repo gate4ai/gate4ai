@@ -58,7 +58,7 @@ func TestEnglishByDefault(t *testing.T) {
 	// Переключатель: cookie и возврат на ту же страницу; чужой адрес — на главную.
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{Jar: jar, Transport: metaRefresh{}}
-	c.Get(u.LoginURL())
+	signIn(t, u, c, base)
 	r, err := c.Get(base + "/lang?l=ru&back=" + url.QueryEscape("/agents"))
 	if err != nil || r.Request.URL.Path != "/agents" {
 		t.Fatal("switch", err)
@@ -74,7 +74,7 @@ func TestEnglishByDefault(t *testing.T) {
 	req, _ := http.NewRequest("GET", base+"/login", nil)
 	req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9")
 	r, _ = http.DefaultClient.Do(req)
-	if p := body(t, r); !strings.Contains(p, "Нужен вход") {
+	if p := body(t, r); !strings.Contains(p, "Пароль Web UI") {
 		t.Fatal("login page in russian", p)
 	}
 }

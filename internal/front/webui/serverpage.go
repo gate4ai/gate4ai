@@ -147,16 +147,17 @@ func (u *UI) serverChecks(ctx context.Context) []ServerCheck {
 	// Вход.
 	p := u.Protection()
 	switch {
-	case p.Password != "" && p.Telegram:
+	case p.Set() && p.Telegram:
 		add(ServerCheck{ID: "login", Title: M("Signing in to the Web UI"), Status: "ok", Detail: M("password and confirmation in Telegram")})
-	case p.Password != "" || p.Telegram:
-		add(ServerCheck{ID: "login", Title: M("Signing in to the Web UI"), Status: "ok", Detail: M("%s", map[bool]string{true: "password", false: "confirmation in Telegram"}[p.Password != ""])})
-	default:
-		st, fix := "off", M("Add a password or Telegram confirmation when agents run on this computer.")
+	case p.Set():
+		var fix Msg
 		if headless {
-			st, fix = "warn", M("On a server an agent of the same OS user can obtain the link: set a password and turn on Telegram confirmation.")
+			fix = M("On a server turn on Telegram confirmation too: a password typed on another computer may be read there.")
 		}
-		add(ServerCheck{ID: "login", Title: M("Signing in to the Web UI"), Status: st, Detail: M("only the one-time link (gate4ai ui)"), Fix: fix, Link: "/settings/login", Button: M("Signing in")})
+		add(ServerCheck{ID: "login", Title: M("Signing in to the Web UI"), Status: "ok", Detail: M("password"), Fix: fix, Link: "/settings/login", Button: M("Signing in")})
+	default:
+		add(ServerCheck{ID: "login", Title: M("Signing in to the Web UI"), Status: "warn", Detail: M("no password yet: whoever opens the Web UI on this computer first sets it"),
+			Fix: M("Open the Web UI and set the password."), Cmd: "gate4ai ui"})
 	}
 
 	// Telegram.

@@ -65,7 +65,7 @@ func setup(ctx context.Context, d *daemon.Daemon, log *slog.Logger) error {
 		log.Warn("web UI login protection removed (--reset-ui-login)")
 		// Сброс виден владельцу: если сбросил не он — это сигнал.
 		if tg := u.Channels.Telegram(); tg != nil {
-			go tg.Notice("⚠️ Защита входа в Web UI gate4.ai снята: daemon запущен с --reset-ui-login. Если это были не вы — задайте защиту заново в Настройках.")
+			go tg.Notice("⚠️ Защита входа в Web UI gate4.ai снята: daemon запущен с --reset-ui-login. Новый пароль задаст тот, кто первым откроет Web UI на компьютере. Если это были не вы — сделайте это сейчас.")
 		}
 	}
 	if _, err := sandbox.Attach(ctx, d, paths.RunDir(), egressAddr); err != nil {

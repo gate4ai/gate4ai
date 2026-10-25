@@ -2,15 +2,14 @@
 
 // Package webui — Web UI владельца на localhost: подтверждения, агенты (токены,
 // коды подключения, отзыв), журнал, базовый редактор политик с симулятором и
-// откатом, алиасы Vault. Вход — одноразовая ссылка, которую выдаёт daemon по
-// сокету владельца (`gate4ai ui`, трей); дальше — сессия в HttpOnly-cookie. Если в
-// Настройках включена защита входа (protect.go), ссылка сама сессию не даёт: нужны
-// пароль и/или подтверждение входа в Telegram-боте.
+// откатом, алиасы Vault. Вход — пароль (и, по выбору, подтверждение в
+// Telegram-боте; protect.go) на постоянном адресе; дальше — сессия в
+// HttpOnly-cookie. `gate4ai ui` и трей просто открывают этот адрес.
 // Защита: проверка Host (DNS rebinding), SameSite=Strict, CSRF-токен в формах.
 //
 // Удалённо Web UI доступен на публичном адресе устройства под /ui/ (RemoteHandler):
-// своя ссылка входа (`gate4ai ui --remote`) и своя cookie, локальная сессия там
-// не действует и наоборот; изменения политик, агентов и секретов — только локально.
+// свой вход и своя cookie, локальная сессия там не действует и наоборот;
+// изменения политик, агентов и секретов — только локально.
 package webui
 
 import (
@@ -171,9 +170,8 @@ type UI struct {
 	Server func() ServerEnv
 
 	mu       sync.Mutex
-	logins   map[string]login // одноразовые токены входа
 	sessions map[string]session
-	attempts map[string]*attempt // попытки входа при включённой защите
+	attempts map[string]*attempt // попытки входа
 	limits   [2]limiter          // защита от перебора пароля: локально, удалённо
 	notes    map[string]note     // сообщение после действия: сессия → одно последнее
 }
@@ -184,17 +182,11 @@ type note struct {
 	detail     string
 }
 
-type login struct {
-	expires time.Time
-	remote  bool
-}
-
 type session struct {
-	csrf      string
-	expires   time.Time
-	remote    bool
-	protected bool // вход прошёл защиту (пароль и/или Telegram)
-	telegram  bool // вход подтверждён в Telegram
+	csrf     string
+	expires  time.Time
+	remote   bool
+	telegram bool // вход подтверждён в Telegram
 }
 
 // mount — где обслуживается Web UI: локально (loopback) или удалённо (/ui/ на
@@ -215,7 +207,7 @@ func (m mount) cookie() string {
 
 // New создаёт Web UI.
 func New(d *daemon.Daemon) *UI {
-	return &UI{D: d, Now: time.Now, logins: map[string]login{}, sessions: map[string]session{}, attempts: map[string]*attempt{},
+	return &UI{D: d, Now: time.Now, sessions: map[string]session{}, attempts: map[string]*attempt{},
 		notes: map[string]note{}, Clients: agentsetup.Default(), Autostart: systemAutostart{}, KeyDir: filepath.Join(d.Home, "agents")}
 }
 
@@ -225,17 +217,18 @@ func random() string {
 	return hex.EncodeToString(b)
 }
 
-// LoginURL — одноразовая ссылка входа (2 минуты).
-func (u *UI) LoginURL() string {
-	return "http://" + u.Addr + "/login?t=" + u.newLogin(false)
+// URL — адрес Web UI на этом компьютере; next — страница после входа
+// (только раздел «Браузер», см. safeNext), "" — главная.
+func (u *UI) URL(next string) string {
+	return "http://" + u.Addr + cmp.Or(safeNext(next), "/")
 }
 
-// errRelayOffline — адрес устройства на relay есть, но туннеля нет: ссылка не
+// errRelayOffline — адрес устройства на relay есть, но туннеля нет: адрес не
 // откроется (relay подержит соединение и сбросит его, браузер покажет таймаут).
-var errRelayOffline = errors.New("the device is not connected to the relay, a link would not open")
+var errRelayOffline = errors.New("the device is not connected to the relay, the address would not open")
 
-// RemoteLoginURL — одноразовая ссылка входа в удалённый Web UI (2 минуты).
-func (u *UI) RemoteLoginURL() (string, error) {
+// RemoteURL — адрес удалённого Web UI (/ui/ на публичном адресе устройства).
+func (u *UI) RemoteURL(next string) (string, error) {
 	pub := u.D.PublicURL()
 	if pub == "" {
 		return "", fmt.Errorf("no public address: register the device on a relay or start the daemon with --public")
@@ -246,18 +239,7 @@ func (u *UI) RemoteLoginURL() (string, error) {
 		}
 		return "", errRelayOffline
 	}
-	return pub + remote.base + "/login?t=" + u.newLogin(true), nil
-}
-
-// loginTTL — срок одноразовой ссылки входа.
-const loginTTL = 2 * time.Minute
-
-func (u *UI) newLogin(rem bool) string {
-	t := random()
-	u.mu.Lock()
-	u.logins[t] = login{expires: u.Now().Add(loginTTL), remote: rem}
-	u.mu.Unlock()
-	return t
+	return pub + remote.base + cmp.Or(safeNext(next), "/"), nil
 }
 
 // Listen слушает только loopback.
@@ -277,9 +259,9 @@ func (u *UI) Listen(addr string) (net.Listener, error) {
 	return l, nil
 }
 
-// OwnerRoutes — маршрут сокета владельца, выдающий ссылку входа (трей, `gate4ai ui`).
+// OwnerRoutes — маршрут сокета владельца, выдающий адрес Web UI (трей, `gate4ai ui`).
 func (u *UI) OwnerRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/ui/session", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /v1/ui/url", func(w http.ResponseWriter, r *http.Request) {
 		if !daemon.PrincipalFrom(r.Context()).IsOwner() {
 			http.Error(w, `{"error":{"code":"owner_only","message":"owner only"}}`, 403)
 			return
@@ -290,10 +272,10 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 			Next   string `json:"next"` // после входа — эта страница (просмотр сеанса браузера)
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		link := u.LoginURL()
+		link := u.URL(req.Next)
 		if req.Remote {
 			var err error
-			if link, err = u.RemoteLoginURL(); err != nil {
+			if link, err = u.RemoteURL(req.Next); err != nil {
 				w.WriteHeader(409)
 				code := "no_public_address"
 				if errors.Is(err, errRelayOffline) {
@@ -303,13 +285,10 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 				return
 			}
 		}
-		if n := safeNext(req.Next); n != "" {
-			link += "&next=" + url.QueryEscape(n)
-		}
-		// requires — что ещё нужно для входа по ссылке (пароль, подтверждение в Telegram);
-		// link_required — нужна ли ссылка вообще (иначе вход и по постоянному адресу).
+		// requires — что нужно для входа (пароль, подтверждение в Telegram);
+		// setup — пароля ещё нет: первый, кто откроет адрес на этом компьютере, задаст его.
 		p := u.Protection()
-		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": p.Requires(), "link_required": !p.NoLink})
+		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": p.Requires(), "setup": !p.Set()})
 	})
 	mux.HandleFunc("GET /v1/tray/state", func(w http.ResponseWriter, r *http.Request) {
 		if !daemon.PrincipalFrom(r.Context()).IsOwner() {
@@ -491,7 +470,6 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/settings/remote-link", u.remoteLink)
 	change("/settings/login/password", u.setLoginPassword)
 	change("/settings/login/telegram", u.setLoginTelegram)
-	change("/settings/login/link", u.setLoginLink)
 	return u.guard(m, mux)
 }
 
@@ -571,13 +549,11 @@ func setNext(w http.ResponseWriter, m mount, p string) {
 	}
 }
 
-// takeNext — адрес после входа: из ссылки (next) или cookie, иначе «/».
-func (u *UI) takeNext(w http.ResponseWriter, r *http.Request, m mount, fromLink string) string {
-	p := safeNext(fromLink)
+// takeNext — адрес после входа: из cookie, иначе «/».
+func (u *UI) takeNext(w http.ResponseWriter, r *http.Request, m mount) string {
+	p := ""
 	if c, err := r.Cookie(m.cookie() + "_next"); err == nil {
-		if p == "" {
-			p = safeNext(c.Value)
-		}
+		p = safeNext(c.Value)
 		http.SetCookie(w, &http.Cookie{Name: m.cookie() + "_next", Value: "", Path: m.base + "/", MaxAge: -1, Secure: m.remote})
 	}
 	if p == "" {
@@ -586,35 +562,9 @@ func (u *UI) takeNext(w http.ResponseWriter, r *http.Request, m mount, fromLink 
 	return p
 }
 
-// login — одноразовая ссылка. Без защиты она сразу даёт сессию; с защитой —
-// попытку входа (cookie), которой нужны пароль и/или подтверждение в Telegram.
+// login — страница входа: продолжение попытки входа этого браузера или её начало.
 func (u *UI) login(m mount) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if t := r.URL.Query().Get("t"); t != "" {
-			setNext(w, m, r.URL.Query().Get("next"))
-			u.mu.Lock()
-			l, ok := u.logins[t]
-			if ok && l.remote == m.remote {
-				delete(u.logins, t)
-			}
-			valid := ok && l.remote == m.remote && !u.Now().After(l.expires)
-			u.mu.Unlock()
-			if valid {
-				p := u.Protection()
-				if !p.Extra() {
-					u.startSession(w, m, false, false)
-					sameSiteRedirect(w, m.base+u.takeNext(w, r, m, r.URL.Query().Get("next")))
-					return
-				}
-				u.mu.Lock()
-				id := u.newAttempt(m, p)
-				u.mu.Unlock()
-				u.setAttemptCookie(w, m, id)
-				// Без токена в адресе: дальше попытка живёт только в cookie этого браузера.
-				sameSiteRedirect(w, m.base+"/login")
-				return
-			}
-		}
 		u.mu.Lock()
 		id, a := u.attemptOf(m, r)
 		u.mu.Unlock()
@@ -624,19 +574,6 @@ func (u *UI) login(m mount) http.HandlerFunc {
 		}
 		u.loginPage(w, r, m)
 	}
-}
-
-// sameSiteRedirect уводит со ссылки входа страницей этого же сайта, а не
-// 303: ссылку открывают и с чужого сайта (страница-передатчик file:// у
-// `gate4ai ui`, мессенджер), и тогда браузер считает весь редирект
-// межсайтовым и не шлёт на следующий адрес только что поставленную
-// cookie с SameSite=Strict — вход терялся. Переход, начатый своей
-// страницей, уже same-site. Токен в Referer не уходит.
-func sameSiteRedirect(w http.ResponseWriter, to string) {
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	q := template.HTMLEscapeString(to)
-	fmt.Fprint(w, `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=`+q+`"><title>gate4.ai</title><a href="`+q+`">gate4.ai</a>`)
 }
 
 type view struct {

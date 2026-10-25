@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,8 +198,8 @@ func TestRelayDNSForACME(t *testing.T) {
 
 var remoteLinkRe = regexp.MustCompile(`<pre class="box" id="rlink">(https://[^<]+)</pre>`)
 
-// Ссылка «Вход с телефона» (Настройки → Вход с телефона): daemon подключён к relay,
-// ссылка открывает Web UI устройства через relay и второй раз не открывается.
+// Адрес «Вход с телефона» (Настройки → Вход с телефона): daemon подключён к relay,
+// адрес открывает через relay страницу входа Web UI устройства, пароль даёт сессию.
 func TestRemoteLinkThroughRelay(t *testing.T) {
 	t.Parallel()
 	r := startRelay(t)
@@ -217,17 +218,8 @@ func TestRemoteLinkThroughRelay(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Владелец входит в локальный Web UI и берёт ссылку, как в браузере.
-	res := g.run("", "", "ui", "--print")
-	if res.code != 0 {
-		t.Fatal(res.out)
-	}
-	jar, _ := cookiejar.New(nil)
-	owner := &http.Client{Jar: jar, Timeout: 5 * time.Second}
-	if code, _ := get(t, owner, strings.TrimSpace(res.out)); code != 200 {
-		t.Fatal("local login:", code)
-	}
-	ui := strings.TrimSuffix(strings.TrimSpace(res.out), "/login?t="+strings.SplitN(strings.TrimSpace(res.out), "t=", 2)[1])
+	// Владелец входит в локальный Web UI и берёт адрес, как в браузере.
+	owner, ui := g.owner()
 	link := func() string {
 		t.Helper()
 		_, p := get(t, owner, ui+"/settings/internet?link=1")
@@ -239,16 +231,19 @@ func TestRemoteLinkThroughRelay(t *testing.T) {
 	}
 
 	l := link()
-	if !regexp.MustCompile(`^https://[0-9a-z]{16}\.localhost/ui/login\?t=[0-9a-f]+$`).MatchString(l) {
+	if !regexp.MustCompile(`^https://[0-9a-z]{16}\.localhost/ui/$`).MatchString(l) {
 		t.Fatal("link:", l)
 	}
 	phone := r.browser(t)
+	if code, p := get(t, phone, l); code != 401 || !strings.Contains(p, `name="password"`) {
+		t.Fatalf("address did not open the sign-in page of the device UI: %d %s", code, p)
+	}
+	resp, err := phone.PostForm(l+"login", url.Values{"start": {"1"}, "password": {uiPassword}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
 	if code, p := get(t, phone, l); code != 200 || !strings.Contains(p, "Remote access") {
-		t.Fatalf("link did not open the device UI: %d %s", code, p)
+		t.Fatalf("password did not sign in through the relay: %d %s", code, p)
 	}
-	if code, _ := get(t, r.browser(t), l); code != 401 {
-		t.Fatal("link opened twice:", code)
-	}
-	// Срок ссылки (2 минуты) проверяет TestLoginLinkExpires в gate4ai/internal/front/webui
-	// со сдвигом часов: здесь его ожидание добавляло бы 2 минуты к каждому CI.
 }
