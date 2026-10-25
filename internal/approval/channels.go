@@ -110,10 +110,6 @@ func (c *Channels) Status() []ChannelStatus {
 		push.State, push.Detail = StateOK, fmt.Sprintf("%d browser(s)", len(subs))
 	}
 	out = append(out, push)
-
-	web := ChannelStatus{Name: "webui", Title: "Web UI (this page; remotely — /ui/)", On: true, State: StateOK,
-		Decided: decided["webui"] + decided["webui-remote"]}
-	out = append(out, web)
 	return out
 }
 
