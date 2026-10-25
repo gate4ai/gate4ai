@@ -39,7 +39,11 @@ func (u *UI) storeItems(ctx context.Context, l string, refresh bool) ([]storeIte
 	opts := u.D.StoreOptions()
 	ix := opts.CachedIndex()
 	var ierr string
-	if (ix == nil || refresh) && opts.Registry != "" {
+	// Кэш индекса старше IndexMaxAge обновляется сам: иначе страница показывала
+	// бы коннекторы, которых в магазине давно нет. Не вышло — остаётся кэш.
+	age, cached := opts.CachedIndexAge()
+	stale := !cached || age > store.IndexMaxAge
+	if (ix == nil || refresh || stale) && opts.Registry != "" {
 		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		if nix, err := opts.RefreshIndex(cctx); err == nil {
 			ix = nix
@@ -66,7 +70,7 @@ func (u *UI) storeItems(ctx context.Context, l string, refresh bool) ([]storeIte
 	var items []storeItem
 	if ix != nil {
 		for name, e := range ix.Connectors {
-			if slices.Contains(daemon.BuiltinConnectors, name) {
+			if slices.Contains(daemon.BuiltinConnectors, name) || slices.Contains(daemon.RemovedConnectors, name) {
 				continue
 			}
 			it := storeItem{Name: name, Description: e.Description, Publisher: e.Publisher, License: e.License, Repo: e.Repo}

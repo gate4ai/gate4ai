@@ -20,9 +20,10 @@ import (
 // — из политики (migrateBuiltins).
 var legacyPackages = []string{"browser", "email"}
 
-// removedConnectors — коннекторы, которых больше нет: правила, настройки и
-// упоминания в профилях убираются из политики новой версией (откат — в версиях).
-var removedConnectors = []string{"email"}
+// RemovedConnectors — коннекторы, которых больше нет: правила, настройки и
+// упоминания в профилях убираются из политики новой версией (откат — в версиях);
+// в магазине Web UI их не показывает, даже если они ещё есть в кэше индекса.
+var RemovedConnectors = []string{"email"}
 
 // removeLegacyPackages удаляет установленные пакеты browser и email до загрузки
 // магазина: встроенный браузер важнее пакета с тем же именем.
@@ -48,11 +49,11 @@ func (d *Daemon) removeLegacyPackages() {
 // умолчанию класса), закрытые — deny. Пустая правка версии не создаёт.
 func (d *Daemon) migrateBuiltins() {
 	changed := false
-	_, err := d.Config.Edit(auth.OwnerVia("daemon"), "gate4ai update: connectors removed ("+strings.Join(removedConnectors, ", ")+"), sites and folders moved to the access lists", func(c *config.Config) error {
+	_, err := d.Config.Edit(auth.OwnerVia("daemon"), "gate4ai update: connectors removed ("+strings.Join(RemovedConnectors, ", ")+"), sites and folders moved to the access lists", func(c *config.Config) error {
 		if migrateAccess(c) {
 			changed = true
 		}
-		for _, name := range removedConnectors {
+		for _, name := range RemovedConnectors {
 			if _, ok := c.Connectors[name]; ok {
 				delete(c.Connectors, name)
 				changed = true
@@ -79,7 +80,7 @@ func (d *Daemon) migrateBuiltins() {
 		d.Log.Warn("policy not migrated", "err", err)
 	}
 	if changed && err == nil {
-		d.Log.Info("policy migrated: removed connectors dropped", "connectors", removedConnectors)
+		d.Log.Info("policy migrated: removed connectors dropped", "connectors", RemovedConnectors)
 	}
 }
 

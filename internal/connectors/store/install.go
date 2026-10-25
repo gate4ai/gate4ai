@@ -95,6 +95,19 @@ func (o Options) CachedIndex() *registry.Index {
 	return ix
 }
 
+// IndexMaxAge — возраст кэша индекса, после которого Web UI обновляет его
+// сам при открытии магазина (кнопка «Обновить каталог» — в любой момент).
+const IndexMaxAge = time.Hour
+
+// CachedIndexAge — возраст кэша индекса по времени файла; ok=false — кэша нет.
+func (o Options) CachedIndexAge() (age time.Duration, ok bool) {
+	st, err := os.Stat(filepath.Join(o.Dir, "registry-index.json"))
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(st.ModTime()), true
+}
+
 // RefreshIndex загружает индекс registry, проверяет подпись и кэширует его.
 func (o Options) RefreshIndex(ctx context.Context) (*registry.Index, error) {
 	if !o.indexKeysOK() {
