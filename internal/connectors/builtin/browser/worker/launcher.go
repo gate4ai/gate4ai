@@ -64,7 +64,13 @@ func LaunchEnv(ctx context.Context, chrome, profileDir string, env []string, ext
 		"--user-data-dir=" + profileDir,
 		// С отладкой Chrome выставляет navigator.webdriver = true — прямой признак
 		// автоматизации для антифрода и reCAPTCHA (login.mos.ru: «подозрительная активность»).
+		// Снять его иначе нельзя: Emulation.setAutomationOverride признак только включает.
 		"--disable-blink-features=AutomationControlled",
+		// --disable-blink-features у Chrome в списке «неподдерживаемых» флагов: без
+		// --test-type он весь сеанс держит жёлтый инфобар «unsupported command-line
+		// flag» (пользователь видит его при ручном входе). --test-type отключает
+		// этот инфобар и плашки про браузер по умолчанию; страницам флаг не виден.
+		"--test-type",
 		"--no-first-run", "--no-default-browser-check",
 	}
 	if !pipeSupported {
