@@ -508,4 +508,8 @@ func TestBusyLabels(t *testing.T) {
 	if js := get("/static/app.js"); !strings.Contains(js, `"a[data-busy]"`) || !strings.Contains(js, `f.method !== "post"`) {
 		t.Error("app.js: no busy handler")
 	}
+	// Счётчик согласований в шапке живёт на любой странице, не только там, где очередь.
+	if js := get("/static/app.js"); !strings.Contains(js, `if (live || counter)`) || !strings.Contains(js, `/approvals/live?count=1`) {
+		t.Error("app.js: header counter is not polled without the queue")
+	}
 }

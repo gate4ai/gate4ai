@@ -401,14 +401,28 @@ func TestLiveApprovals(t *testing.T) {
 		}
 		return body(t, r)
 	}
-	if p := live(); !strings.Contains(p, `"pending":[]`) {
+	if p := live(); !strings.Contains(p, `"pending":[]`) || !strings.Contains(p, `"count":0`) {
 		t.Fatal("empty queue", p)
+	}
+	// Счётчик для шапки на страницах без очереди: только число, без карточек.
+	count := func() string {
+		r, _ := c.Get(base + "/approvals/live?count=1")
+		if r.StatusCode != 200 {
+			t.Fatal("live count", r.StatusCode)
+		}
+		return strings.TrimSpace(body(t, r))
+	}
+	if p := count(); p != `{"count":0}` {
+		t.Fatal("count", p)
 	}
 	// Новый запрос появляется карточкой с кнопками.
 	a := d.Pipeline.Execute(context.Background(), pipeline.Call{Agent: "bot", Action: "notes.append", Args: map[string]any{"text": "one"}})
 	p := live()
-	if !strings.Contains(p, `"id":"`+a.ID+`"`) || !strings.Contains(p, `data-approval=\"`+a.ID+`\"`) || !strings.Contains(p, "Разрешить") {
+	if !strings.Contains(p, `"id":"`+a.ID+`"`) || !strings.Contains(p, `data-approval=\"`+a.ID+`\"`) || !strings.Contains(p, "Разрешить") || !strings.Contains(p, `"count":1`) {
 		t.Fatal("new approval not live", p)
+	}
+	if p := count(); p != `{"count":1}` {
+		t.Fatal("count", p)
 	}
 	// Решён в Telegram — уходит из очереди с пояснением.
 	if _, err := d.Pipeline.Decide(context.Background(), a.ID, true, "telegram", "tg:1"); err != nil {
