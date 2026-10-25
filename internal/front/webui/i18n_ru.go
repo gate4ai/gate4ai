@@ -373,9 +373,7 @@ var ru = map[string]string{
 	"password %s — gate4.ai enters it, only for %s (the connector never sees it)": "пароль %s — подставляет gate4.ai, только для %s (коннектор его не видит)",
 
 	// Доступ: страница коннектора
-	"Files are open for the whole home folder. Put only the folders agents need below (hidden folders and keys stay closed anyway).": "Файлы открыты на весь домашний каталог. Укажите ниже только нужные агентам папки (скрытые папки и ключи закрыты в любом случае).",
-	"Mail service": "Почтовый сервис", "another — I will enter the servers myself": "другой — укажу серверы сам",
-	"The IMAP/SMTP servers are filled in.": "Серверы IMAP/SMTP подставятся сами.", "Who may use it": "Кто может пользоваться",
+	"Files are open for the whole home folder. Put only the folders agents need below (hidden folders and keys stay closed anyway).": "Файлы открыты на весь домашний каталог. Укажите ниже только нужные агентам папки (скрытые папки и ключи закрыты в любом случае).", "Who may use it": "Кто может пользоваться",
 	"No agents yet.": "Агентов пока нет.",
 	"They work with the defaults; change them only if something does not work or you know why.": "Они работают со значениями по умолчанию; меняйте, только если что-то не работает или вы знаете зачем.",
 	"For %s.": "Для %s.", "Permissions %s have no agents.": "У прав %s нет агентов.", "different decisions, see below": "решения разные, см. ниже",
@@ -419,18 +417,8 @@ var ru = map[string]string{
 	"Chrome profile": "Профиль Chrome", "A dedicated profile; ~/.gate4ai-chrome by default.": "Отдельный профиль; по умолчанию ~/.gate4ai-chrome.",
 	"Path to Chrome": "Путь к Chrome", "Empty — find the installed Chrome.": "Пусто — найти установленный Chrome.",
 	"CDP address": "Адрес CDP", "An already running Chrome; empty — the package starts it.": "Уже запущенный Chrome; пусто — пакет запустит его сам.",
-	"Screen": "Экран", "auto (default): your screen; on a server without one — a virtual screen (Xvfb), without Xvfb — no screen (headless, sites see it more often). You watch the sessions in Browser either way.": "auto (по умолчанию): ваш экран; на сервере без него — виртуальный экран (Xvfb), без Xvfb — без экрана (headless, сайты замечают его чаще). Сеансы видно в разделе «Браузер» в любом случае.", "Email address": "Адрес почты",
-	"App password": "Пароль приложения",
-	"Not your main password but an app password from the mail settings. gate4.ai keeps it; the connector never sees it.": "Не основной пароль, а пароль приложения из настроек почты. Хранит gate4.ai; коннектор его не видит.",
-	"IMAP server": "Сервер IMAP", "Filled in for the chosen mail service.": "Подставляется для выбранного почтового сервиса.",
-	"IMAP port": "Порт IMAP", "Usually 993.": "Обычно 993.", "Usually the same as the address.": "Обычно совпадает с адресом.",
-	"SMTP server": "Сервер SMTP", "SMTP port": "Порт SMTP", "Usually 465.": "Обычно 465.", "SMTP password": "Пароль SMTP",
-	"Empty — the same as for IMAP.": "Пусто — тот же, что для IMAP.",
-	"App password: myaccount.google.com → Security → App passwords (2-Step Verification is required).": "Пароль приложения: myaccount.google.com → Безопасность → Пароли приложений (нужна двухэтапная проверка).",
-	"App password: id.yandex.ru → Security → App passwords → Mail.":                                    "Пароль приложения: id.yandex.ru → Безопасность → Пароли приложений → Почта.",
-	"Password for an external app: Mail ID settings → Security.":                                       "Пароль для внешнего приложения: настройки Mail ID → Безопасность.",
-	"App password: account.apple.com → Sign-In and Security → App-Specific Passwords.":                 "Пароль приложения: account.apple.com → Вход и безопасность → Пароли приложений.",
-	"App password: Settings → Privacy & Security → App passwords.":                                     "Пароль приложения: Settings → Privacy & Security → App passwords.",
+	"Screen": "Экран", "auto (default): your screen; on a server without one — a virtual screen (Xvfb), without Xvfb — no screen (headless, sites see it more often). You watch the sessions in Browser either way.": "auto (по умолчанию): ваш экран; на сервере без него — виртуальный экран (Xvfb), без Xvfb — без экрана (headless, сайты замечают его чаще). Сеансы видно в разделе «Браузер» в любом случае.",
+	"App password: Settings → Privacy & Security → App passwords.": "Пароль приложения: Settings → Privacy & Security → App passwords.",
 	"Gmail": "Gmail", "Yandex": "Яндекс", "Mail.ru": "Mail.ru", "iCloud": "iCloud", "Fastmail": "Fastmail",
 
 	// Правила
