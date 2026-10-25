@@ -363,6 +363,8 @@ func resolvedText(a *state.Approval) Msg {
 
 // livePending — очередь подтверждений для живого обновления страницы (app.js):
 // карточки ожидающих запросов и итог тех из known, что уже не ждут решения.
+// С ?count=1 — только число ожидающих: так шапка (счётчик у «Главной»)
+// обновляется на любой странице, не получая HTML карточек.
 func (u *UI) livePending(m mount) http.HandlerFunc {
 	type card struct {
 		ID   string `json:"id"`
@@ -378,10 +380,19 @@ func (u *UI) livePending(m mount) http.HandlerFunc {
 			http.Error(w, "login required", 401)
 			return
 		}
-		pend, err := u.D.State.ListApprovals(state.Pending, 50)
+		pend, err := u.D.State.ListApprovals(state.Pending, 100)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		count := len(pend)
+		if r.URL.Query().Get("count") == "1" {
+			_ = json.NewEncoder(w).Encode(map[string]int{"count": count})
+			return
+		}
+		if len(pend) > 50 {
+			pend = pend[:50]
 		}
 		back := "/approvals"
 		if b := r.URL.Query().Get("back"); b == "/" || strings.HasPrefix(b, "/setup/check?") {
@@ -390,9 +401,10 @@ func (u *UI) livePending(m mount) http.HandlerFunc {
 		l := u.lang(r)
 		v := view{Base: m.base, Remote: m.remote, CSRF: s.csrf, Lang: l}
 		out := struct {
+			Count    int    `json:"count"`
 			Pending  []card `json:"pending"`
 			Resolved []gone `json:"resolved"`
-		}{Pending: []card{}, Resolved: []gone{}}
+		}{Count: count, Pending: []card{}, Resolved: []gone{}}
 		shown := map[string]bool{}
 		for _, a := range pend {
 			var b strings.Builder
@@ -419,7 +431,6 @@ func (u *UI) livePending(m mount) http.HandlerFunc {
 				out.Resolved = append(out.Resolved, gone{ID: id, Text: M("Already decided: %s", resolvedText(a)).In(l)})
 			}
 		}
-		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	}
 }

@@ -203,22 +203,24 @@
 
   // Очередь подтверждений обновляется сама, пока страница открыта: новые
   // запросы появляются, решённые в другом канале или истёкшие — исчезают
-  // с пояснением, кто и как решил.
+  // с пояснением, кто и как решил. Счётчик у «Главной» в шапке есть на
+  // каждой странице: без очереди опрашивается только число (?count=1).
   var live = document.querySelector("[data-live-pending]");
-  if (live) {
-    var back = live.getAttribute("data-back") || "/approvals";
+  var counter = document.querySelector("[data-pending-count]");
+  if (live || counter) {
+    var back = live ? live.getAttribute("data-back") || "/approvals" : "/approvals";
     var cardOf = function (id) {
       var found = null;
       live.querySelectorAll("[data-approval]").forEach(function (c) { if (c.getAttribute("data-approval") === id) found = c; });
       return found;
     };
     var setCount = function (n) {
-      var c = document.querySelector("[data-pending-count]");
-      if (!c) return;
-      c.textContent = n;
-      c.hidden = n === 0;
+      if (!counter) return;
+      counter.textContent = n;
+      counter.hidden = n === 0;
     };
     var apply = function (j) {
+      if (!live) { setCount(j.count); return; }
       j.resolved.forEach(function (g) {
         var c = cardOf(g.id);
         if (!c || c.querySelector("form[data-sent]")) return; // решаем здесь — ждём ответа формы
@@ -245,14 +247,17 @@
       });
       var empty = live.querySelector("[data-live-empty]");
       if (empty) empty.hidden = j.pending.length > 0;
-      setCount(j.pending.length);
+      setCount(j.count !== undefined ? j.count : j.pending.length);
     };
     var poll = function () {
       if (document.hidden) return;
-      var known = [];
-      live.querySelectorAll("[data-approval]").forEach(function (c) { known.push(c.getAttribute("data-approval")); });
-      fetch(base + "/approvals/live?back=" + encodeURIComponent(back) + "&known=" + encodeURIComponent(known.join(",")),
-        { credentials: "same-origin", headers: { Accept: "application/json" } })
+      var url = base + "/approvals/live?count=1";
+      if (live) {
+        var known = [];
+        live.querySelectorAll("[data-approval]").forEach(function (c) { known.push(c.getAttribute("data-approval")); });
+        url = base + "/approvals/live?back=" + encodeURIComponent(back) + "&known=" + encodeURIComponent(known.join(","));
+      }
+      fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (j) { if (j) apply(j); })
         .catch(function () {});
