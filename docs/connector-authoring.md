@@ -124,7 +124,7 @@ credentials:
       fields:
         - { name: login, secret: "@mosru.login", type: text }
         - { name: password, secret: "@mosru.password" }
-    login_page: { selector: "#otp_input" }   # login_required — только там, где сайт просит войти, а не на любой странице bind
+    login_page: { selector: "[data-testid=otp_input]" }   # login_required — только там, где сайт просит войти, а не на любой странице bind
     prompts: { sms: "Код из SMS для входа в ЕМИАС" }
     use: [connector-dev]
     connectors: [lk_emias]
