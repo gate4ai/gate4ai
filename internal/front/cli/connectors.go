@@ -26,7 +26,9 @@ import (
 
 const connectorsUsage = `usage:
   gate4ai connectors list
-  gate4ai connectors new <name> --site <domain> [-o folder]   a WASM connector over the browser to start from
+  gate4ai connectors new <name> [--site <domain>] [--from-session <s-id | steps.json>] [--task <action>] [-o folder]
+                                                   a connector over the browser in the knowledge folder; --from-session: recipe,
+                                                   fixture and a draft action from a recorded session (connectors new --help)
   gate4ai connectors install <name[@version]> [--yes]            from the store (a bare name never means a file)
   gate4ai connectors install <./file.g4c | https://…/file.g4c> [--dev] [--yes]
   gate4ai connectors install <./source-folder> [--yes] [--watch] build from Go sources (your own build, like --dev);
@@ -70,7 +72,7 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 	case "verify":
 		return e.verifyPackage(ctx, rest)
 	case "new":
-		return e.scaffold(rest)
+		return e.scaffold(ctx, rest)
 	}
 	// Остальные команды — к daemon (сокет владельца).
 	c := e.Client()

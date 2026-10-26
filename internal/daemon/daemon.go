@@ -170,6 +170,7 @@ func New(opt Options) (*Daemon, error) {
 	d.strict.Store(true)
 	d.dropRevoked()
 	d.AddRoutes(d.connectorRoutes)
+	d.AddRoutes(d.knowledgeRoutes)
 	d.AddRoutes(d.browserRoutes)
 	eng, err := d.compilePolicy(d.Config.Current())
 	if err != nil {

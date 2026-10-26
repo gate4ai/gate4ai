@@ -46,7 +46,7 @@ func TestConnectorsNew(t *testing.T) {
 			t.Errorf("%s: %v", f, err)
 		}
 	}
-	if _, err := hosttest.LoadFixture(filepath.Join(dir, "testdata", "session.json")); err != nil {
+	if _, err := hosttest.LoadFixture(filepath.Join(dir, "testdata", "summary.json")); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(must(os.ReadFile(filepath.Join(dir, "go.mod"))), []byte("github.com/gate4ai/gate4ai v")) {

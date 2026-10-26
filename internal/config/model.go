@@ -46,6 +46,14 @@ type Config struct {
 	// (allow | read | connector | ask | deny; папки — ещё append). Решает самая
 	// конкретная строка; без строки — deny.
 	Access Access `yaml:"access,omitempty" json:"access"`
+	// Knowledge — папка знаний: папки коннекторов с рецептами сайтов, которые
+	// агент накапливает (docs/connector-sharing-ux.md).
+	Knowledge Knowledge `yaml:"knowledge,omitempty" json:"knowledge"`
+}
+
+// Knowledge — папка знаний. Dir — путь ("~/…" допустим); пусто — ~/gate4ai-knowledge.
+type Knowledge struct {
+	Dir string `yaml:"dir,omitempty" json:"dir,omitempty"`
 }
 
 // Access — списки доступа Браузера и Файлов (общие для всех агентов).

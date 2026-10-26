@@ -71,6 +71,12 @@ func (selfConnector) Manifest() manifest.Manifest {
 				Example: `gate4ai gate4ai change_policy --summary "Let me append to notes" --changes '[{"op":"add_rule","action":"files.append","when":"glob(path, \"~/notes/**\")","effect":"allow"}]'`},
 			{Name: "policy_summary", Class: "read", Description: "Your profile (connectors, rules, limits — what you may do without asking, what needs approval, what is denied), the other profiles and the lists",
 				InputSchema: manifest.MustSchema(`{ type: object, properties: {} }`)},
+			{Name: "sites_lookup", Class: "read", Title: "What is known about a site",
+				Description: "Before working on a site: installed connectors for it, connectors in the store, the owner's knowledge folder (recipes and drafts), how to sign in (accounts and login connectors for this origin) and the next step to take",
+				InputSchema: manifest.MustSchema(`{ type: object, properties: {
+				  domain: { type: string, maxLength: 253, description: "the site: a domain (rzd.ru, pass.rzd.ru) or a page address" } },
+				  required: [domain] }`),
+				Example: `gate4ai sites lookup rzd.ru`},
 		}}
 }
 
@@ -199,6 +205,12 @@ func (s selfConnector) Execute(ctx context.Context, r abi.ExecRequest) (abi.Exec
 	switch r.Action {
 	case "policy_summary":
 		return abi.ExecResult{Structured: PolicySummary(d.Config.Current(), agent)}, nil
+	case "sites_lookup":
+		dom, _ := r.Args["domain"].(string)
+		if strings.TrimSpace(dom) == "" {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "domain is required")
+		}
+		return abi.ExecResult{Structured: d.SitesLookup(dom, agent)}, nil
 	case "change_policy":
 		changes, err := changesOf(r.Args)
 		if err != nil {

@@ -127,7 +127,7 @@ func TestRemoteMCPWithOAuth(t *testing.T) {
 	}
 	st, m := mcpCall(access, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	tools := m["result"].(map[string]any)["tools"].([]any)
-	if st != 200 || len(tools) != 5 || tools[2].(map[string]any)["name"] != "notes_read" {
+	if st != 200 || len(tools) != 6 || tools[3].(map[string]any)["name"] != "notes_read" {
 		t.Fatal(st, m)
 	}
 	_, m = mcpCall(access, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"notes_append","arguments":{"text":"my password"}}}`)

@@ -81,7 +81,7 @@ func TestFirstRunPaths(t *testing.T) {
 	}
 	// Все страницы отрисовываются.
 	for _, path := range []string{"/approvals", "/approvals/telegram", "/agents", "/agents/bot",
-		"/agents/bot?client=cloud", "/agents/bot?client=codex", "/connectors", "/connectors/notes", "/policy", "/policy?sim=notes.append",
+		"/agents/bot?client=cloud", "/agents/bot?client=codex", "/connectors", "/connectors/notes", "/knowledge", "/policy", "/policy?sim=notes.append",
 		"/policy/rule", "/policy/rule?profile=p&action=notes.append", "/policy/templates", "/policy/yaml", "/journal", "/vault", "/settings", "/settings/relay",
 		"/setup", "/setup/access?client=cursor", "/setup/access?client=cloud", "/setup/check?agent=bot&client=cursor", "/settings/notifications", "/settings/login",
 		"/settings/internet", "/settings/internet?link=1", "/settings/advanced"} {
