@@ -36,6 +36,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
+	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/platform/browserenv"
 	"github.com/gate4ai/gate4ai/internal/relayclient"
@@ -70,10 +71,11 @@ var funcs = template.FuncMap{
 		}
 		return m
 	},
-	"lines":  func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
-	"first":  func(s string) string { return strings.SplitN(s, "\n", 2)[0] },
-	"langs":  func() any { return Langs },
-	"pageOf": pageOf,
+	"lines":         func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
+	"first":         func(s string) string { return strings.SplitN(s, "\n", 2)[0] },
+	"langs":         func() any { return Langs },
+	"pageOf":        pageOf,
+	"verifiedAfter": func() int { return pipeline.VerifiedAfter },
 }
 
 // tpls — шаблоны на каждом языке: функции перевода привязаны к языку.

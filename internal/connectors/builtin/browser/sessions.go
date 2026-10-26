@@ -488,3 +488,39 @@ func (b *Browser) busy(r abi.ExecRequest, err error) error {
 		"or browser.read / screenshot --url <url> without session (a temporary tab); close your own with browser.close --session <id> (or --all)",
 		err, worker.MaxSessions, strings.Join(held, "; "))
 }
+
+// AdoptCall — страница корневого действия коннектора становится сеансом
+// агента (handoff_to_agent: действие-черновик не удалось, агент доделывает
+// задачу на той же странице и чинит коннектор). Возвращает id нового сеанса и
+// адрес страницы; false — у действия нет страницы (ещё не открывал или уже
+// освободил). Страница не освобождается EndCall: она уже не числится за вызовом.
+func (b *Browser) AdoptCall(call, agent, instance string) (id, url string, ok bool) {
+	b.mu.Lock()
+	cs, found := b.sessions[call]
+	if found {
+		delete(b.sessions, call)
+	}
+	b.mu.Unlock()
+	if !found {
+		return "", "", false
+	}
+	cs.timer.Stop()
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	var raw [8]byte
+	_, _ = rand.Read(raw[:])
+	now := time.Now()
+	id = "s-" + hex.EncodeToString(raw[:])
+	as := &agentSession{callSession: callSession{s: cs.s, sites: cs.sites, opened: cs.opened, url: cs.url, sid: id, shots: cs.shots,
+		owner: who(agent, instance), since: now},
+		id: id, agent: agent, instance: instance, lock: make(chan struct{}, 1), last: now}
+	as.setURL(cs.url)
+	as.timer = time.AfterFunc(AgentIdle, func() { b.closeIdle(as) })
+	b.mu.Lock()
+	if b.agents == nil {
+		b.agents = map[string]*agentSession{}
+	}
+	b.agents[as.id] = as
+	b.mu.Unlock()
+	return id, cs.url, true
+}

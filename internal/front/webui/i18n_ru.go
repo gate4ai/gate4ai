@@ -7,6 +7,8 @@ package webui
 // TestRussianCatalogComplete. Термины: daemon → gate4.ai, relay → доступ из
 // интернета, profile → права агента, receipt → запись журнала.
 var ru = map[string]string{
+	// Статус действий по прогонам.
+	"a draft runs with a trace of its browser calls; on failure the page is handed to the agent": "черновик выполняется с трассой подвызовов браузера; при сбое страница передаётся агенту",
 	// Установка из git.
 	"<b>A git repository</b> (<code>github.com/user/gate4ai-name</code>, optionally <code>@tag</code>) — cloned into your knowledge folder and built there as your own build; without Go — the package of its release.": "<b>Git-репозиторий</b> (<code>github.com/user/gate4ai-name</code>, можно <code>@тег</code>) — клонируется в вашу папку знаний и собирается там как своя сборка; без Go — пакет его релиза.",
 	"commit": "коммит",

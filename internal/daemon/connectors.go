@@ -184,7 +184,8 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 		for _, it := range list {
 			c, loaded := d.Registry.Get(it.Name)
 			row := map[string]any{"connector": it.Name, "version": it.Manifest.Version, "trust": it.Info.Trust,
-				"publisher": it.Info.Publisher, "source": it.Info.Source, "loaded": loaded, "capabilities": it.Info.Capabilities}
+				"publisher": it.Info.Publisher, "source": it.Info.Source, "loaded": loaded, "capabilities": it.Info.Capabilities,
+				"actions": d.actionRuns(it.Manifest)}
 			if s, ok := c.(interface{ State() string }); ok {
 				row["runtime"], row["state"] = it.Manifest.Runtime, s.State()
 			}

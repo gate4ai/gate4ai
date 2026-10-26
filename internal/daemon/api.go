@@ -637,6 +637,7 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 			Args   map[string]any `json:"args"`
 			Wait   string         `json:"wait"`
 			Agent  string         `json:"agent"` // только владелец: выполнить от имени агента (его профиль)
+			Trace  bool           `json:"trace"` // подвызовы браузера в ответ; при сбое — страница агенту
 		}
 		if err := readJSON(r, &req); err != nil {
 			WriteError(w, 400, "bad_request", err.Error())
@@ -659,7 +660,7 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 			wait = min(wait, maxPublicWait)
 		}
 		args, _ := numbersToFloat(map[string]any(req.Args)).(map[string]any)
-		res := d.Pipeline.Execute(r.Context(), pipeline.Call{Agent: agent, Action: req.Action, Args: args, Wait: wait})
+		res := d.Pipeline.Execute(r.Context(), pipeline.Call{Agent: agent, Action: req.Action, Args: args, Wait: wait, Trace: req.Trace})
 		WriteJSON(w, 200, res)
 	}))
 	mux.HandleFunc("GET /v1/status/{id}", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {

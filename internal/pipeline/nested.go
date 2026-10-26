@@ -30,6 +30,8 @@ type callInfo struct {
 	// Session — сеанс браузера агента, в котором идёт вход коннектором входа
 	// (browser.login учётки с via): страница вложенных вызовов browser.
 	Session string
+	// Trace — корневое действие трассируется: подвызовы попадают в ответ агенту.
+	Trace bool
 }
 
 type callKey struct{}

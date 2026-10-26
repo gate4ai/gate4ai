@@ -542,7 +542,7 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 	if opts.json {
 		e.ForceJSON = true
 	}
-	body := map[string]any{"action": tool.Name, "args": vals, "wait": opts.wait, "agent": opts.as}
+	body := map[string]any{"action": tool.Name, "args": vals, "wait": opts.wait, "agent": opts.as, "trace": opts.trace}
 	var res map[string]any
 	if err := e.Client().Do(ctx, "POST", "/v1/call", body, &res); err != nil {
 		return e.fail(err)
@@ -679,7 +679,7 @@ func (e *Env) actionHelp(t skill.Tool) {
 		}
 		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, bracket(skill.Limits(p.Schema)))
 	}
-	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n"+
+	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n  --trace           connector actions: the browser calls it made (trace); on failure the page stays open as your session (handoff_to_agent)\n"+
 		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           save the image or the file of the result (page_screenshot, browser.download, files.read) to file f;\n                    pending approval: gate4ai status <id> --wait 10m --out f saves it after the decision\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
 }
 
@@ -731,7 +731,7 @@ func hoistCallOpts(args []string) (rest, opts []string) {
 		switch {
 		case !strings.HasPrefix(a, "--"):
 			return args, opts
-		case name == "json" && !hasVal:
+		case (name == "json" || name == "trace") && !hasVal:
 			opts, args = append(opts, a), args[1:]
 		case (name == "wait" || name == "as" || name == "out") && hasVal:
 			opts, args = append(opts, a), args[1:]
@@ -745,11 +745,12 @@ func hoistCallOpts(args []string) (rest, opts []string) {
 }
 
 type callOpts struct {
-	wait string
-	as   string
-	help bool
-	json bool   // --json без значения: вывод JSON
-	out  string // --out f: изображение или файл ответа — в файл f
+	wait  string
+	as    string
+	help  bool
+	json  bool   // --json без значения: вывод JSON
+	out   string // --out f: изображение или файл ответа — в файл f
+	trace bool   // --trace: подвызовы браузера в ответе, при сбое — страница агенту
 }
 
 // MaxArgFile — предел файла аргумента (--<name>_file).
@@ -811,6 +812,9 @@ func parseArgs(t skill.Tool, args []string, stdin io.Reader) (map[string]any, ca
 		_, isArg := types[name]
 		switch {
 		case isArg:
+		case name == "trace" && !hasVal:
+			o.trace = true
+			continue
 		case name == "out":
 			v, err := next()
 			if err != nil {

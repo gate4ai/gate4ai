@@ -1058,3 +1058,42 @@ func TestCloseSessionReleasesAfterAction(t *testing.T) {
 		t.Fatal("page not released after close:", err)
 	}
 }
+
+// AdoptCall — страница корневого вызова коннектора становится сеансом агента:
+// агент продолжает на той же странице, EndCall её больше не трогает.
+func TestAdoptCall(t *testing.T) {
+	_, b, eng := setup(t, nil)
+	caller := &abi.Caller{Connector: "tbank", Call: "root-adopt", Params: map[string]any{"domains": []any{"www.tbank-online.com"}}}
+	if _, _, ok := b.AdoptCall("root-adopt", "bot", ""); ok {
+		t.Fatal("nothing to adopt before open")
+	}
+	if _, err := exec(b, "open", map[string]any{"url": "https://www.tbank-online.com/"}, caller); err != nil {
+		t.Fatal(err)
+	}
+	id, url, ok := b.AdoptCall("root-adopt", "bot", "session:1")
+	if !ok || !strings.HasPrefix(id, "s-") || url != "https://www.tbank-online.com/" {
+		t.Fatal(id, url, ok)
+	}
+	b.EndCall("root-adopt") // страница уже у агента: ничего не освобождает
+	res, err := b.Execute(context.Background(), nil, abi.ExecRequest{Action: "observe", Args: map[string]any{"session": id}, Agent: "bot", AgentInstance: "session:1",
+		Settings: map[string]any{"cdp_url": "http://127.0.0.1:1", "allowed_domains": []any{"*.example.com", "www.tbank-online.com"}}})
+	if err != nil || res.Structured.(map[string]any)["url"] != "https://www.tbank-online.com/" {
+		t.Fatal(res, err)
+	}
+	// Чужой агент сеанс не видит.
+	if _, err := b.Execute(context.Background(), nil, abi.ExecRequest{Action: "observe", Args: map[string]any{"session": id}, Agent: "other",
+		Settings: map[string]any{"cdp_url": "http://127.0.0.1:1", "allowed_domains": []any{"www.tbank-online.com"}}}); err == nil {
+		t.Fatal("another agent used the adopted session")
+	}
+	if _, err := b.Execute(context.Background(), nil, abi.ExecRequest{Action: "close", Args: map[string]any{"session": id}, Agent: "bot", AgentInstance: "session:1",
+		Settings: map[string]any{"cdp_url": "http://127.0.0.1:1", "allowed_domains": []any{"www.tbank-online.com"}}}); err != nil {
+		t.Fatal(err)
+	}
+	b.mu.Lock()
+	_, still := b.agents[id]
+	b.mu.Unlock()
+	if still {
+		t.Fatal("the adopted session is still listed after close")
+	}
+	_ = eng
+}

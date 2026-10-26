@@ -67,6 +67,12 @@ type Result struct {
 	// Log — строки лога коннектора за время вызова (только своя сборка, --dev):
 	// агент, который пишет коннектор, видит, что тот делал.
 	Log []string `json:"log,omitempty"`
+	// Trace — подвызовы браузера за время действия (--trace или действие-черновик).
+	Trace []TraceStep `json:"trace,omitempty"`
+	// Handoff — действие не удалось, его страница отдана агенту сеансом (CodeHandoffToAgent).
+	Handoff *HandoffToAgent `json:"handoff,omitempty"`
+	// Runs — прогоны действия после этого вызова (только коннекторы не из ядра).
+	Runs *RunStats `json:"runs,omitempty"`
 	// connectorCode — код ошибки коннектора (abi) для вложенного вызова.
 	connectorCode string
 }
@@ -173,9 +179,17 @@ type Pipeline struct {
 	// ViewURL — ссылка на просмотр сеанса браузера (nil — без неё): ответ
 	// browser.open с новым сеансом несёт её в view_url, уведомление handoff — тоже.
 	ViewURL func(session string) string
+	// Adopt — страница корневого действия коннектора становится сеансом агента
+	// (handoff_to_agent при сбое трассируемого действия): id сеанса и адрес
+	// страницы; false — страницы нет. nil — передачи нет.
+	Adopt func(root, agent, instance string) (session, url string, ok bool)
+	// RunHook — результат корневого прогона действия коннектора (счётчик
+	// проверенности): daemon обновляет рецепт в папке знаний.
+	RunHook func(action string, ok bool, stats RunStats)
 
 	mu     sync.RWMutex
 	engine *policy.Engine
+	traces sync.Map // корневая квитанция → *traceBuf (трассируемые действия)
 	// admitMu — повторное решение и резерв лимита перед исполнением атомарны:
 	// параллельные вызовы не проходят лимит по одному и тому же счётчику.
 	admitMu sync.Mutex
@@ -216,6 +230,9 @@ type Call struct {
 	Wait   time.Duration // сколько ждать подтверждения; 0 — сразу вернуть pending
 	// Internal — вызов самого daemon (Egress Proxy); только так доступны внутренние коннекторы.
 	Internal bool
+	// Trace — вернуть подвызовы браузера и при сбое отдать страницу агенту
+	// (действия-черновики трассируются и без флага).
+	Trace bool
 }
 
 // Execute проводит действие через все шаги pipeline.
@@ -246,6 +263,9 @@ func (p *Pipeline) Execute(ctx context.Context, c Call) Result {
 			res.Status, res.Code, res.Message = StatusError, CodeInvalidArgs, err.Error()
 			return res
 		}
+	}
+	if c.Trace {
+		ctx = WithTrace(ctx)
 	}
 	// 2. Обогащение.
 	prov, perr := p.provenance(args)
@@ -414,8 +434,20 @@ func (p *Pipeline) run(ctx context.Context, agent, action string, cli connectors
 		ctx = context.WithValue(ctx, logConnsKey{}, set)
 	}
 	set.add(conn)
+	parent, nested := callFrom(ctx)
+	var buf *traceBuf
+	if root && !nested {
+		buf = &traceBuf{}
+		ctx = context.WithValue(ctx, traceBufKey{}, buf)
+	}
 	res := p.execute(ctx, agent, action, cli, act, args, dec, appr)
-	if _, nested := callFrom(ctx); root && !nested && p.ConnectorLog != nil {
+	if nested && parent.Trace {
+		// Подвызов трассируемого действия — в ответ его агенту.
+		if b, ok := ctx.Value(traceBufKey{}).(*traceBuf); ok {
+			b.add(p.traceStep(action, act, args, res))
+		}
+	}
+	if root && !nested && p.ConnectorLog != nil {
 		// Строки своей сборки и коннекторов, вызванных ради неё (коннектор входа).
 		for _, c := range set.list() {
 			for _, l := range p.ConnectorLog(c, start) {
@@ -426,8 +458,18 @@ func (p *Pipeline) run(ctx context.Context, agent, action string, cli connectors
 			}
 		}
 	}
+	if root && !nested && cli.Manifest().Runtime != manifest.RuntimeBuiltin {
+		if p.traced(ctx, cli.Manifest(), action) {
+			res.Trace = buf.list()
+		}
+		ok := res.Status == StatusOK && (res.Verified == nil || *res.Verified)
+		st := p.recordRun(action, ok)
+		res.Runs = &st
+	}
 	return res
 }
+
+type traceBufKey struct{}
 
 type logConnsKey struct{}
 
@@ -467,15 +509,19 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 	// поставщиков живёт до конца корневого действия.
 	info := callInfo{Agent: agent, Act: act, ID: receipt.ID, Root: receipt.ID, Chain: []string{conn}}
 	exReq := abi.ExecRequest{Action: act.Name, Args: args, Settings: settings}
-	if parent, ok := callFrom(ctx); ok {
+	parent, nested := callFrom(ctx)
+	if nested {
 		receipt.Parent = parent.ID
 		info.Root, info.Depth, info.Chain = parent.Root, parent.Depth+1, append(slices.Clone(parent.Chain), conn)
-		info.Session = parent.Session
+		info.Session, info.Trace = parent.Session, parent.Trace
 		if n, ok := ctx.Value(nestedKey{}).(nestedCall); ok {
 			exReq.Caller = &abi.Caller{Connector: n.caller, Call: parent.Root, Params: p.browserParams(n.sites), Session: parent.Session}
 		}
-	} else if p.EndCall != nil {
-		defer p.EndCall(info.Root)
+	} else {
+		info.Trace = p.traced(ctx, cli.Manifest(), action)
+		if p.EndCall != nil {
+			defer p.EndCall(info.Root)
+		}
 	}
 	// Перед исполнением: политика заново и резерв лимита (одобренное давно
 	// действие, параллельные вызовы).
@@ -519,6 +565,22 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 			res.Code = CodeOffline
 		}
 		res.ID, res.Receipt, res.Message = receipt.ID, audit.Short(hash), p.maskString(err.Error())
+		if !nested && info.Trace && p.Adopt != nil {
+			// Коннектор ведёт, агент страхует: страница неудавшегося действия
+			// становится сеансом агента — он доделывает задачу и чинит коннектор.
+			if sid, url, ok := p.Adopt(info.Root, agent, agentInstance(CallerFrom(ctx))); ok {
+				h := &HandoffToAgent{Session: sid, URL: url}
+				if buf, ok := ctx.Value(traceBufKey{}).(*traceBuf); ok {
+					h.FailedStep = len(buf.list())
+				}
+				if p.ViewURL != nil {
+					h.ViewURL = p.ViewURL(sid)
+				}
+				h.Hint = fmt.Sprintf("the page is yours now: continue with gate4ai browser … --session %s (observe, act, close), finish the task there, then fix the connector in its folder and reinstall it (connectors install <folder> --watch); step %d of trace failed", sid, h.FailedStep)
+				res.Code, res.Handoff = CodeHandoffToAgent, h
+				res.Message += "; " + h.Hint
+			}
+		}
 		// Ошибка — и строкой лога коннектора (`gate4ai connectors logs`, поле log
 		// своей сборки); ошибка подвызова — и в логе корневого коннектора.
 		p.Log.Warn(action+" failed", "connector", conn, "receipt", res.Receipt, "err", res.Message)

@@ -192,6 +192,8 @@ func New(opt Options) (*Daemon, error) {
 	d.Pipeline.Home = d.userHome
 	d.Pipeline.Describe = map[string]func(string, map[string]any) (string, error){SelfConnector: d.describeSelf}
 	d.Pipeline.EndCall = d.endCall
+	d.Pipeline.Adopt = d.adoptCall
+	d.Pipeline.RunHook = d.recordRun
 	d.Pipeline.ConnectorLog = d.devLog
 	d.Pipeline.AlwaysAsk = map[string]func(map[string]any) string{SelfConnector: d.alwaysAskSelf}
 	d.Pipeline.Vault = d.Vault

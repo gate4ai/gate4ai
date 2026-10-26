@@ -169,6 +169,20 @@ func (b *Builtin) PageURL(session, call string) string {
 	return ""
 }
 
+// CallAdopter — коннектор, который умеет отдать страницу корневого вызова
+// агенту сеансом (браузер): handoff_to_agent.
+type CallAdopter interface {
+	AdoptCall(call, agent, instance string) (session, url string, ok bool)
+}
+
+// AdoptCall — страница корневого вызова становится сеансом агента (CallAdopter).
+func (b *Builtin) AdoptCall(call, agent, instance string) (string, string, bool) {
+	if a, ok := b.c.(CallAdopter); ok {
+		return a.AdoptCall(call, agent, instance)
+	}
+	return "", "", false
+}
+
 // EndCall — корневое действие закончилось: коннектор освобождает его состояние.
 func (b *Builtin) EndCall(call string) {
 	if e, ok := b.c.(CallEnder); ok {

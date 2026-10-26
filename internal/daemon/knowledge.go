@@ -5,6 +5,8 @@ package daemon
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/knowledge"
+	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/policy"
 )
 
@@ -151,14 +154,7 @@ func (d *Daemon) SitesLookup(raw, agent string) map[string]any {
 		if !matches {
 			continue
 		}
-		var actions []map[string]any
-		for _, a := range m.Actions {
-			if a.ServiceOnly {
-				continue
-			}
-			actions = append(actions, map[string]any{"name": a.Name, "class": a.Class, "description": a.Description})
-		}
-		row := map[string]any{"connector": m.Connector, "version": m.Version, "actions": actions, "visible": visible(m.Connector)}
+		row := map[string]any{"connector": m.Connector, "version": m.Version, "actions": d.actionRuns(m), "visible": visible(m.Connector)}
 		if isLoginConnector(m) {
 			row["login_connector"] = true
 		}
@@ -291,7 +287,7 @@ func lookupHint(host string, installed, inStore, known, login []map[string]any) 
 	switch {
 	case len(site) > 0:
 		c := site[0]["connector"].(string)
-		fmt.Fprintf(&b, "A connector for %s is installed: call its actions (gate4ai %s <action> --help); a draft action may need --trace and a hand back to you on failure.", host, c)
+		fmt.Fprintf(&b, "A connector for %s is installed: call its actions (gate4ai %s <action> --help). A draft action (verified_runs < %d) runs with a trace of its browser calls; if it fails, the answer is handoff_to_agent with a browser session that is yours to finish the task in — then fix the connector in its folder.", host, c, pipeline.VerifiedAfter)
 	case len(inStore) > 0:
 		c := inStore[0]["connector"].(string)
 		fmt.Fprintf(&b, "The store has %s for %s: ask the owner to install it — change_policy with [{\"op\":\"install_connector\",\"connector\":\"%s\"}] — then call its actions.", c, host, c)
@@ -336,4 +332,51 @@ func connectorNameFor(host string) string {
 		name = "site_" + name
 	}
 	return name
+}
+
+// recordRun — прогон действия коннектора закончился (pipeline.RunHook): рецепт
+// в папке знаний, если коннектор поставлен из неё, получает статус задачи,
+// число подтверждённых прогонов и дату. Файл меняется на месте, без git.
+func (d *Daemon) recordRun(action string, ok bool, st pipeline.RunStats) {
+	conn, task, _ := strings.Cut(action, ".")
+	info, err := d.StoreOptions().Info(conn)
+	if err != nil || !strings.HasPrefix(info.Source, store.SourceDir) {
+		return
+	}
+	dir := strings.TrimPrefix(info.Source, store.SourceDir)
+	path := filepath.Join(dir, knowledge.RecipeFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	r, body, err := knowledge.ParseRecipe(raw)
+	if err != nil {
+		return
+	}
+	t := r.Task(task)
+	if t == nil {
+		return
+	}
+	t.VerifiedRuns, t.Status = st.OK, st.Status
+	if ok {
+		t.LastVerified = d.Pipeline.Now().Format("2006-01-02")
+	}
+	if out, err := knowledge.FormatRecipe(r, body); err == nil {
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			d.Log.Warn("knowledge: recipe not updated", "path", path, "err", err)
+		}
+	}
+}
+
+// actionRuns — статус проверенности действий коннектора для списков и lookup.
+func (d *Daemon) actionRuns(m manifest.Manifest) []map[string]any {
+	var out []map[string]any
+	for _, a := range m.Actions {
+		if a.ServiceOnly {
+			continue
+		}
+		st := d.Pipeline.ActionRuns(m.Connector + "." + a.Name)
+		out = append(out, map[string]any{"name": a.Name, "class": a.Class, "description": a.Description, "status": st.Status, "verified_runs": st.OK})
+	}
+	return out
 }

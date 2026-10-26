@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -57,6 +58,7 @@ type bank struct {
 	rule  manifest.ServiceRule
 	got   []error
 	res   []abi.ExecResult
+	fail  bool // ошибка подвызова — ошибка действия (как у настоящего коннектора)
 }
 
 func (b *bank) Manifest() manifest.Manifest {
@@ -76,6 +78,9 @@ func (b *bank) Execute(ctx context.Context, r abi.ExecRequest) (abi.ExecResult, 
 		res, err := b.p.ExecuteNested(ctx, "bank", b.rule, c)
 		b.got = append(b.got, err)
 		b.res = append(b.res, res)
+		if err != nil && b.fail {
+			return abi.ExecResult{}, err
+		}
 	}
 	return abi.ExecResult{Structured: map[string]any{"ok": true}}, nil
 }
@@ -271,5 +276,64 @@ func TestNestedConnectorLogInResult(t *testing.T) {
 	res := p.Execute(context.Background(), Call{Agent: "bot", Action: "bank.pay"})
 	if res.Status != StatusOK || len(res.Log) != 2 || res.Log[0] != "line of bank" || res.Log[1] != "web: line of web" {
 		t.Fatalf("%+v", res.Log)
+	}
+}
+
+// Трассировка и передача страницы агенту: действие-черновик возвращает
+// подвызовы; при сбое его страница становится сеансом агента
+// (handoff_to_agent), счёт подтверждённых прогонов обнуляется; после
+// VerifiedAfter удачных прогонов трассы по умолчанию нет, --trace её возвращает.
+func TestTraceAndHandoffToAgent(t *testing.T) {
+	p, b, w, _, ended := nestedEnv(t)
+	var adopted []string
+	p.Adopt = func(root, agent, instance string) (string, string, bool) {
+		adopted = append(adopted, root+"/"+agent)
+		return "s-adopted", "https://x.example/page", true
+	}
+	var hooks []string
+	p.RunHook = func(action string, ok bool, st RunStats) { hooks = append(hooks, fmt.Sprintf("%s:%v:%d", action, ok, st.OK)) }
+	b.calls = []abi.ServiceCallRequest{{Target: "web", Action: "open", Args: map[string]any{"url": "https://x.example/"}}, {Target: "web", Action: "open", Args: map[string]any{"url": "https://x.example/next"}}}
+	ctx := context.Background()
+	// Черновик: трасса без флага.
+	res := p.Execute(ctx, Call{Agent: "bot", Action: "bank.look", Args: map[string]any{}})
+	if res.Status != StatusOK || len(res.Trace) != 2 || res.Trace[0].Action != "web.open" || res.Trace[0].Args["url"] != "https://x.example/" || res.Trace[0].URL != "https://x.example/" || res.Trace[1].Status != "ok" {
+		t.Fatalf("%+v", res)
+	}
+	if res.Runs == nil || res.Runs.OK != 1 || res.Runs.Status != RunDraft || p.ActionRuns("bank.look").OK != 1 {
+		t.Fatalf("%+v", res.Runs)
+	}
+	for i := 0; i < VerifiedAfter-1; i++ {
+		res = p.Execute(ctx, Call{Agent: "bot", Action: "bank.look", Args: map[string]any{}})
+	}
+	if res.Runs.Status != RunVerified || len(res.Trace) != 2 {
+		t.Fatalf("verified after %d runs (this run was still a draft when it started): %+v trace %d", VerifiedAfter, res.Runs, len(res.Trace))
+	}
+	if res = p.Execute(ctx, Call{Agent: "bot", Action: "bank.look", Args: map[string]any{}}); len(res.Trace) != 0 || res.Runs.OK != VerifiedAfter+1 {
+		t.Fatalf("verified action is not traced: %+v %+v", res.Runs, res.Trace)
+	}
+	// --trace возвращает подвызовы и у проверенного действия.
+	if res = p.Execute(ctx, Call{Agent: "bot", Action: "bank.look", Args: map[string]any{}, Trace: true}); len(res.Trace) != 2 {
+		t.Fatalf("%+v", res)
+	}
+	// Сбой подвызова: коннектор падает, страница — агенту; счёт обнулён; EndCall всё равно вызван.
+	w.fail = abi.Errorf(abi.CodeNotFound, "no #go")
+	b.fail = true
+	res = p.Execute(ctx, Call{Agent: "bot", Action: "bank.look", Args: map[string]any{}, Trace: true})
+	if res.Status != StatusError || res.Code != CodeHandoffToAgent || res.Handoff == nil || res.Handoff.Session != "s-adopted" || res.Handoff.FailedStep != 1 {
+		t.Fatalf("%+v %+v", res, res.Handoff)
+	}
+	if len(res.Trace) != 1 || res.Trace[0].Status != abi.CodeNotFound || !strings.Contains(res.Handoff.Hint, "--session s-adopted") || !strings.Contains(res.Message, "the page is yours now") {
+		t.Fatalf("%+v", res.Trace)
+	}
+	if len(adopted) != 1 || !strings.HasSuffix(adopted[0], "/bot") || res.Runs.OK != 0 || p.ActionRuns("bank.look").Status != RunDraft {
+		t.Fatalf("%v %+v", adopted, res.Runs)
+	}
+	if len(*ended) == 0 || !strings.Contains(strings.Join(hooks, " "), "bank.look:false:0") {
+		t.Fatalf("ended %v hooks %v", *ended, hooks)
+	}
+	// Без Adopt (страницы нет) — обычная ошибка.
+	p.Adopt = func(string, string, string) (string, string, bool) { return "", "", false }
+	if res = p.Execute(ctx, Call{Agent: "bot", Action: "bank.look", Args: map[string]any{}}); res.Code != CodeExecution || res.Handoff != nil {
+		t.Fatalf("%+v", res)
 	}
 }

@@ -31,6 +31,9 @@ type ActionView struct {
 	RuleIDs  []string
 	Calls    []CallView
 	Args     []argInfo
+	// Runs — подтверждённые прогоны и статус (draft | verified); "" — встроенный коннектор.
+	Runs      int
+	RunStatus string
 }
 
 // CallView — подвызов действия другого коннектора (browser.open) для чипа и панели.
@@ -154,6 +157,10 @@ func (u *UI) actionViews(l, name string, m manifest.Manifest, cfg *config.Config
 		}
 		if t, ok := toolSchema(tools, v.Full); ok {
 			v.Args = actionArgs(t)
+		}
+		if m.Runtime != manifest.RuntimeBuiltin {
+			st := u.D.Pipeline.ActionRuns(v.Full)
+			v.Runs, v.RunStatus = st.OK, st.Status
 		}
 		for _, c := range a.Calls {
 			target, _, _ := strings.Cut(c, ".")

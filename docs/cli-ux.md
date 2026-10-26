@@ -26,7 +26,7 @@
 | `status` / `status <id> [--wait 10m] [--out f]` | владелец / агент | да |
 | `daemon [флаги]`, `daemon start \| stop \| restart \| status` | владелец | — |
 | `service install [--no-tray] [-- флаги daemon] \| uninstall \| status` | владелец | нет |
-| `tools [--json] [--as agent]`, `<connector> <action> [--arg v] [--wait] [--json] [--as] [--out f]`, `skill`, `mcp` | агент / владелец | да |
+| `tools [--json] [--as agent]`, `<connector> <action> [--arg v] [--wait] [--json] [--as] [--out f] [--trace]`, `skill`, `mcp` | агент / владелец | да |
 | `pair [--here] [--name agent] [--wait 5m]` | агент | да |
 | `log`, `show`, `export`, `journal verify` | владелец | да |
 | `verify file [--pubkey] [--passphrase-env]` | все | нет |
