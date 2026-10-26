@@ -78,49 +78,65 @@ func (u *UI) deleteSecret(w http.ResponseWriter, r *http.Request) map[string]any
 	return redirect("/vault", M("%s is deleted", r.PostForm.Get("alias")))
 }
 
-// Поля простой формы входа, которые подходят большинству сайтов (мастер учётки).
-const (
-	loginSelector    = `input[type=email], input[autocomplete=username], input[name*=login i], input[name*=user i], input[type=text]`
-	passwordSelector = `input[type=password]`
-)
-
-// addAccount — мастер учётки сайта: адрес, логин и пароль; поля формы и отправка —
-// по умолчанию, пароль — в хранилище, учётка — для выбранных агентов.
-func (u *UI) addAccount(w http.ResponseWriter, r *http.Request) map[string]any {
+// editAccount — окно «Изменить» учётки: профили агентов (use), адреса входа (bind)
+// и, по желанию, новые значения её секретов. Поля формы, коннектор входа и
+// коннекторы с доступом — только в YAML и на страницах коннекторов.
+func (u *UI) editAccount(w http.ResponseWriter, r *http.Request) map[string]any {
 	f := r.PostForm
-	back := "/vault#accounts"
-	site := strings.TrimSpace(f.Get("site"))
-	if !strings.Contains(site, "://") {
-		site = "https://" + site
-	}
-	pu, err := url.Parse(site)
-	if err != nil || pu.Host == "" {
-		return redirectErr(back, M("Enter the address of the sign-in page, e.g. https://login.example.com"))
-	}
-	origin := pu.Scheme + "://" + pu.Host
-	login, pass := strings.TrimSpace(f.Get("login")), f.Get("password")
-	if login == "" || pass == "" {
-		return redirectErr(back, M("Enter the login and the password"))
-	}
-	alias := aliasOf(or(f.Get("name"), pu.Hostname()))
-	secret := alias + ".password"
-	if err := u.D.Vault.Set(secret, pass); err != nil {
-		return redirectErr(back, err)
-	}
-	err = u.edit("account "+alias, func(c *config.Config) error {
-		if c.Credentials == nil {
-			c.Credentials = map[string]config.Credential{}
+	alias := strings.TrimSpace(f.Get("alias"))
+	back := "/vault#" + AccountAnchor(alias)
+	var bind []string
+	for _, b := range strings.Split(f.Get("bind"), "\n") {
+		if b = strings.TrimSpace(b); b != "" {
+			bind = append(bind, b)
 		}
-		c.Credentials[alias] = config.Credential{Bind: []string{origin}, Use: f["profiles"],
-			Form: &config.LoginForm{Fields: []config.FormField{{Selector: loginSelector, Value: login}, {Selector: passwordSelector, Secret: secret}},
-				Submit: config.FormSubmit{Press: "Enter"}}}
+	}
+	if len(bind) == 0 {
+		return redirectErr(back, M("Enter at least one sign-in address, e.g. https://login.example.com"))
+	}
+	var cr config.Credential
+	err := u.edit("account "+alias, func(c *config.Config) error {
+		var ok bool
+		if cr, ok = c.Credentials[alias]; !ok {
+			return M("There is no account %s", alias)
+		}
+		cr.Bind, cr.Use = bind, f["profiles"]
+		c.Credentials[alias] = cr
 		return nil
 	})
 	if err != nil {
-		_ = u.D.Vault.Delete(secret)
 		return redirectErr(back, err)
 	}
-	return redirect("/vault#"+AccountAnchor(alias), M("Account %s for %s is saved. The browser signs in with it; agents never see the password.", alias, origin))
+	for _, sec := range cr.Secrets() {
+		if v := f.Get("secret." + sec); v != "" {
+			if err := u.D.Vault.Set(sec, v); err != nil {
+				return redirectErr(back, err)
+			}
+		}
+	}
+	return redirect(back, M("Account %s is saved", alias))
+}
+
+// deleteAccount — учётка из конфигурации и её секреты из хранилища.
+func (u *UI) deleteAccount(w http.ResponseWriter, r *http.Request) map[string]any {
+	alias := strings.TrimSpace(r.PostForm.Get("alias"))
+	var secrets []string
+	err := u.edit("delete account "+alias, func(c *config.Config) error {
+		cr, ok := c.Credentials[alias]
+		if !ok {
+			return M("There is no account %s", alias)
+		}
+		secrets = cr.Secrets()
+		delete(c.Credentials, alias)
+		return nil
+	})
+	if err != nil {
+		return redirectErr("/vault#accounts", err)
+	}
+	for _, sec := range secrets {
+		_ = u.D.Vault.Delete(sec)
+	}
+	return redirect("/vault#accounts", M("Account %s is deleted", alias))
 }
 
 // ---- Настройки ----

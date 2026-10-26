@@ -332,11 +332,47 @@ func TestAccountsAndQuestions(t *testing.T) {
 	}
 	r, _ = c.Get(base + "/vault")
 	p := body(t, r)
-	for _, want := range []string{"Учётки для входа на сайты", "<code>@site</code>", "https://login.example", "пароль <code>@site.password</code>", "нет @site.password", `name="alias" value="@site.password"`, "Задать", "логин «me»"} {
+	for _, want := range []string{"Учётки для входа на сайты", "<code>@site</code>", "https://login.example", `<span title="#password · отправка: #go">пароль</span> <code>@site.password</code>`, "нет @site.password", `name="alias" value="@site.password"`, "Задать", `<span title="#login">логин «me»</span>`, "Изменить", "/vault/account/delete", "Добавить пароль или токен", "привязано в разделе"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("vault page: no %q", want)
 		}
 	}
+	if strings.Contains(p, "Добавить учётку") || strings.Contains(p, "<summary class=\"help\">поля</summary>") {
+		t.Error("vault page: the wizard or the fields details are still there")
+	}
+	// «Изменить»: профили, адреса и новый пароль; «Удалить»: учётка и её секреты.
+	r, _ = c.PostForm(base+"/vault/account/edit", url.Values{"csrf": {csrf}, "alias": {"@site"}, "bind": {"https://login.example\nhttps://id.example"}, "secret.@site.password": {"pw-2"}})
+	if p := body(t, r); !strings.Contains(p, "Учётка @site сохранена") || strings.Contains(p, "pw-2") {
+		t.Fatal("edit", p)
+	}
+	cr := d.Config.Current().Credentials["@site"]
+	if len(cr.Use) != 0 || len(cr.Bind) != 2 || cr.Bind[1] != "https://id.example" || cr.Form.Submit.Selector != "#go" {
+		t.Fatalf("%+v", cr)
+	}
+	if v, err := d.Vault.Get("@site.password"); err != nil || v != "pw-2" {
+		t.Fatal(v, err)
+	}
+	r, _ = c.PostForm(base+"/vault/account/edit", url.Values{"csrf": {csrf}, "alias": {"@site"}, "bind": {""}, "profiles": {"p"}})
+	if p := body(t, r); !strings.Contains(p, "хотя бы один адрес входа") {
+		t.Fatal("edit without bind", p)
+	}
+	r, _ = c.PostForm(base+"/vault/account/edit", url.Values{"csrf": {csrf}, "alias": {"@site"}, "bind": {"https://login.example"}, "profiles": {"p"}})
+	body(t, r)
+	if cr := d.Config.Current().Credentials["@site"]; len(cr.Use) != 1 || cr.Use[0] != "p" || len(cr.Bind) != 1 {
+		t.Fatalf("%+v", cr)
+	}
+	r, _ = c.PostForm(base+"/vault/account/delete", url.Values{"csrf": {csrf}, "alias": {"@site"}})
+	if p := body(t, r); !strings.Contains(p, "Учётка @site удалена") {
+		t.Fatal("delete", p)
+	}
+	if _, ok := d.Config.Current().Credentials["@site"]; ok {
+		t.Fatal("account still in the config")
+	}
+	if _, err := d.Vault.Get("@site.password"); err == nil {
+		t.Fatal("secret still in the vault")
+	}
+	r, _ = c.PostForm(base+"/policy", url.Values{"csrf": {csrf}, "yaml": {acc}, "comment": {"account again"}})
+	body(t, r)
 	got := make(chan string, 1)
 	go func() {
 		v, _ := d.Pipeline.Ask(context.Background(), pipeline.Question{Agent: "bot", Account: "@site", Bind: []string{"https://login.example"}, Text: "Код из SMS"})

@@ -28,12 +28,11 @@
 <div class="card">
 {{range $d.Channels}}<div class="set"><div class="d"><span class="dot {{if not .On}}off{{else if ne .State "ok"}}bad{{end}}" aria-hidden="true"></span><b>{{T .Title}}</b> — {{if not .On}}{{T "off"}}{{else if eq .State "ok"}}<span class="ok">{{T "on"}}</span>{{else if eq .State "not_configured"}}<span class="warn">{{T "not set up"}}</span>{{else}}<span class="bad">{{T "error"}}</span>{{end}}
 {{if and .On (ne .State "ok") .Detail}}<div class="help">{{T .Detail}}</div>{{end}}
-{{if ne .Name "webui"}}<div class="help">{{T "sent: %d" .Stat.Sent}}{{if .Stat.Failed}} · <span class="bad">{{T "failed: %d" .Stat.Failed}}</span>{{end}} · {{T "decided here: %d" .Decided}}{{if not .Stat.LastOK.IsZero}} · {{T "last: %s" (ago .Stat.LastOK)}}{{end}}</div>{{end}}
+<div class="help">{{T "sent: %d" .Stat.Sent}}{{if .Stat.Failed}} · <span class="bad">{{T "failed: %d" .Stat.Failed}}</span>{{end}} · {{T "decided here: %d" .Decided}}{{if not .Stat.LastOK.IsZero}} · {{T "last: %s" (ago .Stat.LastOK)}}{{end}}</div>
 {{if eq .Name "desktop"}}<details><summary class="help">{{T "No notifications?"}}</summary><p class="help">{{TH "Linux — install <code>libnotify</code> (notify-send); macOS — allow notifications for “Script Editor”; Windows — turn notifications on in Settings → System. You can also decide in the gate4.ai tray icon."}}</p></details>{{end}}
 {{if eq .Name "webpush"}}<div class="help">{{T "A notification in the browser — on this computer or on the phone. On the phone open the Web UI through the link in Internet access (the relay is needed) and press the button there."}}</div>
 {{if $d.PushKey}}<div class="help" data-push-status>{{if not $d.PushOn}}{{T "The channel is off — subscribing turns it on."}}{{end}}</div>{{end}}{{end}}</div>
-<div class="row">{{if eq .Name "webui"}}<span class="muted">{{T "always on"}}</span>
-{{else if eq .Name "telegram"}}{{if not $d.TelegramSet}}<a class="btn primary" href="{{$.Base}}/approvals/telegram">{{T "Connect"}}</a>{{else}}{{template "chan_buttons" (dict "V" $ "C" .)}}<a class="btn small" href="{{$.Base}}/approvals/telegram">{{T "Set up"}}</a>{{end}}
+<div class="row">{{if eq .Name "telegram"}}{{if not $d.TelegramSet}}<a class="btn primary" href="{{$.Base}}/approvals/telegram">{{T "Connect"}}</a>{{else}}{{template "chan_buttons" (dict "V" $ "C" .)}}<a class="btn small" href="{{$.Base}}/approvals/telegram">{{T "Set up"}}</a>{{end}}
 {{else if eq .Name "webpush"}}{{if $d.PushKey}}<button class="primary" data-push-key="{{$d.PushKey}}">{{T "Turn on in this browser"}}</button>{{else}}<span class="muted">{{T "not available: no VAPID key"}}</span>{{end}}{{if .On}}{{template "chan_buttons" (dict "V" $ "C" .)}}{{end}}
 {{else}}{{template "chan_buttons" (dict "V" $ "C" .)}}{{end}}</div></div>{{end}}
 </div>
@@ -123,7 +122,6 @@
 {{define "settings_nav"}}{{$v := .V}}<nav class="side" aria-label="{{T "Settings"}}">
 <a href="{{$v.Base}}/settings" class="{{if eq .On "main"}}on{{end}}">{{T "Main"}}</a>
 <a href="{{$v.Base}}/settings/notifications" class="{{if eq .On "notifications"}}on{{end}}">{{T "Notifications"}}</a>
-<a href="{{$v.Base}}/vault" class="{{if eq .On "vault"}}on{{end}}">{{T "Passwords and accounts"}}</a>
 <a href="{{$v.Base}}/settings/login" class="{{if eq .On "login"}}on{{end}}">{{T "Signing in"}}</a>
 <div class="sep">{{T "Advanced"}}</div>
 <a href="{{$v.Base}}/settings/internet" class="{{if eq .On "internet"}}on{{end}}">{{T "Internet access"}}</a>
