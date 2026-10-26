@@ -154,3 +154,5 @@ gate4ai gate4ai change_policy --summary "install account_example" --changes '[{"
 ## 5. Публикация
 
 Публикация — [publishing.md](publishing.md) и `registry/CONTRIBUTING.md`: исходник обязателен, лицензия — совместимая с AGPL-3.0, сборка воспроизводимая.
+
+Как агент сам сохраняет знания о сайте (рецепт), публикует коннектор из папки знаний и чинит его при повторных запусках — проект UX [connector-sharing-ux.md](connector-sharing-ux.md).
