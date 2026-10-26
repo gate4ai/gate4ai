@@ -454,8 +454,10 @@ func (u *UI) setupSave(w http.ResponseWriter, r *http.Request) map[string]any {
 		}
 	}
 	if client == "cloud" && u.D.PublicURL() == "" {
+		// Адрес обычно уже есть (daemon регистрируется сам) или выключен: тогда
+		// только снимается запрет; новое устройство — лишь когда адреса нет.
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		_, err := relayclient.RegisterDevice(ctx, u.D, owner, relayclient.DefaultURL, "", false)
+		_, err := relayclient.EnsureRegistered(ctx, u.D, owner)
 		cancel()
 		if err != nil {
 			notes = append(notes, M("Internet access was not turned on: %s", err))

@@ -137,15 +137,14 @@ gate4ai skill > SKILL.md               # инструкция для агент�
 gate4ai run claude-code --workspace ~/projects/app
 ```
 
-**Облачные агенты (Claude.ai, ChatGPT)** — через relay, без открытых портов:
+**Облачные агенты (Claude.ai, ChatGPT)** — через relay, без открытых портов. Доступ из интернета включён по умолчанию: daemon при запуске сам регистрирует компьютер на `relay.gate4.ai` (при неудаче повторяет раз в час; состояние и кнопка «Выключить» — **Настройки → Доступ из интернета**):
 
 ```sh
-gate4ai relay register --url https://relay.gate4.ai
 gate4ai relay status                   # mcp_url: https://<device-id>.relay.gate4.ai
 gate4ai agents connect my-agent        # одноразовый код подключения
 ```
 
-Добавьте `mcp_url` в агенте как custom connector и введите код на странице авторизации. Свой HTTPS-адрес вместо relay — `gate4ai daemon --public …`, см. [docs/quickstart.md](docs/quickstart.md#3-агенты).
+Добавьте `mcp_url` в агенте как custom connector и введите код на странице авторизации. Свой relay — `gate4ai relay register --url https://relay.example.org`; свой HTTPS-адрес вместо relay — `gate4ai daemon --public …`, см. [docs/quickstart.md](docs/quickstart.md#3-агенты).
 
 ### 4. Подтверждения и журнал
 

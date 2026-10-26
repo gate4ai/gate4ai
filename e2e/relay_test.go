@@ -247,3 +247,28 @@ func TestRemoteLinkThroughRelay(t *testing.T) {
 		t.Fatalf("password did not sign in through the relay: %d %s", code, p)
 	}
 }
+
+// Доступ из интернета включён по умолчанию: daemon без адреса устройства сам
+// регистрируется на relay из конфигурации (здесь — локальный, с его CA) и
+// подключается; `relay register` не вызывается. Харнесс запускает daemon с
+// --relay-auto=false, этот тест возвращает значение по умолчанию.
+func TestAutoRegisterThroughRelay(t *testing.T) {
+	t.Parallel()
+	r := startRelay(t)
+	conf := filepath.Join(t.TempDir(), "config.yaml")
+	os.WriteFile(conf, []byte("profiles: {default: {}}\nrelay: {url: "+r.url+", ca_file: "+r.ca+", self_signed: true}\n"), 0o600)
+	g := startGate(t, "--relay-auto=true", "--config", conf)
+	for start := time.Now(); ; {
+		st := g.run("", "", "relay", "status").json(t)
+		if st["online"] == true {
+			if st["phase"] != "online" || !strings.HasSuffix(st["mcp_url"].(string), ".localhost") {
+				t.Fatalf("status: %v", st)
+			}
+			break
+		}
+		if time.Since(start) > StartTimeout {
+			t.Fatalf("device did not register and connect by itself: %v", st)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}

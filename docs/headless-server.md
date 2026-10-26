@@ -46,7 +46,7 @@ curl -fsSL https://gate4.ai/install.sh | GATE4AI_NO_TRAY=1 sh
 #   «The browser of agents»: проверка Chrome, Xvfb и шрифтов, команды под дистрибутив, «Install now? [y/N]»;
 #   без терминала — только команды; GATE4AI_INSTALL_DEPS=1 — поставить без вопроса
 gate4ai service install --no-tray -- --keystore file   # сервер без keychain
-gate4ai relay register --url https://relay.gate4.ai      # публичный адрес: /ui/ и CLI агентов
+gate4ai relay status                                      # публичный адрес (/ui/ и CLI агентов): daemon регистрируется на relay.gate4.ai сам
 gate4ai ui --remote                                       # адрес для телефона; Настройки → Вход: Telegram
 
 # пользователь openclaw: нужен только CLI

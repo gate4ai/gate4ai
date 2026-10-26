@@ -63,13 +63,24 @@
 
 {{if eq $d.Sub "internet"}}
 <h2>{{T "Internet access"}}</h2>
-<div class="card" id="relay"{{with $d.Relay}}{{if and .Configured (not $d.Direct) (not .Online) (ne .Phase "failed")}} data-live-relay="{{.Phase}}"{{end}}{{end}}>
+<div class="card" id="relay"{{with $d.Relay}}{{if and (not $d.Direct) (not .Disabled) (not .Online) (ne .Phase "failed") (ne .Phase "")}} data-live-relay="{{.Phase}}"{{end}}{{end}}>
 {{if $d.Direct}}{{template "relay_direct" .}}
+{{else if $d.Relay.Disabled}}<p>{{T "State:"}} <b>{{T "turned off"}}</b> — {{T "cloud assistants (Claude.ai, ChatGPT) and the phone cannot reach this computer."}}{{if $d.Relay.Configured}}<br><span class="help">{{T "The address %s is kept: turning it on again does not need a new certificate." $d.Relay.MCPURL}}</span>{{end}}</p>
+<form method="post" action="{{.Base}}/settings/relay/toggle"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="1"><button class="primary" data-busy="{{T "Connecting…"}}">{{T "Turn on"}}</button></form>
 {{else if $d.Relay.Configured}}{{template "relay_state" $d.Relay}}
 {{template "cloud_addr" (dict "Addr" $d.Relay.MCPURL "Base" .Base)}}
 <details><summary>{{T "Technical details"}}</summary><p class="help">
 {{T "Relay:"}} <code>{{$d.Relay.URL}}</code><br>{{T "Device ID:"}} <code>{{$d.Relay.DeviceID}}</code><br>
-{{TH "MCP answers at the root of the address. The Web UI for the phone is <code>%s/ui/</code>." $d.Relay.MCPURL}}</p></details>
+{{TH "MCP answers at the root of the address. The Web UI for the phone is <code>%s/ui/</code>." $d.Relay.MCPURL}}</p>
+<form method="post" action="{{.Base}}/settings/relay/toggle"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="0"><button class="small">{{T "Turn off"}}</button> <span class="help">{{T "Stops the connection and the attempts; the address is kept."}}</span></form></details>
+{{else if eq $d.Relay.Phase "registering"}}<p>{{T "State:"}} <b class="warn">{{T "turning on"}}</b> — {{T "registering this computer on %s (usually a few seconds)…" $d.RelayHost}}</p>
+<p class="help">{{T "The computer gets an address like <id>.%s, no ports to open. Traffic is encrypted all the way to this computer: the relay sees only encrypted data." $d.RelayHost}}</p>
+<form method="post" action="{{.Base}}/settings/relay/toggle"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="0"><button class="small">{{T "Turn off"}}</button></form>
+{{else if eq $d.Relay.Phase "failed"}}<p>{{T "State:"}} <b class="bad">{{T "could not turn on through %s" $d.RelayHost}}</b>{{with $d.Relay.Error}}: {{.}}{{end}}<br>
+<span class="help">{{with $d.Relay.NextRetryAt}}{{T "Next attempt at %s." .}} {{end}}{{T "Until then cloud assistants (Claude.ai, ChatGPT) and the phone cannot reach this computer."}}</span></p>
+<div class="row"><form method="post" action="{{.Base}}/settings/relay"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="url" value="{{$d.RelayURL}}">
+<button class="primary" data-busy="{{T "Connecting…"}}">{{T "Try now"}}</button></form>
+<form method="post" action="{{.Base}}/settings/relay/toggle"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="0"><button>{{T "Turn off"}}</button></form></div>
 {{else}}<p>{{T "Needed only for cloud assistants (Claude.ai, ChatGPT) and for signing in from the phone. Local assistants work without it."}}</p>
 <form method="post" action="{{.Base}}/settings/relay"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="url" value="{{$d.RelayDefault}}">
 <button class="primary" data-busy="{{T "Connecting…"}}">{{T "Turn on through %s" $d.RelayDefaultHost}}</button></form>

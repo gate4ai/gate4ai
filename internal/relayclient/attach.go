@@ -23,57 +23,101 @@ import (
 
 // Этапы подключения устройства к relay (Status.Phase).
 const (
+	PhaseRegistering  = "registering"  // устройство регистрируется на relay само (адреса ещё нет)
 	PhaseIssuing      = "issuing"      // выпуск сертификата устройства (ACME), до туннеля
 	PhaseConnecting   = "connecting"   // первое соединение с relay
 	PhaseOnline       = "online"       // туннель установлен
 	PhaseReconnecting = "reconnecting" // туннель упал, устройство переподключается
-	PhaseFailed       = "failed"       // подключение остановлено ошибкой (см. Error)
+	PhaseFailed       = "failed"       // подключение остановлено ошибкой (см. Error); без адреса — регистрация не удалась, повтор в NextRetry
 )
 
 // Status — состояние подключения устройства к relay (для Web UI).
 type Status struct {
-	Configured bool   `json:"configured"`
-	Online     bool   `json:"online"`
-	Phase      string `json:"phase,omitempty"` // Phase*; "" — relay не настроен
-	Error      string `json:"error,omitempty"` // последняя ошибка (failed, reconnecting, issuing — повтор выпуска)
-	URL        string `json:"url,omitempty"`   // адрес relay
-	DeviceID   string `json:"device_id,omitempty"`
-	Host       string `json:"host,omitempty"`    // <device-id>.<домен relay>
-	MCPURL     string `json:"mcp_url,omitempty"` // https://<host>: MCP по корню
+	Configured bool      `json:"configured"`         // адрес устройства есть (device_id)
+	Disabled   bool      `json:"disabled,omitempty"` // запрет владельца (relay.disabled): не регистрируется и не подключается
+	Online     bool      `json:"online"`
+	Phase      string    `json:"phase,omitempty"`     // Phase*; "" — relay не настроен и сам не включается
+	Error      string    `json:"error,omitempty"`     // последняя ошибка (failed, reconnecting, issuing — повтор выпуска)
+	NextRetry  time.Time `json:"next_retry,omitzero"` // когда повторится регистрация или выпуск сертификата
+	URL        string    `json:"url,omitempty"`       // адрес relay
+	DeviceID   string    `json:"device_id,omitempty"`
+	Host       string    `json:"host,omitempty"`    // <device-id>.<домен relay>
+	MCPURL     string    `json:"mcp_url,omitempty"` // https://<host>: MCP по корню
 }
 
-// RetryCert — первая пауза перед повторным выпуском сертификата устройства.
+// RetryCert — первая пауза перед повторным выпуском сертификата устройства
+// (дальше вдвое дольше, до часа).
 var RetryCert = 5 * time.Minute
 
-// DefaultURL — relay gate4.ai по умолчанию.
-const DefaultURL = "https://relay.gate4.ai"
+// RetryRegister — пауза между попытками самостоятельной регистрации на relay.
+var RetryRegister = time.Hour
+
+// DefaultURL — relay gate4.ai по умолчанию (переменная — для тестов).
+var DefaultURL = "https://relay.gate4.ai"
+
+// registerMu — регистрации по одной: самостоятельная и ручная (кнопка, мастер,
+// CLI) не создадут два устройства.
+var registerMu sync.Mutex
 
 // Attach подключает relay к daemon: маршруты владельца (регистрация, статус),
 // туннель устройства и свидетеля журнала; перезапускается при смене конфигурации.
+// auto — доступ из интернета включён по умолчанию: пока у устройства нет адреса
+// и владелец его не выключил (relay.disabled), daemon сам регистрируется на
+// relay (relay.url, иначе DefaultURL) и при неудаче повторяет раз в RetryRegister.
+// С прямым публичным адресом (--public) само не регистрируется.
 // Возвращает функцию состояния для Web UI.
-func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
+func Attach(ctx context.Context, d *daemon.Daemon, auto bool) func() Status {
+	auto = auto && d.PublicURL() == ""
+	retryRegister, retryCert := RetryRegister, RetryCert // читаются один раз: тесты меняют их между Attach
 	var mu sync.Mutex
 	var cur *Device
-	var stop context.CancelFunc
+	var stop, stopReg context.CancelFunc
 	var key string
 	var phase, failure string // этап до появления Device; failure — причина PhaseFailed
+	var nextTry time.Time     // следующая попытка регистрации или выпуска сертификата
 	d.AddPublicURL(func() string {
-		if c := d.Config.Current().Relay; c.URL != "" && c.DeviceID != "" {
+		if c := d.Config.Current().Relay; c.URL != "" && c.DeviceID != "" && !c.Disabled {
 			return "https://" + deviceHost(c)
 		}
 		return ""
 	})
+	// register — цикл самостоятельной регистрации, пока не получится или не отменят.
+	register := func(rctx context.Context, r config.Relay) {
+		for {
+			err := autoRegister(rctx, d, r)
+			mu.Lock()
+			if rctx.Err() != nil {
+				mu.Unlock()
+				return
+			}
+			if err == nil {
+				mu.Unlock()
+				return // новая конфигурация: apply поднимет туннель
+			}
+			phase, failure, nextTry = PhaseFailed, err.Error(), time.Now().Add(retryRegister)
+			mu.Unlock()
+			d.Log.Error("relay: device not registered, retrying", "err", err, "in", retryRegister)
+			select {
+			case <-rctx.Done():
+				return
+			case <-time.After(retryRegister):
+			}
+		}
+	}
 	apply := func(c *config.Config) {
 		mu.Lock()
 		defer mu.Unlock()
 		r := c.Relay
 		tok := ""
-		if r.URL != "" && r.DeviceID != "" && r.Token != "" {
+		if r.URL != "" && r.DeviceID != "" && r.Token != "" && !r.Disabled {
 			tok, _ = d.Vault.Get(r.Token)
 		}
 		k := r.URL + "|" + r.DeviceID + "|" + tok + "|" + r.ACMECA + "|" + r.CAFile
 		if r.SelfSigned {
 			k += "|self"
+		}
+		if r.Disabled {
+			k += "|off"
 		}
 		if k == key {
 			return
@@ -84,11 +128,25 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 			stop, cur = nil, nil
 			d.Journal.SetWitness(nil)
 		}
-		phase, failure = "", ""
-		if tok == "" {
-			if r.DeviceID != "" {
-				phase, failure = PhaseFailed, "relay token not found in the vault: register the device again"
+		if stopReg != nil {
+			stopReg()
+			stopReg = nil
+		}
+		phase, failure, nextTry = "", "", time.Time{}
+		if r.Disabled {
+			return
+		}
+		if r.DeviceID == "" {
+			if auto {
+				phase = PhaseRegistering
+				rctx, cancel := context.WithCancel(ctx)
+				stopReg = cancel
+				go register(rctx, r)
 			}
+			return
+		}
+		if tok == "" {
+			phase, failure = PhaseFailed, "relay token not found in the vault: register the device again"
 			return
 		}
 		phase = PhaseIssuing
@@ -99,7 +157,7 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 		// проверок в час на имя), а не отключаем relay до перезапуска: этап
 		// остаётся issuing, причина — в Error.
 		go func() {
-			wait := RetryCert
+			wait := retryCert
 			var dev *Device
 			for {
 				var err error
@@ -110,11 +168,11 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 					return
 				}
 				if err == nil {
-					cur, failure = dev, ""
+					cur, failure, nextTry = dev, "", time.Time{}
 					mu.Unlock()
 					break
 				}
-				failure = err.Error()
+				failure, nextTry = err.Error(), time.Now().Add(wait)
 				mu.Unlock()
 				d.Log.Error("relay: device certificate not obtained, retrying", "err", err, "in", wait)
 				select {
@@ -131,19 +189,25 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 	}
 	status := func() Status {
 		mu.Lock()
-		dev, ph, fail := cur, phase, failure
+		dev, ph, fail, next := cur, phase, failure, nextTry
 		mu.Unlock()
 		c := d.Config.Current().Relay
-		st := Status{Configured: c.DeviceID != "", Online: dev != nil && dev.Online(), URL: c.URL, DeviceID: c.DeviceID}
+		st := Status{Configured: c.DeviceID != "", Disabled: c.Disabled, Online: dev != nil && dev.Online(), URL: c.URL, DeviceID: c.DeviceID}
 		if c.DeviceID != "" {
 			st.Host = deviceHost(c)
 			st.MCPURL = "https://" + st.Host
-			st.Phase, st.Error = ph, fail
-			if dev != nil {
-				st.Phase, st.Error = dev.phase()
-			}
-			if st.Phase == "" { // конфигурация уже новая, apply ещё не отработал
-				st.Phase = PhaseIssuing
+		}
+		if c.Disabled {
+			return st
+		}
+		st.Phase, st.Error, st.NextRetry = ph, fail, next
+		if dev != nil {
+			st.Phase, st.Error = dev.phase()
+		}
+		if st.Phase == "" && (c.DeviceID != "" || auto) { // конфигурация уже новая, apply ещё не отработал
+			st.Phase = PhaseIssuing
+			if c.DeviceID == "" {
+				st.Phase = PhaseRegistering
 			}
 		}
 		return st
@@ -174,12 +238,46 @@ func Attach(ctx context.Context, d *daemon.Daemon) func() Status {
 			if st.MCPURL != "" {
 				out["mcp_url"] = st.MCPURL
 			}
+			if st.Disabled {
+				out["disabled"] = true
+			}
+			if st.Phase != "" {
+				out["phase"] = st.Phase
+			}
+			if st.Error != "" {
+				out["error"] = st.Error
+			}
+			if !st.NextRetry.IsZero() {
+				out["next_retry"] = st.NextRetry.Format(time.RFC3339)
+			}
 			daemon.WriteJSON(w, http.StatusOK, out)
 		})
 	})
 	apply(d.Config.Current())
 	d.Config.Subscribe(apply)
 	return status
+}
+
+// autoRegister — одна самостоятельная регистрация: на relay.url конфигурации
+// (с её ca_file и self_signed — свой relay) или на DefaultURL. Если адрес тем
+// временем появился (кнопка, мастер, CLI) или доступ выключили — ничего не делает.
+func autoRegister(ctx context.Context, d *daemon.Daemon, r config.Relay) error {
+	registerMu.Lock()
+	defer registerMu.Unlock()
+	if c := d.Config.Current().Relay; c.DeviceID != "" || c.Disabled || ctx.Err() != nil {
+		return nil
+	}
+	rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	_, err := registerDevice(rctx, d, auth.OwnerVia("daemon"), or(r.URL, DefaultURL), r.CAFile, r.SelfSigned, "relay registration (automatic)")
+	return err
+}
+
+func or(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func deviceHost(r config.Relay) string {
@@ -233,11 +331,17 @@ func deviceFor(ctx context.Context, d *daemon.Daemon, r config.Relay, tok string
 }
 
 // RegisterDevice регистрирует устройство на relay: токен — в Vault, адрес и id —
-// новой версией конфигурации (только владелец).
+// новой версией конфигурации (только владелец). Снимает запрет relay.disabled.
 func RegisterDevice(ctx context.Context, d *daemon.Daemon, p auth.Principal, relayURL, caFile string, selfSigned bool) (map[string]any, error) {
 	if err := p.RequireOwner(); err != nil {
 		return nil, err
 	}
+	registerMu.Lock()
+	defer registerMu.Unlock()
+	return registerDevice(ctx, d, p, relayURL, caFile, selfSigned, "relay registration")
+}
+
+func registerDevice(ctx context.Context, d *daemon.Daemon, p auth.Principal, relayURL, caFile string, selfSigned bool, comment string) (map[string]any, error) {
 	if !strings.HasPrefix(relayURL, "https://") {
 		return nil, errors.New("relay url must start with https://")
 	}
@@ -253,18 +357,61 @@ func RegisterDevice(ctx context.Context, d *daemon.Daemon, p auth.Principal, rel
 	if err := d.Vault.Set("relay.token", tok); err != nil {
 		return nil, err
 	}
-	raw, _ := d.Config.CurrentRaw()
-	c, err := d.Config.Validate(raw)
+	_, err = d.Config.Edit(p, comment, func(c *config.Config) error {
+		c.Relay.URL, c.Relay.DeviceID, c.Relay.Token, c.Relay.CAFile, c.Relay.SelfSigned, c.Relay.Disabled = relayURL, id, "@relay.token", caFile, selfSigned, false
+		return nil
+	})
 	if err != nil {
-		return nil, err
-	}
-	c.Relay.URL, c.Relay.DeviceID, c.Relay.Token, c.Relay.CAFile, c.Relay.SelfSigned = relayURL, id, "@relay.token", caFile, selfSigned
-	out, err := config.Marshal(c)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := d.Config.Put(p, out, "relay registration"); err != nil {
 		return nil, err
 	}
 	return map[string]any{"device_id": id, "host": host, "mcp_url": "https://" + host}, nil
+}
+
+// SetDisabled выключает (on=false) или включает доступ из интернета (только
+// владелец). Выключение останавливает туннель, адрес устройства сохраняется:
+// повторное включение не тратит новый сертификат. Включение без адреса
+// запускает самостоятельную регистрацию (если daemon её ведёт).
+func SetDisabled(d *daemon.Daemon, p auth.Principal, disabled bool) error {
+	if err := p.RequireOwner(); err != nil {
+		return err
+	}
+	comment := "internet access turned on"
+	if disabled {
+		comment = "internet access turned off"
+	}
+	_, err := d.Config.Edit(p, comment, func(c *config.Config) error {
+		c.Relay.Disabled = disabled
+		return nil
+	})
+	return err
+}
+
+// EnsureRegistered включает доступ из интернета, не создавая лишнего устройства:
+// адрес уже есть — снимает запрет; адреса нет — регистрирует на relay.url
+// конфигурации или DefaultURL (только владелец).
+func EnsureRegistered(ctx context.Context, d *daemon.Daemon, p auth.Principal) (map[string]any, error) {
+	if err := p.RequireOwner(); err != nil {
+		return nil, err
+	}
+	registerMu.Lock()
+	defer registerMu.Unlock()
+	if c := d.Config.Current().Relay; c.DeviceID != "" {
+		if c.Disabled {
+			if err := SetDisabled(d, p, false); err != nil {
+				return nil, err
+			}
+		}
+		host := deviceHost(c)
+		return map[string]any{"device_id": c.DeviceID, "host": host, "mcp_url": "https://" + host}, nil
+	}
+	r := d.Config.Current().Relay
+	return registerDevice(ctx, d, p, or(r.URL, DefaultURL), r.CAFile, r.SelfSigned, "relay registration")
+}
+
+// NextRetryAt — время следующей попытки (HH:MM по часам этого компьютера) или "".
+func (s Status) NextRetryAt() string {
+	if s.NextRetry.IsZero() {
+		return ""
+	}
+	return s.NextRetry.Local().Format("15:04")
 }

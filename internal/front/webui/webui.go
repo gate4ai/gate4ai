@@ -466,6 +466,7 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/channels/telegram", u.telegramStep)
 	change("/settings/approvals", u.saveApprovalSettings)
 	change("/settings/relay", u.registerRelay)
+	change("/settings/relay/toggle", u.toggleRelay)
 	change("/settings/autostart", u.toggleAutostart)
 	change("/settings/general", u.saveGeneral)
 	change("/settings/remote-link", u.remoteLink)

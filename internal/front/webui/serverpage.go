@@ -13,6 +13,7 @@ import (
 
 	"github.com/gate4ai/gate4ai/internal/platform/browserenv"
 	"github.com/gate4ai/gate4ai/internal/platform/version"
+	"github.com/gate4ai/gate4ai/internal/relayclient"
 )
 
 // Страница «Сервер» (Настройки → Сервер): состояние компонентов установки на
@@ -130,11 +131,23 @@ func (u *UI) serverChecks(ctx context.Context) []ServerCheck {
 	// Адрес из интернета.
 	pub, rs := u.D.PublicURL(), u.relay()
 	switch {
+	case rs.Disabled:
+		add(ServerCheck{ID: "public", Title: M("Access from the internet"), Status: "off", Detail: M("turned off by the owner: the Web UI, approvals and browser sessions are reachable only on this computer"),
+			Fix: M("Turn internet access on."), Link: "/settings/internet", Button: M("Turn on")})
 	case rs.Configured && !rs.Online:
 		add(ServerCheck{ID: "public", Title: M("Access from the internet"), Status: "bad", Detail: M("the relay is set up, but the device is not connected to it%s", relayErr(rs.Error)),
 			Fix: M("Check the network and the daemon log."), Cmd: "gate4ai relay status", Link: "/settings/internet", Button: M("Internet access")})
 	case pub != "":
 		add(ServerCheck{ID: "public", Title: M("Access from the internet"), Status: "ok", Detail: M("%s — the Web UI from the phone at /ui/, agents on other computers, links to browser sessions", pub)})
+	case rs.Phase == relayclient.PhaseRegistering:
+		add(ServerCheck{ID: "public", Title: M("Access from the internet"), Status: "warn", Detail: M("turning on: registering this computer on the relay…"), Link: "/settings/internet", Button: M("Internet access")})
+	case rs.Phase == relayclient.PhaseFailed:
+		var next any = ""
+		if at := rs.NextRetryAt(); at != "" {
+			next = M(" Next attempt at %s.", at)
+		}
+		add(ServerCheck{ID: "public", Title: M("Access from the internet"), Status: "bad", Detail: M("could not turn on%s.%v", relayErr(rs.Error), next),
+			Fix: M("Check the network; the daemon retries by itself."), Cmd: "gate4ai relay status", Link: "/settings/internet", Button: M("Internet access")})
 	default:
 		st := "warn"
 		if !headless {
