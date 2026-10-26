@@ -200,6 +200,7 @@ func New(opt Options) (*Daemon, error) {
 	d.Pipeline.Ask = d.ask
 	d.Pipeline.Handoff = d.handoff
 	d.Pipeline.ViewURL = d.BrowserViewURL
+	d.Pipeline.VaultURL = d.VaultURL
 	if opt.Now != nil {
 		d.Pipeline.Now = opt.Now
 		d.State.Now = opt.Now

@@ -103,6 +103,20 @@ func (d *Daemon) BrowserViewURL(session string) string {
 	return local + "/browser/" + id
 }
 
+// VaultURL — страница «Пароли и учётки» Web UI: публичный адрес или локальный.
+func (d *Daemon) VaultURL() string {
+	if pub := d.PublicURL(); pub != "" {
+		return pub + "/ui/vault"
+	}
+	d.mu.Lock()
+	local := d.localUI
+	d.mu.Unlock()
+	if local == "" {
+		local = "http://127.0.0.1:7431"
+	}
+	return local + "/vault"
+}
+
 // BrowserStatus — сеансы агентов в браузере.
 func (d *Daemon) BrowserStatus(ctx context.Context) (BrowserStatus, error) {
 	b, err := d.browser()

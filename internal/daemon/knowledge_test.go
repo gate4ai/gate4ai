@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -38,7 +39,7 @@ func TestSitesLookup(t *testing.T) {
 		Actions: []manifest.Action{{Name: "summary", Class: "read", Description: "Summary"}, {Name: "internal", Class: "read", ServiceOnly: true}}, Services: []string{"internal"}, Contract: 1}}
 	login := siteConn{manifest.Manifest{Connector: "example_login", Version: "1", Sites: []access.Site{{Domain: "login.example.org", Access: access.Allow}},
 		Credentials: []manifest.CredentialSlot{{Slot: "login", Bind: []string{"https://login.example.org"}}},
-		Actions: []manifest.Action{{Name: "login", Class: "write", InputSchema: manifest.MustSchema(`{ type: object, properties: { account: { type: string } }, required: [account] }`)}}}}
+		Actions:     []manifest.Action{{Name: "login", Class: "write", InputSchema: manifest.MustSchema(`{ type: object, properties: { account: { type: string } }, required: [account] }`)}}}}
 	c1, err := connectors.NewInProcess(site)
 	if err != nil {
 		t.Fatal(err)
@@ -164,5 +165,66 @@ func TestSitesLookup(t *testing.T) {
 	}
 	if connectorNameFor("ticket.rzd.ru") != "rzd" || connectorNameFor("www.ozon.ru") != "ozon" || connectorNameFor("localhost") != "localhost" || connectorNameFor("1c.ru") != "site_1c" {
 		t.Fatal("names")
+	}
+}
+
+// add_credential: ответ содержит, какие секреты задать и где; агент ждёт их
+// через /v1/vault/status (только да/нет, учётки своего профиля).
+func TestAddCredentialHintAndVaultStatus(t *testing.T) {
+	d, err := New(Options{Home: filepath.Join(t.TempDir(), "d"), Keys: keys.NewMemory(),
+		InitialConfig: []byte("agents:\n  bot: {profile: p}\n  other: {profile: q}\nprofiles:\n  p:\n    connectors: []\n  q:\n    connectors: []\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ctx := context.Background()
+	cred := `{"bind":["https://pass.example.org"],"form":{"fields":[{"selector":"#login","secret":"@ex.login","type":"text"},{"selector":"#password","secret":"@ex.password"}],"submit":{"selector":"button"}},"use":["p"]}`
+	r := d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "gate4ai.change_policy", Args: map[string]any{"summary": "account for example.org",
+		"changes": []any{map[string]any{"op": "add_credential", "account": "@ex", "credential_json": cred}}}})
+	if r.Status != pipeline.StatusPending {
+		t.Fatalf("%+v", r)
+	}
+	res, err := d.Pipeline.Decide(ctx, r.ID, true, "webui", "owner")
+	if err != nil || res.Status != "ok" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	out := res.Result.(map[string]any)
+	if out["account"] != "@ex" || out["vault_url"] != d.VaultURL() || !strings.Contains(out["hint"].(string), "vault status @ex --wait") {
+		t.Fatalf("%+v", out)
+	}
+	if ts := fmt.Sprint(out["secrets_to_set"]); !strings.Contains(ts, "@ex.login") || !strings.Contains(ts, "@ex.password") {
+		t.Fatalf("%+v", out["secrets_to_set"])
+	}
+	mux := http.NewServeMux()
+	anyp := func(h func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) { h(w, r, PrincipalFrom(r.Context())) }
+	}
+	d.agentRoutes(mux, anyp)
+	status := func(p auth.Principal, account string) (int, map[string]any) {
+		req := httptest.NewRequest("GET", "/v1/vault/status?account="+account, nil)
+		req = req.WithContext(WithPrincipal(req.Context(), p))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		var m map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &m)
+		return rec.Code, m
+	}
+	code, m := status(auth.AgentVia("bot", "agent-socket"), "@ex")
+	if code != 200 || m["ready"] != false || len(m["secrets"].([]any)) != 2 {
+		t.Fatalf("%d %+v", code, m)
+	}
+	if code, _ = status(auth.AgentVia("other", "agent-socket"), "@ex"); code != 404 {
+		t.Fatal("another profile sees the account", code)
+	}
+	if code, _ = status(auth.AgentVia("bot", "agent-socket"), "@nope"); code != 404 {
+		t.Fatal(code)
+	}
+	for _, a := range []string{"@ex.login", "@ex.password"} {
+		if err := d.Vault.Set(a, "v-"+a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, m = status(auth.OwnerVia("socket"), "ex"); code != 200 || m["ready"] != true {
+		t.Fatalf("%d %+v", code, m)
 	}
 }

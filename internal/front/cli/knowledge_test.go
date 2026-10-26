@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gate4ai/gate4ai/sdk-go/hosttest"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -169,5 +170,95 @@ func TestKnowledgeAndLookupCommands(t *testing.T) {
 	// Агенту папка знаний и проверка недоступны (команды владельца, как connectors).
 	if code, _ = h.run(t, tok, "knowledge"); code == ExitOK {
 		t.Fatal("agent read the knowledge folder")
+	}
+}
+
+// vault status — агент ждёт, пока владелец задаст секреты учётки (значений не видит).
+func TestVaultStatusWait(t *testing.T) {
+	c, _ := connectors.NewInProcess(mailFake{})
+	h := startWith(t, policy+"credentials:\n  \"@site\":\n    bind: [\"https://login.example.org\"]\n    form: { fields: [{selector: \"#p\", secret: \"@site.password\"}], submit: {selector: button} }\n    use: [assistant]\n", c)
+	_, out := h.run(t, "", "agents", "token", "claude-ai")
+	tok := jsonOf(t, out)["token"].(string)
+	old := VaultPoll
+	VaultPoll = 20 * time.Millisecond
+	defer func() { VaultPoll = old }()
+	code, out := h.run(t, tok, "vault", "status", "@site", "--wait", "100ms")
+	if code != ExitPending || !strings.Contains(out, `"ready": false`) || strings.Contains(out, "s3cret") {
+		t.Fatal(code, out)
+	}
+	if code, _ = h.run(t, tok, "vault", "status", "@other"); code == ExitOK {
+		t.Fatal("unknown account")
+	}
+	if code, out = h.run(t, "", "vault", "set", "@site.password"); code != ExitOK {
+		t.Fatal(out)
+	}
+	if code, out = h.run(t, tok, "vault", "status", "site", "--wait", "1s"); code != ExitOK || !strings.Contains(out, `"ready": true`) {
+		t.Fatal(code, out)
+	}
+}
+
+// --login-connector: шаги входа из записи сеанса — отдельный коннектор входа,
+// в основном коннекторе вход — один browser.login по слоту.
+func TestConnectorsNewLoginConnector(t *testing.T) {
+	home := t.TempDir()
+	rec := `{"session":"s-l","steps":[
+ {"action":"open","args":{"url":"https://ticket.example.org/"},"result":{"url":"https://pass.example.org/login","login_required":{"account":"@ex"}}},
+ {"action":"act","args":{"selector":"#login","method":"fill","value":"+79161234567"},"result":{"url":"https://pass.example.org/login"}},
+ {"action":"act","args":{"selector":"#password","method":"fill","value":"hunter2"},"result":{"url":"https://pass.example.org/login"}},
+ {"action":"act","args":{"selector":"button","text":"Войти","method":"click","expect_url_change":true},"result":{"url":"https://ticket.example.org/cabinet"}},
+ {"action":"observe","args":{"max_chars":2000},"result":{"url":"https://ticket.example.org/cabinet","title":"Кабинет","text":"Привет"}},
+ {"action":"close","args":{},"result":{"closed":true}}]}`
+	steps := filepath.Join(home, "s-l.json")
+	os.WriteFile(steps, []byte(rec), 0o600)
+	dir := filepath.Join(home, "k", "gate4ai-ex")
+	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
+	code := Run(context.Background(), &Env{Stdout: out, Stderr: errb, Getenv: func(string) string { return "" }},
+		[]string{"connectors", "new", "ex", "--from-session", steps, "--task", "cabinet", "--login-connector", "ex_login", "-o", dir})
+	if code != ExitOK {
+		t.Fatal(code, out.String()+errb.String())
+	}
+	res := jsonOf(t, out.String())
+	lc := res["login_connector"].(map[string]any)
+	ldir := lc["folder"].(string)
+	if lc["connector"] != "ex_login" || lc["origin"] != "https://pass.example.org" || filepath.Base(ldir) != "gate4ai-ex-login" {
+		t.Fatalf("%+v", lc)
+	}
+	m, err := manifest.Parse(must(os.ReadFile(filepath.Join(ldir, "manifest.yaml"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, ok := m.Find("login")
+	if !ok || !m.IsService("login") || m.Contract != 1 || !a.CallsAction("browser", "fill_secret") || len(m.Credentials) != 1 || strings.Join(m.Credentials[0].Fields, ",") != "login,password" {
+		t.Fatalf("%+v %+v", m, a)
+	}
+	for _, f := range []string{"main.go", "connector.go", "connector_test.go"} {
+		src := must(os.ReadFile(filepath.Join(ldir, f)))
+		if _, err := parser.ParseFile(token.NewFileSet(), f, src, parser.AllErrors); err != nil {
+			t.Errorf("%s: %v\n%s", f, err, src)
+		}
+		if bytes.Contains(src, []byte("hunter2")) {
+			t.Errorf("%s: the password leaked", f)
+		}
+	}
+	// Основной коннектор: слот site и подвызов login, но без шагов формы входа.
+	mm, err := manifest.Parse(must(os.ReadFile(filepath.Join(dir, "manifest.yaml"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ma, _ := mm.Find("cabinet")
+	if !ma.CallsAction("browser", "login") || ma.CallsAction("browser", "fill_secret") || len(mm.Credentials) != 1 {
+		t.Fatalf("%+v %+v", ma, mm.Credentials)
+	}
+	main := string(must(os.ReadFile(filepath.Join(dir, "connector.go"))))
+	if !strings.Contains(main, `"login", map[string]any{"account": "site"}`) || strings.Contains(main, "#password") {
+		t.Fatal(main)
+	}
+	// Запись, где вход делал хост (шаг login учётки): ветки входа нет — честная ошибка.
+	os.WriteFile(filepath.Join(home, "s-abc.json"), []byte(sessionRecord), 0o600)
+	out3, err3 := &bytes.Buffer{}, &bytes.Buffer{}
+	code = Run(context.Background(), &Env{Stdout: out3, Stderr: err3, Getenv: func(string) string { return "" }},
+		[]string{"connectors", "new", "ex3", "--from-session", filepath.Join(home, "s-abc.json"), "--login-connector", "ex3_login", "-o", filepath.Join(home, "ex3")})
+	if all := out3.String() + err3.String(); code == ExitOK || !strings.Contains(all, "no sign-in steps") {
+		t.Fatal(code, all)
 	}
 }

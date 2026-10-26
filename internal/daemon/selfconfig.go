@@ -261,7 +261,24 @@ func (s selfConnector) Execute(ctx context.Context, r abi.ExecRequest) (abi.Exec
 		if err != nil {
 			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "%v", err)
 		}
-		return abi.ExecResult{Structured: map[string]any{"status": "applied", "config_version": v.N}}, nil
+		out := map[string]any{"status": "applied", "config_version": v.N}
+		// Новая учётка: куда владелец идёт задавать её секреты и как агенту дождаться.
+		var toSet []string
+		for _, ch := range changes {
+			if ch.Op != config.OpAddCredential {
+				continue
+			}
+			if cr, ok := d.Config.Current().Credentials[ch.Account]; ok {
+				toSet = append(toSet, cr.Secrets()...)
+				out["account"] = ch.Account
+			}
+		}
+		if len(toSet) > 0 {
+			out["secrets_to_set"], out["vault_url"] = toSet, d.VaultURL()
+			out["hint"] = fmt.Sprintf("tell the user to set %s at %s (Web UI → Passwords and accounts) or with gate4ai vault set <alias>; never ask for the values in the chat; wait with gate4ai vault status %s --wait 10m, then browser.login --account %s",
+				strings.Join(toSet, ", "), d.VaultURL(), out["account"], out["account"])
+		}
+		return abi.ExecResult{Structured: out}, nil
 	}
 	return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "unknown action %s", r.Action)
 }

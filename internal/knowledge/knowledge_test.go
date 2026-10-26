@@ -3,6 +3,7 @@
 package knowledge
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,5 +166,57 @@ func TestDraftFromSteps(t *testing.T) {
 	}
 	if !strings.Contains(d.InputSchema(), "input_1") || d.ExampleArgs()["input_1"] != "Москва" || len(d.Fixture().Steps) != 5 {
 		t.Fatal("schema/args/fixture")
+	}
+}
+
+func TestSplitLogin(t *testing.T) {
+	steps := []hosttest.Step{
+		{Action: "open", Args: map[string]any{"url": "https://ticket.example.org/"}, Result: map[string]any{"url": "https://pass.example.org/login", "login_required": map[string]any{"account": "@ex"}}},
+		{Action: "observe", Args: map[string]any{"elements": true}, Result: map[string]any{"url": "https://pass.example.org/login"}},
+		{Action: "act", Args: map[string]any{"selector": "#login", "method": "fill", "value": "+79161234567"}, Result: map[string]any{"url": "https://pass.example.org/login"}},
+		{Action: "act", Args: map[string]any{"selector": "#password", "method": "fill", "value": "hunter2"}, Result: map[string]any{"url": "https://pass.example.org/login"}},
+		{Action: "act", Args: map[string]any{"selector": "button", "text": "Войти", "method": "click", "expect_url_change": true}, Result: map[string]any{"url": "https://ticket.example.org/cabinet"}},
+		{Action: "act", Args: map[string]any{"selector": "#from", "method": "fill", "value": "Москва"}, Result: map[string]any{"url": "https://ticket.example.org/cabinet"}},
+		{Action: "close", Args: map[string]any{}, Result: map[string]any{"closed": true}},
+	}
+	main, br := SplitLogin(steps, "")
+	if br == nil || br.Origin != "https://pass.example.org" || len(br.Steps) != 4 || br.Success != "https://ticket.example.org/cabinet" {
+		t.Fatalf("%+v", br)
+	}
+	if len(br.Fields) != 2 || br.Fields[0].Name != "login" || br.Fields[0].Secret || br.Fields[1].Name != "password" || !br.Fields[1].Secret {
+		t.Fatalf("%+v", br.Fields)
+	}
+	// Основной сценарий: open, затем один шаг login по слоту, затем шаги задачи и close.
+	var acts []string
+	for _, st := range main {
+		acts = append(acts, st.Action)
+	}
+	if strings.Join(acts, " ") != "open login act close" || main[1].Args["account"] != "site" || main[1].Result["status"] != "logged_in" {
+		t.Fatalf("%v %+v", acts, main[1])
+	}
+	d := LoginDraft{Connector: "ex_login", Branch: *br}
+	if strings.Join(d.Calls(), " ") != "browser.act browser.fill_secret browser.observe" || strings.Join(d.FieldNames(), ",") != "login,password" {
+		t.Fatalf("%v %v", d.Calls(), d.FieldNames())
+	}
+	code := d.GoCase()
+	for _, want := range []string{`"fill_secret", map[string]any{"account": account, "field": "login", "selector": "#login"}`, `"field": "password"`, `"text": "Войти"`, `strings.HasPrefix(p.URL, "https://pass.example.org")`} {
+		if !strings.Contains(code, want) {
+			t.Fatalf("code lacks %q:\n%s", want, code)
+		}
+	}
+	if strings.Contains(code, "hunter2") || strings.Contains(code, "+79161234567") {
+		t.Fatal("values leaked into the code")
+	}
+	fx := d.Fixture()
+	raw := fmt.Sprint(fx.Steps)
+	if len(fx.Steps) != 5 || strings.Contains(raw, "hunter2") || fx.Steps[1].Action != "fill_secret" {
+		t.Fatalf("%+v", fx.Steps)
+	}
+	if body := d.Body(); !strings.Contains(body, "`password` → `#password` (secret") {
+		t.Fatal(body)
+	}
+	// Без входа — ветки нет, шаги как были.
+	if m, b := SplitLogin(steps[5:], ""); b != nil || len(m) != 2 {
+		t.Fatalf("%v %+v", m, b)
 	}
 }

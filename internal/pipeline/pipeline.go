@@ -46,6 +46,8 @@ const (
 	CodeExecution          = "execution_failed"
 	CodeOffline            = "connector_unavailable"
 	CodeInvalidResult      = "invalid_result"
+	// CodeCredentialsRequired — вход невозможен без учётки или её секретов (abi.CodeCredentialsRequired).
+	CodeCredentialsRequired = "credentials_required"
 )
 
 // Result — ответ агенту в едином конверте (MarshalJSON): status, при успехе —
@@ -186,6 +188,9 @@ type Pipeline struct {
 	// RunHook — результат корневого прогона действия коннектора (счётчик
 	// проверенности): daemon обновляет рецепт в папке знаний.
 	RunHook func(action string, ok bool, stats RunStats)
+	// VaultURL — страница «Пароли и учётки» Web UI (nil — без ссылки): куда
+	// владелец идёт задавать секреты новой учётки (credentials_required).
+	VaultURL func() string
 
 	mu     sync.RWMutex
 	engine *policy.Engine
@@ -557,8 +562,11 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 		var ae *abi.Error
 		if errors.As(err, &ae) {
 			res.connectorCode = ae.Code
-			if ae.Code == abi.CodeSecretDenied {
+			switch ae.Code {
+			case abi.CodeSecretDenied:
 				res.Code = CodeSecretDenied
+			case abi.CodeCredentialsRequired:
+				res.Code = CodeCredentialsRequired
 			}
 		}
 		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "connection closed") {
@@ -599,6 +607,9 @@ func (p *Pipeline) execute(ctx context.Context, agent, action string, cli connec
 		res.ID, res.Receipt = receipt.ID, audit.Short(hash)
 		res.Message = "the connector returned a malformed result (" + p.maskString(err.Error()) + "); the action may have run: report it to the user as NOT confirmed"
 		return res
+	}
+	if !nested && conn == BrowserConnector && cli.Manifest().Runtime == manifest.RuntimeBuiltin {
+		p.suggestLoginVia(act, ex)
 	}
 	receipt.Execution = audit.Execution{Status: "ok", ResultRef: p.maskString(ex.ResultRef), Page: p.maskString(ex.Page)}
 	var evRefs []string

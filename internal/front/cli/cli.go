@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
@@ -191,6 +192,7 @@ Owner commands (local socket):
   gate4ai policy show | set <file> [-m comment] | versions | rollback <n> | test --agent a --action x [--args json] [--file draft.yaml]
   gate4ai approvals [list] [--table|--json] | approve <id> | reject <id> | questions | answer <id> (value from stdin)
   gate4ai vault list | set <alias> [--from-env VAR] (asks with hidden input; or the value from stdin) | rm <alias>
+  gate4ai vault status <@account> [--wait 10m]   are the account's secrets set (no values; agents may ask and wait for the owner)
   gate4ai access [sites | folders [set <site|folder> <access> | remove <site|folder>]]   the Browser and Files access lists
   gate4ai browser sessions [close <id>] | watch <id> [--remote]   browser sessions of agents: list, live view, close
   gate4ai browser setup [--yes] [--dry-run]   check Chrome, the virtual screen (Xvfb) and fonts; install what is missing (asks first)
@@ -216,6 +218,9 @@ Output: JSON {"status": "ok" | "denied" | "pending" | "error" | "verification_fa
 // commands — встроенные команды (остальное первое слово — имя коннектора).
 var commands = []string{"help", "version", "tools", "status", "skill", "mcp", "pair", "daemon", "service", "log", "show", "export",
 	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "access", "relay", "connectors", "knowledge", "registry", "contract", "fixture", "ui", "run", "doctor", "egress"}
+
+// VaultPoll — как часто vault status --wait спрашивает daemon.
+var VaultPoll = 2 * time.Second
 
 // Run — точка входа CLI.
 func Run(ctx context.Context, e *Env, args []string) int {
@@ -1302,6 +1307,45 @@ func (e *Env) vault(ctx context.Context, args []string) int {
 		}
 		e.printJSON(map[string]any{"status": "ok", "alias": "@" + strings.TrimPrefix(args[0], "@")})
 		return ExitOK
+	case "status":
+		// Заданы ли секреты учётки — без значений; доступно и агенту (он ждёт владельца).
+		pos, fl := splitFlags(args, map[string]bool{"wait": true})
+		fs := flag.NewFlagSet("vault status", flag.ContinueOnError)
+		fs.SetOutput(e.Stderr)
+		wait := fs.String("wait", "", "wait until every secret of the account is set, e.g. 10m")
+		if fs.Parse(fl) != nil || len(pos) != 1 {
+			fmt.Fprintln(e.Stderr, "usage: gate4ai vault status <@account> [--wait 10m]   are the account's secrets set (yes/no, no values); agents may ask")
+			return ExitUsage
+		}
+		e.ownerCmd = false
+		c = e.Client()
+		var d time.Duration
+		if *wait != "" {
+			var err error
+			if d, err = time.ParseDuration(*wait); err != nil {
+				return e.fail(fmt.Errorf("--wait: %v", err))
+			}
+		}
+		deadline := time.Now().Add(d)
+		for {
+			var res map[string]any
+			if err := c.Do(ctx, "GET", "/v1/vault/status?account="+url.QueryEscape(pos[0]), nil, &res); err != nil {
+				return e.fail(err)
+			}
+			if res["ready"] == true || time.Now().After(deadline) {
+				e.printJSON(res)
+				if res["ready"] == true {
+					return ExitOK
+				}
+				fmt.Fprintln(e.Stderr, "gate4ai: not all secrets of "+pos[0]+" are set yet; the owner sets them in Web UI → Passwords and accounts")
+				return ExitPending
+			}
+			select {
+			case <-ctx.Done():
+				return ExitError
+			case <-time.After(VaultPoll):
+			}
+		}
 	case "rm":
 		if len(args) != 1 {
 			fmt.Fprintln(e.Stderr, "usage: gate4ai vault rm <alias>")
@@ -1313,7 +1357,7 @@ func (e *Env) vault(ctx context.Context, args []string) int {
 		e.printJSON(map[string]any{"status": "ok"})
 		return ExitOK
 	}
-	fmt.Fprintln(e.Stderr, "usage: gate4ai vault list | set <alias> | rm <alias>")
+	fmt.Fprintln(e.Stderr, "usage: gate4ai vault list | set <alias> | rm <alias> | status <@account> [--wait 10m]")
 	return ExitUsage
 }
 

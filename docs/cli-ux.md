@@ -31,6 +31,7 @@
 | `log`, `show`, `export`, `journal verify` | владелец | да |
 | `verify file [--pubkey] [--passphrase-env]` | все | нет |
 | `agents`, `policy`, `approvals`, `vault`, `access [sites \| folders [set <v> <режим> \| remove <v>]]`, `sites allow \| remove` (= `access sites set <сайт> allow`), `relay`, `connectors list \| install \| update \| remove \| logs \| refresh` (`install <git url>` — клон в папку знаний и своя сборка), `knowledge [list] \| check <имя>` (папка знаний и проверка перед публикацией) | владелец | да |
+| `vault status <@учётка> [--wait 10m]` — заданы ли секреты учётки (только да/нет; агенту — учётки его профиля) | агент / владелец | да |
 | `sites lookup <домен>` — что известно о сайте (= действие `gate4ai sites_lookup`): поставленные коннекторы, магазин, папка знаний, вход, следующий шаг | агент / владелец | да |
 | `connectors new [--from-session] \| pack \| verify \| keygen`, `registry check \| sign \| add`, `fixture scrub`, `contract gen \| diff` | автор / издатель / registry | нет (`registry check --fetch` ходит в сеть; `connectors new` без `-o` спрашивает у daemon папку знаний, без него — `~/gate4ai-knowledge`) |
 | `run <agent> [--workspace --container --microvm --image --engine --dry-run] [-- cmd]`, `egress` | владелец | да |

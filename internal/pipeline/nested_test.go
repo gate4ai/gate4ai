@@ -291,7 +291,9 @@ func TestTraceAndHandoffToAgent(t *testing.T) {
 		return "s-adopted", "https://x.example/page", true
 	}
 	var hooks []string
-	p.RunHook = func(action string, ok bool, st RunStats) { hooks = append(hooks, fmt.Sprintf("%s:%v:%d", action, ok, st.OK)) }
+	p.RunHook = func(action string, ok bool, st RunStats) {
+		hooks = append(hooks, fmt.Sprintf("%s:%v:%d", action, ok, st.OK))
+	}
 	b.calls = []abi.ServiceCallRequest{{Target: "web", Action: "open", Args: map[string]any{"url": "https://x.example/"}}, {Target: "web", Action: "open", Args: map[string]any{"url": "https://x.example/next"}}}
 	ctx := context.Background()
 	// Черновик: трасса без флага.

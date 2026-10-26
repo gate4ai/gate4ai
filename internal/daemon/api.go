@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -624,6 +625,43 @@ func (d *Daemon) policyTest(w http.ResponseWriter, agent, action string, args ma
 func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc) {
 	mux.HandleFunc("GET /v1/whoami", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		WriteJSON(w, 200, map[string]any{"owner": p.IsOwner(), "agent": p.Agent, "via": p.Via})
+	}))
+	mux.HandleFunc("GET /v1/vault/status", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		// Заданы ли секреты учётки (только да/нет, без значений): агент ждёт,
+		// пока владелец заполнит их на странице Vault; видны учётки его профиля.
+		account := strings.TrimSpace(r.URL.Query().Get("account"))
+		if !strings.HasPrefix(account, "@") {
+			account = "@" + account
+		}
+		cfg := d.Config.Current()
+		cr, ok := cfg.Credentials[account]
+		if ok && !p.IsOwner() && !slices.Contains(cr.Use, cfg.Agents[p.Agent].Profile) {
+			ok = false
+		}
+		if !ok {
+			WriteError(w, 404, "not_found", fmt.Sprintf("no account %s available to you (the owner creates it: change_policy add_credential)", account))
+			return
+		}
+		set := map[string]bool{}
+		for _, a := range d.Vault.Aliases() {
+			set["@"+strings.TrimPrefix(a, "@")] = true
+		}
+		var secrets []map[string]any
+		ready := true
+		for _, a := range cr.Secrets() {
+			secrets = append(secrets, map[string]any{"alias": a, "set": set[a]})
+			if !set[a] {
+				ready = false
+			}
+		}
+		if secrets == nil {
+			secrets = []map[string]any{}
+		}
+		out := map[string]any{"account": account, "ready": ready, "secrets": secrets, "vault_url": d.VaultURL()}
+		if cr.Via != nil {
+			out["via"] = cr.Via.Connector
+		}
+		WriteJSON(w, 200, out)
 	}))
 	mux.HandleFunc("GET /v1/tools", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		if as := r.URL.Query().Get("agent"); as != "" && p.IsOwner() {

@@ -384,9 +384,9 @@ actions:
       type: object
       properties:
         session: { type: string, description: "agents: the session from browser.open" }
-        account: { type: string, description: "the account alias (@name); connectors: also the slot from their credentials" }
+        account: { type: string, description: "the account alias (@name); connectors: also the slot from their credentials. Either account or via" }
+        via: { type: string, description: "a login connector (login_required.via): sign in with the owner's account that uses it; none — credentials_required with the account to create" }
         timeout_ms: { type: integer, minimum: 0, maximum: 60000, description: "how long to wait for leaving the sign-in page (0 — 15 s)" }
-      required: [account]
     output_schema:
       type: object
       properties:
