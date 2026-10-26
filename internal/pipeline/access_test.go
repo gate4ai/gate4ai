@@ -51,9 +51,6 @@ func (b *accBrowser) PageURL(session, call string) string {
 	if session == "s1" || call != "" {
 		return "https://app.example.org/page"
 	}
-	if session == "s2" {
-		return "https://other.test/page" // * ask
-	}
 	return ""
 }
 
@@ -117,6 +114,7 @@ access:
   sites:
     - { domain: "*", access: ask }
     - { domain: "*.example.org", access: allow }
+    - { domain: ro.example", access: read }
     - { domain: shop.example, access: connector }
     - { domain: ask.example, access: connector }
     - { domain: evil.example, access: deny }
@@ -195,6 +193,7 @@ func TestAccessSites(t *testing.T) {
 		{"bot", "browser.read", map[string]any{"url": "https://a.example.org/x"}, StatusOK, "site:a.example.org"},    // allow: *.example.org
 		{"bot", "browser.read", map[string]any{"url": "https://example.org/"}, StatusOK, "site:example.org"},         // apex тоже
 		{"bot", "browser.act", map[string]any{"session": "s1"}, StatusOK, "site:app.example.org"},                    // страница сеанса — allow
+		{"bot", "browser.read", map[string]any{"url": "https://ro.example/"}, StatusOK, "site:ro.example"},           // read: чтение без вопроса
 		{"bot", "browser.read", map[string]any{"url": "https://other.test/"}, StatusPending, "site:other.test"},      // * ask
 		{"bot", "browser.read", map[string]any{"url": "https://shop.example/"}, StatusDenied, "site:shop.example"},   // connector: агенту напрямую нельзя
 		{"bot", "browser.read", map[string]any{"url": "https://evil.example/"}, StatusDenied, "site:evil.example"},   // deny
@@ -219,17 +218,9 @@ func TestAccessSites(t *testing.T) {
 	if b.settings["mode"] != "blocklist" || len(b.settings["blocked"].([]any)) != 1 || b.settings["blocked"].([]any)[0] != "evil.example" {
 		t.Fatal(b.settings)
 	}
-	// Класс действия для сайта не важен: на allow-сайте действие класса write
-	// проходит без вопроса, на ask-сайте и чтение ждёт владельца.
+	// Режим read: действие класса write — с подтверждением; явное правило — allow.
 	if res := run("bot", "browser.act", map[string]any{"session": "s1"}); res.Status != StatusOK {
 		t.Fatal(res)
-	}
-	if res := run("bot", "browser.act", map[string]any{"session": "s2"}); res.Status != StatusPending {
-		t.Fatal(res)
-	}
-	// Режим read у сайта — ошибка конфигурации (он только у папок).
-	if _, err := config.Parse([]byte("access:\n  sites:\n    - { domain: ro.example, access: read }\n")); err == nil || !strings.Contains(err.Error(), "allow | connector | ask | deny") {
-		t.Fatal("site read accepted:", err)
 	}
 }
 

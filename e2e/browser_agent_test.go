@@ -110,17 +110,20 @@ connectors:
 	}
 
 	// Сайт в списке Браузера как allow покрывает и запросы, меняющие данные;
-	// режима read у сайтов нет — доступ к домену либо есть, либо нет.
+	// как read — они ждут владельца, несмотря на правило browser.* allow.
 	// change_policy — всегда владелец.
 	call(tokB, 0, "browser", "post", "--session", sB, "--url", srv.URL+"/api/items", "--body", `{"x":1}`)
-	if r := g.run("", "", "access", "sites", "set", "127.0.0.1", "read"); r.code == 0 || !strings.Contains(r.out, "allow, connector, ask, deny") {
-		t.Fatalf("read accepted for a site: %d %s", r.code, r.out)
+	if r := g.run("", "", "access", "sites", "set", "127.0.0.1", "read"); r.code != 0 {
+		t.Fatalf("access sites set: %d %s", r.code, r.out)
+	}
+	if res := call(tokB, 3, "browser", "post", "--session", sB, "--url", srv.URL+"/api/items", "--body", `{"x":1}`); res["status"] != "pending" {
+		t.Fatalf("browser.post on a read-only site: %v", res)
 	}
 	if r := g.run("", "", "access", "sites", "set", "127.0.0.1", "allow"); r.code != 0 {
 		t.Fatalf("access sites set: %d %s", r.code, r.out)
 	}
 	if res := call(tokB, 3, "gate4ai", "change_policy", "--summary", "allow grafana.com", "--changes",
-		`[{"op":"set_site_access","domain":"grafana.com","access":"allow"}]`); res["status"] != "pending" {
+		`[{"op":"set_site_access","domain":"grafana.com","access":"read"}]`); res["status"] != "pending" {
 		t.Fatalf("set_site_access under change_policy allow: %v", res)
 	}
 	call(tokB, 0, "browser", "close", "--session", sB)

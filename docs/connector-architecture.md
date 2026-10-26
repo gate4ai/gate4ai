@@ -122,9 +122,9 @@ actions:
 ```yaml
 access:
   sites:
-    - { domain: "*.example.com", access: ask }
+    - { domain: "*.example.com", access: read }
     - { domain: app.example.org, access: allow }
-    - { domain: "*", access: ask }
+    - { domain: "*", access: read }
   folders:
     - { path: "~/Documents", access: ask }
     - { path: "~/Documents/notes", access: append }

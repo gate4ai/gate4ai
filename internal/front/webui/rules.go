@@ -360,7 +360,7 @@ var Templates = []Template{
 			return c.SetProfileConnector(profile, "files", true)
 		}},
 	{ID: "sites-list", Title: "Sites from a list", Needs: []string{"browser.read"},
-		Description: "The browser opens only the sites from the list. The sites go to the Browser access list as allowed.",
+		Description: "The browser opens only the sites from the list. The sites go to the Browser access list as read.",
 		Params:      []TemplateParam{{Name: "sites", Label: "Sites", Placeholder: "*.example.com, app.example.org", Multiline: true}},
 		Apply: func(c *config.Config, profile string, p map[string]string, _ []daemon.Tool) error {
 			items := splitItems(p["sites"])
@@ -375,7 +375,7 @@ var Templates = []Template{
 				return err
 			}
 			for _, it := range items {
-				if err := c.SetSiteAccess(it, access.Allow); err != nil {
+				if err := c.SetSiteAccess(it, access.Read); err != nil {
 					return err
 				}
 			}

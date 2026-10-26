@@ -192,21 +192,18 @@ func TestSitesAndCredentialChanges(t *testing.T) {
 	if st := sum["settings"].(map[string]map[string]any); st["notes"]["root"] != "~/n" {
 		t.Fatalf("%+v", sum["settings"])
 	}
-	r := call(map[string]any{"op": "set_site_access", "domain": "login.example", "access": "allow"})
+	r := call(map[string]any{"op": "set_site_access", "domain": "login.example", "access": "read"})
 	if r.Status != pipeline.StatusPending {
 		t.Fatalf("sites: the owner approves: %+v", r)
 	}
 	if res, err := d.Pipeline.Decide(ctx, r.ID, true, "webui", "owner"); err != nil || res.Status != "ok" {
 		t.Fatal(res, err)
 	}
-	if st, ok := access.MatchSite(d.Config.Current().Access.Sites, "https://login.example/"); !ok || st.Access != access.Allow {
+	if st, ok := access.MatchSite(d.Config.Current().Access.Sites, "https://login.example/"); !ok || st.Access != access.Read {
 		t.Fatal(d.Config.Current().Access.Sites)
 	}
-	if r := call(map[string]any{"op": "set_site_access", "domain": "bad host", "access": "allow"}); r.Code != pipeline.CodeInvalidArgs {
+	if r := call(map[string]any{"op": "set_site_access", "domain": "bad host", "access": "read"}); r.Code != pipeline.CodeInvalidArgs {
 		t.Fatalf("bad domain: %+v", r)
-	}
-	if r := call(map[string]any{"op": "set_site_access", "domain": "ro.example", "access": "read"}); r.Code != pipeline.CodeInvalidArgs {
-		t.Fatalf("read for a site: %+v", r)
 	}
 	if r := call(map[string]any{"op": "add_setting_items", "connector": "browser", "key": "model_key", "items": []any{"@x"}}); r.Code != pipeline.CodeInvalidArgs {
 		t.Fatalf("secrets via settings: %+v", r)

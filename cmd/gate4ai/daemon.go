@@ -28,18 +28,20 @@ import (
 // emptyConfig — первая версия конфигурации, если не передан --config: агентов
 // нет, официальный магазин коннекторов подключён, встроенный коннектор files
 // (корень ~/Documents; скрытое и ключи закрыты им самим) виден в профиле
-// default с правилом ask на каждое действие. Каждый
+// default; сайты — `*` → read (чтение без вопроса, изменения — с подтверждением),
+// ~/Documents → ask. Каждый
 // установленный из магазина коннектор daemon добавляет туда же с ask.
-const emptyConfig = `# gate4ai: no agents yet. The browser and files are built in: every site and
-# ~/Documents ask you first (hidden files and keys are always closed). Open sites
-# and folders in the Web UI (Browser, Files) or: gate4ai access sites set app.example.org read
+const emptyConfig = `# gate4ai: no agents yet. The browser and files are built in: any site can be
+# read without asking, changes on sites and everything in ~/Documents ask you first
+# (hidden files and keys are always closed). Open sites and folders in the Web UI
+# (Browser, Files) or: gate4ai access sites set app.example.org allow
 # Add agents in the Web UI, or: gate4ai policy set config.yaml
 store:
   registry: https://raw.githubusercontent.com/gate4ai/registry/main/index.json
   registry_keys: ["ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="]
 access:
   sites:
-    - { domain: "*", access: ask }
+    - { domain: "*", access: read }
   folders:
     - { path: "~/Documents", access: ask }
 profiles:
