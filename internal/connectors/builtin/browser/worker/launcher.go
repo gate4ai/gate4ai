@@ -10,35 +10,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gate4ai/gate4ai/internal/platform/browserenv"
 )
 
-// ChromeCandidates — где искать системный Chrome.
-func ChromeCandidates() []string {
-	switch runtime.GOOS {
-	case "darwin":
-		return []string{"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"}
-	case "windows":
-		var out []string
-		for _, env := range []string{"PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"} {
-			if d := os.Getenv(env); d != "" {
-				out = append(out, filepath.Join(d, "Google", "Chrome", "Application", "chrome.exe"))
-			}
-		}
-		return out
-	}
-	return []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser"}
-}
-
-// FindChrome возвращает путь к Chrome.
+// FindChrome возвращает путь к Chrome: GATE4AI_CHROME, системный, snap и
+// flatpak, кеши Playwright и Puppeteer (browserenv — те же места показывает
+// gate4ai browser setup).
 func FindChrome() (string, error) {
-	for _, c := range ChromeCandidates() {
-		if p, err := exec.LookPath(c); err == nil {
-			return p, nil
-		}
+	if p := browserenv.FindChrome(browserenv.System()); p != "" {
+		return p, nil
 	}
 	return "", errors.New("Chrome not found; set connectors.browser.chrome_path")
 }

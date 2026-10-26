@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caddyserver/certmagic"
+
 	"github.com/gate4ai/gate4ai/internal/config"
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
@@ -39,6 +41,7 @@ type Status struct {
 	Phase      string    `json:"phase,omitempty"`     // Phase*; "" — relay не настроен и сам не включается
 	Error      string    `json:"error,omitempty"`     // последняя ошибка (failed, reconnecting, issuing — повтор выпуска)
 	NextRetry  time.Time `json:"next_retry,omitzero"` // когда повторится регистрация или выпуск сертификата
+	TempCert   bool      `json:"temp_cert,omitempty"` // туннель работает на временном самоподписанном сертификате: выпуск настоящего (Error) не удался и повторится в NextRetry
 	URL        string    `json:"url,omitempty"`       // адрес relay
 	DeviceID   string    `json:"device_id,omitempty"`
 	Host       string    `json:"host,omitempty"`    // <device-id>.<домен relay>
@@ -54,6 +57,9 @@ var RetryRegister = time.Hour
 
 // DefaultURL — relay gate4.ai по умолчанию (переменная — для тестов).
 var DefaultURL = "https://relay.gate4.ai"
+
+// testIssuer — эмитент сертификата устройства вместо ACME (только тесты).
+var testIssuer certmagic.Issuer
 
 // registerMu — регистрации по одной: самостоятельная и ручная (кнопка, мастер,
 // CLI) не создадут два устройства.
@@ -73,8 +79,9 @@ func Attach(ctx context.Context, d *daemon.Daemon, auto bool) func() Status {
 	var cur *Device
 	var stop, stopReg context.CancelFunc
 	var key string
-	var phase, failure string // этап до появления Device; failure — причина PhaseFailed
+	var phase, failure string // этап до появления Device; failure — причина PhaseFailed или неудачного выпуска сертификата
 	var nextTry time.Time     // следующая попытка регистрации или выпуска сертификата
+	var tempCert bool         // cur — временный туннель на самоподписанном сертификате
 	d.AddPublicURL(func() string {
 		if c := d.Config.Current().Relay; c.URL != "" && c.DeviceID != "" && !c.Disabled {
 			return "https://" + deviceHost(c)
@@ -154,25 +161,41 @@ func Attach(ctx context.Context, d *daemon.Daemon, auto bool) func() Status {
 		stop = cancel
 		// Выпуск сертификата (ACME) может занять время — не блокируем daemon.
 		// Неудачу повторяем с растущей паузой (лимит Let's Encrypt — 5 неудачных
-		// проверок в час на имя), а не отключаем relay до перезапуска: этап
-		// остаётся issuing, причина — в Error.
+		// проверок в час на имя), а не отключаем relay до перезапуска. Пока
+		// настоящего сертификата нет, адрес всё же открывается: туннель
+		// поднимается на временном самоподписанном сертификате (браузер
+		// предупредит о нём; статус — TempCert, причина — Error), а выпуск
+		// повторяется в фоне и, удавшись, заменяет временный туннель настоящим.
 		go func() {
 			wait := retryCert
 			var dev *Device
+			var stopTemp context.CancelFunc
 			for {
 				var err error
-				dev, err = deviceFor(dctx, d, r, tok)
+				dev, err = deviceFor(dctx, d, r, tok, r.SelfSigned)
 				mu.Lock()
 				if dctx.Err() != nil {
 					mu.Unlock()
 					return
 				}
 				if err == nil {
-					cur, failure, nextTry = dev, "", time.Time{}
+					if stopTemp != nil {
+						stopTemp()
+					}
+					cur, tempCert, failure, nextTry = dev, false, "", time.Time{}
 					mu.Unlock()
 					break
 				}
 				failure, nextTry = err.Error(), time.Now().Add(wait)
+				if stopTemp == nil {
+					if tmp, terr := deviceFor(dctx, d, r, tok, true); terr == nil {
+						tctx, cancel := context.WithCancel(dctx)
+						stopTemp = cancel
+						cur, tempCert = tmp, true
+						go tmp.Run(tctx)
+						d.Log.Warn("relay: device certificate not obtained, the tunnel runs on a temporary self-signed certificate until it is", "err", err)
+					}
+				}
 				mu.Unlock()
 				d.Log.Error("relay: device certificate not obtained, retrying", "err", err, "in", wait)
 				select {
@@ -189,7 +212,7 @@ func Attach(ctx context.Context, d *daemon.Daemon, auto bool) func() Status {
 	}
 	status := func() Status {
 		mu.Lock()
-		dev, ph, fail, next := cur, phase, failure, nextTry
+		dev, ph, fail, next, temp := cur, phase, failure, nextTry, tempCert
 		mu.Unlock()
 		c := d.Config.Current().Relay
 		st := Status{Configured: c.DeviceID != "", Disabled: c.Disabled, Online: dev != nil && dev.Online(), URL: c.URL, DeviceID: c.DeviceID}
@@ -203,6 +226,14 @@ func Attach(ctx context.Context, d *daemon.Daemon, auto bool) func() Status {
 		st.Phase, st.Error, st.NextRetry = ph, fail, next
 		if dev != nil {
 			st.Phase, st.Error = dev.phase()
+			if temp {
+				// Временный сертификат: причина — неудачный выпуск настоящего,
+				// пока сам туннель в порядке.
+				st.TempCert, st.NextRetry = true, next
+				if st.Online {
+					st.Error = fail
+				}
+			}
 		}
 		if st.Phase == "" && (c.DeviceID != "" || auto) { // конфигурация уже новая, apply ещё не отработал
 			st.Phase = PhaseIssuing
@@ -249,6 +280,9 @@ func Attach(ctx context.Context, d *daemon.Daemon, auto bool) func() Status {
 			}
 			if !st.NextRetry.IsZero() {
 				out["next_retry"] = st.NextRetry.Format(time.RFC3339)
+			}
+			if st.TempCert {
+				out["temp_cert"] = true
 			}
 			daemon.WriteJSON(w, http.StatusOK, out)
 		})
@@ -302,7 +336,10 @@ func relayTLS(r config.Relay) (*tls.Config, error) {
 	return &tls.Config{RootCAs: pool}, nil
 }
 
-func deviceFor(ctx context.Context, d *daemon.Daemon, r config.Relay, tok string) (*Device, error) {
+// deviceFor — устройство с туннелем: сертификат по ACME (DNS-01) или, при
+// selfSigned (relay.self_signed — разработка; временный туннель, пока выпуск
+// не удался), самоподписанный.
+func deviceFor(ctx context.Context, d *daemon.Daemon, r config.Relay, tok string, selfSigned bool) (*Device, error) {
 	rt, err := relayTLS(r)
 	if err != nil {
 		return nil, err
@@ -312,7 +349,7 @@ func deviceFor(ctx context.Context, d *daemon.Daemon, r config.Relay, tok string
 	// заголовок Host, который задаёт клиент (SNI проверен сертификатом, Host — нет).
 	dev := &Device{RelayURL: r.URL, ID: r.DeviceID, Token: tok, RelayTLS: rt,
 		Handler: daemon.WithExternalURL(d.PublicHandler(), "https://"+host), Log: d.Log}
-	if r.SelfSigned {
+	if selfSigned {
 		cert, _, err := SelfSigned(host)
 		if err != nil {
 			return nil, err
@@ -321,7 +358,7 @@ func deviceFor(ctx context.Context, d *daemon.Daemon, r config.Relay, tok string
 		return dev, nil
 	}
 	// ACME DNS-01 в фоне: туннель поднимается, когда сертификат готов.
-	t, err := ACMETLS(ctx, ACMEConfig{Host: host, StorageDir: filepath.Join(d.Home, "certs"), CA: r.ACMECA, Email: r.Email, Provider: DNSProvider{D: dev}})
+	t, err := ACMETLS(ctx, ACMEConfig{Host: host, StorageDir: filepath.Join(d.Home, "certs"), CA: r.ACMECA, Email: r.Email, Provider: DNSProvider{D: dev}, issuer: testIssuer})
 	if err != nil {
 		return nil, err
 	}

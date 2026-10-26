@@ -14,8 +14,9 @@ import (
 )
 
 // gate4ai browser setup — проверка (browserenv) и установка недостающего:
-// команды ставятся только с согласия (вопрос в терминале или --yes);
-// установщик gate4ai сам sudo не вызывает.
+// команды ставятся только с согласия (вопрос в терминале или --yes). Без
+// терминала (--yes из установщика, запущенного агентом) sudo вызывается с -n:
+// пароль спросить некому, и команда сразу отвечает, что нужен root, а не висит.
 
 // setupSysFn — окружение для команды (тесты подменяют).
 var setupSysFn = browserenv.System
@@ -50,9 +51,16 @@ func (e *Env) browserSetup(ctx context.Context, args []string) int {
 		return setupExit(c)
 	}
 	for _, cmd := range c.Commands {
+		if !e.Interactive {
+			cmd = strings.ReplaceAll(cmd, "sudo ", "sudo -n ")
+		}
 		fmt.Fprintln(e.Stderr, "+ "+cmd)
 		if err := s.Run(ctx, cmd, e.Stderr); err != nil {
-			fmt.Fprintln(e.Stderr, "gate4ai: the command failed: "+err.Error())
+			msg := "gate4ai: the command failed: " + err.Error()
+			if c.NeedsRoot && !s.Root && !e.Interactive {
+				msg += "\ngate4ai: root is needed and sudo cannot ask for a password here. Run as root (or with sudo):\n  " + strings.Join(c.Commands, "\n  ")
+			}
+			fmt.Fprintln(e.Stderr, msg)
 			return ExitError
 		}
 	}
@@ -62,7 +70,8 @@ func (e *Env) browserSetup(ctx context.Context, args []string) int {
 	return setupExit(c)
 }
 
-// setupExit — 0: Chrome есть (Xvfb и шрифты — рекомендации), 1 — Chrome нет.
+// setupExit — 0: Chrome есть и запустится (Xvfb и шрифты — рекомендации),
+// 1 — Chrome нет или не хватает его библиотек.
 func setupExit(c browserenv.BrowserCheck) int {
 	if c.OK {
 		return ExitOK
@@ -76,10 +85,13 @@ func (e *Env) printCheck(c browserenv.BrowserCheck) {
 	}
 	w := e.Stdout
 	mark := func(ok bool) string { return map[bool]string{true: "ok  ", false: "--  "}[ok] }
-	if c.Chrome != "" {
-		fmt.Fprintln(w, mark(true)+"Chrome: "+c.Chrome+" "+c.Version)
-	} else {
+	switch {
+	case c.Chrome == "":
 		fmt.Fprintln(w, mark(false)+"Chrome: not found — the browser does not work without it")
+	case len(c.Libraries) > 0:
+		fmt.Fprintln(w, mark(false)+"Chrome: "+c.Chrome+" "+c.Version+" — does not start: missing libraries "+strings.Join(c.Libraries, ", "))
+	default:
+		fmt.Fprintln(w, mark(true)+"Chrome: "+c.Chrome+" "+c.Version)
 	}
 	if c.OS != "darwin" && c.OS != "windows" {
 		switch {
@@ -94,8 +106,15 @@ func (e *Env) printCheck(c browserenv.BrowserCheck) {
 			fmt.Fprintln(w, mark(c.Fonts >= 5)+fmt.Sprintf("Fonts: %d", c.Fonts))
 		}
 	}
+	if c.Summary != "" {
+		fmt.Fprintln(w, "\n"+c.Summary)
+	}
 	if len(c.Commands) > 0 {
-		fmt.Fprintln(w, "\nTo install what is missing:")
+		root := ""
+		if c.NeedsRoot {
+			root = " (needs root)"
+		}
+		fmt.Fprintln(w, "To install what is missing"+root+":")
 		for _, cmd := range c.Commands {
 			fmt.Fprintln(w, "  "+cmd)
 		}
@@ -111,9 +130,12 @@ func (e *Env) browserChecks(ctx context.Context) []sandbox.Check {
 	c := browserenv.CheckBrowser(setupSysFn())
 	fix := "gate4ai browser setup"
 	var out []sandbox.Check
-	if c.Chrome == "" {
-		out = append(out, sandbox.Check{ID: "browser_chrome", Status: "fail", Detail: "Chrome is not installed: the browser connector does not work", Fix: fix})
-	} else {
+	switch {
+	case c.Chrome == "":
+		out = append(out, sandbox.Check{ID: "browser_chrome", Status: "fail", Detail: "Chrome is not installed: the browser connector does not work. " + c.Summary, Fix: fix})
+	case len(c.Libraries) > 0:
+		out = append(out, sandbox.Check{ID: "browser_chrome", Status: "fail", Detail: strings.TrimSpace(c.Chrome+" "+c.Version) + " does not start: missing libraries " + strings.Join(c.Libraries, ", ") + ". " + c.Summary, Fix: fix})
+	default:
 		out = append(out, sandbox.Check{ID: "browser_chrome", Status: "ok", Detail: strings.TrimSpace(c.Chrome + " " + c.Version)})
 	}
 	switch c.Display {

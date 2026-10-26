@@ -9,6 +9,8 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -31,9 +33,23 @@ func fakeSys(goos, arch, osRelease string, have map[string]string, vars map[stri
 			return nil, errors.New("no")
 		},
 		Exists: func(p string) bool { _, ok := have[p]; return ok },
+		Glob: func(pattern string) []string {
+			var out []string
+			for k := range have {
+				if ok, _ := filepath.Match(pattern, k); ok {
+					out = append(out, k)
+				}
+			}
+			sort.Strings(out)
+			return out
+		},
+		Home: vars["HOME"],
 		Output: func(name string, args ...string) (string, error) {
-			if name == "fc-list" {
+			switch name {
+			case "fc-list":
 				return have["fc-list-out"], nil
+			case "ldd":
+				return have["ldd-out"], nil
 			}
 			return "Google Chrome 156.0.8078.47", nil
 		},
@@ -68,6 +84,17 @@ func TestCheckBrowser(t *testing.T) {
 			cmds: []string{"apk add chromium xvfb font-noto"}},
 		{name: "virtual screen ready", goos: "linux", arch: "amd64", rel: ubuntu, have: map[string]string{"chromium": "/usr/bin/chromium", "Xvfb": "/usr/bin/Xvfb", "fc-list-out": fonts},
 			display: "virtual", ok: true},
+		// Chromium из кеша Playwright (без root) находится сам; его библиотеки проверяет ldd —
+		// недостающие названы пакетами дистрибутива, Chrome без них не «ok».
+		{name: "playwright chromium, missing libs", goos: "linux", arch: "amd64", rel: ubuntu, vars: map[string]string{"HOME": "/home/u"},
+			have: map[string]string{"/home/u/.cache/ms-playwright/chromium-1140/chrome-linux/chrome": "", "sudo": "/usr/bin/sudo", "Xvfb": "/usr/bin/Xvfb", "fc-list-out": fonts,
+				"ldd-out": "\tlinux-vdso.so.1 (0x00007ffd)\n\tlibnss3.so => not found\n\tlibatk-1.0.so.0 => not found\n\tlibgbm.so.1 => not found\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x0000)\n"},
+			display: "virtual", missing: []string{"libraries"}, cmds: []string{"sudo apt-get install -y --no-install-recommends libnss3 libatk1.0-0 libgbm1"}},
+		{name: "puppeteer chrome ok", goos: "linux", arch: "amd64", rel: ubuntu, vars: map[string]string{"HOME": "/home/u", "DISPLAY": ":0"},
+			have: map[string]string{"/home/u/.cache/puppeteer/chrome/linux-131.0.6778.85/chrome-linux64/chrome": "", "ldd-out": "\tlibc.so.6 => /lib/libc.so.6 (0x0)\n"}, display: "host", ok: true},
+		{name: "GATE4AI_CHROME", goos: "linux", arch: "amd64", rel: ubuntu, vars: map[string]string{"GATE4AI_CHROME": "/opt/chrome/chrome", "DISPLAY": ":0"},
+			have: map[string]string{"/opt/chrome/chrome": ""}, display: "host", ok: true},
+		{name: "snap chromium", goos: "linux", arch: "amd64", rel: ubuntu, vars: map[string]string{"DISPLAY": ":0"}, have: map[string]string{"/snap/bin/chromium": ""}, display: "host", ok: true},
 		{name: "macOS", goos: "darwin", arch: "arm64", have: map[string]string{"brew": "/opt/homebrew/bin/brew"}, display: "none", missing: []string{"chrome"},
 			cmds: []string{"brew install --cask google-chrome"}},
 		{name: "windows", goos: "windows", arch: "amd64", vars: map[string]string{"LOCALAPPDATA": `C:\Users\u\AppData\Local`},
@@ -90,7 +117,42 @@ func TestCheckBrowser(t *testing.T) {
 			if strings.Contains(strings.Join(c.missing, ","), "chrome") && strings.Contains(all, "dl.google.com") && !strings.Contains(strings.Join(got.Notes, " "), "Terms of Service") {
 				t.Error("Google Chrome comes with its terms")
 			}
+			// Needs повторяет Missing по порядку; Chrome и библиотеки обязательны, остальное — рекомендации.
+			var ids []string
+			for _, n := range got.Needs {
+				ids = append(ids, n.ID)
+				if n.Required != (n.ID == "chrome" || n.ID == "libraries") {
+					t.Errorf("%s required=%v", n.ID, n.Required)
+				}
+			}
+			if strings.Join(ids, ",") != strings.Join(c.missing, ",") {
+				t.Errorf("needs %v, missing %v", ids, c.missing)
+			}
+			if (len(c.missing) > 0) != (got.Summary != "") {
+				t.Errorf("summary %q for missing %v", got.Summary, c.missing)
+			}
 		})
+	}
+	// Фраза для агента: сначала обязательное пакетами дистрибутива, затем рекомендации.
+	got := browserenv.CheckBrowser(fakeSys("linux", "amd64", ubuntu, map[string]string{"/home/u/.cache/ms-playwright/chromium-1140/chrome-linux/chrome": "", "sudo": "/usr/bin/sudo",
+		"ldd-out": "\tlibnss3.so => not found\n\tlibnssutil3.so => not found\n\tlibfoo.so.1 => not found\n"}, map[string]string{"HOME": "/home/u"}))
+	if got.Summary != "To run Chrome, install: libnss3. Recommended: xvfb (a virtual screen: sites see an ordinary Chrome, not headless, so bot protection asks for a captcha or blocks less often); fonts-noto-core fonts-noto-color-emoji (fonts: without them pages show boxes instead of letters)." {
+		t.Errorf("summary: %s", got.Summary)
+	}
+	if !got.NeedsRoot || got.OK || strings.Join(got.Libraries, ",") != "libnss3.so,libnssutil3.so,libfoo.so.1" || !strings.Contains(strings.Join(got.Notes, " "), "libfoo.so.1") {
+		t.Errorf("%+v", got)
+	}
+	// Обёртка google-chrome — скрипт: ldd смотрит настоящий бинарник.
+	s2 := fakeSys("linux", "amd64", ubuntu, map[string]string{"google-chrome": "/usr/bin/google-chrome", "/opt/google/chrome/chrome": "", "ldd-out": "\tlibgbm.so.1 => not found\n"}, map[string]string{"DISPLAY": ":0"})
+	rf := s2.ReadFile
+	s2.ReadFile = func(p string) ([]byte, error) {
+		if p == "/usr/bin/google-chrome" {
+			return []byte("#!/bin/sh\nexec /opt/google/chrome/chrome\n"), nil
+		}
+		return rf(p)
+	}
+	if got := browserenv.CheckBrowser(s2); got.OK || strings.Join(got.Libraries, ",") != "libgbm.so.1" {
+		t.Errorf("%+v", got)
 	}
 	// root: без sudo.
 	s := fakeSys("linux", "amd64", ubuntu, nil, nil)
@@ -114,7 +176,7 @@ func TestBrowserSetupCommand(t *testing.T) {
 		return code, out.String() + errb.String()
 	}
 	// Без согласия ничего не ставится; Chrome есть — выход 0.
-	if code, out := run("", false); code != 0 || len(ran) != 0 || !strings.Contains(out, "apt-get install -y --no-install-recommends xvfb") || !strings.Contains(out, "headless") {
+	if code, out := run("", false); code != 0 || len(ran) != 0 || !strings.Contains(out, "apt-get install -y --no-install-recommends xvfb") || !strings.Contains(out, "headless") || !strings.Contains(out, "Recommended: xvfb (a virtual screen") {
 		t.Fatal(code, ran, out)
 	}
 	if code, _ := run("n\n", true); code != 0 || len(ran) != 0 {
@@ -124,9 +186,22 @@ func TestBrowserSetupCommand(t *testing.T) {
 		t.Fatal("answered yes:", ran)
 	}
 	ran = nil
-	if code, _ := run("", false, "--yes"); code != 0 || len(ran) != 1 {
+	// Без терминала sudo вызывается с -n: пароль спросить некому.
+	if code, _ := run("", false, "--yes"); code != 0 || len(ran) != 1 || !strings.HasPrefix(ran[0], "sudo -n apt-get") {
 		t.Fatal("--yes:", ran)
 	}
+	ran = nil
+	if code, _ := run("y\n", true, "--yes"); code != 0 || len(ran) != 1 || !strings.HasPrefix(ran[0], "sudo apt-get") {
+		t.Fatal("--yes at a terminal:", ran)
+	}
+	// Команда не прошла (нет прав): точные команды для root.
+	sys.Run = func(_ context.Context, cmd string, _ io.Writer) error {
+		return errors.New("sudo: a password is required")
+	}
+	if code, out := run("", false, "--yes"); code != ExitError || !strings.Contains(out, "Run as root (or with sudo):\n  sudo apt-get install -y --no-install-recommends xvfb") {
+		t.Fatal(code, out)
+	}
+	sys.Run = func(_ context.Context, cmd string, _ io.Writer) error { ran = append(ran, cmd); return nil }
 	ran = nil
 	code, out := run("", false, "--json")
 	var c browserenv.BrowserCheck

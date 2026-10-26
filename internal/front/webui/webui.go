@@ -245,6 +245,39 @@ func (u *UI) RemoteURL(next string) (string, error) {
 	return pub + remote.base + cmp.Or(safeNext(next), "/"), nil
 }
 
+// remoteState — адрес Web UI из интернета и его состояние для ответа /v1/ui/url:
+// remote_url — адрес, когда он откроется (прямой адрес или relay онлайн);
+// remote_phase — этап relay (registering, issuing, connecting, online,
+// reconnecting, failed; "" — доступ из интернета не настраивается);
+// remote_cert — "ok" или "temporary" (туннель на временном самоподписанном
+// сертификате, пока выпуск не удался: браузер предупредит о нём);
+// remote_error — последняя ошибка; remote_next_retry — когда повторится.
+func (u *UI) remoteState(next string) map[string]any {
+	out := map[string]any{}
+	st := u.relay()
+	if st.Disabled {
+		out["remote_disabled"] = true
+		return out
+	}
+	if st.Phase != "" {
+		out["remote_phase"] = st.Phase
+	}
+	if st.Error != "" {
+		out["remote_error"] = st.Error
+	}
+	if !st.NextRetry.IsZero() {
+		out["remote_next_retry"] = st.NextRetry.Format(time.RFC3339)
+	}
+	if link, err := u.RemoteURL(next); err == nil {
+		out["remote_url"] = link
+		out["remote_cert"] = "ok"
+		if st.TempCert {
+			out["remote_cert"] = "temporary"
+		}
+	}
+	return out
+}
+
 // Listen слушает только loopback.
 func (u *UI) Listen(addr string) (net.Listener, error) {
 	host, _, err := net.SplitHostPort(addr)
@@ -291,7 +324,13 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		// requires — что нужно для входа (пароль, подтверждение в Telegram);
 		// password — сгенерированный пароль, которым ещё не входили (только здесь,
 		// на сокете владельца: его показывают установщик, gate4ai ui и трей).
-		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": u.Protection().Requires(), "password": u.InitialPassword()})
+		// remote_* — адрес из интернета и его состояние: установщик и агент
+		// отдают пользователю https-адрес, а не проброс порта по ssh.
+		out := map[string]any{"url": link, "requires": u.Protection().Requires(), "password": u.InitialPassword()}
+		for k, v := range u.remoteState(req.Next) {
+			out[k] = v
+		}
+		_ = json.NewEncoder(w).Encode(out)
 	})
 	// Сброс защиты входа: новый сгенерированный пароль, Telegram выключен,
 	// сессии закрыты (`gate4ai ui --reset-password`).

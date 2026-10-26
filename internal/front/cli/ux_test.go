@@ -111,24 +111,65 @@ func TestUIWithoutDaemon(t *testing.T) {
 		t.Fatal(errb)
 	}
 	// В терминале: daemon запускается в фоне, затем выдаётся адрес Web UI и
-	// сгенерированный пароль, пока им не вошли.
-	e, out, errb = envAt(sock, true)
-	if code := Run(context.Background(), e, []string{"ui"}); code != ExitOK || started != 1 || !strings.Contains(out.String(), "http://127.0.0.1:7431/") {
+	// сгенерированный пароль, пока им не вошли, — подписанными строками в stdout
+	// (их читает и агент, запустивший установку); не в терминале — JSON.
+	e, out, _ = envAt(sock, true)
+	e.StdoutTTY = true
+	if code := Run(context.Background(), e, []string{"ui"}); code != ExitOK || started != 1 || !strings.Contains(out.String(), "Web UI: http://127.0.0.1:7431/\n") {
 		t.Fatalf("code %d started %d: %s", code, started, out)
 	}
-	if !strings.Contains(errb.String(), "password (generated, shown until the first sign-in — save it): abcde-fghjk-mnpqr-stuvw") {
-		t.Fatal(errb)
+	if !strings.Contains(out.String(), "Password: abcde-fghjk-mnpqr-stuvw   (generated, shown until the first sign-in — save it") {
+		t.Fatal(out)
+	}
+	e, out, _ = envAt(sock, true)
+	if code := Run(context.Background(), e, []string{"ui", "--print", "--json"}); code != ExitOK {
+		t.Fatal(code)
+	}
+	if m := jsonOf(t, out.String()); m["url"] != "http://127.0.0.1:7431/" || m["password"] != "abcde-fghjk-mnpqr-stuvw" || m["remote_url"] != nil {
+		t.Fatal(out)
 	}
 	// Паролем вошли: его больше не печатают; --reset-password генерирует новый.
 	fakeUIPassword.Store("")
-	e, _, errb = envAt(sock, true)
-	if code := Run(context.Background(), e, []string{"ui", "--print"}); code != ExitOK || strings.Contains(errb.String(), "abcde") || !strings.Contains(errb.String(), "gate4ai ui --reset-password") {
-		t.Fatal(errb)
+	e, out, _ = envAt(sock, true)
+	e.StdoutTTY = true
+	if code := Run(context.Background(), e, []string{"ui", "--print"}); code != ExitOK || strings.Contains(out.String(), "abcde") || !strings.Contains(out.String(), "Sign in with: the Web UI password") || !strings.Contains(out.String(), "gate4ai ui --reset-password") {
+		t.Fatal(out)
 	}
-	e, _, errb = envAt(sock, true)
-	if code := Run(context.Background(), e, []string{"ui", "--print", "--reset-password"}); code != ExitOK || !strings.Contains(errb.String(), "save it): new22-new22-new22-new22") {
-		t.Fatal(errb)
+	e, out, _ = envAt(sock, true)
+	e.StdoutTTY = true
+	if code := Run(context.Background(), e, []string{"ui", "--print", "--reset-password"}); code != ExitOK || !strings.Contains(out.String(), "Password: new22-new22-new22-new22   (generated") {
+		t.Fatal(out)
 	}
+	// Адрес из интернета: пока relay выпускает сертификат, --print ждёт (до
+	// --wait), а потом печатает адрес; на временном сертификате — с пометкой.
+	fakeUIRemote.Store(`"remote_phase":"issuing"`)
+	oldPoll, oldWait := UIRemotePoll, UIRemoteWait
+	UIRemotePoll, UIRemoteWait = 5*time.Millisecond, 2*time.Second
+	t.Cleanup(func() { UIRemotePoll, UIRemoteWait = oldPoll, oldWait })
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		fakeUIRemote.Store(`"remote_phase":"online","remote_url":"https://abc.relay.test/ui/","remote_cert":"temporary","remote_error":"acme: rate limited"`)
+	}()
+	e, out, _ = envAt(sock, true)
+	e.StdoutTTY = true
+	if code := Run(context.Background(), e, []string{"ui", "--print"}); code != ExitOK || !strings.Contains(out.String(), "From the internet: https://abc.relay.test/ui/   (temporary certificate") {
+		t.Fatal(out)
+	}
+	// Ждать нечего: регистрация не удалась (повтор через час) — сразу ответ.
+	fakeUIRemote.Store(`"remote_phase":"failed","remote_error":"relay: 503"`)
+	e, out, _ = envAt(sock, true)
+	e.StdoutTTY = true
+	begin := time.Now()
+	if code := Run(context.Background(), e, []string{"ui", "--print"}); code != ExitOK || !strings.Contains(out.String(), "From the internet: not yet — relay: 503") || time.Since(begin) > time.Second {
+		t.Fatal(out, time.Since(begin))
+	}
+	// --wait 0: без ожидания, этап как есть.
+	fakeUIRemote.Store(`"remote_phase":"issuing"`)
+	e, out, _ = envAt(sock, true)
+	if code := Run(context.Background(), e, []string{"ui", "--print", "--wait", "0"}); code != ExitOK || jsonOf(t, out.String())["remote_phase"] != "issuing" {
+		t.Fatal(out)
+	}
+	fakeUIRemote.Store("")
 	// daemon status / status без id.
 	e, out, _ = envAt(sock, false)
 	if code := Run(context.Background(), e, []string{"status"}); code != ExitOK || jsonOf(t, out.String())["running"] != true {
@@ -155,11 +196,18 @@ var fakeUIPassword atomic.Value
 
 func init() { fakeUIPassword.Store("abcde-fghjk-mnpqr-stuvw") }
 
+// fakeUIRemote — поля remote_* ответа фальшивого маршрута (JSON без скобок; "" — нет).
+var fakeUIRemote atomic.Value
+
 // fakeUIRoutes — маршруты адреса Web UI и сброса защиты без настоящего Web UI.
 func fakeUIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/ui/url", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"url":"http://127.0.0.1:7431/","requires":["password"],"password":%q}`, fakeUIPassword.Load())
+		extra := ""
+		if r, _ := fakeUIRemote.Load().(string); r != "" {
+			extra = "," + r
+		}
+		fmt.Fprintf(w, `{"url":"http://127.0.0.1:7431/","requires":["password"],"password":%q%s}`, fakeUIPassword.Load(), extra)
 	})
 	mux.HandleFunc("POST /v1/ui/reset-login", func(w http.ResponseWriter, r *http.Request) {
 		fakeUIPassword.Store("new22-new22-new22-new22")
