@@ -40,7 +40,7 @@ func TestRemoteLoginQR(t *testing.T) {
 	var src, link, shot string
 	var width int
 	err = chromedp.Run(ctx,
-		chromeSignIn(base),
+		chromeSignIn(base, g.uiPassword()),
 		chromedp.Navigate(base+"/lang?l=en&back=/settings/internet#remote"),
 		chromedp.Click(`//button[text()="Show the address and the QR code"]`),
 		chromedp.WaitVisible(`#rlink`),

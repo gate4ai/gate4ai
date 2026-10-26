@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -173,6 +174,7 @@ type gate struct {
 	user string // HOME daemon и CLI: от него считается ~ в путях коннекторов
 	env  []string
 	log  *syncBuffer // stderr daemon
+	pw   string      // пароль Web UI: сгенерированный daemon, прочитан из `gate4ai ui --print`
 }
 
 // syncBuffer — журнал daemon: пишет процесс, читает тест.
@@ -267,10 +269,11 @@ func (g *gate) installFrom(dir string) {
 // errOf — объект error из ответа gate4ai.
 func errOf(m map[string]any) map[string]any { e, _ := m["error"].(map[string]any); return e }
 
-// uiPassword — пароль Web UI, который харнесс задаёт первым входом.
-const uiPassword = "e2e correct horse"
+// uiPasswordRe — строка `gate4ai ui` со сгенерированным паролем Web UI.
+var uiPasswordRe = regexp.MustCompile(`save it\): ([a-z2-9-]+)`)
 
 // uiBase — адрес локального Web UI (`gate4ai ui --print`), без завершающего «/».
+// Там же — сгенерированный пароль, пока им не вошли: харнесс запоминает его.
 func (g *gate) uiBase() string {
 	g.t.Helper()
 	r := g.run("", "", "ui", "--print")
@@ -278,48 +281,48 @@ func (g *gate) uiBase() string {
 	if r.code != 0 || !strings.HasPrefix(u, "http://127.0.0.1:") {
 		g.t.Fatalf("ui --print: %d %s", r.code, r.out)
 	}
+	if m := uiPasswordRe.FindStringSubmatch(r.out); m != nil {
+		g.pw = m[1]
+	}
+	if g.pw == "" {
+		g.t.Fatalf("ui --print did not show the generated password: %s", r.out)
+	}
 	return strings.TrimSuffix(u, "/")
 }
 
-// owner — браузер владельца с сессией Web UI: на свежей установке первый вход
-// задаёт пароль uiPassword, дальше входит с ним.
+// uiPassword — пароль Web UI: сгенерированный daemon при первом запуске.
+func (g *gate) uiPassword() string {
+	g.t.Helper()
+	if g.pw == "" {
+		g.uiBase()
+	}
+	return g.pw
+}
+
+// owner — браузер владельца с сессией Web UI: вход сгенерированным паролем.
 func (g *gate) owner() (*http.Client, string) {
 	g.t.Helper()
 	base := g.uiBase()
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{Jar: jar, Timeout: 10 * time.Second}
-	resp, err := c.PostForm(base+"/login", url.Values{"setup": {"1"}, "password": {uiPassword}, "repeat": {uiPassword}})
+	resp, err := c.PostForm(base+"/login", url.Values{"start": {"1"}, "password": {g.pw}})
 	if err != nil {
 		g.t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode == 401 { // пароль уже задан
-		if resp, err = c.PostForm(base+"/login", url.Values{"start": {"1"}, "password": {uiPassword}}); err != nil {
-			g.t.Fatal(err)
-		}
-		resp.Body.Close()
-	}
 	if resp.StatusCode != 200 {
 		g.t.Fatalf("owner sign-in: %d", resp.StatusCode)
 	}
 	return c, base
 }
 
-// chromeSignIn — вход владельца в настоящем браузере: первый пароль или пароль.
-func chromeSignIn(base string) chromedp.Action {
+// chromeSignIn — вход владельца в настоящем браузере сгенерированным паролем.
+func chromeSignIn(base, password string) chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		if err := chromedp.Run(ctx, chromedp.Navigate(base+"/"), chromedp.WaitVisible(`input[name="password"]`)); err != nil {
 			return err
 		}
-		var setup bool
-		if err := chromedp.Run(ctx, chromedp.Evaluate(`!!document.querySelector('input[name="setup"]')`, &setup)); err != nil {
-			return err
-		}
-		acts := []chromedp.Action{chromedp.SendKeys(`input[name="password"]`, uiPassword)}
-		if setup {
-			acts = append(acts, chromedp.SendKeys(`input[name="repeat"]`, uiPassword))
-		}
-		acts = append(acts, chromedp.Submit(`input[name="password"]`), chromedp.WaitReady(`form[action="/logout"]`))
-		return chromedp.Run(ctx, acts...)
+		return chromedp.Run(ctx, chromedp.SendKeys(`input[name="password"]`, password),
+			chromedp.Submit(`input[name="password"]`), chromedp.WaitReady(`form[action="/logout"]`))
 	})
 }

@@ -149,15 +149,12 @@ func (u *UI) serverChecks(ctx context.Context) []ServerCheck {
 	switch {
 	case p.Set() && p.Telegram:
 		add(ServerCheck{ID: "login", Title: M("Signing in to the Web UI"), Status: "ok", Detail: M("password and confirmation in Telegram")})
-	case p.Set():
+	default:
 		var fix Msg
 		if headless {
 			fix = M("On a server turn on Telegram confirmation too: a password typed on another computer may be read there.")
 		}
 		add(ServerCheck{ID: "login", Title: M("Signing in to the Web UI"), Status: "ok", Detail: M("password"), Fix: fix, Link: "/settings/login", Button: M("Signing in")})
-	default:
-		add(ServerCheck{ID: "login", Title: M("Signing in to the Web UI"), Status: "warn", Detail: M("no password yet: whoever opens the Web UI on this computer first sets it"),
-			Fix: M("Open the Web UI and set the password."), Cmd: "gate4ai ui"})
 	}
 
 	// Telegram.

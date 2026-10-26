@@ -238,7 +238,7 @@ func TestRemoteLinkThroughRelay(t *testing.T) {
 	if code, p := get(t, phone, l); code != 401 || !strings.Contains(p, `name="password"`) {
 		t.Fatalf("address did not open the sign-in page of the device UI: %d %s", code, p)
 	}
-	resp, err := phone.PostForm(l+"login", url.Values{"start": {"1"}, "password": {uiPassword}})
+	resp, err := phone.PostForm(l+"login", url.Values{"start": {"1"}, "password": {g.uiPassword()}})
 	if err != nil {
 		t.Fatal(err)
 	}

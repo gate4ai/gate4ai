@@ -24,4 +24,4 @@
 <p class="err">{{T "Could not send the confirmation to Telegram:"}} {{.Data.TelegramError}}</p>
 <form method="post" action="{{.Base}}/login"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="retry" value="1"><button>{{T "Send again"}}</button></form>
 {{end}}
-<p style="color:#666">{{if .Data.Start}}{{T "A session lasts 12 hours. Telegram confirmation is turned on in Settings → Signing in."}}{{else}}{{T "A sign-in attempt is valid for 5 minutes."}}{{end}}</p></body></html>
+<p style="color:#666">{{if .Data.Start}}{{T "A session lasts 12 hours. Telegram confirmation is turned on in Settings → Signing in."}}<br>{{T "The password was generated at install and shown by the installer; on the computer with gate4.ai it is also shown by gate4ai ui until the first sign-in. Forgotten — run gate4ai ui --reset-password there."}}{{else}}{{T "A sign-in attempt is valid for 5 minutes."}}{{end}}</p></body></html>

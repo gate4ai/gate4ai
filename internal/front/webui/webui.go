@@ -172,6 +172,7 @@ type UI struct {
 	mu       sync.Mutex
 	sessions map[string]session
 	attempts map[string]*attempt // попытки входа
+	initial  string              // сгенерированный пароль, которым ещё не входили (см. EnsurePassword)
 	limits   [2]limiter          // защита от перебора пароля: локально, удалённо
 	notes    map[string]note     // сообщение после действия: сессия → одно последнее
 }
@@ -286,9 +287,25 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 			}
 		}
 		// requires — что нужно для входа (пароль, подтверждение в Telegram);
-		// setup — пароля ещё нет: первый, кто откроет адрес на этом компьютере, задаст его.
-		p := u.Protection()
-		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": p.Requires(), "setup": !p.Set()})
+		// password — сгенерированный пароль, которым ещё не входили (только здесь,
+		// на сокете владельца: его показывают установщик, gate4ai ui и трей).
+		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": u.Protection().Requires(), "password": u.InitialPassword()})
+	})
+	// Сброс защиты входа: новый сгенерированный пароль, Telegram выключен,
+	// сессии закрыты (`gate4ai ui --reset-password`).
+	mux.HandleFunc("POST /v1/ui/reset-login", func(w http.ResponseWriter, r *http.Request) {
+		if !daemon.PrincipalFrom(r.Context()).IsOwner() {
+			http.Error(w, `{"error":{"code":"owner_only","message":"owner only"}}`, 403)
+			return
+		}
+		pw, err := u.ResetLogin()
+		if err != nil {
+			http.Error(w, `{"error":{"code":"internal","message":"`+err.Error()+`"}}`, 500)
+			return
+		}
+		u.D.Log.Warn("web UI login protection reset: new password generated, Telegram confirmation off, sessions closed")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"url": u.URL(""), "password": pw})
 	})
 	mux.HandleFunc("GET /v1/tray/state", func(w http.ResponseWriter, r *http.Request) {
 		if !daemon.PrincipalFrom(r.Context()).IsOwner() {
@@ -316,7 +333,9 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pending": items, "config_version": n, "receipts": seq,
-			"browser": len(bs.Sessions), "browser_waiting": waiting})
+			"browser": len(bs.Sessions), "browser_waiting": waiting,
+			// ui_password — сгенерированный пароль Web UI, которым ещё не входили: трей показывает его в меню.
+			"ui_password": u.InitialPassword()})
 	})
 }
 

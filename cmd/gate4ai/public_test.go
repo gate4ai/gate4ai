@@ -121,6 +121,12 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	u := webui.New(d)
+	// Пароль Web UI генерирует daemon до того, как Web UI станет доступен.
+	if pw, err := u.EnsurePassword(); err != nil || pw == "" {
+		t.Fatal("generated password", pw, err)
+	} else {
+		uiPassword = pw
+	}
 	d.AddPublic("/ui/", u.RemoteHandler())
 	approval.Attach(ctx, d, nil, tgSrv.URL)
 	l, err := u.Listen("127.0.0.1:0")
@@ -138,21 +144,11 @@ func newEnv(t *testing.T) *env {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	e := &env{d: d, ui: u, base: "http://" + addr, local: "http://" + u.Addr, bot: bot, cancel: cancel}
-	// Первый вход на этом компьютере задаёт пароль Web UI.
-	resp, err := noRedirect.PostForm(e.local+"/login", url.Values{"setup": {"1"}, "password": {uiPassword}, "repeat": {uiPassword}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("first password: %d", resp.StatusCode)
-	}
-	return e
+	return &env{d: d, ui: u, base: "http://" + addr, local: "http://" + u.Addr, bot: bot, cancel: cancel}
 }
 
-// uiPassword — пароль Web UI в тестах.
-const uiPassword = "correct horse battery staple"
+// uiPassword — сгенерированный пароль Web UI текущего окружения (тесты не параллельны).
+var uiPassword string
 
 var noRedirect = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
@@ -354,19 +350,30 @@ func TestPublicRemoteUI(t *testing.T) {
 		t.Errorf("remote decide: %d", r.StatusCode)
 	}
 
-	// Первый пароль с публичного адреса не задаётся, даже когда пароля нет.
-	if err := e.ui.ResetProtection(); err != nil {
-		t.Fatal(err)
+	// Сброс защиты: новый сгенерированный пароль, старый не подходит ни
+	// удалённо, ни локально; формы первого пароля с публичного адреса нет.
+	old := uiPassword
+	pw, err := e.ui.ResetLogin()
+	if err != nil || pw == "" || pw == old {
+		t.Fatal("reset", pw, err)
 	}
 	req, _ := http.NewRequest("POST", e.base+"/ui/login", strings.NewReader("setup=1&password=remote+horse+1&repeat=remote+horse+1"))
 	req.Host = publicHost
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Origin", "https://"+publicHost)
-	if resp, _ := noRedirect.Do(req); resp.StatusCode != http.StatusUnauthorized || e.ui.Protection().Set() {
+	if resp, _ := noRedirect.Do(req); resp.StatusCode != http.StatusUnauthorized || e.ui.InitialPassword() != pw {
 		t.Errorf("first password set from the public address: %d", resp.StatusCode)
 	}
-	if resp, _ := noRedirect.Get(e.local + "/"); resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("local UI after reset: %d", resp.StatusCode)
+	req, _ = http.NewRequest("POST", e.base+"/ui/login", strings.NewReader(url.Values{"start": {"1"}, "password": {old}}.Encode()))
+	req.Host = publicHost
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://"+publicHost)
+	if resp, _ := noRedirect.Do(req); resp.StatusCode != http.StatusUnauthorized || len(resp.Cookies()) > 0 && strings.HasSuffix(resp.Cookies()[0].Name, "session") {
+		t.Error("old password works after reset")
+	}
+	uiPassword = pw
+	if ck, _ := login(t, e.local+"/", ""); ck == nil {
+		t.Error("new password after reset")
 	}
 }
 

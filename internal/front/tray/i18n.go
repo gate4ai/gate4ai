@@ -19,6 +19,7 @@ var messages = map[string][2]string{ // ключ → {en, ru}
 	"details":       {"Details in the Web UI", "Подробнее в Web UI"},
 	"decide_in_ui":  {"Review the changes and decide in the Web UI", "Просмотреть правки и решить в Web UI"},
 	"open_ui":       {"Open Web UI", "Открыть Web UI"},
+	"password":      {"Web UI password (until the first sign-in): %s", "Пароль Web UI (до первого входа): %s"},
 	"browser":       {"Browser: %d agent sessions", "Браузер: сеансов агентов — %d"},
 	"browser_wait":  {"Browser: an agent waits for you", "Браузер: агент ждёт вас"},
 	"start":         {"Start daemon", "Запустить daemon"},

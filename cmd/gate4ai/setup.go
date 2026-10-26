@@ -24,7 +24,9 @@ import (
 // uiAddr — адрес Web UI (только loopback); "" — выключен.
 var uiAddr = "127.0.0.1:7431"
 
-// resetUILogin — снять защиту входа в Web UI при старте (забыт пароль, нет Telegram).
+// resetUILogin — сбросить защиту входа в Web UI при старте (забыт пароль, нет
+// Telegram): новый сгенерированный пароль покажет `gate4ai ui`. Обычный путь —
+// `gate4ai ui --reset-password` у работающего daemon.
 var resetUILogin bool
 
 // telegramAPI — адрес Bot API (переопределяется для тестов и self-hosted Bot API).
@@ -50,6 +52,19 @@ func setup(ctx context.Context, d *daemon.Daemon, log *slog.Logger) error {
 	relayStatus := relayclient.Attach(ctx, d)
 	u := webui.New(d)
 	u.Relay = relayStatus
+	// Пароль Web UI есть до того, как Web UI станет доступен — в том числе с
+	// публичного адреса: на свежей установке daemon генерирует его сам, на диске
+	// только хэш; открытый текст показывают `gate4ai ui`, установщик и трей.
+	if resetUILogin {
+		if err := u.D.State.Set("ui.login", "{}"); err != nil {
+			return err
+		}
+	}
+	if pw, err := u.EnsurePassword(); err != nil {
+		return err
+	} else if pw != "" {
+		log.Info("web UI password generated (shown by gate4ai ui until the first sign-in)")
+	}
 	d.AddRoutes(u.OwnerRoutes)
 	d.AddPublic("/ui/", u.RemoteHandler())
 	desktop := approval.NewDesktop()
@@ -59,13 +74,10 @@ func setup(ctx context.Context, d *daemon.Daemon, log *slog.Logger) error {
 	}
 	u.Channels = approval.Attach(ctx, d, desktop, telegramAPI)
 	if resetUILogin {
-		if err := u.ResetProtection(); err != nil {
-			return err
-		}
-		log.Warn("web UI login protection removed (--reset-ui-login)")
+		log.Warn("web UI login protection reset (--reset-ui-login): new password — gate4ai ui, Telegram confirmation off")
 		// Сброс виден владельцу: если сбросил не он — это сигнал.
 		if tg := u.Channels.Telegram(); tg != nil {
-			go tg.Notice("⚠️ Защита входа в Web UI gate4.ai снята: daemon запущен с --reset-ui-login. Новый пароль задаст тот, кто первым откроет Web UI на компьютере. Если это были не вы — сделайте это сейчас.")
+			go tg.Notice("⚠️ Защита входа в Web UI gate4.ai сброшена: daemon запущен с --reset-ui-login. Новый пароль показан на компьютере (gate4ai ui), подтверждение входа в Telegram выключено. Если это были не вы — войдите и смените пароль в «Настройки → Вход».")
 		}
 	}
 	if _, err := sandbox.Attach(ctx, d, paths.RunDir(), egressAddr); err != nil {
