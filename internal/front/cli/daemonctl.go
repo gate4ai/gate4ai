@@ -37,6 +37,7 @@ flags (gate4ai daemon and gate4ai daemon start):
   --connectors dir           installed connectors directory (default <home>/connectors)
   --ui addr                  web UI address, loopback only (default 127.0.0.1:7431; "" disables)
   --public addr --public-url https://host [--public-cert f --public-key f]   public address without relay
+  --relay-auto=false   do not register on relay.gate4.ai by itself (tests, stands)
   --egress addr              egress proxy address for sandboxed agents
   --telegram-api url         Telegram Bot API base URL
   --version                  print version

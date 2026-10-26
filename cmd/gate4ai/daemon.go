@@ -77,6 +77,7 @@ func daemonMain(args []string, tty bool) error {
 	flag.StringVar(&public.url, "public-url", "", "external URL of --public, e.g. https://gate.example.com")
 	flag.StringVar(&public.cert, "public-cert", "", "TLS certificate (PEM) for --public")
 	flag.StringVar(&public.key, "public-key", "", "TLS key (PEM) for --public")
+	flag.BoolVar(&relayAuto, "relay-auto", relayAuto, "turn internet access on by itself: register this computer on relay.gate4.ai when it has no address and the owner did not turn it off (relay.disabled)")
 	flag.StringVar(&egressAddr, "egress", egressAddr, "egress proxy address for sandboxed agents (authenticated per run)")
 	if err := flag.Parse(args); err != nil {
 		return err

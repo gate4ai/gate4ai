@@ -213,7 +213,9 @@ func startGate(t *testing.T, extra ...string) *gate {
 
 	dlog := &syncBuffer{}
 	g.log = dlog
-	d := exec.Command(g.bin, append([]string{"daemon", "--home", g.home, "--keystore", "file", "--ui", ""}, extra...)...)
+	// --relay-auto=false: иначе каждый тест регистрировал бы устройство на боевом
+	// relay.gate4.ai и тратил бы сертификат Let's Encrypt.
+	d := exec.Command(g.bin, append([]string{"daemon", "--home", g.home, "--keystore", "file", "--ui", "", "--relay-auto=false"}, extra...)...)
 	d.Env = g.env
 	d.Stderr = dlog
 	if err := d.Start(); err != nil {

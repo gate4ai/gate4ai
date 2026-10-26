@@ -36,6 +36,10 @@ var egressAddr = "127.0.0.1:0"
 // public — прямой публичный адрес без relay (--public …).
 var public publicOpts
 
+// relayAuto — доступ из интернета включён по умолчанию: без адреса и без запрета
+// daemon сам регистрируется на relay gate4.ai (--relay-auto=false — нет: тесты, стенд).
+var relayAuto = true
+
 type publicOpts struct {
 	addr, url, cert, key string
 }
@@ -47,7 +51,7 @@ func setup(ctx context.Context, d *daemon.Daemon, log *slog.Logger) error {
 	if _, err := servePublic(d, public, log); err != nil {
 		return err
 	}
-	relayStatus := relayclient.Attach(ctx, d)
+	relayStatus := relayclient.Attach(ctx, d, relayAuto)
 	u := webui.New(d)
 	u.Relay = relayStatus
 	d.AddRoutes(u.OwnerRoutes)

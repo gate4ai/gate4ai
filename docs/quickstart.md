@@ -193,10 +193,9 @@ gate4ai run claude-code --workspace . --dry-run                    # показ�
 
 Каждый запуск получает свой токен и сокет, отзываемые по завершении; сеть — только через Egress Proxy (`gate4ai egress` — журнал соединений).
 
-**Облачные агенты (Claude.ai, ChatGPT) через relay:**
+**Облачные агенты (Claude.ai, ChatGPT) через relay.** Доступ из интернета включён по умолчанию: daemon без адреса устройства (`relay.device_id`) и без запрета (`relay.disabled: true`) сам регистрируется на relay — `relay.url` конфигурации (с его `ca_file` / `self_signed` для своего relay), иначе `https://relay.gate4.ai`; с `--public` — нет. Неудача повторяется раз в час; `gate4ai relay status` показывает `phase` (`registering`, `issuing`, `connecting`, `online`, `reconnecting`, `failed`), `error` и `next_retry`. Выключить — **Настройки → Доступ из интернета** или `relay.disabled: true` (адрес сохраняется). `--relay-auto=false` — daemon сам не регистрируется (тесты, стенды). `gate4ai relay register` нужен для своего relay или повторной регистрации (новое устройство и новый сертификат).
 
 ```sh
-gate4ai relay register --url https://relay.gate4.ai
 gate4ai relay status                      # mcp_url: https://<device-id>.relay.gate4.ai
 gate4ai agents connect claude-ai          # одноразовый код подключения
 ```
@@ -257,11 +256,11 @@ export GATE4AI_HOME=$PWD/.stand GATE4AI_SOCKET=/tmp/g4stand/owner.sock GATE4AI_A
 export GATE4AI_DESKTOP_NOTIFY=log   # уведомления daemon — в его журнал, без всплывающих окон
 # стенд, который запускает сам агент (Claude Code): сборка go build -tags gate4ai_devstand ./cmd/gate4ai
 # и GATE4AI_OWNER_CHECK=off — сокет владельца не отличает агента от человека (в выпуске переменная не действует)
-gate4ai daemon --ui 127.0.0.1:7531 --keystore file &       # ключи в файле, а не в связке ОС
+gate4ai daemon --ui 127.0.0.1:7531 --keystore file --relay-auto=false &   # ключи в файле; на relay.gate4.ai сам не регистрируется
 go run ./e2e/testsite/cmd/testsite &                       # тестовый сайт на 127.0.0.1:8099 (учётка — на /login)
 gate4ai connectors install e2e/testconnector --yes --watch  # коннектор к нему из каталога исходников, пересобирается при правках
 gate4ai ui --print                                         # адрес Web UI (вход по паролю)
 gate4ai relay register --url https://relay.gate4.ai        # адрес для claude.ai: gate4ai relay status
 ```
 
-Сокеты — в коротком пути: у unix-сокета ограничена длина. Прод-relay `relay.gate4.ai` можно использовать и для тестовых стендов. Каждая регистрация — новое устройство и новый сертификат на `*.relay.gate4.ai` (у Let's Encrypt лимит 50 в неделю), поэтому храните `GATE4AI_HOME` стенда между запусками, а не регистрируйтесь заново.
+Сокеты — в коротком пути: у unix-сокета ограничена длина. Прод-relay `relay.gate4.ai` можно использовать и для тестовых стендов. Каждая регистрация — новое устройство и новый сертификат на `*.relay.gate4.ai` (у Let's Encrypt лимит 50 в неделю), поэтому стенды и e2e-тесты запускают daemon с `--relay-auto=false`, а `GATE4AI_HOME` стенда хранят между запусками, а не регистрируются заново.

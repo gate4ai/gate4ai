@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
 
@@ -537,4 +538,86 @@ func signIn(t *testing.T, u *UI, c *http.Client, base string) *http.Response {
 		t.Fatalf("sign in: %d %s", r.StatusCode, body(t, r))
 	}
 	return r
+}
+
+// Доступ из интернета включается сам: страница показывает «включается»,
+// неудачу с временем следующей попытки и кнопкой «Попробовать сейчас»,
+// «выключено» с кнопкой «Включить»; у подключённого — «Выключить».
+// Кнопки меняют relay.disabled в конфигурации.
+func TestRelayAutoStates(t *testing.T) {
+	u, d, _, base := setup(t)
+	_, _, post, get := loginAs(t, u, base)
+	st := relayclient.Status{Phase: relayclient.PhaseRegistering}
+	u.Relay = func() relayclient.Status { return st }
+	p := get("/settings/internet")
+	for _, want := range []string{`data-live-relay="registering"`, "включается", "регистрируем этот компьютер на relay.gate4.ai", `name="on" value="0"`} {
+		if !strings.Contains(p, want) {
+			t.Fatal(want, p)
+		}
+	}
+	if strings.Contains(p, "Включить через") {
+		t.Fatal("manual button while registering", p)
+	}
+
+	st = relayclient.Status{Phase: relayclient.PhaseFailed, Error: "relay register: 429 Too Many Requests", NextRetry: time.Now().Add(time.Hour)}
+	p = get("/settings/internet")
+	for _, want := range []string{"не удалось включить через relay.gate4.ai", "429 Too Many Requests", "Следующая попытка в " + st.NextRetryAt(), "Попробовать сейчас", `value="https://relay.gate4.ai"`, `name="on" value="0"`} {
+		if !strings.Contains(p, want) {
+			t.Fatal(want, p)
+		}
+	}
+	if strings.Contains(p, "data-live-relay") {
+		t.Fatal("live update while failed", p)
+	}
+	// Сервер: та же причина и время.
+	if p := get("/settings/server"); !strings.Contains(p, "не удалось включить: relay register: 429") || !strings.Contains(p, st.NextRetryAt()) {
+		t.Fatal("server page failed", p)
+	}
+
+	// Сертификат не выпустился: время следующей попытки.
+	st = relayclient.Status{Configured: true, Phase: relayclient.PhaseIssuing, Error: "acme: rate limited", NextRetry: time.Now().Add(20 * time.Minute),
+		URL: "https://relay.gate4.ai", DeviceID: "abc", Host: "abc.relay.gate4.ai", MCPURL: "https://abc.relay.gate4.ai"}
+	if p := get("/settings/internet"); !strings.Contains(p, "следующая попытка в "+st.NextRetryAt()) || !strings.Contains(p, "acme: rate limited") {
+		t.Fatal("issuing retry", p)
+	}
+
+	// Подключён: «Выключить» в технических деталях; нажатие пишет relay.disabled.
+	st = relayclient.Status{Configured: true, Online: true, Phase: relayclient.PhaseOnline, URL: "https://relay.gate4.ai", DeviceID: "abc", Host: "abc.relay.gate4.ai", MCPURL: "https://abc.relay.gate4.ai"}
+	if p := get("/settings/internet"); !strings.Contains(p, "Выключить") || !strings.Contains(p, `action="/settings/relay/toggle"`) {
+		t.Fatal("online", p)
+	}
+	if p := post("/settings/relay/toggle", url.Values{"on": {"0"}}); !strings.Contains(p, "Доступ из интернета выключен") {
+		t.Fatal("turn off", p)
+	}
+	if !d.Config.Current().Relay.Disabled {
+		t.Fatal("relay.disabled not set")
+	}
+	st = relayclient.Status{Configured: true, Disabled: true, URL: "https://relay.gate4.ai", DeviceID: "abc", Host: "abc.relay.gate4.ai", MCPURL: "https://abc.relay.gate4.ai"}
+	p = get("/settings/internet")
+	for _, want := range []string{"выключен", "Адрес https://abc.relay.gate4.ai сохранён", `name="on" value="1"`} {
+		if !strings.Contains(p, want) {
+			t.Fatal(want, p)
+		}
+	}
+	for _, bad := range []string{`id="mcp"`, "data-live-relay", "Выключить"} {
+		if strings.Contains(p, bad) {
+			t.Fatal(bad, p)
+		}
+	}
+	if p := get("/settings/server"); !strings.Contains(p, "выключен владельцем") {
+		t.Fatal("server page disabled", p)
+	}
+	if p := get("/settings/internet?link=1"); strings.Contains(p, `id="rlink"`) {
+		t.Fatal("remote link while disabled", p)
+	}
+	// «Включить» с сохранённым адресом — снимает запрет, на relay не ходит.
+	if err := u.edit("relay", func(c *config.Config) error { c.Relay.DeviceID = "abc"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if p := post("/settings/relay/toggle", url.Values{"on": {"1"}}); !strings.Contains(p, "Доступ из интернета включён") || !strings.Contains(p, "https://abc.relay.gate4.ai") {
+		t.Fatal("turn on", p)
+	}
+	if c := d.Config.Current().Relay; c.Disabled || c.DeviceID != "abc" {
+		t.Fatalf("after turn on: %+v", c)
+	}
 }

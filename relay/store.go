@@ -257,6 +257,17 @@ func (s *Store) Auth(id, token string) bool {
 	return subtle.ConstantTimeCompare([]byte(h), []byte(got)) == 1 && ok
 }
 
+// Devices — идентификаторы зарегистрированных устройств (тесты, диагностика).
+func (s *Store) Devices() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.data.Devices))
+	for id := range s.data.Devices {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // Exists — зарегистрировано ли устройство.
 func (s *Store) Exists(id string) bool {
 	s.mu.RLock()

@@ -59,7 +59,7 @@ func TestDaemonThroughRelay(t *testing.T) {
 	defer d.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	status := Attach(ctx, d)
+	status := Attach(ctx, d, false)
 	if st := status(); st.Configured || st.Phase != "" {
 		t.Fatalf("before registration: %+v", st)
 	}
@@ -165,7 +165,7 @@ func TestStatusFailedWithoutToken(t *testing.T) {
 	defer d.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	st := Attach(ctx, d)()
+	st := Attach(ctx, d, false)()
 	if !st.Configured || st.Online || st.Phase != PhaseFailed || st.Error == "" {
 		t.Fatalf("%+v", st)
 	}
@@ -192,7 +192,7 @@ func TestCertFailureRetried(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	status := Attach(ctx, d)
+	status := Attach(ctx, d, false)
 	for i := 0; i < 500 && (status().Error == "" || hits.Load() < 2); i++ {
 		time.Sleep(10 * time.Millisecond)
 	}

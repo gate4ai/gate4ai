@@ -126,8 +126,10 @@ type Retention struct {
 	CheckpointEach int      `yaml:"checkpoint_each,omitempty" json:"checkpoint_each,omitempty"`
 }
 
-// Relay — подключение устройства к relay.
+// Relay — подключение устройства к relay. Без DeviceID и без Disabled daemon
+// сам регистрирует устройство (на URL, а если он пуст — на relay gate4.ai).
 type Relay struct {
+	Disabled   bool   `yaml:"disabled,omitempty" json:"disabled,omitempty"` // запрет владельца: не регистрироваться и не подключаться
 	URL        string `yaml:"url,omitempty" json:"url,omitempty"`
 	DeviceID   string `yaml:"device_id,omitempty" json:"device_id,omitempty"`
 	Token      string `yaml:"token,omitempty" json:"token,omitempty"`             // алиас Vault

@@ -296,7 +296,33 @@ func (u *UI) relayData() map[string]any {
 		direct = pub
 	}
 	def, _ := url.Parse(relayclient.DefaultURL)
-	return map[string]any{"Relay": rs, "RelayDefault": relayclient.DefaultURL, "RelayDefaultHost": def.Host, "Direct": direct}
+	// RelayURL / RelayHost — relay, на котором устройство регистрируется (свой из
+	// конфигурации или relay gate4.ai): для состояния «включается» и повтора.
+	ru := or(u.D.Config.Current().Relay.URL, relayclient.DefaultURL)
+	rh := ru
+	if p, err := url.Parse(ru); err == nil && p.Host != "" {
+		rh = p.Host
+	}
+	return map[string]any{"Relay": rs, "RelayDefault": relayclient.DefaultURL, "RelayDefaultHost": def.Host, "RelayURL": ru, "RelayHost": rh, "Direct": direct}
+}
+
+// toggleRelay — «Выключить» / «Включить» доступ из интернета. Выключение
+// останавливает туннель и самостоятельную регистрацию, адрес сохраняется.
+// Включение: адрес есть — снимает запрет; нет — регистрирует устройство.
+func (u *UI) toggleRelay(w http.ResponseWriter, r *http.Request) map[string]any {
+	if r.PostForm.Get("on") != "1" {
+		if err := relayclient.SetDisabled(u.D, owner, true); err != nil {
+			return redirectErr("/settings/internet", err)
+		}
+		return redirect("/settings/internet", M("Internet access is off: cloud assistants and the phone cannot reach this computer. The address is kept for when you turn it on again."))
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	res, err := relayclient.EnsureRegistered(ctx, u.D, owner)
+	if err != nil {
+		return redirectErr("/settings/internet", M("Relay: %s", err))
+	}
+	return redirect("/settings/internet", M("Internet access is on. The address for Claude.ai / ChatGPT is %v. Getting a certificate and connecting usually takes under a minute; the page updates itself.", res["mcp_url"]))
 }
 
 // relayPage — свой relay, свой HTTPS-адрес без relay и повторная регистрация.
