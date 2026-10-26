@@ -304,10 +304,14 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		var req struct {
-			Remote bool   `json:"remote"`
-			Next   string `json:"next"` // после входа — эта страница (просмотр сеанса браузера)
+			Remote  bool   `json:"remote"`
+			Next    string `json:"next"`    // после входа — эта страница (просмотр сеанса браузера)
+			Relayed bool   `json:"relayed"` // читает не человек в терминале, а скрипт или агент
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Relayed {
+			_ = u.MarkRelayed()
+		}
 		link := u.URL(req.Next)
 		if req.Remote {
 			var err error
@@ -648,6 +652,7 @@ type view struct {
 	Title, Nav, CSRF string
 	Flash, Error     string
 	Detail           string // подробности сообщения (пути, исходный текст ошибки)
+	Notice           string // напоминание на каждой странице (пароль прошёл через агента)
 	Data             map[string]any
 	// Счётчик в меню.
 	Pending int
@@ -706,6 +711,9 @@ func (u *UI) render(w http.ResponseWriter, r *http.Request, name string, v view,
 		v.Path = v.Base + "/"
 	}
 	u.counts(&v)
+	if v.CSRF != "" && u.relayedNotice() {
+		v.Notice = tr(v.Lang, "The Web UI password was handed to a script or an agent that installed gate4.ai, so it passed through a chat. Change it in Settings → Signing in, or turn on confirmation in Telegram there.")
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if status != 0 {
 		w.WriteHeader(status)

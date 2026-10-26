@@ -18,14 +18,19 @@ import (
 // терминала (--yes из установщика, запущенного агентом) sudo вызывается с -n:
 // пароль спросить некому, и команда сразу отвечает, что нужен root, а не висит.
 
-// setupSysFn — окружение для команды (тесты подменяют).
-var setupSysFn = browserenv.System
+// setupSysFn — окружение для команды (тесты подменяют); userInstallFn —
+// загрузка Chrome for Testing в каталог данных (без root).
+var (
+	setupSysFn    = browserenv.System
+	userInstallFn = browserenv.InstallUserChrome
+)
 
 func (e *Env) browserSetup(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("gate4ai browser setup", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	yes := fs.Bool("yes", false, "install what is missing without asking (runs the commands, with sudo where needed)")
 	dry := fs.Bool("dry-run", false, "only check and print the commands")
+	user := fs.Bool("user", false, "no root: download Chrome for Testing into gate4ai's data folder (its system libraries still come from packages)")
 	asJSON := fs.Bool("json", false, "JSON output")
 	if fs.Parse(args) != nil || fs.NArg() != 0 {
 		return ExitUsage
@@ -35,6 +40,11 @@ func (e *Env) browserSetup(ctx context.Context, args []string) int {
 	}
 	s := setupSysFn()
 	c := browserenv.CheckBrowser(s)
+	if *user && c.Chrome == "" {
+		if c = e.userChrome(ctx, s); c.Chrome == "" {
+			return ExitError
+		}
+	}
 	e.printCheck(c)
 	if len(c.Commands) == 0 || *dry || !e.human() && !*yes {
 		e.out(c, nil)
@@ -49,6 +59,18 @@ func (e *Env) browserSetup(ctx context.Context, args []string) int {
 	if !install {
 		e.say("Nothing installed. Run the commands above, or gate4ai browser setup --yes.")
 		return setupExit(c)
+	}
+	// Chrome нет, а root взять негде (не root, sudo без пароля не проходит):
+	// сам бинарник ставится без root — Chrome for Testing в каталог данных;
+	// библиотеки к нему всё равно из пакетов (команда ниже скажет, какие).
+	if c.Chrome == "" && c.NeedsRoot && !s.Root && !canSudo(s) && browserenv.UserInstallAvailable(s) {
+		if c = e.userChrome(ctx, s); c.Chrome == "" {
+			return ExitError
+		}
+		e.printCheck(c)
+		if len(c.Commands) == 0 {
+			return setupExit(c)
+		}
 	}
 	for _, cmd := range c.Commands {
 		if !e.Interactive {
@@ -68,6 +90,26 @@ func (e *Env) browserSetup(ctx context.Context, args []string) int {
 	e.say("After installing:")
 	e.printCheck(c)
 	return setupExit(c)
+}
+
+// userChrome ставит Chrome for Testing в каталог данных и проверяет заново.
+func (e *Env) userChrome(ctx context.Context, s browserenv.Sys) browserenv.BrowserCheck {
+	path, err := userInstallFn(ctx, s, s.DataDir, e.Stderr)
+	if err != nil {
+		fmt.Fprintln(e.Stderr, "gate4ai: Chrome for Testing: "+err.Error())
+		return browserenv.BrowserCheck{}
+	}
+	fmt.Fprintln(e.Stderr, "Chrome for Testing: "+path)
+	return browserenv.CheckBrowser(s)
+}
+
+// canSudo — sudo работает без пароля (или его не спросят).
+func canSudo(s browserenv.Sys) bool {
+	if _, err := s.LookPath("sudo"); err != nil {
+		return false
+	}
+	_, err := s.Output("sudo", "-n", "true")
+	return err == nil
 }
 
 // setupExit — 0: Chrome есть и запустится (Xvfb и шрифты — рекомендации),

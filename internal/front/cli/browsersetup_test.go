@@ -214,3 +214,60 @@ func TestBrowserSetupCommand(t *testing.T) {
 		t.Fatal("no Chrome:", code)
 	}
 }
+
+// Chrome нет и root взять негде: --user (и --yes без терминала сам) ставит
+// Chrome for Testing в каталог данных, а библиотеки к нему называет пакетами.
+func TestBrowserSetupUserChrome(t *testing.T) {
+	have := map[string]string{"sudo": "/usr/bin/sudo", "Xvfb": "/usr/bin/Xvfb", "fc-list-out": fonts}
+	sys := fakeSys("linux", "amd64", "ID=debian\n", have, map[string]string{"HOME": "/home/u"})
+	sys.DataDir = "/data"
+	sys.Output = func(name string, args ...string) (string, error) {
+		switch name {
+		case "sudo":
+			return "", errors.New("sudo: a password is required")
+		case "ldd":
+			return have["ldd-out"], nil
+		case "fc-list":
+			return have["fc-list-out"], nil
+		}
+		return "Google Chrome 131.0.1", nil
+	}
+	sys.Run = func(_ context.Context, cmd string, _ io.Writer) error {
+		if strings.HasPrefix(cmd, "sudo") {
+			return errors.New("sudo: a password is required")
+		}
+		return nil
+	}
+	installs := 0
+	oldSys, oldInst := setupSysFn, userInstallFn
+	setupSysFn = func() browserenv.Sys { return sys }
+	userInstallFn = func(_ context.Context, s browserenv.Sys, dataDir string, out io.Writer) (string, error) {
+		installs++
+		if dataDir != "/data" {
+			t.Fatal(dataDir)
+		}
+		have["/data/chrome/131.0.1/chrome-linux64/chrome"] = ""
+		have["ldd-out"] = "\tlibnss3.so => not found\n"
+		return "/data/chrome/131.0.1/chrome-linux64/chrome", nil
+	}
+	defer func() { setupSysFn, userInstallFn = oldSys, oldInst }()
+	run := func(args ...string) (int, string) {
+		var out, errb bytes.Buffer
+		e := &Env{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Getenv: func(string) string { return "" }, StdoutTTY: true}
+		code := Run(context.Background(), e, append([]string{"browser", "setup"}, args...))
+		return code, out.String() + errb.String()
+	}
+	// Без флагов: только диагностика с заметкой про --user.
+	if code, out := run("--dry-run"); code != ExitError || installs != 0 || !strings.Contains(out, "gate4ai browser setup --user") {
+		t.Fatal(code, out)
+	}
+	// --yes без терминала и без root: Chrome for Testing ставится сам, библиотеки — командой для root.
+	if code, out := run("--yes"); installs != 1 || code != ExitError || !strings.Contains(out, "Chrome for Testing: /data/chrome/131.0.1/chrome-linux64/chrome") ||
+		!strings.Contains(out, "To run Chrome, install: libnss3.") || !strings.Contains(out, "Run as root (or with sudo):") {
+		t.Fatal(code, installs, out)
+	}
+	// --user явно, Chrome уже есть: повторной установки нет.
+	if code, out := run("--user", "--dry-run"); installs != 1 || code != ExitError || !strings.Contains(out, "missing libraries libnss3.so") {
+		t.Fatal(code, installs, out)
+	}
+}

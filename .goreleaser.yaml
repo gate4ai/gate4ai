@@ -73,3 +73,43 @@ signs:
     signature: "${artifact}.sig"
     certificate: "${artifact}.pem"
     args: ["sign-blob", "--yes", "--output-signature=${signature}", "--output-certificate=${certificate}", "${artifact}"]
+# Каталоги. Формула и манифест готовятся всегда (dist/homebrew, dist/winget); в
+# репозитории каталога они публикуются только при токене (secrets HOMEBREW_TAP_TOKEN,
+# WINGET_TOKEN — docs/publishing.md, «Каталоги»).
+homebrew_casks:
+  - name: gate4ai
+    ids: [gate4ai]
+    repository:
+      owner: gate4ai
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    skip_upload: '{{ if .Env.HOMEBREW_TAP_TOKEN }}false{{ else }}true{{ end }}'
+    directory: Formula
+    homepage: https://gate4.ai
+    description: "The guard between AI agents and your computer: policies, approvals and an audit log for the browser, files and sites"
+    binaries: [gate4ai]
+    caveats: |
+      Start: gate4ai service install  (or: gate4ai ui)
+      The browser of agents needs Google Chrome: gate4ai browser setup
+winget:
+  - name: gate4ai
+    publisher: gate4ai
+    publisher_url: https://gate4.ai
+    publisher_support_url: https://github.com/gate4ai/gate4ai/issues
+    package_identifier: gate4ai.gate4ai
+    short_description: "The guard between AI agents and your computer"
+    license: AGPL-3.0-only
+    homepage: https://gate4.ai
+    ids: [gate4ai]
+    repository:
+      owner: gate4ai
+      name: winget-pkgs
+      branch: "gate4ai-{{ .Version }}"
+      token: "{{ .Env.WINGET_TOKEN }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+    skip_upload: '{{ if .Env.WINGET_TOKEN }}false{{ else }}true{{ end }}'

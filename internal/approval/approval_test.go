@@ -374,13 +374,16 @@ func TestTelegramLoginConfirmation(t *testing.T) {
 	const owner = 42
 	tg := NewTelegram(&BotAPI{Base: srv.URL, Token: "1:T"}, owner, nil, nil)
 	got := make(chan bool, 2)
-	if err := tg.ConfirmLogin("abc", "Вход в Web UI, код 123456", func(ok bool) { got <- ok }); err != nil {
+	// Идентификатор вне hex-алфавита: случайный ключ callback (hex) не может
+	// содержать его по совпадению.
+	const attempt = "xyz-attempt"
+	if err := tg.ConfirmLogin(attempt, "Вход в Web UI, код 123456", func(ok bool) { got <- ok }); err != nil {
 		t.Fatal(err)
 	}
 	kb := fake.sent[0]["reply_markup"].(map[string]any)["inline_keyboard"].([]any)[0].([]any)
 	yes := kb[0].(map[string]any)["callback_data"].(string)
 	// Идентификатор попытки (значение cookie) в Telegram не уходит (E.12).
-	if strings.Contains(yes, "abc") || strings.Contains(kb[1].(map[string]any)["callback_data"].(string), "abc") {
+	if strings.Contains(yes, attempt) || strings.Contains(kb[1].(map[string]any)["callback_data"].(string), attempt) {
 		t.Fatal("login attempt id leaked to Telegram:", yes)
 	}
 	// Чужой не подтверждает вход.

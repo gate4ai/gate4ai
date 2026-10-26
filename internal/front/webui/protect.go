@@ -39,6 +39,10 @@ const protectionKey = "ui.login"
 type Protection struct {
 	Password string `json:"password,omitempty"` // $argon2id$v=19$m=…,t=…,p=…$соль$хэш; "" — пароль ещё не сгенерирован
 	Telegram bool   `json:"telegram,omitempty"` // подтверждение входа в Telegram-боте
+	// Relayed — сгенерированный пароль отдан не человеку в терминале, а скрипту
+	// или агенту (установка через OpenClaw): он прошёл через чат, и пока владелец
+	// не сменит пароль или не включит Telegram, Web UI напоминает об этом.
+	Relayed bool `json:"relayed,omitempty"`
 }
 
 // Set — пароль задан. "" бывает только до EnsurePassword при старте daemon:
@@ -98,6 +102,27 @@ func (u *UI) InitialPassword() string {
 
 // forgetInitial — пароль использован или сменён: показывать больше нечего (под u.mu).
 func (u *UI) forgetInitial() { u.initial = "" }
+
+// MarkRelayed — сгенерированный пароль отдан скрипту или агенту (gate4ai ui без
+// терминала): запомнить, чтобы после входа напомнить о смене пароля.
+func (u *UI) MarkRelayed() error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	p := u.Protection()
+	if u.initial == "" || p.Relayed {
+		return nil
+	}
+	p.Relayed = true
+	b, _ := json.Marshal(p)
+	return u.D.State.Set(protectionKey, string(b))
+}
+
+// relayedNotice — напоминание на страницах Web UI, пока пароль, прошедший через
+// агента, не сменён и подтверждение в Telegram не включено.
+func (u *UI) relayedNotice() bool {
+	p := u.Protection()
+	return p.Relayed && !p.Telegram
+}
 
 // minPassword — минимальная длина пароля Web UI.
 const minPassword = 8
@@ -590,6 +615,7 @@ func (u *UI) setLoginPassword(w http.ResponseWriter, r *http.Request) map[string
 		return redirectErr("/settings/login", err)
 	}
 	p.Password = hashPassword(f.Get("password"))
+	p.Relayed = false // новый пароль через агента не проходил
 	if err := u.saveProtection(sid, p); err != nil {
 		return redirectErr("/settings/login", err)
 	}

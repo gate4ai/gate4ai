@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/gate4ai/gate4ai/internal/platform/paths"
 )
 
 // Sys — окружение проверки (подменяется в тестах).
@@ -29,13 +31,15 @@ type Sys struct {
 	Run          func(ctx context.Context, cmd string, out io.Writer) error
 	Root         bool
 	Home         string // домашний каталог (кеши Playwright, Puppeteer, flatpak)
+	DataDir      string // каталог данных gate4ai: Chrome for Testing в <DataDir>/chrome (gate4ai browser setup --user)
 }
 
 func System() Sys {
 	return Sys{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Getenv: os.Getenv, LookPath: exec.LookPath, ReadFile: os.ReadFile,
-		Exists: func(p string) bool { _, err := os.Stat(p); return err == nil },
-		Glob:   func(pattern string) []string { m, _ := filepath.Glob(pattern); return m },
-		Home:   home(),
+		Exists:  func(p string) bool { _, err := os.Stat(p); return err == nil },
+		Glob:    func(pattern string) []string { m, _ := filepath.Glob(pattern); return m },
+		Home:    home(),
+		DataDir: paths.Home(),
 		Output: func(name string, args ...string) (string, error) {
 			b, err := exec.Command(name, args...).Output()
 			return string(b), err
@@ -96,6 +100,9 @@ func ChromeCandidates(s Sys) []string {
 	var out []string
 	if p := s.Getenv("GATE4AI_CHROME"); p != "" {
 		out = append(out, p)
+	}
+	if s.DataDir != "" {
+		out = append(out, userChromeGlob(s.GOOS, s.DataDir)) // gate4ai browser setup --user
 	}
 	switch s.GOOS {
 	case "darwin":
@@ -503,6 +510,9 @@ func planInstall(s Sys, missing, libs []string) (needs []Need, cmds, notes []str
 	}
 	if c := install(pkgs); c != "" {
 		cmds = append(cmds, c)
+	}
+	if need["chrome"] && UserInstallAvailable(s) {
+		notes = append(notes, "without root: gate4ai browser setup --user downloads Chrome for Testing into "+UserChromeDir(s.DataDir)+" (its system libraries still come from packages)")
 	}
 	if sudo != "" && len(cmds) > 0 {
 		root = true

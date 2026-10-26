@@ -20,14 +20,22 @@
 4. Публикация черновика (`--latest`): только теперь его видят `https://gate4.ai/latest` и установщики.
 5. `gate4ai-relay` из релиза — на сервер relay.gate4.ai (окружение `production`: `vars.DEPLOY_HOST`, `secrets.DEPLOY_SSH_KEY`, `secrets.DEPLOY_KNOWN_HOSTS`; без них шаг пропускается). Бинарник загружается в каталог, созданный `mktemp -d` на сервере (не в предсказуемый путь `/tmp`); скрипт на сервере (`relay/deploy/remote-install.sh <путь>`) меняет только бинарник и откатывает его, если API relay не ответил.
 
+6. **Attestations и образ.** Каждый архив и `checksums.txt` получают GitHub artifact attestation (SLSA provenance, `actions/attest-build-provenance`): проверка — `gh attestation verify <архив> -R gate4ai/gate4ai`. Job `docker` собирает `Dockerfile` (gate4ai + Chrome, Xvfb, шрифты; linux/amd64 и arm64) в `ghcr.io/gate4ai/gate4ai:<версия>` и `:latest`, подписывает образ cosign и прикладывает attestation; публикация релиза ждёт и его.
+7. **Каталоги.** GoReleaser готовит cask Homebrew (`dist/homebrew`) и манифест winget (`dist/winget`) всегда; в репозиторий каталога они уходят только при токене: `secrets.HOMEBREW_TAP_TOKEN` (PAT с правом записи в `gate4ai/homebrew-tap`, формула `Formula/gate4ai.rb` → `brew install gate4ai/tap/gate4ai`) и `secrets.WINGET_TOKEN` (PAT для форка `gate4ai/winget-pkgs`, pull request в `microsoft/winget-pkgs`; идентификатор `gate4ai.gate4ai`). Без токенов шаг пропускается (`skip_upload`). AUR и скилл в ClawHub — руками по чеклисту `dev/docs/catalogs.md`.
+
 Сторонние actions во всех workflow закреплены по полному SHA (тег — в комментарии), обновления предлагает Dependabot (`.github/dependabot.yml`): в job'ах релиза есть `contents: write` и `id-token: write` (cosign). Подпись `checksums.txt` установщик проверяет по идентичности именно этого workflow на теге (`…/.github/workflows/release.yml@refs/tags/v…`).
 
 ## Запись в registry
 
 Официальных коннекторов в магазине нет: Браузер и Файлы — часть `gate4ai`, релиз в registry не записывается. Индекс (`index.json`) содержит только коннекторы издателей (WASM): издатель собирает пакет `gate4ai connectors pack`, подписывает его своим ключом (`gate4ai connectors keygen`) и присылает `<коннектор>.pack.json` в pull request registry (`gate4ai registry add … --publisher <имя> --repo <репозиторий> --path <каталог>`); CI registry ставит gate4ai версии из `.github/gate4ai-version`, скачивает и сверяет каждый пакет с его записью и пересобирает новые версии из исходников; индекс подписывает ключ registry (`gate4ai registry sign`, ключ — вне GitHub). Порядок — [CONTRIBUTING.md registry](https://github.com/gate4ai/registry/blob/main/CONTRIBUTING.md). Старые установки при старте новой версии удаляют поставленные из магазина `browser` и `email` (`internal/daemon/migrate.go`). Контракт 1 действий браузера считается от схем v0.7.7.
 
+## Сигналы доверия
+
+Проект молодой, поэтому доверие даёт проверяемость, а не возраст: подпись cosign и attestations релизов, подписанный образ, воспроизводимая сборка (`-trimpath`, `CGO_ENABLED=0`, `mod_timestamp` коммита), `SECURITY.md` с политикой раскрытия, workflow `scorecard.yml` (OpenSSF Scorecard, бейдж в README), actions по SHA и Dependabot. Что настроить руками в организации GitHub (верификация домена gate4.ai, профиль, topics, Discussions) и где публиковаться — чеклисты `dev/docs/github-org.md` и `dev/docs/launch.md`.
+
 ## Настройки организации
 
 - **CLA Assistant и DCO** (GitHub App) на `gate4ai/gate4ai`, `registry` и `.github`.
 - **Branch protection** на `main`: обязательный CI.
+- **Scorecard:** workflow `scorecard.yml` публикует результаты (`publish_results: true`) — для этого репозиторий должен быть публичным, а в Settings → Code security включён code scanning (SARIF).
 - **Секреты:** окружение `production` в `gate4ai/gate4ai` — доступ к серверу relay; `REGISTRY_PUBLIC_KEY` — переменная `registry` для CI. Ключ издателя gate4ai (`GATE4AI_PUBLISHER_KEY`) релизу больше не нужен: пакетов коннекторов он не собирает.

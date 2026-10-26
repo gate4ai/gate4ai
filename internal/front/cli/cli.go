@@ -1414,7 +1414,9 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 			}
 			*reset = false // daemon запустился, сброс сделан: повторный вызов не нужен
 		}
-		return c.Do(ctx, "POST", "/v1/ui/url", map[string]bool{"remote": *remote}, &res)
+		// relayed — пароль читает не человек в терминале, а скрипт или агент
+		// (установка через OpenClaw): daemon напомнит сменить его после входа.
+		return c.Do(ctx, "POST", "/v1/ui/url", map[string]bool{"remote": *remote, "relayed": !e.Interactive}, &res)
 	}
 	err := session()
 	if NotRunning(err) && e.Getenv("GATE4AI_TOKEN") == "" && !*noStart && (*start || e.Interactive && !*printOnly) {
