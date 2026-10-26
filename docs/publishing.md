@@ -31,7 +31,7 @@
 
 ## Сигналы доверия
 
-Проект молодой, поэтому доверие даёт проверяемость, а не возраст: подпись cosign и attestations релизов, подписанный образ, воспроизводимая сборка (`-trimpath`, `CGO_ENABLED=0`, `mod_timestamp` коммита), `SECURITY.md` с политикой раскрытия, workflow `scorecard.yml` (OpenSSF Scorecard, бейдж в README), actions по SHA и Dependabot. Что настроить руками в организации GitHub (верификация домена gate4.ai, профиль, topics, Discussions) и где публиковаться — чеклисты `dev/docs/github-org.md` и `dev/docs/launch.md`.
+Проект молодой, поэтому доверие даёт проверяемость, а не возраст: подпись cosign и attestations релизов, подписанный образ, воспроизводимая сборка (`-trimpath`, `CGO_ENABLED=0`, `mod_timestamp` коммита), `SECURITY.md` с политикой раскрытия, workflow `scorecard.yml` (OpenSSF Scorecard, бейдж в README), `codeql.yml` (SAST: Go, JavaScript, workflow), actions по SHA и Dependabot. Ruleset `main`: без удаления и force-push, линейная история, обязательные проверки `test`, `e2e`, `build (macos-latest)`, `build (windows-latest)` из `ci.yml`; администраторы организации обходят правила (так `deploy.sh` пушит слитый коммит в `main`). Что настроить руками в организации GitHub (верификация домена gate4.ai, профиль, topics, Discussions) и где публиковаться — чеклисты `dev/docs/github-org.md` и `dev/docs/launch.md`.
 
 ## Настройки организации
 
