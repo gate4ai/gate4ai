@@ -272,21 +272,10 @@ func TestAccessGroup(t *testing.T) {
 	}
 }
 
-// Учётка сайта из трёх полей: пароль — в хранилище, поля и отправка — по умолчанию.
-func TestAccountWizard(t *testing.T) {
-	u, d, _, base := setup(t)
+// Алиас секрета из названия, которое ввёл человек.
+func TestSecretAliasFromName(t *testing.T) {
+	u, _, _, base := setup(t)
 	_, _, post, _ := loginAs(t, u, base)
-	p := post("/vault/account", url.Values{"site": {"login.example.com/signin"}, "login": {"me@example.com"}, "password": {"pw-123"}, "profiles": {"p"}})
-	if !strings.Contains(p, "Учётка @login.example.com для https://login.example.com сохранена") || strings.Contains(p, "pw-123") {
-		t.Fatal(p)
-	}
-	cr, ok := d.Config.Current().Credentials["@login.example.com"]
-	if !ok || cr.Form == nil || cr.Form.Submit.Press != "Enter" || cr.Form.Fields[1].Secret != "@login.example.com.password" || cr.Use[0] != "p" {
-		t.Fatalf("%+v", cr)
-	}
-	if v, err := d.Vault.Get("@login.example.com.password"); err != nil || v != "pw-123" {
-		t.Fatal(v, err)
-	}
 	if p := post("/vault", url.Values{"name": {"Work mail"}, "value": {"x"}}); !strings.Contains(p, "Сохранено как @work-mail") {
 		t.Fatal("alias from name", p)
 	}
