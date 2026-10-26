@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/registry"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
+	"github.com/gate4ai/gate4ai/internal/platform/gitrepo"
 )
 
 // InfoFile — запись об установке (согласованные возможности, доверие, дайджест).
@@ -54,17 +56,22 @@ type Options struct {
 	RegistryKeys []string // ключи подписи индекса
 	TrustedKeys  []string // ключи издателей, которым владелец доверяет без registry
 	Builtin      []string // имена коннекторов ядра: из магазина не ставятся
+	// KnowledgeDir — папка знаний владельца: сюда клонируются репозитории
+	// коннекторов (connectors install <git url>); "" — ~/gate4ai-knowledge.
+	KnowledgeDir string
 	Log          *slog.Logger
 }
 
 // Plan — что будет установлено; показывается владельцу для согласия.
 type Plan struct {
-	Connector    string   `json:"connector"`
-	Version      string   `json:"version"`
-	Trust        string   `json:"trust"`
-	Publisher    string   `json:"publisher,omitempty"`
-	Source       string   `json:"source"`
-	Repo         string   `json:"repo,omitempty"`
+	Connector string `json:"connector"`
+	Version   string `json:"version"`
+	Trust     string `json:"trust"`
+	Publisher string `json:"publisher,omitempty"`
+	Source    string `json:"source"`
+	Repo      string `json:"repo,omitempty"`
+	// Commit — коммит клона, если коннектор поставлен из git.
+	Commit       string   `json:"commit,omitempty"`
 	Capabilities []string `json:"capabilities"`
 	Classes      []string `json:"classes"`
 	Installed    string   `json:"installed,omitempty"` // установленная версия
@@ -165,6 +172,8 @@ func (o Options) Prepare(ctx context.Context, source string, dev bool) (*Plan, e
 		p, err = o.prepareRegistry(ctx, source)
 	} else if dir, ok := SourceFolder(source); ok {
 		p, err = o.prepareDir(ctx, dir, dev)
+	} else if gitrepo.IsGit(source) {
+		p, err = o.prepareGit(ctx, source)
 	} else {
 		p, err = o.prepareFile(ctx, source, dev)
 	}
@@ -288,6 +297,95 @@ func (o Options) prepareDir(ctx context.Context, dir string, dev bool) (*Plan, e
 		return nil, err
 	}
 	return &Plan{Source: SourceDir + dir, pkg: pkg, Trust: TrustLocal}, nil
+}
+
+// prepareGit — коннектор из git-репозитория: клон в папку знаний (владелец
+// потом правит его там и шлёт автору pull request), сборка из исходников как
+// своя сборка (доверие local); без Go — пакет .g4c из релиза репозитория
+// (v<version> из манифеста). Повторная установка того же адреса подтягивает
+// чистый клон; клон с правками остаётся как есть.
+func (o Options) prepareGit(ctx context.Context, source string) (*Plan, error) {
+	src, err := gitrepo.Parse(source)
+	if err != nil {
+		return nil, err
+	}
+	kdir := o.KnowledgeDir
+	if kdir == "" {
+		home, _ := os.UserHomeDir()
+		kdir = filepath.Join(home, "gate4ai-knowledge")
+	}
+	folder := src.Name
+	if !strings.HasPrefix(folder, "gate4ai-") {
+		folder = "gate4ai-" + folder
+	}
+	dest := filepath.Join(kdir, folder)
+	var notes []string
+	if st, err := os.Stat(dest); err == nil && st.IsDir() {
+		g := gitrepo.Read(dest)
+		if !g.Repo || !sameRepo(g.Remote, src.URL) {
+			return nil, fmt.Errorf("%s already exists and is not a clone of %s: install the folder itself (connectors install %s) or move it away", dest, src.URL, dest)
+		}
+		if src.Ref == "" {
+			if pulled, note := gitrepo.PullIfClean(ctx, dest); note != "" {
+				notes = append(notes, note)
+			} else if pulled {
+				notes = append(notes, "the clone in "+dest+" was updated from "+src.URL)
+			}
+		}
+	} else if err := gitrepo.Clone(ctx, src, dest); err != nil {
+		return nil, err
+	}
+	g := gitrepo.Read(dest)
+	var p *Plan
+	if _, err := exec.LookPath("go"); err == nil {
+		if p, err = o.prepareDir(ctx, dest, true); err != nil {
+			return nil, err
+		}
+	} else {
+		rel, err := releaseURL(src, dest)
+		if err != nil {
+			return nil, fmt.Errorf("go is not installed to build %s, and %v", src.URL, err)
+		}
+		if p, err = o.prepareFile(ctx, rel, true); err != nil {
+			return nil, fmt.Errorf("go is not installed to build %s; its release package: %w", src.URL, err)
+		}
+		p.Source = SourceDir + dest
+		notes = append(notes, "the package comes from the repository's release "+rel+" (no Go here to build the sources)")
+	}
+	p.Repo, p.Commit = src.Web, g.Commit
+	if p.Repo == "" {
+		p.Repo = src.URL
+	}
+	p.Warnings = append(p.Warnings, fmt.Sprintf("from git %s (commit %s): your own build of someone else's code, not reviewed by gate4.ai; the clone is in %s", src.URL, g.Commit, dest))
+	p.Warnings = append(p.Warnings, notes...)
+	return p, nil
+}
+
+// sameRepo — два адреса ведут в один репозиторий (без .git, схемы и регистра).
+func sameRepo(a, b string) bool {
+	norm := func(s string) string {
+		s = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(s), ".git"))
+		s = strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://"), "ssh://")
+		s = strings.TrimPrefix(s, "git@")
+		return strings.TrimSuffix(strings.Replace(s, ":", "/", 1), "/")
+	}
+	return norm(a) == norm(b)
+}
+
+// releaseURL — пакет релиза v<version> репозитория на GitHub-подобном хостинге.
+func releaseURL(src gitrepo.Source, dir string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, ManifestFile))
+	if err != nil {
+		return "", err
+	}
+	m, err := manifest.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	if src.Web == "" || !strings.HasPrefix(src.Web, "https://") {
+		return "", errors.New("the repository has no web address to download a release from")
+	}
+	return fmt.Sprintf("%s/releases/download/v%s/%s-%s%s", strings.TrimSuffix(src.Web, "/"), m.Version, m.Connector, m.Version, PackageExt), nil
 }
 
 // trustOf — доверие к пакету из файла по ключам издателя из индекса. Уровень

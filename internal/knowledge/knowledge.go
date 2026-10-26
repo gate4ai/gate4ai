@@ -9,22 +9,19 @@
 package knowledge
 
 import (
-	"bufio"
 	"bytes"
-	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
+
+	"github.com/gate4ai/gate4ai/internal/platform/gitrepo"
 )
 
 // Имена файлов папки коннектора.
@@ -172,17 +169,12 @@ func (r *Recipe) Matches(host string) bool {
 }
 
 // Git — состояние git папки, только чтение: gate4ai ничего не инициализирует
-// и не отправляет.
-type Git struct {
-	Repo   bool   `json:"repo"`             // есть .git
-	Remote string `json:"remote,omitempty"` // url origin
-	// Dirty — есть незакоммиченные правки; nil — git недоступен или не репозиторий.
-	Dirty *bool `json:"dirty,omitempty"`
-}
+// и не отправляет (gitrepo.Read).
+type Git = gitrepo.State
 
-// State — состояние папки для владельца: только файлы, готов к публикации,
+// GitState — состояние папки для владельца: только файлы, готов к публикации,
 // есть git, опубликован, есть неопубликованные правки.
-func (g Git) State() string {
+func GitState(g Git) string {
 	switch {
 	case !g.Repo:
 		return "files"
@@ -195,55 +187,8 @@ func (g Git) State() string {
 	}
 }
 
-var remoteURLRe = regexp.MustCompile(`(?m)^\s*url\s*=\s*(\S+)`)
-
-// ReadGit читает состояние git папки: .git/config — origin, `git status` — правки.
-func ReadGit(dir string) Git {
-	var g Git
-	if st, err := os.Stat(filepath.Join(dir, ".git")); err != nil || !st.IsDir() {
-		return g
-	}
-	g.Repo = true
-	if cfg, err := os.ReadFile(filepath.Join(dir, ".git", "config")); err == nil {
-		g.Remote = originURL(string(cfg))
-	}
-	if git, err := exec.LookPath("git"); err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, git, "-C", dir, "status", "--porcelain")
-		cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
-		if out, err := cmd.Output(); err == nil {
-			dirty := len(bytes.TrimSpace(out)) > 0
-			g.Dirty = &dirty
-		}
-	}
-	return g
-}
-
-// originURL — url секции [remote "origin"] конфигурации git (первый remote, если origin нет).
-func originURL(cfg string) string {
-	section, first := "", ""
-	sc := bufio.NewScanner(strings.NewReader(cfg))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if strings.HasPrefix(line, "[") {
-			section = line
-			continue
-		}
-		if !strings.HasPrefix(section, `[remote `) {
-			continue
-		}
-		if m := remoteURLRe.FindStringSubmatch(line); m != nil {
-			if section == `[remote "origin"]` {
-				return m[1]
-			}
-			if first == "" {
-				first = m[1]
-			}
-		}
-	}
-	return first
-}
+// ReadGit читает состояние git папки.
+func ReadGit(dir string) Git { return gitrepo.Read(dir) }
 
 // Folder — папка коннектора в папке знаний.
 type Folder struct {
@@ -313,7 +258,7 @@ func Read(path string) Folder {
 		}
 	}
 	f.Git = ReadGit(path)
-	f.State = f.Git.State()
+	f.State = GitState(f.Git)
 	return f
 }
 

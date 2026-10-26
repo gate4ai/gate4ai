@@ -27,7 +27,7 @@ func HowToPublish(f Folder, user string) Publish {
 		repo = RepoPrefix + repo
 	}
 	cd := "cd " + shellPath(f.Path)
-	switch f.Git.State() {
+	switch GitState(f.Git) {
 	case "files":
 		return Publish{Kind: "scratch", Commands: []string{
 			"gate4ai knowledge check " + f.Name,

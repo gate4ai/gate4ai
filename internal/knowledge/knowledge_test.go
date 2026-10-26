@@ -74,8 +74,8 @@ func TestListFindAndGit(t *testing.T) {
 		g    Git
 		want string
 	}{{Git{}, "files"}, {Git{Repo: true}, "git"}, {Git{Repo: true, Remote: "x"}, "published"}, {Git{Repo: true, Remote: "x", Dirty: &dirty}, "unpublished_changes"}} {
-		if c.g.State() != c.want {
-			t.Fatalf("%+v: %s", c.g, c.g.State())
+		if GitState(c.g) != c.want {
+			t.Fatalf("%+v: %s", c.g, GitState(c.g))
 		}
 	}
 	p := HowToPublish(Folder{Name: "gate4ai-my-site", Path: f, Connector: "my_site"}, "alex")

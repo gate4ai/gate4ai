@@ -195,7 +195,7 @@ Owner commands (local socket):
   gate4ai browser sessions [close <id>] | watch <id> [--remote]   browser sessions of agents: list, live view, close
   gate4ai browser setup [--yes] [--dry-run]   check Chrome, the virtual screen (Xvfb) and fonts; install what is missing (asks first)
   gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
-  gate4ai connectors list | install <file.g4c | name[@version] | source folder> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | logs <name> [--limit n] [--since 10m] | refresh
+  gate4ai connectors list | install <file.g4c | name[@version] | source folder | git url> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | logs <name> [--limit n] [--since 10m] | refresh
   gate4ai connectors new <name> [--site <domain>] [--from-session <s-id | steps.json>] [--task <action>] [-o folder]   a connector in the knowledge folder; --from-session: recipe and draft from a recorded session
   gate4ai knowledge [list] | check <name>   the knowledge folder (recipes and connectors agents made) and the check before you publish a folder yourself
   gate4ai sites lookup <domain>           what is known about a site: connectors, store, knowledge folder, sign-in, next step (agents too)

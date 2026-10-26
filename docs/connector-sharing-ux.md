@@ -161,7 +161,8 @@ human_steps: [sms_code, payment]                         # что делает �
 ## Статус реализации
 
 - **Э1 (папка знаний) — сделано:** настройка `knowledge.dir`; действие `gate4ai.sites_lookup` и `gate4ai sites lookup <домен>` (владельцу — `GET /v1/sites/lookup`); `connectors new --from-session <steps_file | s-id> --task <действие>` — папка `gate4ai-<имя>` в папке знаний без `git init`: `RECIPE.md`, манифест, код по шагам, фикстура после автоочистки, README с блоком «For AI agents», `LICENSE` AGPL-3.0-only; `gate4ai knowledge [list | check]` и `GET /v1/knowledge`, `POST /v1/knowledge/check`; Web UI → Доступ → Знания (состояния по `.git`/`remote`/`git status`, проверка, подсказка «Как опубликовать» с нуля и через форк) и поле папки знаний в Настройки → Расширенные; раздел «Sites and knowledge» в skill. Пакет — `internal/knowledge`.
-- **Э4 (установка из git), Э2 (трассировка, `handoff_to_agent`, статусы), Э3 (вход через коннектор входа)** — в работе, см. таблицу ниже.
+- **Э4 (установка из git) — сделано:** `gate4ai connectors install <github.com/user/gate4ai-name[@tag] | git url>` (и Web UI → «Поставить не из магазина»): daemon клонирует репозиторий в папку знаний (`gate4ai-<имя>`), собирает как свою сборку (уровень `local`), без Go берёт пакет релиза `v<version>`; экран согласия показывает источник, коммит и предупреждение «чужой код, не проверен gate4.ai»; повторная установка того же адреса и `connectors update` подтягивают только чистый клон, клон с правками остаётся как есть (предупреждение). Пакет — `internal/platform/gitrepo` (единственные операции git, которые делает gate4ai: `clone`, `pull --ff-only` чистого клона, чтение состояния).
+- **Э2 (трассировка, `handoff_to_agent`, статусы), Э3 (вход через коннектор входа)** — в работе, см. таблицу ниже.
 
 ## Что меняется в продукте
 

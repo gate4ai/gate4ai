@@ -7,6 +7,9 @@ package webui
 // TestRussianCatalogComplete. Термины: daemon → gate4.ai, relay → доступ из
 // интернета, profile → права агента, receipt → запись журнала.
 var ru = map[string]string{
+	// Установка из git.
+	"<b>A git repository</b> (<code>github.com/user/gate4ai-name</code>, optionally <code>@tag</code>) — cloned into your knowledge folder and built there as your own build; without Go — the package of its release.": "<b>Git-репозиторий</b> (<code>github.com/user/gate4ai-name</code>, можно <code>@тег</code>) — клонируется в вашу папку знаний и собирается там как своя сборка; без Go — пакет его релиза.",
+	"commit": "коммит",
 	// Знания (папка знаний).
 	"%s: no such folder in %s": "%s: такой папки нет в %s",
 	"<b>Connector</b> — the same steps as a WebAssembly module that runs in the sandbox through your Browser; install it from the folder, and the agent calls one action instead of a browser session.":                                                                                          "<b>Коннектор</b> — те же шаги модулем WebAssembly, который работает в песочнице через ваш Браузер; поставьте его из папки, и агент вызывает одно действие вместо сеанса браузера.",
