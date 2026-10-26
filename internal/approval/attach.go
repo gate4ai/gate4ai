@@ -178,7 +178,6 @@ func Attach(ctx context.Context, d *daemon.Daemon, desktop *Desktop, telegramBas
 		go tg.Run(tctx)
 		d.Log.Info("telegram approvals enabled")
 	}
-	apply(d.Config.Current())
-	d.Config.Subscribe(apply)
+	d.Config.SubscribeNow(apply)
 	return ch
 }

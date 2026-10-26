@@ -253,8 +253,7 @@ func Attach(ctx context.Context, d *daemon.Daemon, auto bool) func() Status {
 			daemon.WriteJSON(w, http.StatusOK, out)
 		})
 	})
-	apply(d.Config.Current())
-	d.Config.Subscribe(apply)
+	d.Config.SubscribeNow(apply)
 	return status
 }
 

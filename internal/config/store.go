@@ -115,6 +115,21 @@ func (s *Store) Subscribe(f func(*Config)) {
 	s.mu.Unlock()
 }
 
+// SubscribeNow подписывает f и сразу отдаёт ему текущую версию — под той же
+// блокировкой, что и рассылка: версия, сохранённая между подпиской и первым
+// вызовом (или до неё), не теряется. Так подключаются компоненты, которые
+// по первой конфигурации сами запускают работу, меняющую конфигурацию
+// (самостоятельная регистрация на relay).
+func (s *Store) SubscribeNow(f func(*Config)) {
+	s.notifyMu.Lock()
+	defer s.notifyMu.Unlock()
+	s.mu.Lock()
+	s.subs = append(s.subs, f)
+	c := s.cur
+	s.mu.Unlock()
+	f(c)
+}
+
 // Validate проверяет YAML, ничего не сохраняя.
 func (s *Store) Validate(raw []byte) (*Config, error) { return Parse(raw, s.extra...) }
 
