@@ -92,7 +92,7 @@ func migrateAccess(c *config.Config) bool {
 	if b := c.Connectors["browser"]; b != nil {
 		mode, _ := b["mode"].(string)
 		for _, dmn := range settingStrings(b["allowed_domains"]) {
-			c.Access.Sites = access.SetSite(c.Access.Sites, dmn, access.Allow)
+			c.Access.Sites = access.SetSite(c.Access.Sites, dmn, access.Read)
 			changed = true
 		}
 		for _, dmn := range settingStrings(b["blocked"]) {
@@ -100,7 +100,7 @@ func migrateAccess(c *config.Config) bool {
 			changed = true
 		}
 		if mode == "blocklist" {
-			c.Access.Sites = access.SetSite(c.Access.Sites, "*", access.Allow)
+			c.Access.Sites = access.SetSite(c.Access.Sites, "*", access.Read)
 			changed = true
 		}
 		for _, k := range []string{"allowed_domains", "blocked", "mode"} {

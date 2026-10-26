@@ -227,7 +227,7 @@ func FormatDuration(d time.Duration) string {
 // Defaults заполняет значения по умолчанию из спецификации (docs/specification.md).
 func (c *Config) Defaults() {
 	if c.Access.Sites == nil {
-		c.Access.Sites = []access.Site{{Domain: "*", Access: access.Ask}}
+		c.Access.Sites = []access.Site{{Domain: "*", Access: access.Read}}
 	}
 	if c.Approvals.Timeout == 0 {
 		c.Approvals.Timeout = Duration(30 * time.Minute)

@@ -146,7 +146,7 @@ func TestFreshInstallBuiltins(t *testing.T) {
 	c := d.Config.Current()
 	if !c.Profiles["default"].HasConnector("files") || !c.Profiles["default"].HasConnector("browser") ||
 		len(c.Access.Folders) != 1 || c.Access.Folders[0] != (access.Folder{Path: "~/Documents", Access: access.Ask}) ||
-		len(c.Access.Sites) != 1 || c.Access.Sites[0] != (access.Site{Domain: "*", Access: access.Ask}) {
+		len(c.Access.Sites) != 1 || c.Access.Sites[0] != (access.Site{Domain: "*", Access: access.Read}) {
 		t.Fatal(c.Profiles["default"], c.Access)
 	}
 	for conn, acts := range defaultActions {
@@ -256,12 +256,11 @@ profiles:
 	if vs, _ := d.Config.Versions(); len(vs) < 2 {
 		t.Fatal("migration must be a new policy version:", vs)
 	}
-	// Прежние папки — в списке доступа как read, сайты — как allow (у сайтов
-	// режима read нет); настройки убраны.
+	// Прежние папки и сайты — в списках доступа как read; настройки убраны.
 	if f, ok := access.MatchFolder(c.Access.Folders, "~/Documents/x", d.Pipeline.Home); !ok || f.Access != access.Read || c.Connectors["files"] != nil {
 		t.Fatal(c.Access.Folders, c.Connectors["files"])
 	}
-	if s, ok := access.MatchSite(c.Access.Sites, "https://account.example/"); !ok || s.Access != access.Allow || c.Connectors["browser"]["allowed_domains"] != nil {
+	if s, ok := access.MatchSite(c.Access.Sites, "https://account.example/"); !ok || s.Access != access.Read || c.Connectors["browser"]["allowed_domains"] != nil {
 		t.Fatal(c.Access.Sites, c.Connectors["browser"])
 	}
 }

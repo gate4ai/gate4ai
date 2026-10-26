@@ -46,13 +46,13 @@ Daemon держит политики, списки доступа, секрет�
 
 ### 2. Сайты, папки и политика
 
-Браузер и Файлы встроены в gate4ai. Что им открыто, задают **списки доступа** — общие для всех агентов строки с режимом: сайт (`app.example.org`, `*.example.org` — и сам домен, `*` — любой) или папка (она и всё ниже). Начальная конфигурация: любой сайт и `~/Documents` — «спросить» (`ask`), скрытые файлы и папки, ключи и данные приложений закрыты всегда (открыть — `allow_hidden`, `allow_paths` в настройках Файлов).
+Браузер и Файлы встроены в gate4ai. Что им открыто, задают **списки доступа** — общие для всех агентов строки с режимом: сайт (`app.example.org`, `*.example.org` — и сам домен, `*` — любой) или папка (она и всё ниже). Начальная конфигурация: любой сайт — «чтение» (`read`: читать без вопроса, менять — с подтверждением), `~/Documents` — «спросить» (`ask`), скрытые файлы и папки, ключи и данные приложений закрыты всегда (открыть — `allow_hidden`, `allow_paths` в настройках Файлов).
 
 ```sh
 gate4ai access                                      # оба списка
-gate4ai access sites set app.example.org allow      # сайт открыт (ask — каждое действие с подтверждением, deny — закрыть; «только чтение» у сайтов нет)
+gate4ai access sites set app.example.org read       # читать без вопроса, менять — с подтверждением (allow — всё, deny — закрыть)
 gate4ai access folders set ~/Documents/notes append # читать и дописывать без вопроса, перезаписывать — с подтверждением
-gate4ai sites allow account.example.org                  # то же, что access sites set … allow
+gate4ai sites allow account.example.org                  # то же, что access sites set … read
 ```
 
 То же в Web UI — **Доступ → Браузер** и **Файлы**. Побеждает самая конкретная строка; нет строки или `deny` — отказ; правило политики на действие побеждает строку. Режим `connector` открывает сайт только коннектору магазина, а не агенту напрямую.
@@ -65,7 +65,7 @@ store:
   registry_keys: ["ed25519:yDcbQuNCGqSqHSt08HdvW5/fNyWRW8FIXtKiL91hqtw="]
 access:
   sites:
-    - { domain: "*", access: ask }
+    - { domain: "*", access: read }
   folders:
     - { path: "~/Documents/notes", access: append }
 agents:

@@ -30,17 +30,17 @@ gate4ai access                   # списки доступа: сайты Бр�
 gate4ai connectors list          # коннекторы магазина (на свежей установке пусто)
 ```
 
-Браузер и Файлы — часть ядра (`runtime: builtin`, из магазина не ставятся). Начальная конфигурация без `--config`: профиль `default` с `files` и `browser`, списки доступа — любой сайт (`*`) и `~/Documents` в режиме `ask` (каждое действие спрашивает вас), правил нет; скрытые файлы и папки, ключи и данные приложений Файлы не открывают никогда (открывают `allow_hidden: true` и `allow_paths`). Из магазина daemon сам ничего не ставит. Старая установка с пакетами `browser` / `email` из магазина при старте новой версии удаляет их, убирает почту из политики и переносит прежние `connectors.browser.allowed_domains` / `blocked` / `mode` и `connectors.files.roots` в списки доступа (`read` / `deny`) — новой версией политики, с откатом.
+Браузер и Файлы — часть ядра (`runtime: builtin`, из магазина не ставятся). Начальная конфигурация без `--config`: профиль `default` с `files` и `browser`, списки доступа — любой сайт (`*`) в режиме `read` (чтение без вопроса, изменения спрашивают вас) и `~/Documents` в режиме `ask` (каждое действие спрашивает вас), правил нет; скрытые файлы и папки, ключи и данные приложений Файлы не открывают никогда (открывают `allow_hidden: true` и `allow_paths`). Из магазина daemon сам ничего не ставит. Старая установка с пакетами `browser` / `email` из магазина при старте новой версии удаляет их, убирает почту из политики и переносит прежние `connectors.browser.allowed_domains` / `blocked` / `mode` и `connectors.files.roots` в списки доступа (`read` / `deny`) — новой версией политики, с откатом.
 
 **Списки доступа** — первый уровень решения для Браузера и Файлов, общий для всех агентов (`access.sites`, `access.folders` в конфигурации):
 
 ```sh
-gate4ai access sites set app.example.org ask       # каждое действие на сайте — с подтверждением (режима «только чтение» у сайтов нет)
+gate4ai access sites set app.example.org read      # чтение без вопроса, клики и запросы с эффектом — с подтверждением
 gate4ai access sites set "*.example.com" allow     # поддомены и сам example.com — всё без вопроса
 gate4ai access sites set "*" deny                  # остальные сайты закрыты
 gate4ai access folders set ~/Documents/notes append   # чтение, список и дописывание без вопроса, перезапись — с подтверждением
 gate4ai access folders remove ~/Documents
-gate4ai sites allow account.example.org                 # то же, что access sites set account.example.org allow
+gate4ai sites allow account.example.org                 # то же, что access sites set account.example.org read
 ```
 
 Режимы сайтов: `allow`, `read`, `connector` (только через коннектор магазина, агенту напрямую — отказ), `ask`, `deny`; у папок ещё `append`. Побеждает самая конкретная строка, при равенстве — строже. Нет строки или `deny` — отказ; правило политики на действие (`allow` / `ask` / `deny`) побеждает строку, без правила действует режим строки. В Web UI то же — **Доступ → Браузер** и **Файлы**; в запросе подтверждения по сайту или папке есть кнопки «Добавить в разрешённые / запрещённые». Агент просит сайт через `gate4ai.change_policy` (`set_site_access`) — с вашим подтверждением.
@@ -70,7 +70,7 @@ gate4ai connectors install ./account_example --watch   # пересобират�
 ```yaml
 access:                         # списки доступа Браузера и Файлов — для всех агентов
   sites:
-    - { domain: "*.example.com", access: ask }     # каждое действие — с подтверждением
+    - { domain: "*.example.com", access: read }    # чтение без вопроса, изменения — с подтверждением
     - { domain: app.example.org, access: allow }
     - { domain: "*", access: deny }                # остальные сайты закрыты
   folders:

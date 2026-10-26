@@ -168,46 +168,6 @@ func TestSetupFolders(t *testing.T) {
 	}
 }
 
-// Мастер: у Браузера одна группа «Сайты из списка» — чтение и изменение не
-// делятся; её решение становится режимом строк списка сайтов.
-func TestSetupSites(t *testing.T) {
-	u, d, _, base := setupCfg(t, "profiles:\n  default:\n    connectors: [notes]\n", &fakeBrowser{})
-	home := t.TempDir()
-	u.Clients = agentsetup.Env{Home: home, GOOS: "linux", Getenv: func(string) string { return "" }, LookPath: func(string) (string, error) { return "", errors.New("no") }}
-	u.Bin = "/opt/gate4ai/gate4ai"
-	u.Autostart = &fakeAutostart{}
-	_, _, post, get := loginAs(t, u, base)
-	p := get("/setup/access?client=cli")
-	if !strings.Contains(p, `name="effect.browser.sites"`) || strings.Contains(p, `name="effect.browser.read"`) || strings.Contains(p, "Читать страницы") || strings.Contains(p, "Нажимать, вводить, входить") {
-		t.Fatal("browser groups", p)
-	}
-	post("/setup", url.Values{"client": {"cli"}, "name": {"bot"}, "conn": {"browser"}, "sites": {"github.com, *.notion.so"}, "effect.browser.sites": {"allow"}})
-	sites := d.Config.Current().Access.Sites
-	for _, dom := range []string{"github.com", "*.notion.so"} {
-		if s, ok := access.MatchSite(sites, "https://"+strings.TrimPrefix(dom, "*.")+"/"); !ok || s.Domain != dom || s.Access != access.Allow {
-			t.Fatalf("%s: %v", dom, sites)
-		}
-	}
-	if len(d.Config.Current().Profiles[d.Config.Current().Agents["bot"].Profile].Rules) != 0 {
-		t.Fatal("rules written for the browser")
-	}
-}
-
-// fakeBrowser — «Браузер» мастера: действия классов read и write.
-type fakeBrowser struct{}
-
-func (fakeBrowser) Manifest() manifest.Manifest {
-	url := manifest.MustSchema(`{ type: object, properties: { url: { type: string } }, required: [url] }`)
-	return manifest.Manifest{Connector: "browser", Title: "Browser", Actions: []manifest.Action{
-		{Name: "read", Class: "read", InputSchema: url}, {Name: "act", Class: "write", InputSchema: url}}}
-}
-func (fakeBrowser) Execute(context.Context, abi.ExecRequest) (abi.ExecResult, error) {
-	return abi.ExecResult{}, nil
-}
-func (fakeBrowser) Verify(context.Context, abi.VerifyRequest) (abi.VerifyResult, error) {
-	return abi.VerifyResult{}, nil
-}
-
 // Запрос подтверждения — человеческим языком; «Разрешать всегда» пишет правило
 // по папке запроса.
 func TestApprovalCardAndAllowAlways(t *testing.T) {

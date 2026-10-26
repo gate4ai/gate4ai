@@ -19,11 +19,9 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/domain"
 )
 
-// Режимы доступа. Для доменов: Allow, Connector, Ask, Deny — доступ к сайту
-// либо есть, либо с вопросом, либо закрыт: чтение и изменение не различаются
-// (и GET-запрос может что-то изменить). Для папок — ещё Read и Append.
-// Connector — только через WASM-коннектор (прямое действие агента запрещено,
-// вызов коннектора разрешён); у коннектора такого режима нет.
+// Режимы доступа. Для доменов: Allow, Read, Connector, Ask, Deny; для папок —
+// ещё Append. Connector — только через WASM-коннектор (прямое действие агента
+// запрещено, вызов коннектора разрешён); у коннектора такого режима нет.
 const (
 	Allow     = "allow"
 	Read      = "read"
@@ -35,12 +33,11 @@ const (
 
 // SiteModes и FolderModes — допустимые режимы; ConnectorSiteModes и
 // ConnectorFolderModes — для строк коннектора (без Connector; у папок
-// коннектора нет и Ask: коннектор не спрашивает владельца). Read и Append —
-// только у папок.
+// коннектора нет и Ask: коннектор не спрашивает владельца).
 var (
-	SiteModes            = []string{Allow, Connector, Ask, Deny}
+	SiteModes            = []string{Allow, Read, Connector, Ask, Deny}
 	FolderModes          = []string{Allow, Append, Read, Connector, Ask, Deny}
-	ConnectorSiteModes   = []string{Allow, Ask, Deny}
+	ConnectorSiteModes   = []string{Allow, Read, Ask, Deny}
 	ConnectorFolderModes = []string{Allow, Append, Read, Deny}
 )
 
@@ -296,12 +293,18 @@ func globSegs(ps, pats []string) bool {
 	return len(ps) == 0
 }
 
-// Effect — решение (allow | ask | deny) по режиму доступа домена для любого
-// действия на сайте: класс действия не важен. Режим Connector для прямого
-// действия агента — deny; для вызова коннектора (viaConnector) — как Allow.
-func Effect(mode string, viaConnector bool) string {
+// Effect — решение (allow | ask | deny) по режиму доступа домена для действия:
+// write — действие меняет что-то на сайте (класс write и выше). Режим
+// Connector для прямого действия агента — deny; для вызова коннектора
+// (viaConnector) — как Allow.
+func Effect(mode string, write, viaConnector bool) string {
 	switch mode {
 	case Allow:
+		return Allow
+	case Read:
+		if write {
+			return Ask
+		}
 		return Allow
 	case Connector:
 		if viaConnector {

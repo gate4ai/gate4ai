@@ -330,7 +330,7 @@ func agentExec(t *testing.T, b *Browser, action string, args map[string]any) (ma
 func TestAgentSession(t *testing.T) {
 	_, b, eng := setup(t, nil)
 	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://evil.example/"}); err == nil || !strings.Contains(err.Error(), abi.CodeCapabilityDenied) ||
-		!strings.Contains(err.Error(), "gate4ai access sites set evil.example allow") {
+		!strings.Contains(err.Error(), "gate4ai access sites set evil.example read") {
 		t.Fatal("agent site list, with the owner's command:", err)
 	}
 	// Неудачный open не оставляет сеанс.
@@ -486,7 +486,7 @@ func TestReadDuringSession(t *testing.T) {
 func TestAgentEditReloadHandoff(t *testing.T) {
 	_, b, eng := setup(t, nil)
 	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://evil.example/"}); err == nil ||
-		!strings.Contains(err.Error(), `"op":"set_site_access","domain":"evil.example","access":"allow"`) {
+		!strings.Contains(err.Error(), `"op":"set_site_access","domain":"evil.example","access":"read"`) {
 		t.Fatal("the agent learns how to ask for a site:", err)
 	}
 	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})

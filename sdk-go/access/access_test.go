@@ -65,27 +65,18 @@ func TestMatchFolder(t *testing.T) {
 
 func TestEffects(t *testing.T) {
 	cases := []struct {
-		mode string
-		via  bool
-		want string
+		mode  string
+		write bool
+		via   bool
+		want  string
 	}{
-		{Allow, false, Allow}, {Connector, false, Deny}, {Connector, true, Allow}, {Ask, false, Ask}, {Deny, true, Deny},
-		{Read, false, Deny}, // у сайтов режима read нет
+		{Allow, true, false, Allow}, {Read, false, false, Allow}, {Read, true, false, Ask},
+		{Connector, false, false, Deny}, {Connector, true, true, Allow}, {Ask, false, false, Ask}, {Deny, false, true, Deny},
 	}
 	for _, c := range cases {
-		if got := Effect(c.mode, c.via); got != c.want {
+		if got := Effect(c.mode, c.write, c.via); got != c.want {
 			t.Errorf("%+v: %s", c, got)
 		}
-	}
-	// read — только у папок: сайту его задать нельзя, ни в списке Браузера, ни у коннектора.
-	if err := CheckSite(Site{Domain: "a.example", Access: Read}, SiteModes); err == nil {
-		t.Fatal("read accepted for a site")
-	}
-	if err := CheckSite(Site{Domain: "a.example", Access: Read}, ConnectorSiteModes); err == nil {
-		t.Fatal("read accepted for a connector site")
-	}
-	if err := CheckFolder(Folder{Path: "~/x", Access: Read}, FolderModes); err != nil {
-		t.Fatal(err)
 	}
 	for _, c := range []struct{ mode, op, want string }{
 		{Allow, OpWrite, Allow}, {Append, OpAppend, Allow}, {Append, OpWrite, Ask}, {Read, OpList, Allow}, {Read, OpAppend, Ask},
