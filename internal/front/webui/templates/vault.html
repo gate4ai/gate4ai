@@ -1,5 +1,4 @@
 {{template "head" .}}
-<div class="layout">{{template "settings_nav" (dict "V" . "On" "vault")}}<div>
 <h2>{{T "Passwords and accounts"}}</h2>
 <p class="muted">{{TH "Passwords and tokens are kept in the system keychain. Agents and connectors see only names like @mail.work; gate4.ai enters the value itself and only for the addresses it is bound to in <a href=\"#accounts\">Accounts for signing in to sites</a>."}}</p>
 <table><tr><th>{{T "Name"}}</th><th>{{T "Used by"}}</th><th></th></tr>{{range .Data.Aliases}}<tr id="{{secAnchor .}}"><td><code>{{.}}</code></td>
@@ -38,7 +37,6 @@
 <div class="actions"><a class="btn" href="#{{accAnchor .Alias}}" data-close>{{T "Cancel"}}</a><button class="primary" data-busy="{{T "Saving…"}}">{{T "Save"}}</button></div></form></div></div></td></tr>
 {{else}}<tr><td colspan="5" class="muted">{{T "No accounts yet."}}</td></tr>{{end}}</table>
 <p class="help">{{TH "New accounts: in the <a href=\"%s/policy/yaml\">YAML</a> (<code>credentials</code>) or by an agent through gate4ai.change_policy with your confirmation." .Base}}</p>
-</div></div>
 {{template "foot"}}
 {{/* acc_secret — секрет поля учётки: заданный — ссылка на его строку и ✓. */}}
 {{define "acc_secret"}}{{if .Set}}<a href="#{{secAnchor .Secret}}"><code>{{.Secret}}</code></a> ✓{{else}}<code>{{.Secret}}</code>{{end}}{{end}}
