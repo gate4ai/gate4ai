@@ -515,3 +515,31 @@ func TestPasswordLimiterParallel(t *testing.T) {
 		t.Fatal("no semaphore on password checks:", err)
 	}
 }
+
+// Пароль, отданный скрипту или агенту (gate4ai ui без терминала), после входа
+// напоминает о себе на каждой странице, пока его не сменят или не включат Telegram.
+func TestRelayedPasswordNotice(t *testing.T) {
+	u, _, _, base := setup(t)
+	pw, _ := u.EnsurePassword()
+	// Человек в терминале: без пометки.
+	if err := u.MarkRelayed(); err != nil || !u.Protection().Relayed {
+		t.Fatal("mark relayed", err)
+	}
+	b, _, post := protectedSession(t, u, base, pw)
+	_, page := b.get("/")
+	if !strings.Contains(page, "data-notice") || !strings.Contains(page, "прошёл через чат") {
+		t.Fatal("no notice after signing in with a relayed password", page)
+	}
+	if _, page := b.get("/journal"); !strings.Contains(page, "data-notice") {
+		t.Fatal("the notice must be on every page")
+	}
+	post("/settings/login/password", url.Values{"current": {pw}, "password": {"correct horse"}, "repeat": {"correct horse"}})
+	b2, _, _ := protectedSession(t, u, base, "correct horse")
+	if _, page := b2.get("/"); strings.Contains(page, "data-notice") || u.Protection().Relayed {
+		t.Fatal("the notice must go away after a password change", page)
+	}
+	// Пароль уже использован (вошли): пометка больше не ставится.
+	if err := u.MarkRelayed(); err != nil || u.Protection().Relayed {
+		t.Fatal("relayed after the password was used", err)
+	}
+}

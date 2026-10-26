@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -272,24 +271,26 @@ func (g *gate) installFrom(dir string) {
 func errOf(m map[string]any) map[string]any { e, _ := m["error"].(map[string]any); return e }
 
 // uiPasswordRe — строка `gate4ai ui` со сгенерированным паролем Web UI.
-var uiPasswordRe = regexp.MustCompile(`save it\): ([a-z2-9-]+)`)
-
-// uiBase — адрес локального Web UI (`gate4ai ui --print`), без завершающего «/».
-// Там же — сгенерированный пароль, пока им не вошли: харнесс запоминает его.
+// uiBase — адрес локального Web UI (`gate4ai ui --print --json`: url, password,
+// remote_*), без завершающего «/». Там же — сгенерированный пароль, пока им не
+// вошли: харнесс запоминает его. --wait 0: адрес из интернета тесты не ждут.
 func (g *gate) uiBase() string {
 	g.t.Helper()
-	r := g.run("", "", "ui", "--print")
-	u := strings.TrimSpace(strings.SplitN(r.out, "\n", 2)[0]) // дальше — подсказки в stderr
-	if r.code != 0 || !strings.HasPrefix(u, "http://127.0.0.1:") {
-		g.t.Fatalf("ui --print: %d %s", r.code, r.out)
+	r := g.run("", "", "ui", "--print", "--json", "--wait", "0")
+	var res struct {
+		URL      string `json:"url"`
+		Password string `json:"password"`
 	}
-	if m := uiPasswordRe.FindStringSubmatch(r.out); m != nil {
-		g.pw = m[1]
+	if err := json.Unmarshal([]byte(r.out), &res); r.code != 0 || err != nil || !strings.HasPrefix(res.URL, "http://127.0.0.1:") {
+		g.t.Fatalf("ui --print: %d %v %s", r.code, err, r.out)
+	}
+	if res.Password != "" {
+		g.pw = res.Password
 	}
 	if g.pw == "" {
 		g.t.Fatalf("ui --print did not show the generated password: %s", r.out)
 	}
-	return strings.TrimSuffix(u, "/")
+	return strings.TrimSuffix(res.URL, "/")
 }
 
 // uiPassword — пароль Web UI: сгенерированный daemon при первом запуске.

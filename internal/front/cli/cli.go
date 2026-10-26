@@ -165,7 +165,7 @@ const usage = `gate4ai — actions for AI agents under your policies
 
 Start here (on the computer you protect):
   gate4ai service install                 run the daemon now and at every login (or: gate4ai daemon start)
-  gate4ai ui [--print] [--remote] [--reset-password] [--start|--no-start]   open the web UI (sign in with the password; starts the daemon at a terminal)
+  gate4ai ui [--print] [--remote] [--json] [--wait 3m] [--reset-password] [--start|--no-start]   open the web UI (sign in with the password; starts the daemon at a terminal); --print: addresses and password only
   gate4ai status                          is the daemon running
 
 Agent commands (an agent connects itself: the first command shows a code, the owner approves it in the Web UI;
@@ -1392,19 +1392,20 @@ func (e *Env) relay(ctx context.Context, args []string) int {
 func (e *Env) ui(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("gate4ai ui", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
-	printOnly := fs.Bool("print", false, "only print the address of the web UI")
+	printOnly := fs.Bool("print", false, "only print the addresses and the password, do not open a browser")
 	remote := fs.Bool("remote", false, "the address for the phone (relay or --public)")
 	reset := fs.Bool("reset-password", false, "forgot the password: generate a new one (prints it), turn Telegram confirmation off, close all sessions")
 	start := fs.Bool("start", false, "start the daemon in the background if it is not running (default when you are at a terminal)")
 	noStart := fs.Bool("no-start", false, "never start the daemon")
+	wait := fs.Duration("wait", UIRemoteWait, "with --print or --remote: how long to wait for the internet address to come up (certificate issue); 0 — do not wait")
+	asJSON := fs.Bool("json", false, "JSON output (url, password, remote_url, remote_cert…)")
 	if fs.Parse(args) != nil {
 		return ExitUsage
 	}
-	var res struct {
-		URL      string   `json:"url"`
-		Requires []string `json:"requires"`
-		Password string   `json:"password"` // сгенерированный пароль, которым ещё не входили
+	if *asJSON {
+		e.ForceJSON = true
 	}
+	var res uiAddress
 	c := e.Client()
 	session := func() error {
 		if *reset {
@@ -1413,7 +1414,9 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 			}
 			*reset = false // daemon запустился, сброс сделан: повторный вызов не нужен
 		}
-		return c.Do(ctx, "POST", "/v1/ui/url", map[string]bool{"remote": *remote}, &res)
+		// relayed — пароль читает не человек в терминале, а скрипт или агент
+		// (установка через OpenClaw): daemon напомнит сменить его после входа.
+		return c.Do(ctx, "POST", "/v1/ui/url", map[string]bool{"remote": *remote, "relayed": !e.Interactive}, &res)
 	}
 	err := session()
 	if NotRunning(err) && e.Getenv("GATE4AI_TOKEN") == "" && !*noStart && (*start || e.Interactive && !*printOnly) {
@@ -1425,33 +1428,104 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
+	// Адрес из интернета: установщик и агент отдают его пользователю вместо
+	// проброса порта по ssh, поэтому ждём, пока relay зарегистрирует устройство
+	// и выпустит сертификат (или поднимет туннель на временном), — но не дольше wait.
+	if (*printOnly || *remote) && *wait > 0 && !res.remoteSettled() {
+		e.say("Waiting for the internet address (certificate issue; up to " + wait.String() + ")…")
+		deadline := time.Now().Add(*wait)
+		for !res.remoteSettled() && time.Now().Before(deadline) {
+			select {
+			case <-ctx.Done():
+				return e.fail(ctx.Err())
+			case <-time.After(UIRemotePoll):
+			}
+			if err := session(); err != nil {
+				return e.fail(err)
+			}
+		}
+	}
 	if !*printOnly && !*remote {
 		if headless() {
-			fmt.Fprintln(e.Stderr, "gate4ai: no graphical session here, so no browser was opened. Open the address in a browser on this computer, or forward the port: "+sshHint(res.URL)+"; from another device: gate4ai ui --remote (needs relay or --public)")
+			hint := "Open the address in a browser on this computer, or forward the port: " + sshHint(res.URL)
+			if res.RemoteURL != "" {
+				hint = "Open the internet address below from any device"
+			}
+			fmt.Fprintln(e.Stderr, "gate4ai: no graphical session here, so no browser was opened. "+hint)
 		} else if err := OpenURL(res.URL); err != nil {
 			fmt.Fprintln(e.Stderr, "gate4ai: could not open a browser ("+err.Error()+"): open the address yourself")
 		}
 	}
-	e.say("Web UI:")
-	fmt.Fprintln(e.Stdout, res.URL)
+	if !e.human() {
+		e.printJSON(res)
+		return ExitOK
+	}
+	// Человеку — подписанные строки в stdout: их читают и установщик, и агент,
+	// запустивший установку (stderr у его инструментов часто теряется).
+	w := e.Stdout
+	fmt.Fprintln(w, "Web UI: "+res.URL)
 	if res.Password != "" {
 		// Сгенерированный пароль показывается, пока им не вошли: установщик
 		// печатает его этой командой. Дальше — только gate4ai ui --reset-password.
-		fmt.Fprintln(e.Stderr, "gate4ai: Web UI password (generated, shown until the first sign-in — save it): "+res.Password)
-		fmt.Fprintln(e.Stderr, "gate4ai: change it in Settings → Signing in; forgotten — gate4ai ui --reset-password")
-		return ExitOK
-	}
-	need := map[string]string{"password": "the Web UI password", "telegram": "confirmation in your Telegram bot"}
-	var parts []string
-	for _, r := range res.Requires {
-		if need[r] == "" {
-			need[r] = r
+		fmt.Fprintln(w, "Password: "+res.Password+"   (generated, shown until the first sign-in — save it; change it in Settings → Signing in)")
+	} else {
+		need := map[string]string{"password": "the Web UI password", "telegram": "confirmation in your Telegram bot"}
+		var parts []string
+		for _, r := range res.Requires {
+			if need[r] == "" {
+				need[r] = r
+			}
+			parts = append(parts, need[r])
 		}
-		parts = append(parts, need[r])
+		fmt.Fprintln(w, "Sign in with: "+strings.Join(parts, " and ")+"   (a session lasts 12 hours; forgotten the password — gate4ai ui --reset-password)")
 	}
-	fmt.Fprintln(e.Stderr, "gate4ai: sign in with "+strings.Join(parts, " and ")+"; a session lasts 12 hours; forgotten the password — gate4ai ui --reset-password")
+	switch {
+	case res.RemoteURL != "" && res.RemoteCert == "temporary":
+		fmt.Fprintln(w, "From the internet: "+res.RemoteURL+"   (temporary certificate: the browser warns about it until the real one is issued — gate4ai retries by itself; gate4ai relay status)")
+	case res.RemoteURL != "":
+		fmt.Fprintln(w, "From the internet: "+res.RemoteURL)
+	case res.RemoteDisabled:
+		fmt.Fprintln(w, "From the internet: off (Settings → Internet access)")
+	case res.RemotePhase == "failed":
+		fmt.Fprintln(w, "From the internet: not yet — "+res.RemoteError+"; gate4ai retries by itself (gate4ai relay status)")
+	case res.RemotePhase != "":
+		msg := "From the internet: not yet (" + res.RemotePhase + ")"
+		if res.RemoteError != "" {
+			msg += " — " + res.RemoteError
+		}
+		fmt.Fprintln(w, msg+"; usually a few minutes: gate4ai ui --print")
+	}
 	return ExitOK
 }
+
+// uiAddress — ответ /v1/ui/url.
+type uiAddress struct {
+	URL      string   `json:"url"`
+	Requires []string `json:"requires"`
+	Password string   `json:"password,omitempty"` // сгенерированный пароль, которым ещё не входили
+	// Адрес из интернета (см. webui.remoteState).
+	RemoteURL       string `json:"remote_url,omitempty"`
+	RemoteCert      string `json:"remote_cert,omitempty"` // ok | temporary
+	RemotePhase     string `json:"remote_phase,omitempty"`
+	RemoteError     string `json:"remote_error,omitempty"`
+	RemoteNextRetry string `json:"remote_next_retry,omitempty"`
+	RemoteDisabled  bool   `json:"remote_disabled,omitempty"`
+}
+
+// remoteSettled — адрес из интернета определился: есть (на настоящем или
+// временном сертификате), выключен, не настраивается или регистрация не удалась
+// (повтор через час — ждать нечего).
+func (a uiAddress) remoteSettled() bool {
+	return a.RemoteURL != "" || a.RemoteDisabled || a.RemotePhase == "" || a.RemotePhase == "failed"
+}
+
+// UIRemoteWait — сколько gate4ai ui --print ждёт адрес из интернета по
+// умолчанию (выпуск сертификата по DNS-01 — обычно до двух минут);
+// UIRemotePoll — как часто спрашивает daemon (тесты меняют).
+var (
+	UIRemoteWait = 3 * time.Minute
+	UIRemotePoll = 2 * time.Second
+)
 
 // NotRunning — daemon не запущен (нет сокета или остался старый): его можно запустить.
 func NotRunning(err error) bool {

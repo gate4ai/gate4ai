@@ -245,6 +245,39 @@ func (u *UI) RemoteURL(next string) (string, error) {
 	return pub + remote.base + cmp.Or(safeNext(next), "/"), nil
 }
 
+// remoteState — адрес Web UI из интернета и его состояние для ответа /v1/ui/url:
+// remote_url — адрес, когда он откроется (прямой адрес или relay онлайн);
+// remote_phase — этап relay (registering, issuing, connecting, online,
+// reconnecting, failed; "" — доступ из интернета не настраивается);
+// remote_cert — "ok" или "temporary" (туннель на временном самоподписанном
+// сертификате, пока выпуск не удался: браузер предупредит о нём);
+// remote_error — последняя ошибка; remote_next_retry — когда повторится.
+func (u *UI) remoteState(next string) map[string]any {
+	out := map[string]any{}
+	st := u.relay()
+	if st.Disabled {
+		out["remote_disabled"] = true
+		return out
+	}
+	if st.Phase != "" {
+		out["remote_phase"] = st.Phase
+	}
+	if st.Error != "" {
+		out["remote_error"] = st.Error
+	}
+	if !st.NextRetry.IsZero() {
+		out["remote_next_retry"] = st.NextRetry.Format(time.RFC3339)
+	}
+	if link, err := u.RemoteURL(next); err == nil {
+		out["remote_url"] = link
+		out["remote_cert"] = "ok"
+		if st.TempCert {
+			out["remote_cert"] = "temporary"
+		}
+	}
+	return out
+}
+
 // Listen слушает только loopback.
 func (u *UI) Listen(addr string) (net.Listener, error) {
 	host, _, err := net.SplitHostPort(addr)
@@ -271,10 +304,14 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		var req struct {
-			Remote bool   `json:"remote"`
-			Next   string `json:"next"` // после входа — эта страница (просмотр сеанса браузера)
+			Remote  bool   `json:"remote"`
+			Next    string `json:"next"`    // после входа — эта страница (просмотр сеанса браузера)
+			Relayed bool   `json:"relayed"` // читает не человек в терминале, а скрипт или агент
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Relayed {
+			_ = u.MarkRelayed()
+		}
 		link := u.URL(req.Next)
 		if req.Remote {
 			var err error
@@ -291,7 +328,13 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		// requires — что нужно для входа (пароль, подтверждение в Telegram);
 		// password — сгенерированный пароль, которым ещё не входили (только здесь,
 		// на сокете владельца: его показывают установщик, gate4ai ui и трей).
-		_ = json.NewEncoder(w).Encode(map[string]any{"url": link, "requires": u.Protection().Requires(), "password": u.InitialPassword()})
+		// remote_* — адрес из интернета и его состояние: установщик и агент
+		// отдают пользователю https-адрес, а не проброс порта по ssh.
+		out := map[string]any{"url": link, "requires": u.Protection().Requires(), "password": u.InitialPassword()}
+		for k, v := range u.remoteState(req.Next) {
+			out[k] = v
+		}
+		_ = json.NewEncoder(w).Encode(out)
 	})
 	// Сброс защиты входа: новый сгенерированный пароль, Telegram выключен,
 	// сессии закрыты (`gate4ai ui --reset-password`).
@@ -609,6 +652,7 @@ type view struct {
 	Title, Nav, CSRF string
 	Flash, Error     string
 	Detail           string // подробности сообщения (пути, исходный текст ошибки)
+	Notice           string // напоминание на каждой странице (пароль прошёл через агента)
 	Data             map[string]any
 	// Счётчик в меню.
 	Pending int
@@ -667,6 +711,9 @@ func (u *UI) render(w http.ResponseWriter, r *http.Request, name string, v view,
 		v.Path = v.Base + "/"
 	}
 	u.counts(&v)
+	if v.CSRF != "" && u.relayedNotice() {
+		v.Notice = tr(v.Lang, "The Web UI password was handed to a script or an agent that installed gate4.ai, so it passed through a chat. Change it in Settings → Signing in, or turn on confirmation in Telegram there.")
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if status != 0 {
 		w.WriteHeader(status)

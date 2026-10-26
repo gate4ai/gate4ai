@@ -137,6 +137,9 @@ func (u *UI) serverChecks(ctx context.Context) []ServerCheck {
 	case rs.Configured && !rs.Online:
 		add(ServerCheck{ID: "public", Title: M("Access from the internet"), Status: "bad", Detail: M("the relay is set up, but the device is not connected to it%s", relayErr(rs.Error)),
 			Fix: M("Check the network and the daemon log."), Cmd: "gate4ai relay status", Link: "/settings/internet", Button: M("Internet access")})
+	case rs.TempCert:
+		add(ServerCheck{ID: "public", Title: M("Access from the internet"), Status: "warn", Detail: M("%s works on a temporary certificate: the browser warns about it, cloud assistants do not connect yet%s", pub, relayErr(rs.Error)),
+			Fix: M("The certificate is issued again by itself; nothing to do."), Cmd: "gate4ai relay status", Link: "/settings/internet", Button: M("Internet access")})
 	case pub != "":
 		add(ServerCheck{ID: "public", Title: M("Access from the internet"), Status: "ok", Detail: M("%s — the Web UI from the phone at /ui/, agents on other computers, links to browser sessions", pub)})
 	case rs.Phase == relayclient.PhaseRegistering:
@@ -204,6 +207,9 @@ func (u *UI) serverChecks(ctx context.Context) []ServerCheck {
 	if !bs.Missing {
 		if ck.Chrome == "" {
 			add(ServerCheck{ID: "chrome", Title: M("Chrome"), Status: "bad", Detail: M("not installed: agents get browser_unavailable"), Fix: M("Install it (asks first)."), Cmd: "gate4ai browser setup", Link: "/browser", Button: M("Browser")})
+		} else if len(ck.Libraries) > 0 {
+			add(ServerCheck{ID: "chrome", Title: M("Chrome"), Status: "bad", Detail: M("%s does not start: missing libraries %s", strings.TrimSpace(ck.Chrome+" "+ck.Version), strings.Join(ck.Libraries, ", ")),
+				Fix: M("Install them (asks first): %s", strings.Join(ck.Commands, "; ")), Cmd: "gate4ai browser setup", Link: "/browser", Button: M("Browser")})
 		} else {
 			add(ServerCheck{ID: "chrome", Title: M("Chrome"), Status: "ok", Detail: M("%s", strings.TrimSpace(ck.Chrome+" "+ck.Version))})
 		}

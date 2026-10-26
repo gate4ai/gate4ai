@@ -1,4 +1,5 @@
 {{define "relay_state"}}<p>{{T "State:"}} {{if .Disabled}}<b>{{T "turned off"}}</b>
+{{else if and .TempCert (or .Online (eq .Phase "online"))}}<b class="warn">{{T "connected on a temporary certificate"}}</b> — {{T "the certificate for the device address is not issued yet: the Web UI opens from the phone, but the browser warns about the certificate, and cloud assistants do not connect yet. gate4.ai keeps trying."}}{{with .Error}}<br><span class="help">{{with $.NextRetryAt}}{{T "Next attempt at %s. Last error:" .}}{{else}}{{T "Last error:"}}{{end}} {{.}}</span>{{end}}
 {{else if or .Online (eq .Phase "online")}}<b class="ok">{{T "connected"}}</b>
 {{else if eq .Phase "issuing"}}<b class="warn">{{T "connecting"}}</b> — {{T "getting a certificate for the device address (usually under a minute)…"}}{{with .Error}}<br><span class="help">{{with $.NextRetryAt}}{{T "Did not work, next attempt at %s. Last error:" .}}{{else}}{{T "Did not work, will retry in a few minutes. Last error:"}}{{end}} {{.}}</span>{{end}}
 {{else if eq .Phase "connecting"}}<b class="warn">{{T "connecting to the relay…"}}</b>

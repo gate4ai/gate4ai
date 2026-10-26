@@ -32,34 +32,65 @@
 3. Капча, SMS, вход без учётки: агент вызывает `gate4ai browser handoff --session s-… --message "Введите код из SMS"`. Уведомление в Telegram-боте gate4ai, push и Web UI несёт ту же ссылку; управление включено сразу, «Готово» / «Не буду» завершают ожидание.
 4. Взять сеанс можно и без просьбы агента — «Взять управление». С другого устройства это подтверждается в Telegram, если вход был без него. Пока сеанс у человека, действия агента в нём отвечают `session_held_by_user`.
 
-Ссылка сама доступа не даёт: агент её знает, но войти в Web UI не может — вход только по паролю. На сервере задайте пароль сразу после установки (`gate4ai ui` печатает адрес; пока пароля нет, его задаст первый, кто откроет localhost, — например, через проброс порта `ssh -L 7431:127.0.0.1:7431`) и включите подтверждение в Telegram (Настройки → Вход).
+Ссылка сама доступа не даёт: агент её знает, но войти в Web UI не может — вход только по паролю. Пароль есть с первой секунды: daemon генерирует его при первом запуске, установщик и `gate4ai ui --print` печатают его (до первого входа) вместе с адресом из интернета `https://<id>.relay.gate4.ai/ui/` — входите по нему с телефона или ноутбука, проброс порта по ssh не нужен. Если gate4ai ставил агент, он пересказывает эти строки вам в чат: смените пароль после первого входа (Настройки → Вход) и включите там подтверждение в Telegram — тогда знание пароля агентом ничего не даёт.
 
 ## Установка
 
+Установщик рассчитан и на агента без терминала: ничего не спрашивает, в конце печатает в stdout строки `Web UI:`, `Password:` и `From the internet:` (ждёт адрес из интернета до `GATE4AI_UI_WAIT`, по умолчанию 3 минуты), а недостающее для Chrome ставит сам, если он root или `sudo -n` проходит, иначе печатает точные команды для root — «To run Chrome, install: libnss3 libgbm1 …». Поставить можно под тем же пользователем, что и OpenClaw (проще), или под отдельным (строже — см. «Изоляция»).
+
 ```sh
-# root: отдельные пользователи ОС для gate4ai и для агента
+# один пользователь (openclaw): gate4ai и агент рядом; у пользователя должен быть linger,
+# иначе systemd --user и служба умирают с выходом из сессии
+loginctl enable-linger "$USER"                            # root: loginctl enable-linger openclaw
+curl -fsSL https://gate4.ai/install.sh | GATE4AI_NO_TRAY=1 sh
+#   «The browser of agents»: Chrome (системный, snap, flatpak, кеш Playwright/Puppeteer), его библиотеки (ldd),
+#   Xvfb и шрифты; в терминале — «Install now? [y/N]», без терминала — сам при root / sudo -n,
+#   иначе команды для root; GATE4AI_INSTALL_DEPS=1 — поставить без вопроса
+#   в конце: Web UI: http://127.0.0.1:7431/   Password: xxxxx-xxxxx-xxxxx-xxxxx   From the internet: https://<id>.relay.gate4.ai/ui/
+gate4ai ui --print                                        # те же строки в любой момент (--json — для программы)
+gate4ai skill > ~/.openclaw/skills/gate4ai/SKILL.md       # агент подключается сам: первая команда даёт код, подтвердите его в Web UI или Telegram
+# в настройках OpenClaw выключите его собственный браузер для сайтов с личными данными (или целиком)
+```
+
+```sh
+# два пользователя: отдельные пользователи ОС для gate4ai и для агента (root)
 useradd -m gate4ai && useradd -m openclaw
 loginctl enable-linger gate4ai
 
-# пользователь gate4ai (sudo — только для Chrome и Xvfb: установщик спросит)
+# пользователь gate4ai (sudo — только для Chrome, его библиотек и Xvfb: установщик спросит)
 curl -fsSL https://gate4.ai/install.sh | GATE4AI_NO_TRAY=1 sh
-#   «The browser of agents»: проверка Chrome, Xvfb и шрифтов, команды под дистрибутив, «Install now? [y/N]»;
-#   без терминала — только команды; GATE4AI_INSTALL_DEPS=1 — поставить без вопроса
 gate4ai service install --no-tray -- --keystore file   # сервер без keychain
-gate4ai relay status                                      # публичный адрес (/ui/ и CLI агентов): daemon регистрируется на relay.gate4.ai сам
-gate4ai ui --remote                                       # адрес для телефона; Настройки → Вход: Telegram
+gate4ai ui --print                                        # адреса и пароль; From the internet — адрес для телефона и агентов
+gate4ai relay status                                      # состояние адреса из интернета: daemon регистрируется на relay.gate4.ai сам
 
 # пользователь openclaw: нужен только CLI
 curl -fsSL https://gate4.ai/install.sh | GATE4AI_NO_START=1 GATE4AI_NO_OPEN=1 GATE4AI_NO_BROWSER=1 GATE4AI_NO_TRAY=1 sh
 export GATE4AI_URL=https://<device-id>.relay.gate4.ai
 gate4ai pair --wait 5m                                    # код подтвердить в Web UI или Telegram
 gate4ai skill > ~/.openclaw/skills/gate4ai/SKILL.md
-# в настройках OpenClaw выключите его собственный браузер для сайтов с личными данными (или целиком)
 ```
+
+Chrome без root: бинарник ставится без root — Chromium из кеша Playwright или Puppeteer gate4ai находит сам (свой путь — `GATE4AI_CHROME`), а `gate4ai browser setup --user` скачивает Chrome for Testing в каталог данных (`--yes` без терминала и без root делает это сам). Его системные библиотеки (libnss3, libatk, libgbm, libasound, шрифты) и Xvfb — только из пакетов дистрибутива: `gate4ai browser setup` называет недостающие пакеты точно («To run Chrome, install: …»), без Xvfb браузер работает headless. Совсем без root — образ Docker ниже.
+
+Адрес из интернета: daemon сам регистрируется на relay.gate4.ai и выпускает сертификат на `<id>.relay.gate4.ai` (DNS-01, обычно до двух минут). Если выпуск не удался (лимиты Let's Encrypt, сеть), адрес всё равно поднимается на временном самоподписанном сертификате — браузер предупредит о нём, облачные ассистенты пока не подключатся, — а выпуск повторяется сам (через 5 минут, далее вдвое реже) и заменяет временный сертификат настоящим; `gate4ai ui --print` и `gate4ai relay status` показывают состояние (`remote_cert: temporary`).
 
 Проверка: **Настройки → Сервер** в Web UI (и с телефона по `/ui/settings/server`) — состояние каждого компонента и что сделать: служба и linger, хранилище ключей, адрес из интернета, вход, Telegram, пакет браузера, Chrome, экран, шрифты, агенты через локальный сокет. Из терминала — `gate4ai browser setup --dry-run`, `gate4ai doctor`, после первого `browser.open` — `gate4ai browser sessions`.
 
 Без Xvfb браузер работает без экрана (`--headless=new`): UA и client hints подменены, но сайты с антибот-защитой замечают headless чаще — Web UI и `doctor` предупреждают. Режим задаёт `connectors.browser.display` (`auto`, `virtual`, `headless`, `host`).
+
+## Docker
+
+Образ `ghcr.io/gate4ai/gate4ai:<версия>` (`Dockerfile` в корне, собирает и подписывает cosign `release.yml`; linux/amd64 и arm64) — gate4ai с Chrome, Xvfb и шрифтами: для сервера без root и без системных библиотек Chrome.
+
+```sh
+docker run -d --name gate4ai --restart unless-stopped \
+  --security-opt seccomp=unconfined \
+  -v gate4ai-data:/data ghcr.io/gate4ai/gate4ai:latest
+docker exec gate4ai gate4ai ui --print          # Web UI, пароль, адрес из интернета
+docker exec -it gate4ai gate4ai skill > ~/.openclaw/skills/gate4ai/SKILL.md
+```
+
+Данные — том `/data` (`GATE4AI_HOME`), ключи — `--keystore file`. Web UI слушает только loopback контейнера: с этого компьютера — `--network host`, с любого устройства — адрес из интернета. Агент на этом же сервере ходит через `GATE4AI_URL=https://<id>.relay.gate4.ai` или через смонтированный `/data/run` (сокет агентов) — `GATE4AI_HOME=<том> gate4ai …`. Проверка образа — `cosign verify ghcr.io/gate4ai/gate4ai:<версия> …` ([SECURITY.md](../SECURITY.md)).
 
 Chrome в Docker: песочнице Chrome нужны пространства имён — `--security-opt seccomp=unconfined` (или профиль seccomp Chrome); иначе Chrome не стартует, а ошибка пакета приводит его слова.
 

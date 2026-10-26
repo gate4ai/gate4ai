@@ -193,10 +193,87 @@ func TestCertFailureRetried(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	status := Attach(ctx, d, false)
-	for i := 0; i < 500 && (status().Error == "" || hits.Load() < 2); i++ {
+	for i := 0; i < 500 && (status().Error == "" || hits.Load() < 2 || !status().TempCert); i++ {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if st := status(); st.Online || st.Phase != PhaseIssuing || st.Error == "" || hits.Load() < 2 {
+	// Выпуск повторяется; тем временем туннель поднят на временном сертификате
+	// (relay.test недостижим — он переподключается, но не «issuing» без адреса).
+	if st := status(); st.Online || !st.TempCert || st.Phase == PhaseIssuing || st.Phase == PhaseFailed || st.Error == "" || st.NextRetry.IsZero() || hits.Load() < 2 {
 		t.Fatalf("%+v, CA requests %d", st, hits.Load())
+	}
+}
+
+// Пока настоящий сертификат не выпущен, адрес устройства уже открывается через
+// relay на временном самоподписанном сертификате; как только выпуск удался,
+// туннель переходит на настоящий.
+func TestTempCertUntilIssued(t *testing.T) {
+	old := RetryCert
+	RetryCert = 50 * time.Millisecond
+	defer func() { RetryCert = old }()
+	iss := newFakeIssuer(t)
+	iss.fail.Store(true)
+	testIssuer = iss
+	defer func() { testIssuer = nil }()
+	e := startRelay(t)
+	TestDialer = e.dial
+	defer func() { TestDialer = nil }()
+	home := t.TempDir()
+	cert := e.srv.TLS.Certificates[0]
+	caFile := filepath.Join(home, "relay-ca.pem")
+	os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}), 0o600)
+	c, _ := connectors.NewInProcess(noop{})
+	d, err := daemon.New(daemon.Options{Home: filepath.Join(home, "d"), Keys: keys.NewMemory(), Connectors: []connectors.Client{c},
+		InitialConfig: []byte("agents: {a: {profile: p}}\nprofiles: {p: {connectors: [notes]}}\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	status := Attach(ctx, d, false)
+	res, err := RegisterDevice(ctx, d, auth.OwnerVia("socket"), "https://relay.test", caFile, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res["device_id"].(string)
+	for i := 0; i < 500 && !(status().Online && status().TempCert); i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if st := status(); !st.Online || !st.TempCert || st.Phase != PhaseOnline || st.Error == "" {
+		t.Fatalf("temporary certificate: %+v", st)
+	}
+	leaf := func() *x509.Certificate {
+		var got *x509.Certificate
+		cl := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: id + ".relay.test",
+				VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error { got, _ = x509.ParseCertificate(raw[0]); return nil }},
+			DialContext: func(ctx context.Context, n, a string) (net.Conn, error) { return e.dial(ctx, n, a) }}}
+		resp, err := cl.Get("https://" + id + ".relay.test/.well-known/oauth-authorization-server")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return got
+	}
+	if l := leaf(); l == nil || l.Issuer.CommonName != id+".relay.test" {
+		t.Fatalf("expected a self-signed device certificate, got %+v", l)
+	}
+	// Выпуск удался: туннель на настоящем сертификате, статус без TempCert.
+	iss.fail.Store(false)
+	for i := 0; i < 1000 && (status().TempCert || !status().Online); i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if st := status(); st.TempCert || !st.Online || st.Error != "" || !st.NextRetry.IsZero() {
+		t.Fatalf("after issue: %+v", st)
+	}
+	var l *x509.Certificate
+	for i := 0; i < 100; i++ {
+		if l = leaf(); l != nil && l.Issuer.CommonName == "fake CA" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if l == nil || l.Issuer.CommonName != "fake CA" {
+		t.Fatalf("expected the issued certificate, got %+v", l)
 	}
 }

@@ -11,8 +11,10 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,11 +27,26 @@ type fakeIssuer struct {
 	issued int
 	ca     *x509.Certificate
 	key    *ecdsa.PrivateKey
+	fail   atomic.Bool // отказывать в выпуске (сбой ACME)
+}
+
+// newFakeIssuer — эмитент со своим CA «fake CA».
+func newFakeIssuer(t *testing.T) *fakeIssuer {
+	t.Helper()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "fake CA"}, NotBefore: time.Now().Add(-time.Hour),
+		NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, _ := x509.CreateCertificate(rand.Reader, ca, ca, &key.PublicKey, key)
+	ca, _ = x509.ParseCertificate(der)
+	return &fakeIssuer{ca: ca, key: key}
 }
 
 func (f *fakeIssuer) IssuerKey() string { return "fake-acme" }
 
 func (f *fakeIssuer) Issue(_ context.Context, csr *x509.CertificateRequest) (*certmagic.IssuedCertificate, error) {
+	if f.fail.Load() {
+		return nil, errors.New("fake ACME: rate limited")
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.issued++
@@ -50,12 +67,7 @@ func (f *fakeIssuer) n() int { f.mu.Lock(); defer f.mu.Unlock(); return f.issued
 // конфигурацию (наш эмитент и хранилище), а не через certmagic.NewDefault —
 // иначе сертификат устройства истёк бы без перезапуска daemon.
 func TestCertRenewedInBackground(t *testing.T) {
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "fake CA"}, NotBefore: time.Now().Add(-time.Hour),
-		NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
-	der, _ := x509.CreateCertificate(rand.Reader, ca, ca, &key.PublicKey, key)
-	ca, _ = x509.ParseCertificate(der)
-	iss := &fakeIssuer{ca: ca, key: key}
+	iss := newFakeIssuer(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	host := "dev1.relay.test"
