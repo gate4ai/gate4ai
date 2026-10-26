@@ -47,6 +47,9 @@ type State struct {
 	// Browser — сеансов агентов в браузере, BrowserWaiting — из них ждут человека (handoff).
 	Browser        int `json:"browser"`
 	BrowserWaiting int `json:"browser_waiting"`
+	// UIPassword — сгенерированный пароль Web UI, которым ещё не входили:
+	// показывается в меню, чтобы войти после установки.
+	UIPassword string `json:"ui_password"`
 }
 
 // Tray — клиент трея к сокету владельца.
@@ -127,6 +130,15 @@ func (t *Tray) URLTo(ctx context.Context, next string) (string, error) {
 	return res.URL, err
 }
 
+// PasswordLine — пункт меню со сгенерированным паролем Web UI ("" — паролем
+// уже входили или его сменили).
+func PasswordLine(st *State) string {
+	if st == nil || st.UIPassword == "" {
+		return ""
+	}
+	return fmt.Sprintf(T("password"), st.UIPassword)
+}
+
 // BrowserLine — пункт меню о сеансах браузера ("" — сеансов нет).
 func BrowserLine(st *State) string {
 	switch {
@@ -165,7 +177,7 @@ func MenuKey(st *State) string {
 	}
 	var b strings.Builder
 	b.WriteString("ok")
-	fmt.Fprintf(&b, ",b%d/%d", st.Browser, st.BrowserWaiting)
+	fmt.Fprintf(&b, ",b%d/%d,p%d", st.Browser, st.BrowserWaiting, len(st.UIPassword))
 	for _, p := range st.Pending {
 		b.WriteString("," + p.ID)
 	}

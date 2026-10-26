@@ -7,13 +7,14 @@ package webui
 // устройстве, не на этом компьютере. Вход начинается на постоянном адресе Web UI
 // — и на этом компьютере, и удалённо (/ui/ на публичном адресе): сохранённая
 // закладка работает и через неделю; дальше — сессия в cookie. Пароля ещё нет
-// (свежая установка, сброс) — Web UI на этом компьютере показывает только
-// страницу «задайте пароль»: его задаёт тот, кто первым откроет localhost; с
-// публичного адреса задать пароль нельзя. Попытка входа привязана к браузеру
-// cookie. От перебора пароля — задержка после неверных паролей, у удалённого
-// входа свой счётчик. Настройки защиты хранятся не в конфигурации (её может
-// менять агент через gate4ai.change_policy), а в State Store; API, который их
-// отдаёт, нет.
+// (свежая установка, сброс) — daemon генерирует его сам при старте: на диске
+// только хэш, открытый текст живёт в памяти daemon и отдаётся владельцу через
+// сокет владельца (gate4ai ui, установщик, трей), пока им не вошли. Формы
+// «задайте пароль» нет: с первой секунды, в том числе с публичного адреса, Web
+// UI требует пароль. Попытка входа привязана к браузеру cookie. От перебора
+// пароля — задержка после неверных паролей, у удалённого входа свой счётчик.
+// Настройки защиты хранятся не в конфигурации (её может менять агент через
+// gate4ai.change_policy), а в State Store; API, который их отдаёт, нет.
 
 import (
 	"crypto/rand"
@@ -36,12 +37,67 @@ const protectionKey = "ui.login"
 // Protection — защита входа в Web UI. Прежнее поле no_link (вход без
 // одноразовой ссылки) больше не читается: ссылки нет.
 type Protection struct {
-	Password string `json:"password,omitempty"` // $argon2id$v=19$m=…,t=…,p=…$соль$хэш; "" — пароль ещё не задан
+	Password string `json:"password,omitempty"` // $argon2id$v=19$m=…,t=…,p=…$соль$хэш; "" — пароль ещё не сгенерирован
 	Telegram bool   `json:"telegram,omitempty"` // подтверждение входа в Telegram-боте
 }
 
-// Set — пароль задан: входить можно. Иначе Web UI ждёт первого пароля.
+// Set — пароль задан. "" бывает только до EnsurePassword при старте daemon:
+// такой пароль не подходит никогда.
 func (p Protection) Set() bool { return p.Password != "" }
+
+// passwordAlphabet — символы сгенерированного пароля: без похожих (0/o, 1/l/i),
+// только строчные — его печатают с экрана и набирают на телефоне.
+const passwordAlphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+
+// generatePassword — сложный пароль Web UI: 4 группы по 5 символов
+// (≈99 бит), вид xxxxx-xxxxx-xxxxx-xxxxx.
+func generatePassword() string {
+	var b strings.Builder
+	for g := range 4 {
+		if g > 0 {
+			b.WriteByte('-')
+		}
+		for range 5 {
+			n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(passwordAlphabet))))
+			b.WriteByte(passwordAlphabet[n.Int64()])
+		}
+	}
+	return b.String()
+}
+
+// EnsurePassword — пароль Web UI есть с первой секунды: если его нет (свежая
+// установка, сброс), daemon генерирует его сам. В State Store — только хэш;
+// открытый текст возвращается и хранится в памяти (InitialPassword) до первого
+// входа или смены пароля. Пароль уже есть — "" (перезапуск: показать нечего,
+// забытый пароль сбрасывает ResetLogin).
+func (u *UI) EnsurePassword() (string, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	p := u.Protection()
+	if p.Set() {
+		return "", nil
+	}
+	pw := generatePassword()
+	p.Password = hashPassword(pw)
+	b, _ := json.Marshal(p)
+	if err := u.D.State.Set(protectionKey, string(b)); err != nil {
+		return "", err
+	}
+	u.initial = pw
+	return pw, nil
+}
+
+// InitialPassword — сгенерированный пароль, которым ещё не входили; "" — его
+// уже использовали, сменили или daemon перезапускался. Только для сокета
+// владельца: в журнал и ответы агентам не попадает.
+func (u *UI) InitialPassword() string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.initial
+}
+
+// forgetInitial — пароль использован или сменён: показывать больше нечего (под u.mu).
+func (u *UI) forgetInitial() { u.initial = "" }
 
 // minPassword — минимальная длина пароля Web UI.
 const minPassword = 8
@@ -81,14 +137,26 @@ func (u *UI) Protection() Protection {
 	return p
 }
 
-// ResetProtection снимает защиту входа (восстановление при забытом пароле или
-// недоступном Telegram) и закрывает все сессии: Web UI снова ждёт первого пароля.
-func (u *UI) ResetProtection() error {
+// ResetLogin — восстановление при забытом пароле или недоступном Telegram:
+// снимает подтверждение в Telegram, генерирует новый пароль и закрывает все
+// сессии и попытки входа. Возвращает новый пароль (его печатает
+// `gate4ai ui --reset-password`); он же — InitialPassword до первого входа.
+// Сброс виден владельцу: уведомление в Telegram, если бот подключён.
+func (u *UI) ResetLogin() (string, error) {
 	if err := u.D.State.Set(protectionKey, "{}"); err != nil {
-		return err
+		return "", err
 	}
 	u.dropSessions("")
-	return nil
+	pw, err := u.EnsurePassword()
+	if err != nil {
+		return "", err
+	}
+	if u.Channels != nil {
+		if tg := u.Channels.Telegram(); tg != nil {
+			go tg.Notice("⚠️ Защита входа в Web UI gate4.ai сброшена: новый пароль показан на компьютере (gate4ai ui), подтверждение входа в Telegram выключено, сессии закрыты. Если это были не вы — войдите и смените пароль в «Настройки → Вход».")
+		}
+	}
+	return pw, nil
 }
 
 // kdf — параметры argon2id для новых хэшей (RFC 9106; в тестах меньше).
@@ -179,9 +247,8 @@ func (u *UI) setAttemptCookie(w http.ResponseWriter, m mount, id string) {
 		SameSite: http.SameSiteStrictMode, MaxAge: int(attemptTTL.Seconds())})
 }
 
-// loginPage — страница «нужен вход»: без попытки входа. С паролем — начало
-// входа (форма пароля); без пароля — на этом компьютере форма первого пароля,
-// удалённо — подсказка задать его на компьютере с gate4.ai.
+// loginPage — страница «нужен вход»: без попытки входа, начало входа (форма
+// пароля) — одинаковая на этом компьютере и удалённо.
 func (u *UI) loginPage(w http.ResponseWriter, r *http.Request, m mount) {
 	u.loginPageErr(w, r, m, "")
 }
@@ -189,11 +256,6 @@ func (u *UI) loginPage(w http.ResponseWriter, r *http.Request, m mount) {
 func (u *UI) loginPageErr(w http.ResponseWriter, r *http.Request, m mount, errMsg string) {
 	p := u.Protection()
 	v := view{Path: m.base + "/", Error: tr(u.lang(r), errMsg)}
-	if !p.Set() {
-		v.Data = map[string]any{"Setup": !m.remote}
-		u.login401(w, r, m, "login.html", v)
-		return
-	}
 	v.Data = map[string]any{"Start": true, "Telegram": map[bool]string{true: tgNeed}[p.Telegram]}
 	u.login401(w, r, m, "login_step.html", v)
 }
@@ -257,6 +319,7 @@ func (u *UI) startSession(w http.ResponseWriter, m mount, telegram bool) {
 	sid := random()
 	u.mu.Lock()
 	u.sessions[sid] = session{csrf: random(), expires: u.Now().Add(sessionTTL), remote: m.remote, telegram: telegram}
+	u.forgetInitial() // паролем вошли: показывать его больше незачем
 	u.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: m.cookie(), Value: sid, Path: m.base + "/", HttpOnly: true, Secure: m.remote,
 		SameSite: http.SameSiteStrictMode, MaxAge: int(sessionTTL.Seconds())})
@@ -363,39 +426,8 @@ func (u *UI) telegramBusy(m mount, id string) bool {
 	return false
 }
 
-// setupPassword — первый пароль: форма на этом компьютере, пока пароля нет.
-// Кто первым открыл localhost, тот и задал; остальным — «уже задан».
-func (u *UI) setupPassword(w http.ResponseWriter, r *http.Request, m mount) {
-	if m.remote {
-		u.loginPage(w, r, m)
-		return
-	}
-	if err := newPassword(r.PostForm.Get("password"), r.PostForm.Get("repeat")); err != nil {
-		u.loginPageErr(w, r, m, err.Error())
-		return
-	}
-	enc := hashPassword(r.PostForm.Get("password"))
-	u.mu.Lock()
-	p := u.Protection()
-	if p.Set() {
-		u.mu.Unlock()
-		u.loginPageErr(w, r, m, "The password is already set: sign in with it.")
-		return
-	}
-	p.Password = enc
-	b, _ := json.Marshal(p)
-	err := u.D.State.Set(protectionKey, string(b))
-	u.mu.Unlock()
-	if err != nil {
-		u.loginPageErr(w, r, m, err.Error())
-		return
-	}
-	u.startSession(w, m, false)
-	http.Redirect(w, r, m.base+u.takeNext(w, r, m), http.StatusSeeOther)
-}
-
-// loginPost — первый пароль, начало попытки входа («Войти» с паролем), ввод
-// пароля и повторная отправка в Telegram на странице попытки входа.
+// loginPost — начало попытки входа («Войти» с паролем), ввод пароля и
+// повторная отправка в Telegram на странице попытки входа.
 func (u *UI) loginPost(m mount) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !u.originOK(m, r) {
@@ -403,16 +435,12 @@ func (u *UI) loginPost(m mount) http.HandlerFunc {
 			return
 		}
 		_ = r.ParseForm()
-		if r.PostForm.Get("setup") == "1" {
-			u.setupPassword(w, r, m)
-			return
-		}
 		u.mu.Lock()
 		id, a := u.attemptOf(m, r)
 		// Попытка начинается кнопкой «Войти» на постоянном адресе (POST с проверкой
 		// Origin: чужой сайт попытку не начнёт и Telegram не потревожит). Повторное
 		// «Войти» начинает попытку заново (неверные пароли считает общая задержка).
-		if p := u.Protection(); r.PostForm.Get("start") == "1" && p.Set() {
+		if p := u.Protection(); r.PostForm.Get("start") == "1" {
 			delete(u.attempts, id)
 			id = u.newAttempt(m, p)
 			a = u.attempts[id]
@@ -545,6 +573,9 @@ func (u *UI) saveProtection(sid string, p Protection) error {
 		return err
 	}
 	u.dropSessions(sid)
+	u.mu.Lock()
+	u.forgetInitial()
+	u.mu.Unlock()
 	return nil
 }
 

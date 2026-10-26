@@ -164,7 +164,7 @@ const usage = `gate4ai — actions for AI agents under your policies
 
 Start here (on the computer you protect):
   gate4ai service install                 run the daemon now and at every login (or: gate4ai daemon start)
-  gate4ai ui [--print] [--remote] [--start|--no-start]   open the web UI (sign in with the password; starts the daemon at a terminal)
+  gate4ai ui [--print] [--remote] [--reset-password] [--start|--no-start]   open the web UI (sign in with the password; starts the daemon at a terminal)
   gate4ai status                          is the daemon running
 
 Agent commands (an agent connects itself: the first command shows a code, the owner approves it in the Web UI;
@@ -1342,6 +1342,7 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 	fs.SetOutput(e.Stderr)
 	printOnly := fs.Bool("print", false, "only print the address of the web UI")
 	remote := fs.Bool("remote", false, "the address for the phone (relay or --public)")
+	reset := fs.Bool("reset-password", false, "forgot the password: generate a new one (prints it), turn Telegram confirmation off, close all sessions")
 	start := fs.Bool("start", false, "start the daemon in the background if it is not running (default when you are at a terminal)")
 	noStart := fs.Bool("no-start", false, "never start the daemon")
 	if fs.Parse(args) != nil {
@@ -1350,10 +1351,16 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 	var res struct {
 		URL      string   `json:"url"`
 		Requires []string `json:"requires"`
-		Setup    bool     `json:"setup"` // пароля ещё нет: первый, кто откроет адрес, задаст его
+		Password string   `json:"password"` // сгенерированный пароль, которым ещё не входили
 	}
 	c := e.Client()
 	session := func() error {
+		if *reset {
+			if err := c.Do(ctx, "POST", "/v1/ui/reset-login", nil, nil); err != nil {
+				return err
+			}
+			*reset = false // daemon запустился, сброс сделан: повторный вызов не нужен
+		}
 		return c.Do(ctx, "POST", "/v1/ui/url", map[string]bool{"remote": *remote}, &res)
 	}
 	err := session()
@@ -1375,19 +1382,22 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 	}
 	e.say("Web UI:")
 	fmt.Fprintln(e.Stdout, res.URL)
-	if res.Setup {
-		fmt.Fprintln(e.Stderr, "gate4ai: no password yet: whoever opens the Web UI on this computer first sets it")
-	} else {
-		need := map[string]string{"password": "the Web UI password", "telegram": "confirmation in your Telegram bot"}
-		var parts []string
-		for _, r := range res.Requires {
-			if need[r] == "" {
-				need[r] = r
-			}
-			parts = append(parts, need[r])
-		}
-		fmt.Fprintln(e.Stderr, "gate4ai: sign in with "+strings.Join(parts, " and ")+"; a session lasts 12 hours")
+	if res.Password != "" {
+		// Сгенерированный пароль показывается, пока им не вошли: установщик
+		// печатает его этой командой. Дальше — только gate4ai ui --reset-password.
+		fmt.Fprintln(e.Stderr, "gate4ai: Web UI password (generated, shown until the first sign-in — save it): "+res.Password)
+		fmt.Fprintln(e.Stderr, "gate4ai: change it in Settings → Signing in; forgotten — gate4ai ui --reset-password")
+		return ExitOK
 	}
+	need := map[string]string{"password": "the Web UI password", "telegram": "confirmation in your Telegram bot"}
+	var parts []string
+	for _, r := range res.Requires {
+		if need[r] == "" {
+			need[r] = r
+		}
+		parts = append(parts, need[r])
+	}
+	fmt.Fprintln(e.Stderr, "gate4ai: sign in with "+strings.Join(parts, " and ")+"; a session lasts 12 hours; forgotten the password — gate4ai ui --reset-password")
 	return ExitOK
 }
 

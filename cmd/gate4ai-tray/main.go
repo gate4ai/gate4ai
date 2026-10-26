@@ -118,6 +118,10 @@ func buildMenu(t *tray.Tray, st *tray.State, refresh chan<- struct{}) {
 		onClick(systray.AddMenuItem(line, ""), func() { openPage(t, "/browser") })
 	}
 	onClick(systray.AddMenuItem(tray.T("open_ui"), ""), func() { openUI(t) })
+	if line := tray.PasswordLine(st); line != "" {
+		// Пароль, сгенерированный при установке: виден здесь, пока им не вошли.
+		systray.AddMenuItem(line, "").Disable()
+	}
 	onClick(systray.AddMenuItem(tray.T("quit"), ""), systray.Quit)
 }
 

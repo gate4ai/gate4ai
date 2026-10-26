@@ -122,12 +122,12 @@ func TestWebUI(t *testing.T) {
 	c := &http.Client{Jar: jar, Transport: metaRefresh{}}
 
 	r, _ := c.Get(base + "/")
-	// Пароля ещё нет: страница первого пароля, обычный вход невозможен.
-	if r.StatusCode != 401 || !strings.Contains(body(t, r), `name="setup"`) {
-		t.Fatal("no password yet must ask to set it")
+	// Пароля ещё нет (до EnsurePassword): форма пароля, но войти нельзя ничем.
+	if r.StatusCode != 401 || !strings.Contains(body(t, r), `name="start"`) {
+		t.Fatal("must ask for the password")
 	}
-	if r, _ := c.PostForm(base+"/login", url.Values{"start": {"1"}, "password": {"anything"}}); r.StatusCode != 401 || !strings.Contains(body(t, r), `name="setup"`) {
-		t.Fatal("sign-in before the password is set", r.StatusCode)
+	if r, _ := c.PostForm(base+"/login", url.Values{"start": {"1"}, "password": {""}}); r.StatusCode != 401 || strings.Contains(body(t, r), `action="/logout"`) {
+		t.Fatal("sign-in before the password exists", r.StatusCode)
 	}
 	r = signIn(t, u, c, base)
 	page := body(t, r)
@@ -239,17 +239,24 @@ func TestOwnerRoutesOnSocket(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	owner := ipc.HTTPClient(sock)
+	pw, _ := u.EnsurePassword()
 	r, err := owner.Post("http://gate4ai/v1/ui/url", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := body(t, r); r.StatusCode != 200 || !strings.Contains(p, `"url":"http://`+u.Addr+`/"`) || !strings.Contains(p, `"setup":true`) {
+	// Сгенерированный пароль — владельцу вместе с адресом, пока им не вошли.
+	if p := body(t, r); r.StatusCode != 200 || !strings.Contains(p, `"url":"http://`+u.Addr+`/"`) || !strings.Contains(p, `"password":"`+pw+`"`) {
 		t.Fatal(r.StatusCode, p)
 	}
 	d.Pipeline.Execute(ctx, pipeline.Call{Agent: "bot", Action: "notes.append", Args: map[string]any{"text": "x"}})
 	r, _ = owner.Get("http://gate4ai/v1/tray/state")
-	if p := body(t, r); !strings.Contains(p, `"pending":[{`) || !strings.Contains(p, `"agent":"bot"`) {
+	if p := body(t, r); !strings.Contains(p, `"pending":[{`) || !strings.Contains(p, `"agent":"bot"`) || !strings.Contains(p, `"ui_password":"`+pw+`"`) {
 		t.Fatal(p)
+	}
+	// Сброс защиты — новый пароль; агенту с токеном недоступен.
+	r, _ = owner.Post("http://gate4ai/v1/ui/reset-login", "application/json", nil)
+	if p := body(t, r); r.StatusCode != 200 || strings.Contains(p, pw) || !strings.Contains(p, `"password":"`) {
+		t.Fatal(r.StatusCode, p)
 	}
 	// Агент с токеном адрес Web UI не получает.
 	tok, _ := d.State.IssueToken("bot", "", "")
@@ -257,6 +264,11 @@ func TestOwnerRoutesOnSocket(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+tok)
 	if r, _ := ipc.HTTPClient(asock).Do(req); r.StatusCode == 200 {
 		t.Fatal("agent got the Web UI address")
+	}
+	req, _ = http.NewRequest("POST", "http://gate4ai/v1/ui/reset-login", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	if r, _ := ipc.HTTPClient(asock).Do(req); r.StatusCode == 200 {
+		t.Fatal("agent reset the Web UI login")
 	}
 	if r, _ := ipc.HTTPClient(sock).Do(req); r.StatusCode != 403 {
 		t.Fatal("agent token on owner socket got the Web UI address", r.StatusCode)
@@ -297,7 +309,7 @@ func TestTrayContract(t *testing.T) {
 	if err := tr.Decide(ctx, p.ID, true); err != nil || n.n != 1 {
 		t.Fatal(err, n.n)
 	}
-	if st := tr.Fetch(ctx); st == nil || len(st.Pending) != 0 || tray.MenuKey(st) != "ok,b0/0" || tray.BrowserLine(st) != "" {
+	if st := tr.Fetch(ctx); st == nil || len(st.Pending) != 0 || tray.MenuKey(st) != "ok,b0/0,p0" || tray.BrowserLine(st) != "" || tray.PasswordLine(st) != "" {
 		t.Fatalf("%+v", st)
 	}
 	if l, err := tr.URL(ctx); err != nil || l != "http://"+u.Addr+"/" {

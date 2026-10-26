@@ -51,11 +51,6 @@ func TestServerPage(t *testing.T) {
 			t.Errorf("no %q", want)
 		}
 	}
-	// Пароля ещё нет (сброс): страница зовёт задать его.
-	d.State.Set(protectionKey, "{}")
-	if p := get("/settings/server"); !strings.Contains(p, "пароля ещё нет") || !strings.Contains(p, "Откройте Web UI и задайте пароль.") {
-		t.Error("no password: the page must ask to set it")
-	}
 	// Всё исправлено.
 	u.Autostart = &runningAutostart{}
 	u.Server = func() ServerEnv {

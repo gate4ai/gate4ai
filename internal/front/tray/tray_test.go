@@ -44,3 +44,15 @@ func TestNeedsWebUI(t *testing.T) {
 		t.Fatal("ordinary action")
 	}
 }
+
+// Сгенерированный пароль Web UI: пункт меню, пока им не вошли; меню
+// перестраивается, когда он исчезает.
+func TestPasswordLine(t *testing.T) {
+	st := &State{OK: true, UIPassword: "abcde-fghjk-mnpqr-stuvw"}
+	if l := PasswordLine(st); !strings.Contains(l, "abcde-fghjk-mnpqr-stuvw") || PasswordLine(nil) != "" || PasswordLine(&State{OK: true}) != "" {
+		t.Fatal(l)
+	}
+	if MenuKey(st) == MenuKey(&State{OK: true}) {
+		t.Fatal("menu must rebuild when the password is used")
+	}
+}

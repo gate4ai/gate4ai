@@ -150,7 +150,7 @@ connectors:
 		})
 	}
 	err = chromedp.Run(ctx,
-		chromeSignIn(base),
+		chromeSignIn(base, g.uiPassword()),
 		chromedp.Navigate(view),
 		chromedp.Poll(frame, nil),
 		chromedp.Click(`//button[text()="Take control"]`),

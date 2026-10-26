@@ -96,10 +96,13 @@ func (b *browser) submitPassword(page, pw string) (int, string) {
 	return b.post("/login", url.Values{"csrf": {m[1]}, "password": {pw}})
 }
 
-// setupPassword — первый пароль через форму на этом компьютере.
-func (b *browser) setupPassword(pw, repeat string) (int, string) {
-	b.t.Helper()
-	return b.post("/login", url.Values{"setup": {"1"}, "password": {pw}, "repeat": {repeat}})
+// setPassword — пароль Web UI в тестах (в жизни первый генерирует EnsurePassword,
+// дальше его меняют в Настройках).
+func setPassword(t *testing.T, u *UI, pw string) {
+	t.Helper()
+	if err := u.D.State.Set(protectionKey, `{"password":"`+hashPassword(pw)+`"}`); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // signInWith — вход по постоянному адресу: «Войти» с паролем.
@@ -129,70 +132,94 @@ func remoteDo(u *UI, method, path string, form url.Values) (string, bool) {
 	return rec.buf.String(), false
 }
 
-// Свежая установка: пароля нет, первый, кто открыл localhost, задаёт его;
-// удалённо пароль не задать; второй — «уже задан».
-func TestFirstPassword(t *testing.T) {
+// Свежая установка: пароль генерирует daemon (EnsurePassword) — сложный, на
+// диске только хэш, открытый текст виден владельцу (InitialPassword) до первого
+// входа. Формы «задайте пароль» нет ни на этом компьютере, ни удалённо.
+func TestGeneratedPassword(t *testing.T) {
 	u, d, _, base := setup(t)
 	d.AddPublicURL(func() string { return "https://dev.example" })
-	if p := u.Protection(); p.Set() || len(p.Requires()) != 0 {
-		t.Fatal("fresh install must have no password")
+	if p := u.Protection(); p.Set() || len(p.Requires()) != 0 || u.InitialPassword() != "" {
+		t.Fatal("fresh install must have no password before EnsurePassword")
 	}
+	// До генерации войти нельзя ничем — ни пустым паролем, ни формой первого пароля.
 	b := newBrowser(t, base)
-	st, page := b.get("/")
-	if st != 401 || !strings.Contains(page, `name="setup"`) || strings.Contains(page, `name="start"`) {
-		t.Fatal("fresh install must ask for the first password", st, page)
+	if st, page := b.get("/"); st != 401 || !strings.Contains(page, `name="start"`) || strings.Contains(page, `name="setup"`) {
+		t.Fatal("must ask for the password, never offer to set it", st, page)
 	}
-	// Удалённо — только подсказка, формы нет; задать пароль оттуда нельзя.
-	if page, ok := remoteDo(u, "GET", "/ui/", nil); ok || strings.Contains(page, `name="setup"`) || !strings.Contains(page, "gate4ai ui") {
-		t.Fatal("remote must not offer the first password", page)
+	if st, _ := b.post("/login", url.Values{"setup": {"1"}, "password": {"evil horse"}, "repeat": {"evil horse"}}); st != 401 || b.loggedIn() || u.Protection().Set() {
+		t.Fatal("the first-password form must be gone")
 	}
-	if _, ok := remoteDo(u, "POST", "/ui/login", url.Values{"setup": {"1"}, "password": {"remote horse"}, "repeat": {"remote horse"}}); ok || u.Protection().Set() {
-		t.Fatal("remote set the first password")
+	if st, _ := b.signInWith(""); st != 401 || b.loggedIn() {
+		t.Fatal("signed in with an empty password")
 	}
-	// Обычный вход без пароля невозможен.
-	if st, _ := b.signInWith("anything"); st != 401 || b.loggedIn() {
-		t.Fatal("sign-in before the password exists")
+	pw, err := u.EnsurePassword()
+	if err != nil || !regexp.MustCompile(`^[a-z2-9]{5}(-[a-z2-9]{5}){3}$`).MatchString(pw) || strings.ContainsAny(pw, "01lio") {
+		t.Fatal("generated password", pw, err)
 	}
-	// Чужой сайт пароль не задаст.
-	req, _ := http.NewRequest("POST", base+"/login", strings.NewReader("setup=1&password=evil+horse&repeat=evil+horse"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Origin", "https://evil.example")
-	if r, _ := http.DefaultClient.Do(req); r.StatusCode != 403 || u.Protection().Set() {
-		t.Fatal("cross-origin first password", r.StatusCode)
+	if again, _ := u.EnsurePassword(); again != "" || !checkPassword(u.Protection().Password, pw) {
+		t.Fatal("EnsurePassword must not replace an existing password")
 	}
-	if _, page := b.setupPassword("short", "short"); !strings.Contains(page, "не короче 8") || u.Protection().Set() {
-		t.Fatal("short password accepted", page)
-	}
-	if _, page := b.setupPassword("correct horse", "correct horsee"); !strings.Contains(page, "не совпадают") || u.Protection().Set() {
-		t.Fatal("mismatch accepted")
-	}
-	if st, _ := b.setupPassword("correct horse", "correct horse"); st != 200 || !b.loggedIn() {
-		t.Fatal("first password did not sign in", st)
+	if u.InitialPassword() != pw || len(u.Protection().Requires()) != 1 {
+		t.Fatal("the generated password must be shown until the first sign-in")
 	}
 	p := u.Protection()
-	if !strings.HasPrefix(p.Password, "$argon2id$") || strings.Contains(p.Password, "correct horse") || !checkPassword(p.Password, "correct horse") {
+	if !strings.HasPrefix(p.Password, "$argon2id$") || strings.Contains(p.Password, pw) {
 		t.Fatal("password must be stored as argon2id hash", p.Password)
+	}
+	if v, _ := d.State.Get(protectionKey); strings.Contains(v, pw) {
+		t.Fatal("plaintext password on disk")
+	}
+	// Удалённо — та же форма пароля, без формы первого пароля.
+	if page, ok := remoteDo(u, "GET", "/ui/", nil); ok || strings.Contains(page, `name="setup"`) || !strings.Contains(page, `name="start"`) {
+		t.Fatal("remote must ask for the password", page)
+	}
+	if _, ok := remoteDo(u, "POST", "/ui/login", url.Values{"setup": {"1"}, "password": {"remote horse"}, "repeat": {"remote horse"}}); ok || !checkPassword(u.Protection().Password, pw) {
+		t.Fatal("remote replaced the password")
+	}
+	// Чужой сайт попытку не начнёт.
+	req, _ := http.NewRequest("POST", base+"/login", strings.NewReader("start=1&password="+pw))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://evil.example")
+	if r, _ := http.DefaultClient.Do(req); r.StatusCode != 403 {
+		t.Fatal("cross-origin sign-in", r.StatusCode)
+	}
+	// Вход сгенерированным паролем; после него пароль больше не показывается.
+	if st, _ := b.signInWith("wrong-wrong-wrong-wrong"); st != 401 || b.loggedIn() {
+		t.Fatal("wrong password signed in")
+	}
+	if st, _ := b.signInWith(pw); st != 200 || !b.loggedIn() {
+		t.Fatal("generated password did not sign in", st)
+	}
+	if u.InitialPassword() != "" {
+		t.Fatal("the password is still shown after the first sign-in")
 	}
 	if _, page := (&browser{t: t, c: &http.Client{}, base: base}).get("/settings"); strings.Contains(page, "argon2id$") {
 		t.Fatal("hash leaked")
 	}
-	// Второй — опоздал: пароль уже задан, сессии нет, форма входа.
-	b2 := newBrowser(t, base)
-	if st, page := b2.setupPassword("evil horse", "evil horse"); st != 401 || b2.loggedIn() || !strings.Contains(page, "уже задан") {
-		t.Fatal("second first-password accepted", st, page)
+	// Сброс: новый пароль, старый не подходит, сессии закрыты, Telegram выключен.
+	d.State.Set(protectionKey, `{"password":"`+u.Protection().Password+`","telegram":true}`)
+	pw2, err := u.ResetLogin()
+	if err != nil || pw2 == "" || pw2 == pw || u.InitialPassword() != pw2 || u.Protection().Telegram || b.loggedIn() {
+		t.Fatal("reset", pw2, err)
 	}
-	if !checkPassword(u.Protection().Password, "correct horse") {
-		t.Fatal("password overwritten")
+	if st, _ := b.signInWith(pw); st != 401 || b.loggedIn() {
+		t.Fatal("old password works after reset")
 	}
-	if st, page := b2.get("/"); st != 401 || !strings.Contains(page, `name="start"`) || strings.Contains(page, `name="setup"`) {
-		t.Fatal("with a password the page must offer signing in", page)
+	if st, _ := b.signInWith(pw2); st != 200 || !b.loggedIn() || u.InitialPassword() != "" {
+		t.Fatal("new password after reset", st)
 	}
-	// Сброс: пароля нет, сессии закрыты, снова форма первого пароля.
-	if err := u.ResetProtection(); err != nil || u.Protection().Set() || b.loggedIn() {
-		t.Fatal("reset")
+	// Смена пароля в Настройках тоже прячет сгенерированный.
+	u.ResetLogin()
+	_, _, post := protectedSession(t, u, base, u.InitialPassword())
+	if u.InitialPassword() != "" {
+		t.Fatal("shown after sign-in")
 	}
-	if _, page := b2.get("/"); !strings.Contains(page, `name="setup"`) {
-		t.Fatal("after reset the first password is asked again")
+	u.mu.Lock()
+	u.initial = "stale"
+	u.mu.Unlock()
+	post("/settings/login/password", url.Values{"current": {u.InitialPassword()}, "password": {"correct horse"}, "repeat": {"correct horse"}})
+	if u.InitialPassword() != "" && checkPassword(u.Protection().Password, "correct horse") {
+		t.Fatal("still shown after a password change")
 	}
 }
 
@@ -200,8 +227,7 @@ func TestLoginPassword(t *testing.T) {
 	u, d, _, base := setup(t)
 	advance := clock(u)
 	d.AddPublicURL(func() string { return "https://dev.example" })
-	b0 := newBrowser(t, base)
-	b0.setupPassword("correct horse", "correct horse")
+	setPassword(t, u, "correct horse")
 	// Постоянный адрес: форма пароля, GET попытку не начинает.
 	b := newBrowser(t, base)
 	st, page := b.get("/")
@@ -328,7 +354,7 @@ func protectedSession(t *testing.T, u *UI, base, pw string) (*browser, string, f
 
 func TestLoginTelegram(t *testing.T) {
 	u, _, _, base := setup(t)
-	newBrowser(t, base).setupPassword("correct horse", "correct horse")
+	setPassword(t, u, "correct horse")
 	_, _, post := protectedSession(t, u, base, "correct horse")
 	if p := post("/settings/login/telegram", url.Values{"on": {"1"}, "current": {"correct horse"}}); !strings.Contains(p, "подключите Telegram-бот") || u.Protection().Telegram {
 		t.Fatal("telegram confirmation enabled without a bot")
@@ -394,8 +420,8 @@ func TestLoginTelegram(t *testing.T) {
 	if u.Protection().Telegram {
 		t.Fatal("telegram not disabled")
 	}
-	// Восстановление: сброс снимает всё и закрывает сессии.
-	if err := u.ResetProtection(); err != nil || u.Protection().Set() || b.loggedIn() {
+	// Восстановление: сброс снимает Telegram, меняет пароль и закрывает сессии.
+	if pw, err := u.ResetLogin(); err != nil || pw == "" || u.Protection().Telegram || !checkPassword(u.Protection().Password, pw) || b.loggedIn() {
 		t.Fatal("reset")
 	}
 }
@@ -410,11 +436,11 @@ func regexp1(re, s string) string {
 
 // Удалённый вход с Telegram: подтверждение в сообщении называет удалённый вход.
 func TestRemoteLoginTelegram(t *testing.T) {
-	u, d, _, base := setup(t)
+	u, d, _, _ := setup(t)
 	d.AddPublicURL(func() string { return "https://dev.example" })
 	f := &fakeConfirm{}
 	u.Confirm = f
-	newBrowser(t, base).setupPassword("correct horse", "correct horse")
+	setPassword(t, u, "correct horse")
 	d.State.Set(protectionKey, `{"password":"`+u.Protection().Password+`","telegram":true}`)
 	if page, ok := remoteDo(u, "POST", "/ui/login", url.Values{"start": {"1"}, "password": {"correct horse"}}); ok || f.n() != 1 || !strings.Contains(f.reqs[0], "удалённо") && !strings.Contains(f.reqs[0], "remotely") {
 		t.Fatal("remote login must wait for Telegram", ok, f.reqs, page)

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -109,10 +110,24 @@ func TestUIWithoutDaemon(t *testing.T) {
 	if !strings.Contains(errb.String(), "Start it: gate4ai daemon start") {
 		t.Fatal(errb)
 	}
-	// В терминале: daemon запускается в фоне, затем выдаётся адрес Web UI.
-	e, out, _ = envAt(sock, true)
+	// В терминале: daemon запускается в фоне, затем выдаётся адрес Web UI и
+	// сгенерированный пароль, пока им не вошли.
+	e, out, errb = envAt(sock, true)
 	if code := Run(context.Background(), e, []string{"ui"}); code != ExitOK || started != 1 || !strings.Contains(out.String(), "http://127.0.0.1:7431/") {
 		t.Fatalf("code %d started %d: %s", code, started, out)
+	}
+	if !strings.Contains(errb.String(), "password (generated, shown until the first sign-in — save it): abcde-fghjk-mnpqr-stuvw") {
+		t.Fatal(errb)
+	}
+	// Паролем вошли: его больше не печатают; --reset-password генерирует новый.
+	fakeUIPassword.Store("")
+	e, _, errb = envAt(sock, true)
+	if code := Run(context.Background(), e, []string{"ui", "--print"}); code != ExitOK || strings.Contains(errb.String(), "abcde") || !strings.Contains(errb.String(), "gate4ai ui --reset-password") {
+		t.Fatal(errb)
+	}
+	e, _, errb = envAt(sock, true)
+	if code := Run(context.Background(), e, []string{"ui", "--print", "--reset-password"}); code != ExitOK || !strings.Contains(errb.String(), "save it): new22-new22-new22-new22") {
+		t.Fatal(errb)
 	}
 	// daemon status / status без id.
 	e, out, _ = envAt(sock, false)
@@ -135,11 +150,21 @@ func TestUIWithoutDaemon(t *testing.T) {
 	}
 }
 
-// fakeUIRoutes — маршрут адреса Web UI без настоящего Web UI.
+// fakeUIPassword — сгенерированный пароль Web UI фальшивого маршрута ("" — им уже вошли).
+var fakeUIPassword atomic.Value
+
+func init() { fakeUIPassword.Store("abcde-fghjk-mnpqr-stuvw") }
+
+// fakeUIRoutes — маршруты адреса Web UI и сброса защиты без настоящего Web UI.
 func fakeUIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/ui/url", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"url":"http://127.0.0.1:7431/","requires":["password"]}`)
+		fmt.Fprintf(w, `{"url":"http://127.0.0.1:7431/","requires":["password"],"password":%q}`, fakeUIPassword.Load())
+	})
+	mux.HandleFunc("POST /v1/ui/reset-login", func(w http.ResponseWriter, r *http.Request) {
+		fakeUIPassword.Store("new22-new22-new22-new22")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"url":"http://127.0.0.1:7431/","password":"new22-new22-new22-new22"}`)
 	})
 }
 
