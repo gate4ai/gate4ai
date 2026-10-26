@@ -43,7 +43,7 @@ Every release is built by `.github/workflows/release.yml` on a `v*` tag, nothing
 
 - **Reproducible builds.** Binaries are built with `-trimpath`, `CGO_ENABLED=0` and `mod_timestamp` from the commit; `go build` from the tag gives the same binary.
 
-Third-party GitHub Actions are pinned by full commit SHA, dependencies are watched by Dependabot, and the repository publishes an [OpenSSF Scorecard](https://securityscorecards.dev/viewer/?uri=github.com/gate4ai/gate4ai).
+Third-party GitHub Actions are pinned by full commit SHA, dependencies are watched by Dependabot, and the repository publishes an [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/gate4ai/gate4ai) and holds the [OpenSSF Best Practices badge](https://www.bestpractices.dev/projects/15964) (passing).
 
 ## Design notes for reviewers
 
