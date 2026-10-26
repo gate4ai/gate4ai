@@ -30,6 +30,7 @@ import (
 // fakeEngine — страница без Chrome: переходы, текст, поиск элемента для act.
 type fakeEngine struct {
 	mu      sync.Mutex // url меняет и «человек» (handoff) из другой горутины
+	shot    []byte     // ответ Screenshot вместо testPNG (пустой/обрезанный снимок)
 	url     string
 	keys    []string
 	hooks   int
@@ -71,7 +72,10 @@ func (f *fakeEngine) Text(context.Context) (string, error) {
 	return "Задолженность 1 234,56 ₽", nil
 }
 func (f *fakeEngine) Screenshot(context.Context, *worker.Clip, bool) ([]byte, error) {
-	return []byte("\x89PNG-fake"), nil
+	if f.shot != nil {
+		return f.shot, nil
+	}
+	return testPNG(64, 48), nil
 }
 func (f *fakeEngine) Eval(_ context.Context, expr string, out any) error {
 	switch {
@@ -178,7 +182,7 @@ func TestAgentReadScreenshot(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 	res, err = h.Execute(b, "screenshot", map[string]any{"url": "https://app.example.org/", "selector": "#debt"})
-	if err != nil || string(res.Evidence[0].Data) != "\x89PNG-fake" || res.Content[0].Type != abi.ContentImage {
+	if err != nil || !bytes.Equal(res.Evidence[0].Data, testPNG(64, 48)) || res.Content[0].Type != abi.ContentImage {
 		t.Fatal(res, err)
 	}
 }
@@ -1002,7 +1006,16 @@ func mustFind(t *testing.T, h *hosttest.Host, name string) manifest.Action {
 
 func TestMain(m *testing.M) {
 	worker.SettleTimeout = 200 * time.Millisecond // страницы вне списка в тестах не возвращаются
-	os.Exit(m.Run())
+	// Каталог данных на прогон — временный: ни один тест не пишет снимки и
+	// шаги сеансов в настоящий каталог данных разработчика.
+	home, err := os.MkdirTemp("", "gate4ai-test-home-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("GATE4AI_HOME", home)
+	code := m.Run()
+	os.RemoveAll(home)
+	os.Exit(code)
 }
 
 // Срок download — ожидание элемента, файла (timeout_ms) и запас: элемента нет —

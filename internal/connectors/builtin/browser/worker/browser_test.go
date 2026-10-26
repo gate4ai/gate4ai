@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -100,7 +101,7 @@ func (f *fakeChrome) ws(w http.ResponseWriter, r *http.Request) {
 			}
 			res = map[string]any{"result": map[string]any{"value": v}}
 		case "Page.captureScreenshot":
-			res = map[string]any{"data": base64.StdEncoding.EncodeToString([]byte("\x89PNG-fake"))}
+			res = map[string]any{"data": base64.StdEncoding.EncodeToString(testPNG(100, 30))}
 		}
 		f.mu.Unlock()
 		out, _ := json.Marshal(map[string]any{"id": m.ID, "result": res})
@@ -147,7 +148,7 @@ func TestOpenObserveScreenshotViaCDP(t *testing.T) {
 		t.Fatal(p, err)
 	}
 	png, err := s.ScreenshotElement(ctx, "#debt")
-	if err != nil || string(png) != "\x89PNG-fake" {
+	if err != nil || !bytes.Equal(png, testPNG(100, 30)) {
 		t.Fatal(png, err)
 	}
 	if _, err := s.ScreenshotElement(ctx, "#missing"); err == nil {

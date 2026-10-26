@@ -4,6 +4,7 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,9 +19,17 @@ import (
 // ShotKeep — снимки сеансов агентов старше этого удаляются при следующем снимке.
 var ShotKeep = 24 * time.Hour
 
+// pngMagic — сигнатура файла PNG.
+const pngMagic = "\x89PNG\r\n\x1a\n"
+
 // saveShot пишет снимок сеанса агента в <каталог данных>/browser-shots/<сеанс>-<n>.png
-// (0600; папка — та же, что у steps_file, — каталог данных gate4ai).
+// (0600; папка — та же, что у steps_file, — каталог данных gate4ai). Не PNG
+// (пустой или обрезанный ответ движка) не пишется: лучше ошибка, чем файл,
+// который не открыть.
 func saveShot(id string, n int, png []byte) (string, error) {
+	if !strings.HasPrefix(string(png), pngMagic) {
+		return "", fmt.Errorf("not a PNG image (%d bytes)", len(png))
+	}
 	dir := filepath.Join(dataDir(), "browser-shots")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
@@ -40,6 +49,9 @@ func saveShot(id string, n int, png []byte) (string, error) {
 // у страницы вызывающего коннектора — только изображение в content.
 func (cs *callSession) capture(ctx context.Context, r worker.ShotRequest) (map[string]any, abi.ExecResult, error) {
 	s, err := cs.s.Capture(ctx, r)
+	if errors.Is(err, worker.ErrBadShot) {
+		return nil, abi.ExecResult{}, abi.Errorf(abi.CodeIO, "%v", err)
+	}
 	if err != nil {
 		return nil, abi.ExecResult{}, err
 	}

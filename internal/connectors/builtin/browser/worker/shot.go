@@ -5,9 +5,14 @@ package worker
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrBadShot — Chrome вернул не PNG (пустой или обрезанный ответ
+// Page.captureScreenshot): снимок не отдаётся и не сохраняется.
+var ErrBadShot = errors.New("screenshot: the browser returned no PNG image")
 
 // Clip — прямоугольник страницы в CSS-пикселях от начала документа.
 type Clip struct{ X, Y, W, H float64 }
@@ -124,10 +129,13 @@ func (x *Executor) Capture(ctx context.Context, r ShotRequest) (Shot, error) {
 		return Shot{}, err
 	}
 	w, h := pngSize(png)
+	if w == 0 || h == 0 {
+		return Shot{}, fmt.Errorf("%w (%d bytes)", ErrBadShot, len(png))
+	}
 	return Shot{PNG: png, Width: w, Height: h, Mode: r.Mode()}, nil
 }
 
-// pngSize — ширина и высота из заголовка PNG (IHDR); 0 — не PNG.
+// pngSize — ширина и высота из заголовка PNG (IHDR); 0, 0 — не PNG.
 func pngSize(b []byte) (int, int) {
 	if len(b) < 24 || string(b[:8]) != "\x89PNG\r\n\x1a\n" || string(b[12:16]) != "IHDR" {
 		return 0, 0

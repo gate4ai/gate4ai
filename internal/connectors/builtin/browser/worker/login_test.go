@@ -220,7 +220,7 @@ func (f *loginChrome) ws(w http.ResponseWriter, r *http.Request) {
 				fl.value += t
 			}
 		case "Page.captureScreenshot":
-			res = map[string]any{"data": base64.StdEncoding.EncodeToString([]byte("\x89PNG"))}
+			res = map[string]any{"data": base64.StdEncoding.EncodeToString(testPNG(10, 10))}
 		}
 		f.mu.Unlock()
 		out, _ := json.Marshal(map[string]any{"id": m.ID, "result": res})
