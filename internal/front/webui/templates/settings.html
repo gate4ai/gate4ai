@@ -106,6 +106,10 @@
 <label for="st-reg">{{T "Catalog address (index.json)"}}</label><input id="st-reg" name="registry" value="{{$d.Config.Store.Registry}}" size="70">
 <label for="st-keys">{{T "Catalog signing keys"}}</label><textarea id="st-keys" name="registry_keys" rows="2" class="code">{{join $d.Config.Store.RegistryKeys "\n"}}</textarea>
 <button data-busy="{{T "Saving…"}}">{{T "Save"}}</button></form></div>
+<div class="card" id="knowledge"><h3>{{T "Knowledge folder"}}</h3>
+<form method="post" action="{{.Base}}/settings/general"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="kn-dir">{{T "Where agents keep what they learned about sites (recipes and connectors); empty — ~/gate4ai-knowledge"}}</label><input id="kn-dir" name="knowledge_dir" value="{{$d.Config.Knowledge.Dir}}" size="70" placeholder="~/gate4ai-knowledge">
+<button data-busy="{{T "Saving…"}}">{{T "Save"}}</button></form></div>
 <div class="card"><h3>{{T "Keeping the journal"}}</h3>
 <form method="post" action="{{.Base}}/settings/general" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}">
 {{$rs := $d.Retentions}}{{range (list "receipts" "denied" "evidence_other" "evidence_money")}}{{$k := .}}{{$cur := index $d.Retention $k}}<label class="inline" for="ret-{{$k}}">{{dur $k}}</label><select id="ret-{{$k}}" name="ret_{{$k}}">{{range $rs}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{dur .}}</option>{{end}}{{if not (has $rs $cur)}}<option selected>{{$cur}}</option>{{end}}</select>{{end}}

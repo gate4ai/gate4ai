@@ -14,6 +14,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/connectors/builtin/browser"
 	"github.com/gate4ai/gate4ai/internal/connectors/builtin/files"
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
+	"github.com/gate4ai/gate4ai/internal/platform/gitrepo"
 	"github.com/gate4ai/gate4ai/internal/policy"
 )
 
@@ -21,7 +22,7 @@ import (
 func (d *Daemon) StoreOptions() store.Options {
 	s := d.Config.Current().Store
 	return store.Options{Dir: d.ConnectorsDir, Registry: s.Registry, RegistryKeys: s.RegistryKeys, TrustedKeys: s.TrustedKeys,
-		Builtin: BuiltinConnectors, Log: d.Log}
+		Builtin: BuiltinConnectors, KnowledgeDir: d.KnowledgeDir(), Log: d.Log}
 }
 
 // BuiltinConnectors — компоненты ядра: из магазина не ставятся и не удаляются.
@@ -183,7 +184,8 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 		for _, it := range list {
 			c, loaded := d.Registry.Get(it.Name)
 			row := map[string]any{"connector": it.Name, "version": it.Manifest.Version, "trust": it.Info.Trust,
-				"publisher": it.Info.Publisher, "source": it.Info.Source, "loaded": loaded, "capabilities": it.Info.Capabilities}
+				"publisher": it.Info.Publisher, "source": it.Info.Source, "loaded": loaded, "capabilities": it.Info.Capabilities,
+				"actions": d.actionRuns(it.Manifest)}
 			if s, ok := c.(interface{ State() string }); ok {
 				row["runtime"], row["state"] = it.Manifest.Runtime, s.State()
 			}
@@ -242,8 +244,12 @@ func (d *Daemon) connectorRoutes(mux *http.ServeMux) {
 			WriteError(w, 400, "bad_request", "name is required")
 			return
 		}
-		// Коннектор из папки с исходниками пересобирается из неё же (своя сборка).
+		// Коннектор из папки с исходниками пересобирается из неё же (своя сборка);
+		// чистый клон репозитория сначала подтягивается, клон с правками — нет.
 		if info, err := d.StoreOptions().Info(req.Name); err == nil && strings.HasPrefix(info.Source, store.SourceDir) {
+			if _, note := gitrepo.PullIfClean(r.Context(), strings.TrimPrefix(info.Source, store.SourceDir)); note != "" {
+				d.Log.Warn("connector update", "connector", req.Name, "git", note)
+			}
 			install(w, r, info.Source, true, req.Consent, true, "")
 			return
 		}

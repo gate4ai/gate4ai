@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
+	"github.com/gate4ai/gate4ai/internal/platform/gitrepo"
 	"github.com/gate4ai/gate4ai/sdk-go/registry"
 )
 
@@ -416,5 +418,88 @@ func TestSourceKind(t *testing.T) {
 	os.WriteFile(bad, []byte("\x7fELF"), 0o755)
 	if _, err := (Options{Dir: dir}).Prepare(context.Background(), bad, true); err == nil || err.Error() != bad+": not a gate4ai package (.g4c)" {
 		t.Fatal(err)
+	}
+}
+
+// Установка из git: клон в папку знаний, своя сборка, повторная установка
+// подтягивает чистый клон; папка с правками не трогается.
+func TestInstallFromGit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds WASM")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	t.Setenv("GOWORK", "off")
+	dir := t.TempDir()
+	origin := filepath.Join(dir, "gate4ai-bank.git")
+	os.MkdirAll(origin, 0o755)
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", origin}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	os.WriteFile(filepath.Join(origin, "go.mod"), []byte("module example.com/bank\n\ngo "+strings.TrimPrefix(runtime.Version(), "go")+"\n"), 0o644)
+	os.WriteFile(filepath.Join(origin, ManifestFile), manifestYAML("1", "api.bank.example", false), 0o644)
+	os.WriteFile(filepath.Join(origin, "main.go"), []byte("package main\n\nfunc main() { println(\"v1\") }\n"), 0o644)
+	git("add", ".")
+	git("commit", "-q", "-m", "one")
+	know := filepath.Join(dir, "knowledge")
+	o := Options{Dir: filepath.Join(dir, "connectors"), KnowledgeDir: know}
+	ctx := context.Background()
+	src := "file://" + origin
+	p, err := o.Prepare(ctx, src, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(know, "gate4ai-bank")
+	if p.Trust != TrustLocal || p.Source != SourceDir+dest || p.Connector != "bank" || p.Commit == "" || p.Repo != src {
+		t.Fatalf("%+v", p)
+	}
+	if !strings.Contains(strings.Join(p.Warnings, "\n"), "from git "+src) {
+		t.Fatalf("%v", p.Warnings)
+	}
+	if _, err := os.Stat(filepath.Join(dest, ".git")); err != nil {
+		t.Fatal("not cloned into the knowledge folder")
+	}
+	info, err := o.Install(p, p.Capabilities)
+	if err != nil || info.Source != SourceDir+dest {
+		t.Fatal(info, err)
+	}
+	// Новый коммит в origin: повторная установка того же адреса подтягивает чистый клон.
+	os.WriteFile(filepath.Join(origin, "main.go"), []byte("package main\n\nfunc main() { println(\"v2\") }\n"), 0o644)
+	git("commit", "-q", "-am", "two")
+	p2, err := o.Prepare(ctx, src, false)
+	if err != nil || p2.Commit == p.Commit || !strings.Contains(strings.Join(p2.Warnings, "\n"), "was updated") {
+		t.Fatalf("%+v %v", p2, err)
+	}
+	// Правки в клоне остаются: pull не делается, собирается как есть.
+	os.WriteFile(filepath.Join(dest, "main.go"), []byte("package main\n\nfunc main() { println(\"local\") }\n"), 0o644)
+	os.WriteFile(filepath.Join(origin, "main.go"), []byte("package main\n\nfunc main() { println(\"v3\") }\n"), 0o644)
+	git("commit", "-q", "-am", "three")
+	p3, err := o.Prepare(ctx, src, false)
+	if err != nil || !strings.Contains(strings.Join(p3.Warnings, "\n"), "local changes") {
+		t.Fatalf("%+v %v", p3, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dest, "main.go")); !strings.Contains(string(b), "local") {
+		t.Fatal("local changes were overwritten")
+	}
+	// Папка с тем же именем, но не клон этого репозитория — отказ.
+	other := filepath.Join(know, "gate4ai-other")
+	os.MkdirAll(other, 0o755)
+	os.WriteFile(filepath.Join(other, ManifestFile), []byte("connector: other\n"), 0o644)
+	if _, err := o.Prepare(ctx, "file://"+filepath.Join(dir, "other.git"), false); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatal(err)
+	}
+	if !sameRepo("https://github.com/A/gate4ai-x.git", "git@github.com:a/gate4ai-x") || sameRepo("https://github.com/a/x", "https://github.com/b/x") {
+		t.Fatal("sameRepo")
+	}
+	u, err := releaseURL(gitrepo.Source{Web: "https://github.com/a/gate4ai-bank"}, dest)
+	if err != nil || u != "https://github.com/a/gate4ai-bank/releases/download/v1/bank-1.g4c" {
+		t.Fatal(u, err)
 	}
 }

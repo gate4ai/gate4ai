@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -237,6 +238,18 @@ func (p *Pipeline) prepareBrowser(ctx context.Context, agent string, act manifes
 		return nil, nil
 	}
 	arg, _ := req.Args["account"].(string)
+	if via, _ := req.Args["via"].(string); via != "" && act.Name == ActionLogin && arg == "" {
+		// Вход коннектором входа: учётка владельца, которая входит через него.
+		alias, err := p.accountVia(cfg, who, via)
+		if err != nil {
+			return nil, err
+		}
+		arg = alias
+		delete(req.Args, "via")
+	}
+	if arg == "" {
+		return nil, abi.Errorf(abi.CodeBadRequest, "account (or via — a login connector) is required")
+	}
 	alias := resolveAccount(cfg, who, arg)
 	cr, ok := cfg.Credentials[alias]
 	if !ok || !p.allowed(cfg, alias, cr, who) {
@@ -264,7 +277,7 @@ func (p *Pipeline) prepareBrowser(ctx context.Context, agent string, act manifes
 		}
 		v, err := p.Vault.Get(secret)
 		if err != nil || v == "" {
-			return denied("secret %s of account %s is not set: the owner sets it — gate4ai vault set %s (asks with hidden input) or Web UI → Secrets", secret, alias, secret)
+			return abi.Errorf(abi.CodeCredentialsRequired, "secret %s of account %s is not set: the owner sets it — gate4ai vault set %s (asks with hidden input) or Web UI → Passwords and accounts%s; never ask for it in the chat; wait with gate4ai vault status %s --wait 10m", secret, alias, secret, p.vaultLink(), alias)
 		}
 		if req.Revealed == nil {
 			req.Revealed = map[string]string{}
@@ -473,4 +486,106 @@ func (p *Pipeline) accountPreview(agent, action string, act manifest.Action, arg
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// vaultLink — ссылка на страницу Vault для текста ошибки ("" — нет).
+func (p *Pipeline) vaultLink() string {
+	if p.VaultURL == nil {
+		return ""
+	}
+	if u := p.VaultURL(); u != "" {
+		return " (" + u + ")"
+	}
+	return ""
+}
+
+// accountVia — учётка вызывающего, которая входит через коннектор входа via;
+// нет такой — credentials_required с готовой правкой add_credential: bind —
+// origin слота коннектора входа, поля — из его слота.
+func (p *Pipeline) accountVia(cfg *config.Config, who accessor, via string) (string, error) {
+	cli, ok := p.Registry.Get(via)
+	if !ok || !isLoginConnector(cli.Manifest()) {
+		return "", abi.Errorf(abi.CodeNotFound, "login connector %s is not installed (gate4ai sites lookup <domain> lists the ones that are)", via)
+	}
+	for _, alias := range slices.Sorted(maps.Keys(cfg.Credentials)) {
+		cr := cfg.Credentials[alias]
+		if cr.Via != nil && cr.Via.Connector == via && p.allowed(cfg, alias, cr, who) {
+			return alias, nil
+		}
+	}
+	m := cli.Manifest()
+	var binds, fields []string
+	for _, c := range m.Credentials {
+		binds = append(binds, c.Bind...)
+		for _, f := range c.Fields {
+			fields = append(fields, fmt.Sprintf(`{"name":%q,"secret":"@<account>.%s"}`, f, f))
+		}
+	}
+	if len(fields) == 0 {
+		fields = []string{`{"name":"login","secret":"@<account>.login","type":"text"}`, `{"name":"password","secret":"@<account>.password"}`}
+	}
+	bind, _ := json.Marshal(binds)
+	return "", abi.Errorf(abi.CodeCredentialsRequired, "no account signs in through %s: ask the owner to create one — change_policy add_credential {account: \"@<account>\", credential_json: {\"bind\": %s, \"via\": {\"connector\": %q, \"action\": \"login\", \"fields\": [%s]}, \"use\": [\"<your profile>\"]}}; the owner then sets the secrets in the vault%s (never ask for them in the chat) and you call browser.login --account @<account>",
+		via, bind, via, strings.Join(fields, ", "), p.vaultLink())
+}
+
+// isLoginConnector — у коннектора есть действие login {account}: коннектор входа.
+func isLoginConnector(m manifest.Manifest) bool {
+	if m.Runtime == manifest.RuntimeBuiltin {
+		return false
+	}
+	for _, a := range m.Actions {
+		if a.Name == ActionLogin {
+			return true
+		}
+	}
+	return false
+}
+
+// loginConnectorFor — поставленный коннектор входа, который работает на origin
+// страницы u (сайты манифеста или bind его слотов); "" — нет.
+func (p *Pipeline) loginConnectorFor(u string) string {
+	host := domain.HostOf(u)
+	if host == "" {
+		return ""
+	}
+	var found []string
+	for _, m := range p.Registry.Manifests() {
+		if !isLoginConnector(m) {
+			continue
+		}
+		for _, c := range m.Credentials {
+			if domain.OriginIn(u, c.Bind) {
+				found = append(found, m.Connector)
+			}
+		}
+		for _, st := range m.Sites {
+			if !strings.Contains(st.Domain, "${") && domain.HostMatches(host, st.Domain) {
+				found = append(found, m.Connector)
+			}
+		}
+	}
+	if len(found) == 0 {
+		return ""
+	}
+	slices.Sort(found)
+	return found[0]
+}
+
+// suggestLoginVia — страница сеанса агента на origin поставленного коннектора
+// входа, а учётки с login_required нет: подсказать войти через него
+// (login_required: {via}). Управление входом отдаётся коннектору входа.
+func (p *Pipeline) suggestLoginVia(act manifest.Action, ex abi.ExecResult) {
+	if act.Name != "open" && act.Name != "observe" {
+		return
+	}
+	m, ok := ex.Structured.(map[string]any)
+	if !ok || m["login_required"] != nil {
+		return
+	}
+	u, _ := m["url"].(string)
+	if via := p.loginConnectorFor(u); via != "" {
+		m["login_required"] = map[string]any{"via": via,
+			"hint": "sign in through the login connector: gate4ai browser login --session <s> --via " + via + " (an account that uses it is picked; none — the answer is credentials_required with the account to create)"}
+	}
 }

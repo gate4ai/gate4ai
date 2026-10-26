@@ -428,6 +428,9 @@ func (u *UI) saveGeneral(w http.ResponseWriter, r *http.Request) map[string]any 
 			c.Store.Registry = strings.TrimSpace(f.Get("registry"))
 			c.Store.RegistryKeys = splitItems(f.Get("registry_keys"))
 		}
+		if f.Has("knowledge_dir") {
+			c.Knowledge.Dir = strings.TrimSpace(f.Get("knowledge_dir"))
+		}
 		for _, k := range []string{"receipts", "denied", "evidence_other", "evidence_money"} {
 			if !f.Has("ret_" + k) {
 				continue

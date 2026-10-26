@@ -15,14 +15,23 @@
 - Сайт без учётки в gate4ai, капча или код из SMS: агент передаёт страницу вам — `gate4ai browser handoff --session s-… --message "Войдите в Хабр" [--until_selector …]`; уведомление со ссылкой на сеанс приходит в Web UI, на рабочий стол, в Telegram и push, вы делаете шаг в просмотре сеанса (Web UI → «Браузер», с телефона тоже) или в окне Chrome gate4ai, агент продолжает, когда адрес сменится (или появится элемент); «Готово» и «Не буду» в просмотре завершают ожидание сразу. Пароли агенту в чате не сообщайте.
 - Вход на сайт: опишите учётку в `credentials` политики (раздел 3а) — агент может прислать её через `change_policy` с `add_credential {account, credential_json}` — всегда с вашим подтверждением и только новую учётку: перезаписать существующую агент не может, секреты в ней — только новые алиасы `@<account>.*`, которых ещё нет в Vault и политике (сослаться на ваш существующий секрет нельзя), значений секретов и секретоподобных ключей в ней нет. Правки настроек коннектора, входящих в `bind` его манифеста (сайт входа), тоже всегда идут вам на подтверждение. Затем положите пароль в хранилище: `gate4ai vault set @site.password` спрашивает значение скрытым вводом (Enter — готово), без терминала — `--from-env VAR` или Web UI → Пароли и учётки (у каждого незаданного секрета учётки — поле «Задать»); тогда агент входит сам `browser.login`, не видя пароля. Или войдите сами в окне выделенного профиля Chrome (`~/.gate4ai-chrome`) — пароль агенту давать нельзя.
 
+## 0а. Сначала — что уже известно о сайте
+
+`gate4ai sites lookup <домен>` (агенту — то же действие `gate4ai sites_lookup`; skill предписывает начинать с него): поставленные коннекторы с этим сайтом и их действия, коннекторы магазина, папки в папке знаний (рецепты и черновики), как входить (учётки владельца с этим origin в `bind`, коннекторы входа) и `hint` — следующий шаг. Есть коннектор — зовите его действия, писать своё не нужно; есть папка знаний — прочитайте её `RECIPE.md` и поставьте сборку из неё; нет ничего — сеанс браузера (раздел 2), а в конце — заготовка из записи сеанса (раздел 1).
+
 ## 1. Заготовка
 
 ```sh
-gate4ai connectors new account_example --site account.example.org
-cd account_example && go mod tidy && go test ./...
+gate4ai connectors new account_example --site account.example.org                      # пустая: действие summary
+gate4ai connectors new account_example --from-session <steps_file> --task pay_bill      # из записи сеанса (browser close --save_steps)
+cd ~/gate4ai-knowledge/gate4ai-account-example && go mod tidy && go test ./...
 ```
 
-Получается: `manifest.yaml` (действие `summary`, `capabilities.services` к `browser`, строка `sites: [{domain: <сайт>, access: allow}]`), `connector.go`, `connector_test.go` на `hosttest.Replay`, `testdata/session.json`, `README.md`.
+Папка создаётся в **папке знаний** владельца (`knowledge.dir`, по умолчанию `~/gate4ai-knowledge`; `-o` — другая), одна папка — один коннектор, имя — `gate4ai-<имя>` как у репозитория магазина. Это просто файлы: `git init`, коммиты и публикацию делает владелец (Web UI → Доступ → Знания показывает команды), daemon — только `git clone` чужих репозиториев. Получается: `manifest.yaml` (`capabilities.services` к `browser`, строки `sites` по доменам сеанса, слот `credentials` — если был вход), `connector.go`, `connector_test.go` на `hosttest.Replay`, `testdata/<действие>.json`, `RECIPE.md` (знания о сайте: шапка YAML — сайт, домены, задачи со статусом `draft` / `verified` и числом подтверждённых прогонов, вход, шаги человека; тело — шаги словами, аргументы, ловушки), `README.md` с блоком «For AI agents», `LICENSE` (AGPL-3.0-only), `.gitignore` с `.explore/`.
+
+`--login-connector <имя>` вместе с `--from-session` выделяет ветку входа (от страницы входа до ухода с неё) во вторую папку `gate4ai-<имя>` — коннектор входа: действие `login {account}` на `observe` / `act` / `fill_secret` по именам полей (`login`, `password`, `code` — по селекторам; значений в коде и фикстуре нет), `services: [login]`, слот `credentials` с `bind` и `fields`; в основном коннекторе вход — один `browser.login` по слоту `site`. Вход меняется чаще всего: первая версия — черновик, проверьте шаги глазами.
+
+С `--from-session` запись сеанса (путь из `steps_file` или id сеанса — файл `browser-steps/<id>.json` каталога данных) очищается от личных данных (как `fixture scrub --auto`) и становится рецептом, фикстурой и черновиком действия: подвызовы браузера по шагам, введённые значения — аргументы `input_N`, класс `write`, если были клики или вход; неудачные шаги — в «Ловушки», шаги человека (`handoff`, код из SMS) — в `human_steps`, запросы агента к API (`network`, `get`, …) — в «Not in the connector». Названия, документы и даты проверьте глазами; покупка или заказ — класс `money` с `verify`.
 
 ## 2. Исследование сайта — в сеансе браузера
 
@@ -83,7 +92,7 @@ connectors:
   account_example: { credentials: { site: "@site" } }                     # слот коннектора → учётка
 ```
 
-**Агент в сеансе:** `browser open` кабинета → сайт уводит на вход, ответ содержит `login_required: {account: "@site"}` → `gate4ai browser login --session s-… --account @site` → `status`: `logged_in`, `submitted` или `still_on_login` (капча, SMS, неверный пароль — человек завершает вход сам, в просмотре сеанса или в окне Chrome gate4ai). После ввода секрета страницу нельзя читать (`secret_on_page`) до перехода — `act` (click, press, wait) работает.
+**Агент в сеансе:** `browser open` кабинета → сайт уводит на вход, ответ содержит `login_required: {account: "@site"}` → `gate4ai browser login --session s-… --account @site`. Учётки нет, но страница — origin поставленного коннектора входа (bind его слота или его `sites`): ответ `login_required: {via: "<коннектор>"}` → `gate4ai browser login --session s-… --via <коннектор>` — учётка владельца, которая входит через него, подбирается сама; нет такой или не заданы секреты — `credentials_required` с готовой правкой `add_credential` (bind и поля — из слота коннектора входа) и ссылкой на страницу «Пароли и учётки»; после `add_credential` ответ `change_policy` называет `secrets_to_set` и `vault_url`, агент ждёт `gate4ai vault status @site --wait 10m` (только «задано / нет») и повторяет `browser.login`. Пароль в чате агент не спрашивает никогда. → `status`: `logged_in`, `submitted` или `still_on_login` (капча, SMS, неверный пароль — человек завершает вход сам, в просмотре сеанса или в окне Chrome gate4ai). После ввода секрета страницу нельзя читать (`secret_on_page`) до перехода — `act` (click, press, wait) работает.
 
 **Коннектор:** в манифесте — слот и подвызов, в коде — вход по `login_required`:
 
@@ -149,8 +158,14 @@ gate4ai log --parent '#e1964671'          # владелец: подвызовы
 gate4ai gate4ai change_policy --summary "install account_example" --changes '[{"op":"install_dev_connector","folder":"/home/me/projects/account_example"}]'
 ```
 
+**Черновик и трасса.** У действий коннекторов не из ядра daemon считает подтверждённые прогоны подряд: меньше трёх — действие `draft`, его ответ несёт `trace` (подвызовы браузера: действие, аргументы, статус, адрес и начало текста страницы) и `runs`; `--trace` даёт трассу и проверенному действию. Если действие-черновик (или с `--trace`) падает, его страница не закрывается, а становится сеансом агента: ответ — код `handoff_to_agent` и `handoff: {session, url, view_url, failed_step, hint}`; агент доделывает задачу на той же странице (`browser observe/act --session …`), закрывает сеанс с `--save_steps` и правит коннектор по номеру неудачного шага. Статус задачи и число прогонов daemon записывает в `RECIPE.md` папки знаний, из которой коннектор поставлен; `not_confirmed` и передача агенту обнуляют счёт.
+
 Ответ своей сборки (из папки или `.g4c` с `--dev`) содержит поле `log` — строки лога коннектора за вызов, включая ошибку действия и его подвызовов; у коннекторов из магазина его нет. Одобрение в Web UI, трее или Telegram многошаговое действие не обрывает. MCP-клиент по stdio получает `notifications/tools/list_changed` и видит новый коннектор без перезапуска; CLI видит его сразу.
 
 ## 5. Публикация
 
 Публикация — [publishing.md](publishing.md) и `registry/CONTRIBUTING.md`: исходник обязателен, лицензия — совместимая с AGPL-3.0, сборка воспроизводимая.
+
+Перед публикацией — `gate4ai knowledge check <имя>` (владелец; Web UI → Доступ → Знания — та же проверка кнопкой): личные данные (почта, телефоны, длинные номера), значения рядом со словами «password», «token», длинные ключи, манифест, рецепт, `LICENSE`, `.gitignore`. Публикует владелец сам: `git init`, `gh repo create <you>/gate4ai-<имя> --public --source . --push`, тема `gate4ai-connector` на GitHub — команды печатает `knowledge check` и показывает Web UI; чужой клон — `gh repo fork` и pull request. Другие ставят репозиторий командой `gate4ai connectors install github.com/<user>/gate4ai-<имя>[@тег]`: daemon клонирует его в их папку знаний, собирает как свою сборку (уровень `local`, согласие с источником и коммитом; без Go — пакет релиза `v<version>`), а правки в клоне уходят вам pull request'ом.
+
+Как агент сам сохраняет знания о сайте (рецепт), делится коннектором из папки знаний и чинит его при повторных запусках — [connector-sharing-ux.md](connector-sharing-ux.md).

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -20,7 +21,8 @@ const accessUsage = `usage:
   gate4ai access folders                            folders and their access
   gate4ai access folders set <folder> <access>      allow | append | read | connector | ask | deny; folder: ~/notes, /data, ~/notes/**/*.md
   gate4ai access folders remove <folder>
-  gate4ai sites allow <site>...                     the same as: access sites set <site> allow`
+  gate4ai sites allow <site>...                     the same as: access sites set <site> allow
+  gate4ai sites lookup <domain>                     what is known about a site: connectors, store, knowledge folder, sign-in, next step`
 
 // accessCmd — списки доступа Браузера и Файлов без правки YAML (команда владельца).
 func (e *Env) accessCmd(ctx context.Context, args []string) int {
@@ -121,6 +123,18 @@ func (e *Env) sites(ctx context.Context, args []string) int {
 		return code
 	case "remove", "rm":
 		return e.accessCmd(ctx, append([]string{"sites", "remove"}, args[1:]...))
+	case "lookup":
+		if len(args) != 2 {
+			fmt.Fprintln(e.Stderr, accessUsage)
+			return ExitUsage
+		}
+		// Агент — действие встроенного коннектора gate4ai под своим профилем;
+		// владелец — тот же ответ без фильтра профиля.
+		if e.AgentMode() {
+			e.ownerCmd = false
+			return e.action(ctx, "gate4ai", []string{"sites_lookup", "--domain", args[1]})
+		}
+		return e.call(ctx, e.Client(), "GET", "/v1/sites/lookup?domain="+url.QueryEscape(args[1]), nil)
 	}
 	fmt.Fprintln(e.Stderr, accessUsage)
 	return ExitUsage

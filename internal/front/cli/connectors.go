@@ -22,13 +22,18 @@ import (
 
 	"github.com/gate4ai/gate4ai/internal/connectors/store"
 	"github.com/gate4ai/gate4ai/internal/connectors/wasm"
+	"github.com/gate4ai/gate4ai/internal/platform/gitrepo"
 )
 
 const connectorsUsage = `usage:
   gate4ai connectors list
-  gate4ai connectors new <name> --site <domain> [-o folder]   a WASM connector over the browser to start from
+  gate4ai connectors new <name> [--site <domain>] [--from-session <s-id | steps.json>] [--task <action>] [-o folder]
+                                                   a connector over the browser in the knowledge folder; --from-session: recipe,
+                                                   fixture and a draft action from a recorded session (connectors new --help)
   gate4ai connectors install <name[@version]> [--yes]            from the store (a bare name never means a file)
   gate4ai connectors install <./file.g4c | https://…/file.g4c> [--dev] [--yes]
+  gate4ai connectors install <github.com/user/gate4ai-name[@tag] | git url> [--yes]   clone into the knowledge folder and build
+                                                                (your own build, trust local; without Go — the release package)
   gate4ai connectors install <./source-folder> [--yes] [--watch] build from Go sources (your own build, like --dev);
                                                                 a file or folder needs a path: with / or .g4c
   gate4ai connectors update <name> [--yes] [--watch]           a connector from a folder is rebuilt from it;
@@ -70,7 +75,7 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 	case "verify":
 		return e.verifyPackage(ctx, rest)
 	case "new":
-		return e.scaffold(rest)
+		return e.scaffold(ctx, rest)
 	}
 	// Остальные команды — к daemon (сокет владельца).
 	c := e.Client()
@@ -108,6 +113,14 @@ func (e *Env) connectors(ctx context.Context, args []string) int {
 			var err error
 			if folder, err = e.installedFolder(ctx, pos[0]); err != nil {
 				return e.fail(err)
+			}
+			if folder != "" {
+				// Клон репозитория: чистый подтягивается, с правками — остаётся как есть.
+				if pulled, note := gitrepo.PullIfClean(ctx, folder); note != "" {
+					fmt.Fprintln(e.Stderr, "gate4ai: "+note)
+				} else if pulled {
+					fmt.Fprintln(e.Stderr, "gate4ai: pulled the latest changes into "+folder)
+				}
 			}
 		} else {
 			src, dir, err := installSource(pos[0], e.Stderr)
@@ -192,8 +205,8 @@ func installSource(arg string, hint io.Writer) (source, folder string, err error
 		}
 		return arg, "", nil
 	}
-	if strings.Contains(arg, "://") {
-		return arg, "", nil
+	if strings.Contains(arg, "://") || gitrepo.IsGit(arg) {
+		return arg, "", nil // адрес .g4c или git-репозиторий: клонирует и собирает daemon
 	}
 	if dir, ok := store.SourceFolder(arg); ok {
 		return arg, dir, nil

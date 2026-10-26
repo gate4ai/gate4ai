@@ -64,7 +64,11 @@ const (
 	CodeLimit            = "limit_exceeded"    // квота, размер, время
 	CodeConnector        = "connector_error"   // ошибка самого коннектора
 	CodeSecretDenied     = "secret_denied"     // учётка недоступна вызывающему (или не задана)
-	CodeCancelled        = "cancelled"         // вызов отменён: запрос, который его начал, закончился
+	// CodeCredentialsRequired — входа нет: учётки для этого коннектора входа
+	// или origin ещё нет, или её секреты не заданы; владелец создаёт учётку
+	// (add_credential) и задаёт значения в Vault.
+	CodeCredentialsRequired = "credentials_required"
+	CodeCancelled           = "cancelled" // вызов отменён: запрос, который его начал, закончился
 )
 
 // Error — ошибка ABI.

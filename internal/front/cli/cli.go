@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
@@ -191,12 +192,15 @@ Owner commands (local socket):
   gate4ai policy show | set <file> [-m comment] | versions | rollback <n> | test --agent a --action x [--args json] [--file draft.yaml]
   gate4ai approvals [list] [--table|--json] | approve <id> | reject <id> | questions | answer <id> (value from stdin)
   gate4ai vault list | set <alias> [--from-env VAR] (asks with hidden input; or the value from stdin) | rm <alias>
+  gate4ai vault status <@account> [--wait 10m]   are the account's secrets set (no values; agents may ask and wait for the owner)
   gate4ai access [sites | folders [set <site|folder> <access> | remove <site|folder>]]   the Browser and Files access lists
   gate4ai browser sessions [close <id>] | watch <id> [--remote]   browser sessions of agents: list, live view, close
   gate4ai browser setup [--yes] [--dry-run]   check Chrome, the virtual screen (Xvfb) and fonts; install what is missing (asks first)
   gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
-  gate4ai connectors list | install <file.g4c | name[@version] | source folder> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | logs <name> [--limit n] [--since 10m] | refresh
-  gate4ai connectors new <name> --site <domain> [-o folder]   a connector over the browser to start from (offline)
+  gate4ai connectors list | install <file.g4c | name[@version] | source folder | git url> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | logs <name> [--limit n] [--since 10m] | refresh
+  gate4ai connectors new <name> [--site <domain>] [--from-session <s-id | steps.json>] [--task <action>] [-o folder]   a connector in the knowledge folder; --from-session: recipe and draft from a recorded session
+  gate4ai knowledge [list] | check <name>   the knowledge folder (recipes and connectors agents made) and the check before you publish a folder yourself
+  gate4ai sites lookup <domain>           what is known about a site: connectors, store, knowledge folder, sign-in, next step (agents too)
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c] | verify <dir> <file.g4c> | keygen [-o key]   (publisher / registry review, offline)
   gate4ai registry check <index.json> [--key ed25519:…] [--fetch] | sign <index.json> --key file | add <index.json> <pack.json> --publisher name …   (registry)
   gate4ai fixture scrub <file.json> [-o out] [--replace "real=fake"]... [--auto]   personal data out of a recorded browser session
@@ -213,7 +217,10 @@ Output: JSON {"status": "ok" | "denied" | "pending" | "error" | "verification_fa
 
 // commands — встроенные команды (остальное первое слово — имя коннектора).
 var commands = []string{"help", "version", "tools", "status", "skill", "mcp", "pair", "daemon", "service", "log", "show", "export",
-	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "access", "relay", "connectors", "registry", "contract", "fixture", "ui", "run", "doctor", "egress"}
+	"verify", "journal", "agents", "policy", "approvals", "vault", "sites", "access", "relay", "connectors", "knowledge", "registry", "contract", "fixture", "ui", "run", "doctor", "egress"}
+
+// VaultPoll — как часто vault status --wait спрашивает daemon.
+var VaultPoll = 2 * time.Second
 
 // Run — точка входа CLI.
 func Run(ctx context.Context, e *Env, args []string) int {
@@ -293,6 +300,8 @@ func Run(ctx context.Context, e *Env, args []string) int {
 		return e.relay(ctx, rest)
 	case "connectors":
 		return e.connectors(ctx, rest)
+	case "knowledge":
+		return e.knowledgeCmd(ctx, rest)
 	case "registry":
 		return e.registry(ctx, rest)
 	case "contract":
@@ -538,7 +547,7 @@ func (e *Env) action(ctx context.Context, conn string, args []string) int {
 	if opts.json {
 		e.ForceJSON = true
 	}
-	body := map[string]any{"action": tool.Name, "args": vals, "wait": opts.wait, "agent": opts.as}
+	body := map[string]any{"action": tool.Name, "args": vals, "wait": opts.wait, "agent": opts.as, "trace": opts.trace}
 	var res map[string]any
 	if err := e.Client().Do(ctx, "POST", "/v1/call", body, &res); err != nil {
 		return e.fail(err)
@@ -675,7 +684,7 @@ func (e *Env) actionHelp(t skill.Tool) {
 		}
 		fmt.Fprintf(e.Stdout, "  --%-14s %s%s  %s%s\n", p.Name, flagType(p.Schema), req, p.Schema.Description, bracket(skill.Limits(p.Schema)))
 	}
-	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n"+
+	fmt.Fprintf(e.Stdout, "\nOptions:\n  --wait 10m        wait for approval if needed\n  --json '{...}'    all arguments as a JSON object (bare --json: JSON output, as always)\n  --trace           connector actions: the browser calls it made (trace); on failure the page stays open as your session (handoff_to_agent)\n"+
 		"  --<name>_file f   a string argument from file f (- — stdin), e.g. --value_file article.md\n  --out f           save the image or the file of the result (page_screenshot, browser.download, files.read) to file f;\n                    pending approval: gate4ai status <id> --wait 10m --out f saves it after the decision\n  --as <agent>      owner only: run with this agent's profile\n\nExample:\n  %s\n", skill.Example(t))
 }
 
@@ -727,7 +736,7 @@ func hoistCallOpts(args []string) (rest, opts []string) {
 		switch {
 		case !strings.HasPrefix(a, "--"):
 			return args, opts
-		case name == "json" && !hasVal:
+		case (name == "json" || name == "trace") && !hasVal:
 			opts, args = append(opts, a), args[1:]
 		case (name == "wait" || name == "as" || name == "out") && hasVal:
 			opts, args = append(opts, a), args[1:]
@@ -741,11 +750,12 @@ func hoistCallOpts(args []string) (rest, opts []string) {
 }
 
 type callOpts struct {
-	wait string
-	as   string
-	help bool
-	json bool   // --json без значения: вывод JSON
-	out  string // --out f: изображение или файл ответа — в файл f
+	wait  string
+	as    string
+	help  bool
+	json  bool   // --json без значения: вывод JSON
+	out   string // --out f: изображение или файл ответа — в файл f
+	trace bool   // --trace: подвызовы браузера в ответе, при сбое — страница агенту
 }
 
 // MaxArgFile — предел файла аргумента (--<name>_file).
@@ -807,6 +817,9 @@ func parseArgs(t skill.Tool, args []string, stdin io.Reader) (map[string]any, ca
 		_, isArg := types[name]
 		switch {
 		case isArg:
+		case name == "trace" && !hasVal:
+			o.trace = true
+			continue
 		case name == "out":
 			v, err := next()
 			if err != nil {
@@ -1294,6 +1307,45 @@ func (e *Env) vault(ctx context.Context, args []string) int {
 		}
 		e.printJSON(map[string]any{"status": "ok", "alias": "@" + strings.TrimPrefix(args[0], "@")})
 		return ExitOK
+	case "status":
+		// Заданы ли секреты учётки — без значений; доступно и агенту (он ждёт владельца).
+		pos, fl := splitFlags(args, map[string]bool{"wait": true})
+		fs := flag.NewFlagSet("vault status", flag.ContinueOnError)
+		fs.SetOutput(e.Stderr)
+		wait := fs.String("wait", "", "wait until every secret of the account is set, e.g. 10m")
+		if fs.Parse(fl) != nil || len(pos) != 1 {
+			fmt.Fprintln(e.Stderr, "usage: gate4ai vault status <@account> [--wait 10m]   are the account's secrets set (yes/no, no values); agents may ask")
+			return ExitUsage
+		}
+		e.ownerCmd = false
+		c = e.Client()
+		var d time.Duration
+		if *wait != "" {
+			var err error
+			if d, err = time.ParseDuration(*wait); err != nil {
+				return e.fail(fmt.Errorf("--wait: %v", err))
+			}
+		}
+		deadline := time.Now().Add(d)
+		for {
+			var res map[string]any
+			if err := c.Do(ctx, "GET", "/v1/vault/status?account="+url.QueryEscape(pos[0]), nil, &res); err != nil {
+				return e.fail(err)
+			}
+			if res["ready"] == true || time.Now().After(deadline) {
+				e.printJSON(res)
+				if res["ready"] == true {
+					return ExitOK
+				}
+				fmt.Fprintln(e.Stderr, "gate4ai: not all secrets of "+pos[0]+" are set yet; the owner sets them in Web UI → Passwords and accounts")
+				return ExitPending
+			}
+			select {
+			case <-ctx.Done():
+				return ExitError
+			case <-time.After(VaultPoll):
+			}
+		}
 	case "rm":
 		if len(args) != 1 {
 			fmt.Fprintln(e.Stderr, "usage: gate4ai vault rm <alias>")
@@ -1305,7 +1357,7 @@ func (e *Env) vault(ctx context.Context, args []string) int {
 		e.printJSON(map[string]any{"status": "ok"})
 		return ExitOK
 	}
-	fmt.Fprintln(e.Stderr, "usage: gate4ai vault list | set <alias> | rm <alias>")
+	fmt.Fprintln(e.Stderr, "usage: gate4ai vault list | set <alias> | rm <alias> | status <@account> [--wait 10m]")
 	return ExitUsage
 }
 

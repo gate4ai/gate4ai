@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -625,6 +626,43 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 	mux.HandleFunc("GET /v1/whoami", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		WriteJSON(w, 200, map[string]any{"owner": p.IsOwner(), "agent": p.Agent, "via": p.Via})
 	}))
+	mux.HandleFunc("GET /v1/vault/status", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		// Заданы ли секреты учётки (только да/нет, без значений): агент ждёт,
+		// пока владелец заполнит их на странице Vault; видны учётки его профиля.
+		account := strings.TrimSpace(r.URL.Query().Get("account"))
+		if !strings.HasPrefix(account, "@") {
+			account = "@" + account
+		}
+		cfg := d.Config.Current()
+		cr, ok := cfg.Credentials[account]
+		if ok && !p.IsOwner() && !slices.Contains(cr.Use, cfg.Agents[p.Agent].Profile) {
+			ok = false
+		}
+		if !ok {
+			WriteError(w, 404, "not_found", fmt.Sprintf("no account %s available to you (the owner creates it: change_policy add_credential)", account))
+			return
+		}
+		set := map[string]bool{}
+		for _, a := range d.Vault.Aliases() {
+			set["@"+strings.TrimPrefix(a, "@")] = true
+		}
+		var secrets []map[string]any
+		ready := true
+		for _, a := range cr.Secrets() {
+			secrets = append(secrets, map[string]any{"alias": a, "set": set[a]})
+			if !set[a] {
+				ready = false
+			}
+		}
+		if secrets == nil {
+			secrets = []map[string]any{}
+		}
+		out := map[string]any{"account": account, "ready": ready, "secrets": secrets, "vault_url": d.VaultURL()}
+		if cr.Via != nil {
+			out["via"] = cr.Via.Connector
+		}
+		WriteJSON(w, 200, out)
+	}))
 	mux.HandleFunc("GET /v1/tools", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		if as := r.URL.Query().Get("agent"); as != "" && p.IsOwner() {
 			p = auth.AgentVia(as, "socket")
@@ -637,6 +675,7 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 			Args   map[string]any `json:"args"`
 			Wait   string         `json:"wait"`
 			Agent  string         `json:"agent"` // только владелец: выполнить от имени агента (его профиль)
+			Trace  bool           `json:"trace"` // подвызовы браузера в ответ; при сбое — страница агенту
 		}
 		if err := readJSON(r, &req); err != nil {
 			WriteError(w, 400, "bad_request", err.Error())
@@ -659,7 +698,7 @@ func (d *Daemon) agentRoutes(mux *http.ServeMux, anyp func(func(http.ResponseWri
 			wait = min(wait, maxPublicWait)
 		}
 		args, _ := numbersToFloat(map[string]any(req.Args)).(map[string]any)
-		res := d.Pipeline.Execute(r.Context(), pipeline.Call{Agent: agent, Action: req.Action, Args: args, Wait: wait})
+		res := d.Pipeline.Execute(r.Context(), pipeline.Call{Agent: agent, Action: req.Action, Args: args, Wait: wait, Trace: req.Trace})
 		WriteJSON(w, 200, res)
 	}))
 	mux.HandleFunc("GET /v1/status/{id}", anyp(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {

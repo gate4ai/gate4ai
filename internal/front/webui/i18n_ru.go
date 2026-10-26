@@ -7,6 +7,40 @@ package webui
 // TestRussianCatalogComplete. Термины: daemon → gate4.ai, relay → доступ из
 // интернета, profile → права агента, receipt → запись журнала.
 var ru = map[string]string{
+	// Статус действий по прогонам.
+	"a draft runs with a trace of its browser calls; on failure the page is handed to the agent": "черновик выполняется с трассой подвызовов браузера; при сбое страница передаётся агенту",
+	// Установка из git.
+	"<b>A git repository</b> (<code>github.com/user/gate4ai-name</code>, optionally <code>@tag</code>) — cloned into your knowledge folder and built there as your own build; without Go — the package of its release.": "<b>Git-репозиторий</b> (<code>github.com/user/gate4ai-name</code>, можно <code>@тег</code>) — клонируется в вашу папку знаний и собирается там как своя сборка; без Go — пакет его релиза.",
+	"commit": "коммит",
+	// Знания (папка знаний).
+	"%s: no such folder in %s": "%s: такой папки нет в %s",
+	"<b>Connector</b> — the same steps as a WebAssembly module that runs in the sandbox through your Browser; install it from the folder, and the agent calls one action instead of a browser session.":                                                                                          "<b>Коннектор</b> — те же шаги модулем WebAssembly, который работает в песочнице через ваш Браузер; поставьте его из папки, и агент вызывает одно действие вместо сеанса браузера.",
+	"<b>Recipe</b> (<code>RECIPE.md</code>) — the steps on the site in words, what the human does (SMS codes, payment), pitfalls and how many runs confirmed each task. Agents read it as data, never as instructions.":                                                                          "<b>Рецепт</b> (<code>RECIPE.md</code>) — шаги на сайте словами, что делает человек (коды из SMS, оплата), ловушки и сколько прогонов подтвердили каждую задачу. Агенты читают его как данные, а не как инструкции.",
+	"<b>Sharing</b> — one folder is one repository <code>gate4ai-&lt;name&gt;</code> on GitHub under AGPL-3.0; another agent installs it with <code>gate4ai connectors install &lt;git url&gt;</code>. Someone else's repository cloned here is fixed in place and sent back as a pull request.": "<b>Обмен</b> — одна папка — один репозиторий <code>gate4ai-&lt;имя&gt;</code> на GitHub под AGPL-3.0; другой агент ставит его командой <code>gate4ai connectors install &lt;git url&gt;</code>. Чужой репозиторий, клонированный сюда, правится на месте и уходит автору pull request'ом.",
+	"Check before publishing":           "Проверить перед публикацией",
+	"Check before publishing: %s":       "Проверка перед публикацией: %s",
+	"Folder:":                           "Папка:",
+	"How to publish on GitHub":          "Как опубликовать на GitHub",
+	"How to push the changes":           "Как отправить правки",
+	"How to send the fix to the author": "Как отправить исправление автору",
+	"Knowledge":                         "Знания",
+	"Knowledge folder":                  "Папка знаний",
+	"Look at these by eye:":             "Посмотрите глазами:",
+	"Not ready: fix the errors below.":  "Не готово: исправьте ошибки ниже.",
+	"Nothing yet. When an agent finishes a task on a site in a browser session, it keeps what it learned here: gate4ai connectors new <name> --site <domain> --from-session <session> --task <task>.": "Пока ничего. Когда агент заканчивает задачу на сайте в сеансе браузера, он сохраняет узнанное сюда: gate4ai connectors new <имя> --site <домен> --from-session <сеанс> --task <задача>.",
+	"Ready to publish: no personal data or secrets found in %d files.":                                                                            "Готово к публикации: личных данных и секретов не найдено (файлов: %d).",
+	"Run these yourself in a terminal: gate4.ai never pushes or creates repositories for you. The topic %s lets other agents find the connector.": "Выполните это сами в терминале: gate4.ai не делает push и не создаёт репозитории за вас. По теме %s коннектор находят другие агенты.",
+	"Sites:": "Сайты:",
+	"Tests and the build are not run here: the agent runs go test ./... in the folder.": "Тесты и сборка здесь не запускаются: агент выполняет go test ./... в папке.",
+	"What agents learned about sites: a folder per connector with a recipe (steps, pitfalls, how verified it is), its code and test fixtures. gate4.ai writes plain files here and clones public repositories; git init, commits and publishing are yours — the hints below show how.": "Что агенты узнали о сайтах: папка на коннектор с рецептом (шаги, ловушки, насколько проверено), его кодом и фикстурами тестов. gate4.ai пишет сюда обычные файлы и клонирует публичные репозитории; git init, коммиты и публикация — ваши, подсказки ниже показывают как.",
+	"Where agents keep what they learned about sites (recipes and connectors); empty — ~/gate4ai-knowledge": "Где агенты хранят узнанное о сайтах (рецепты и коннекторы); пусто — ~/gate4ai-knowledge",
+	"draft":               "черновик",
+	"files only":          "только файлы",
+	"git, not published":  "git, не опубликовано",
+	"last %s":             "последний раз %s",
+	"published":           "опубликовано",
+	"unpublished changes": "есть неопубликованные правки",
+	"verified %d times":   "проверено %d раз",
 	// Списки доступа Браузера и Файлов.
 	"%s removed from the list.": "%s убран из списка.",
 	"A connector is a WebAssembly module from the store that works with a site through the built-in browser: high-level actions instead of clicks. It sees only the sites and folders you allowed and never knows your passwords.": "Коннектор — модуль WebAssembly из магазина, который работает с сайтом через встроенный браузер: высокоуровневые действия вместо кликов. Он видит только разрешённые вами сайты и папки и никогда не знает ваших паролей.",

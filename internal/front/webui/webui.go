@@ -36,6 +36,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/audit"
 	"github.com/gate4ai/gate4ai/internal/daemon"
 	"github.com/gate4ai/gate4ai/internal/front/agentsetup"
+	"github.com/gate4ai/gate4ai/internal/pipeline"
 	"github.com/gate4ai/gate4ai/internal/platform/auth"
 	"github.com/gate4ai/gate4ai/internal/platform/browserenv"
 	"github.com/gate4ai/gate4ai/internal/relayclient"
@@ -70,10 +71,11 @@ var funcs = template.FuncMap{
 		}
 		return m
 	},
-	"lines":  func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
-	"first":  func(s string) string { return strings.SplitN(s, "\n", 2)[0] },
-	"langs":  func() any { return Langs },
-	"pageOf": pageOf,
+	"lines":         func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
+	"first":         func(s string) string { return strings.SplitN(s, "\n", 2)[0] },
+	"langs":         func() any { return Langs },
+	"pageOf":        pageOf,
+	"verifiedAfter": func() int { return pipeline.VerifiedAfter },
 }
 
 // tpls — шаблоны на каждом языке: функции перевода привязаны к языку.
@@ -94,7 +96,7 @@ func tplIn(l string) *template.Template {
 }
 
 var titles = map[string]string{"overview": "Home", "approvals": "Approvals", "telegram": "Telegram", "agents": "Agents", "agent": "Agent",
-	"agent_new": "New agent", "setup": "Getting started", "connectors": "Access", "connector": "Connector", "policy": "Rules", "rule": "Rule", "templates": "Ready-made rules",
+	"agent_new": "New agent", "setup": "Getting started", "connectors": "Access", "connector": "Connector", "knowledge": "Knowledge", "policy": "Rules", "rule": "Rule", "templates": "Ready-made rules",
 	"policy_yaml": "YAML", "journal": "Journal", "receipt": "Journal entry", "vault": "Passwords and accounts", "settings": "Settings", "relay": "Internet access",
 	"remote_only": "Only on this computer", "browser": "Browser", "browser_view": "Browser session", "server": "Server"}
 
@@ -423,6 +425,7 @@ func (u *UI) handler(m mount) http.Handler {
 	localPage("/access/files", u.builtinPage("files"))
 	localPage("/connectors", u.connectorsPage)
 	localPage("/connectors/{name}", u.connectorPage)
+	localPage("/knowledge", u.knowledgePage)
 	localPage("/policy", u.policyPage)
 	localPage("/policy/rule", u.rulePage)
 	localPage("/policy/templates", u.templatesPage)
@@ -464,6 +467,7 @@ func (u *UI) handler(m mount) http.Handler {
 	change("/agents/{name}/client/remove", u.disconnectClient)
 	change("/connectors/install", u.installConnector)
 	change("/connectors/refresh", u.refreshIndex)
+	change("/knowledge/check", u.checkKnowledge)
 	change("/connectors/{name}/settings", u.saveConnectorSettings)
 	change("/connectors/{name}/remove", u.removeConnector)
 	change("/connectors/{name}/reinstall", u.reinstallConnector)
@@ -617,7 +621,7 @@ func (v view) Section() string {
 		return "home"
 	case "agents", "agent", "agent_new":
 		return "agents"
-	case "connectors", "connector", "builtin", "policy", "rule", "templates", "policy_yaml":
+	case "connectors", "connector", "builtin", "knowledge", "policy", "rule", "templates", "policy_yaml":
 		return "access"
 	case "journal", "receipt":
 		return "journal"

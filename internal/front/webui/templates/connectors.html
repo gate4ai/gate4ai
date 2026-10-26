@@ -4,7 +4,7 @@
 {{with $d.Plan}}
 <div class="card" style="border-color:var(--accent)">
 <h3>{{T "Install %s %s?" $d.PlanTitle .Version}}</h3>
-<p>{{T "Publisher:"}} <b>{{or .Publisher "—"}}</b> · {{if eq .Trust "verified"}}<span class="badge ok">{{T "verified by gate4.ai"}}</span>{{else if eq .Trust "publisher"}}<span class="badge ok">{{T "verified publisher"}}</span>{{else if eq .Trust "community"}}<span class="badge warn">{{T "community — read only"}}</span>{{else}}<span class="badge">{{.Trust}}</span>{{end}}{{if .Repo}} · <a href="{{.Repo}}" target="_blank" rel="noopener">{{T "source code"}}</a>{{end}}</p>
+<p>{{T "Publisher:"}} <b>{{or .Publisher "—"}}</b> · {{if eq .Trust "verified"}}<span class="badge ok">{{T "verified by gate4.ai"}}</span>{{else if eq .Trust "publisher"}}<span class="badge ok">{{T "verified publisher"}}</span>{{else if eq .Trust "community"}}<span class="badge warn">{{T "community — read only"}}</span>{{else}}<span class="badge">{{.Trust}}</span>{{end}}{{if .Repo}} · <a href="{{.Repo}}" target="_blank" rel="noopener">{{T "source code"}}</a>{{end}}{{if .Commit}} · {{T "commit"}} <code>{{.Commit}}</code>{{end}}</p>
 <p>{{T "The connector gets only this — gate4.ai gives it nothing more:"}}</p>
 <ul>{{range $d.PlanCaps}}<li>{{.Text}}</li>{{else}}<li>{{T "nothing: computation only"}}</li>{{end}}</ul>
 <details><summary>{{T "Technical"}}</summary><ul class="help">{{range .Capabilities}}<li><code>{{.}}</code></li>{{end}}</ul></details>
@@ -47,9 +47,10 @@
 </details>
 <div class="modal" id="m-local" role="dialog" aria-modal="true" aria-labelledby="m-local-h"><div class="box"><h3 id="m-local-h">{{T "Install not from the store"}}</h3>
 <form method="get" action="{{.Base}}/connectors" data-busy="{{T "Checking…"}}"><input type="hidden" name="local" value="1">
-<label for="m-local-src">{{T "Folder, file or build address"}}</label><input id="m-local-src" name="install" required placeholder="~/projects/lk_emias  ·  ~/bin/mail.g4c  ·  https://…/mail.g4c" value="{{if $d.Local}}{{$d.Src}}{{end}}">
+<label for="m-local-src">{{T "Folder, file or build address"}}</label><input id="m-local-src" name="install" required placeholder="~/projects/lk_emias  ·  github.com/user/gate4ai-rzd  ·  https://…/mail.g4c" value="{{if $d.Local}}{{$d.Src}}{{end}}">
 <ul class="help" style="padding-left:1.1rem"><li>{{TH "<b>A source folder</b> (with <code>manifest.yaml</code>) — gate4.ai builds the connector itself; Go is needed."}}</li>
 <li>{{TH "<b>A file</b> <code>.g4c</code> on this computer or <b>an address</b> <code>https://…/*.g4c</code>."}}</li>
+<li>{{TH "<b>A git repository</b> (<code>github.com/user/gate4ai-name</code>, optionally <code>@tag</code>) — cloned into your knowledge folder and built there as your own build; without Go — the package of its release."}}</li>
 <li>{{T "The path is typed: the browser does not tell a site where a chosen folder is, and gate4.ai runs on this same computer."}}</li></ul>
 <label class="inline"><input type="checkbox" name="dev" value="1" {{if or $d.Dev (not $d.Local)}}checked{{end}}> {{T "own build: install without a trusted publisher's signature"}}</label>
 <p class="help">{{TH "Without the box only a package signed by the store publisher or by a key from <code>store.trusted_keys</code> is installed. A build from a folder needs the box."}}</p>
@@ -60,5 +61,6 @@
 <nav class="tabs" aria-label="{{T "Access"}}"><a href="{{$v.Base}}/access/browser" class="{{if eq .On "browser"}}on{{end}}"{{if eq .On "browser"}} aria-current="page"{{end}}>{{T "Browser"}}</a>
 <a href="{{$v.Base}}/access/files" class="{{if eq .On "files"}}on{{end}}"{{if eq .On "files"}} aria-current="page"{{end}}>{{T "Files"}}</a>
 <a href="{{$v.Base}}/connectors" class="{{if eq .On "connectors"}}on{{end}}"{{if eq .On "connectors"}} aria-current="page"{{end}}>{{T "Connectors"}}</a>
+<a href="{{$v.Base}}/knowledge" class="{{if eq .On "knowledge"}}on{{end}}"{{if eq .On "knowledge"}} aria-current="page"{{end}}>{{T "Knowledge"}}</a>
 <a href="{{$v.Base}}/policy" class="{{if eq .On "rules"}}on{{end}}"{{if eq .On "rules"}} aria-current="page"{{end}}>{{T "Rules"}}</a>
 <a href="{{$v.Base}}/policy/templates" class="{{if eq .On "templates"}}on{{end}}"{{if eq .On "templates"}} aria-current="page"{{end}}>{{T "Ready-made rules"}}</a></nav>{{end}}

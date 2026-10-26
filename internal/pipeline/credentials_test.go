@@ -32,7 +32,7 @@ type fakeBrowser struct {
 }
 
 func (b *fakeBrowser) Manifest() manifest.Manifest {
-	obj := manifest.MustSchema(`{ type: object, properties: { session: { type: string }, account: { type: string }, field: { type: string }, selector: { type: string }, source: { type: string }, prompt: { type: string } } }`)
+	obj := manifest.MustSchema(`{ type: object, properties: { session: { type: string }, account: { type: string }, via: { type: string }, field: { type: string }, selector: { type: string }, source: { type: string }, prompt: { type: string } } }`)
 	m := manifest.Manifest{Connector: "browser", Runtime: b.runtime, Contract: 1, Services: []string{"open", "observe", "login", "fill_secret"}, Actions: []manifest.Action{
 		{Name: "open", Class: "read", InputSchema: manifest.MustSchema(`{ type: object, properties: { url: { type: string }, session: { type: string } } }`)},
 		{Name: "observe", Class: "read", InputSchema: manifest.MustSchema(`{ type: object, properties: { session: { type: string } } }`)},
@@ -520,5 +520,48 @@ func TestHandoffNotifiesAfterPrecheck(t *testing.T) {
 	}
 	if reqs != 3 { // проверка закрытого сеанса, проверка и ожидание
 		t.Fatal(reqs)
+	}
+}
+
+// Вход через коннектор входа по --via: учётка владельца подбирается сама; нет
+// такой — credentials_required с готовой правкой add_credential; незаданный
+// секрет — credentials_required со ссылкой на Vault; страница на origin
+// коннектора входа подсказывает login_required.via.
+func TestLoginViaAndCredentialsRequired(t *testing.T) {
+	e := newCredEnv(t, manifest.RuntimeBuiltin)
+	e.p.VaultURL = func() string { return "http://127.0.0.1:7431/vault" }
+	ctx := context.Background()
+	r := e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.login", Args: map[string]any{"session": "s-1", "via": "bank_login"}})
+	if r.Status != StatusOK {
+		t.Fatalf("%+v", r)
+	}
+	if rec := e.br.last(); rec.Action != "login" || rec.Args[ArgRecordOnly] != true || rec.Args["account"] != "@bank" || rec.Args["via"] != nil {
+		t.Fatalf("%+v", rec)
+	}
+	// Коннектор входа есть, учётки через него у агента нет — что создать.
+	r = e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.login", Args: map[string]any{"session": "s-1", "via": "slotted"}})
+	if r.Code != CodeCredentialsRequired || !strings.Contains(r.Message, `"via": {"connector": "slotted"`) || !strings.Contains(r.Message, "https://login.example") || !strings.Contains(r.Message, "127.0.0.1:7431/vault") {
+		t.Fatalf("%+v", r)
+	}
+	if r = e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.login", Args: map[string]any{"session": "s-1", "via": "nosuch"}}); r.Status == StatusOK || !strings.Contains(r.Message, "not installed") {
+		t.Fatalf("%+v", r)
+	}
+	if r = e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.login", Args: map[string]any{"session": "s-1"}}); r.Status == StatusOK || !strings.Contains(r.Message, "account (or via") {
+		t.Fatalf("%+v", r)
+	}
+	// Секрет не задан: credentials_required, ссылка на Vault, как дождаться.
+	e.p.Vault = fakeVault{}
+	r = e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.login", Args: map[string]any{"session": "s-1", "account": "@emias"}})
+	if r.Code != CodeCredentialsRequired || !strings.Contains(r.Message, "vault status @emias --wait") || !strings.Contains(r.Message, "127.0.0.1:7431/vault") {
+		t.Fatalf("%+v", r)
+	}
+	// Страница на origin слота коннектора входа slotted: подсказка login_required.via.
+	r = e.p.Execute(ctx, Call{Agent: "dev", Action: "browser.open", Args: map[string]any{"url": "https://login.example/", "session": "s-1"}})
+	lr, _ := r.Result.(map[string]any)["login_required"].(map[string]any)
+	if r.Status != StatusOK || lr == nil || lr["via"] != "slotted" || !strings.Contains(lr["hint"].(string), "--via slotted") {
+		t.Fatalf("%+v", r.Result)
+	}
+	if e.p.loginConnectorFor("https://other.example/") != "" || e.p.loginConnectorFor("") != "" {
+		t.Fatal("no login connector for other sites")
 	}
 }
