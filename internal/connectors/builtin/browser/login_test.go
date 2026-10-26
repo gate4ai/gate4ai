@@ -45,7 +45,7 @@ func (f *formEngine) URL(context.Context) (string, error)   { return f.url, nil 
 func (f *formEngine) Title(context.Context) (string, error) { return "Вход", nil }
 func (f *formEngine) Text(context.Context) (string, error)  { return "Логин и пароль", nil }
 func (f *formEngine) Screenshot(context.Context, *worker.Clip, bool) ([]byte, error) {
-	return []byte("\x89PNG"), nil
+	return testPNG(10, 10), nil
 }
 func (f *formEngine) Eval(_ context.Context, expr string, out any) error {
 	var v any = map[string]any{"text": ""}
