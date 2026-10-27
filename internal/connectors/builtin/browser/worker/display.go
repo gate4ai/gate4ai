@@ -86,19 +86,26 @@ func ResolveDisplay(mode string, e DisplayEnv) (string, error) {
 	return "", fmt.Errorf("display %q must be one of %s", mode, strings.Join(DisplayModes, ", "))
 }
 
+// WindowSize — размер окна Chrome на виртуальном экране и в headless:
+// самое распространённое разрешение десктопа у настоящих пользователей
+// (StatCounter, desktop worldwide, 2026: 1920×1080 — около 20 %, следующие —
+// по 6–7 %). Без флага --headless=new открывал бы окна 800×600, какие у людей
+// почти не встречаются: сайты верстаются иначе, а антифрод замечает редкий размер.
+const WindowSize = "1920,1080"
+
 // displayFlags — флаги Chrome под режим.
 func displayFlags(mode string) []string {
 	switch mode {
 	case DisplayHeadless:
-		return []string{"--headless=new"}
+		return []string{"--headless=new", "--window-size=" + WindowSize}
 	case DisplayVirtual:
 		// Chrome на Wayland-сессии иначе выбрал бы Wayland, а не дисплей Xvfb.
-		return []string{"--ozone-platform=x11", "--window-size=1920,1080", "--window-position=0,0"}
+		return []string{"--ozone-platform=x11", "--window-size=" + WindowSize, "--window-position=0,0"}
 	}
 	return nil
 }
 
-// XvfbScreen — размер виртуального экрана.
+// XvfbScreen — размер виртуального экрана (под окно WindowSize).
 const XvfbScreen = "1920x1080x24"
 
 // Xvfb — виртуальный дисплей, который поднял пакет: X-сервер в память, без

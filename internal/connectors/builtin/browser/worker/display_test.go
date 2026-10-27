@@ -88,7 +88,7 @@ func TestServiceHeadlessFallback(t *testing.T) {
 	defer s.Release()
 	mu.Lock()
 	defer mu.Unlock()
-	if strings.Join(flags, " ") != "--headless=new" || len(env) != 0 {
+	if strings.Join(flags, " ") != "--headless=new --window-size=1920,1080" || len(env) != 0 {
 		t.Fatal(flags, env)
 	}
 	if m := svc.DisplayMode(); m != DisplayHeadless {

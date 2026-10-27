@@ -76,7 +76,7 @@ Chrome без root: бинарник ставится без root — Chromium �
 
 Проверка: **Настройки → Сервер** в Web UI (и с телефона по `/ui/settings/server`) — состояние каждого компонента и что сделать: служба и linger, хранилище ключей, адрес из интернета, вход, Telegram, пакет браузера, Chrome, экран, шрифты, агенты через локальный сокет. Из терминала — `gate4ai browser setup --dry-run`, `gate4ai doctor`, после первого `browser.open` — `gate4ai browser sessions`.
 
-Без Xvfb браузер работает без экрана (`--headless=new`): UA и client hints подменены, но сайты с антибот-защитой замечают headless чаще — Web UI и `doctor` предупреждают. Режим задаёт `connectors.browser.display` (`auto`, `virtual`, `headless`, `host`).
+Без Xvfb браузер работает без экрана (`--headless=new`, окна 1920×1080 — как на Xvfb и у большинства настоящих пользователей, а не 800×600 по умолчанию Chrome): UA и client hints подменены, но сайты с антибот-защитой замечают headless чаще — Web UI и `doctor` предупреждают. Режим задаёт `connectors.browser.display` (`auto`, `virtual`, `headless`, `host`).
 
 ## Docker
 
