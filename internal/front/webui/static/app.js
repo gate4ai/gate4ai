@@ -390,8 +390,11 @@
         else if (m.type === "closed") { ended = true; note.textContent = msg("closed") + (m.message ? " " + m.message : ""); }
         else if (m.type === "error") note.textContent = m.message;
       };
-      ws.onclose = function () {
+      ws.onclose = function (ev) {
         if (ended) return;
+        // Код закрытия — в консоль: 1006 без рукопожатия — сервер или relay
+        // оборвал соединение, 1000/1001 — закрыл сам (причина — в логе daemon).
+        console.warn("browser view closed", ev.code, ev.reason || "", ev.wasClean ? "clean" : "abrupt");
         note.textContent = msg("lost");
         setTimeout(connect, Math.min(10000, 500 * Math.pow(2, retry++)));
       };
