@@ -61,6 +61,21 @@ func Resolve(setting, userHome string) string {
 	return setting
 }
 
+// ConnectorNameFor — имя коннектора по сайту: ticket.rzd.ru → rzd,
+// app.example.org → example, habr.com и account.habr.com → habr.
+func ConnectorNameFor(host string) string {
+	labels := strings.Split(strings.TrimPrefix(strings.ToLower(host), "www."), ".")
+	name := labels[0]
+	if len(labels) >= 2 {
+		name = labels[len(labels)-2]
+	}
+	name = strings.ReplaceAll(name, "-", "_")
+	if name == "" || name[0] < 'a' || name[0] > 'z' {
+		name = "site_" + name
+	}
+	return name
+}
+
 // FolderName — имя папки коннектора: gate4ai-<имя> (подчёркивания — дефисами,
 // как в именах репозиториев).
 func FolderName(connector string) string {
@@ -69,12 +84,27 @@ func FolderName(connector string) string {
 
 // Recipe — шапка RECIPE.md: что умеет коннектор на сайте и насколько это проверено.
 type Recipe struct {
-	Site       string         `yaml:"site" json:"site"`
-	Domains    []string       `yaml:"domains,omitempty" json:"domains,omitempty"`
-	Tasks      []Task         `yaml:"tasks,omitempty" json:"tasks,omitempty"`
-	Login      *RecipeLogin   `yaml:"login,omitempty" json:"login,omitempty"`
-	HumanSteps []string       `yaml:"human_steps,omitempty" json:"human_steps,omitempty"`
-	Extra      map[string]any `yaml:",inline" json:"-"`
+	Site    string   `yaml:"site" json:"site"`
+	Domains []string `yaml:"domains,omitempty" json:"domains,omitempty"`
+	// Status — auto: рецепт пишет сам daemon из сеансов браузера, задач и
+	// коннектора ещё нет; пусто — рецепт коннектора (статус у задач).
+	Status     string       `yaml:"status,omitempty" json:"status,omitempty"`
+	Tasks      []Task       `yaml:"tasks,omitempty" json:"tasks,omitempty"`
+	Login      *RecipeLogin `yaml:"login,omitempty" json:"login,omitempty"`
+	HumanSteps []string     `yaml:"human_steps,omitempty" json:"human_steps,omitempty"`
+	// Sessions — сеансы браузера на сайте, из которых daemon дописал рецепт.
+	Sessions []Session      `yaml:"sessions,omitempty" json:"sessions,omitempty"`
+	Extra    map[string]any `yaml:",inline" json:"-"`
+}
+
+// Session — сеанс браузера, записанный в рецепт: когда, чей, сколько шагов и
+// заметка агента (gate4ai knowledge note), если он её оставил.
+type Session struct {
+	At      string `yaml:"at" json:"at"` // YYYY-MM-DD HH:MM
+	Agent   string `yaml:"agent,omitempty" json:"agent,omitempty"`
+	Session string `yaml:"session,omitempty" json:"session,omitempty"` // id сеанса: connectors new --from-session
+	Steps   int    `yaml:"steps" json:"steps"`
+	Note    string `yaml:"note,omitempty" json:"note,omitempty"`
 }
 
 // Task — задача рецепта (действие коннектора) и её статус проверенности.
@@ -95,10 +125,12 @@ type RecipeLogin struct {
 	Kind string `yaml:"kind,omitempty" json:"kind,omitempty"` // form | form+sms | via | human
 }
 
-// Статусы задач.
+// Статусы задач и рецепта.
 const (
 	StatusDraft    = "draft"
 	StatusVerified = "verified"
+	// StatusAuto — рецепт из сеансов, написанный daemon: ни задач, ни коннектора.
+	StatusAuto = "auto"
 	// VerifiedAfter — столько подтверждённых прогонов делают действие verified.
 	VerifiedAfter = 3
 )
@@ -145,6 +177,39 @@ func FormatRecipe(r *Recipe, body string) ([]byte, error) {
 		}
 	}
 	return b.Bytes(), nil
+}
+
+// Overall — статус рецепта одним словом: verified, если есть проверенная
+// задача; draft, если задачи есть; иначе auto.
+func (r *Recipe) Overall() string {
+	for _, t := range r.Tasks {
+		if t.Status == StatusVerified {
+			return StatusVerified
+		}
+	}
+	if len(r.Tasks) > 0 {
+		return StatusDraft
+	}
+	return StatusAuto
+}
+
+// WithoutNote — сколько сеансов без заметки агента.
+func (r *Recipe) WithoutNote() int {
+	n := 0
+	for _, s := range r.Sessions {
+		if s.Note == "" {
+			n++
+		}
+	}
+	return n
+}
+
+// LastSession — время последнего сеанса ("" — не было).
+func (r *Recipe) LastSession() string {
+	if len(r.Sessions) == 0 {
+		return ""
+	}
+	return r.Sessions[len(r.Sessions)-1].At
 }
 
 // Task ищет задачу рецепта.

@@ -431,6 +431,13 @@ func (u *UI) saveGeneral(w http.ResponseWriter, r *http.Request) map[string]any 
 		if f.Has("knowledge_dir") {
 			c.Knowledge.Dir = strings.TrimSpace(f.Get("knowledge_dir"))
 		}
+		if f.Has("steps_keep_days") {
+			n, err := strconv.Atoi(strings.TrimSpace(or(f.Get("steps_keep_days"), "0")))
+			if err != nil || n < 0 || n > 3650 {
+				return M("days to keep session records: a number 0..3650")
+			}
+			c.Knowledge.StepsKeepDays = n
+		}
 		for _, k := range []string{"receipts", "denied", "evidence_other", "evidence_money"} {
 			if !f.Has("ret_" + k) {
 				continue

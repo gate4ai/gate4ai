@@ -15,8 +15,8 @@ import (
 	"github.com/gate4ai/gate4ai/sdk-go/hosttest"
 )
 
-// Draft — черновик знаний о сайте из записи сеанса браузера (browser.close
-// --save_steps, уже после fixture scrub): шаги для рецепта, подвызовы и класс
+// Draft — черновик знаний о сайте из записи сеанса браузера (steps_file
+// browser.close, уже после fixture scrub): шаги для рецепта, подвызовы и класс
 // действия для манифеста, фикстура для тестов и код действия для коннектора.
 type Draft struct {
 	Connector string

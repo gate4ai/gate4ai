@@ -109,6 +109,7 @@
 <div class="card" id="knowledge"><h3>{{T "Knowledge folder"}}</h3>
 <form method="post" action="{{.Base}}/settings/general"><input type="hidden" name="csrf" value="{{.CSRF}}">
 <label for="kn-dir">{{T "Where agents keep what they learned about sites (recipes and connectors); empty — ~/gate4ai-knowledge"}}</label><input id="kn-dir" name="knowledge_dir" value="{{$d.Config.Knowledge.Dir}}" size="70" placeholder="~/gate4ai-knowledge">
+<label for="kn-keep">{{T "Days to keep the records of browser sessions (browser-steps in the data folder; a recipe is written from each one by itself); 0 — 30 days"}}</label><input id="kn-keep" name="steps_keep_days" type="number" min="0" max="3650" value="{{$d.Config.Knowledge.StepsKeepDays}}" size="6">
 <button data-busy="{{T "Saving…"}}">{{T "Save"}}</button></form></div>
 <div class="card"><h3>{{T "Keeping the journal"}}</h3>
 <form method="post" action="{{.Base}}/settings/general" class="row"><input type="hidden" name="csrf" value="{{.CSRF}}">

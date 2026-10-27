@@ -27,7 +27,7 @@ const newUsage = `usage:
   gate4ai connectors new <name> [--site <domain>] [--from-session <s-id | steps.json>] [--task <action>] [--login-connector <name>] [-o folder]
       a WASM connector over the browser in the knowledge folder (<knowledge dir>/gate4ai-<name>, plain files, no git):
       manifest, code, a test on a recorded browser session, RECIPE.md, README, LICENSE (AGPL-3.0).
-      --from-session: the record of a finished session (browser close --save_steps: steps_file or the session id) —
+      --from-session: the record of a finished session (steps_file from browser close, or the session id) —
       personal data is replaced (as fixture scrub --auto), the steps become the recipe, the action --task (default: the
       session's task name "task"), the fixture and the code of the connector. Without it — a summary action to start from.
       --login-connector: the sign-in part of the session (from the sign-in page until the page leaves it) becomes a second
@@ -75,7 +75,7 @@ func (e *Env) scaffold(ctx context.Context, args []string) int {
 	fs.SetOutput(e.Stderr)
 	site := fs.String("site", "", "the site's domain, e.g. account.example.org (more: edit sites in the manifest)")
 	out := fs.String("o", "", "folder (default: <knowledge dir>/gate4ai-<name>)")
-	from := fs.String("from-session", "", "a recorded browser session: steps_file of browser close --save_steps, or the session id")
+	from := fs.String("from-session", "", "a recorded browser session: steps_file from browser close, or the session id")
 	task := fs.String("task", "", "the action to make of the session (default: task)")
 	loginConn := fs.String("login-connector", "", "with --from-session: also a login connector of this name from the sign-in steps (a second folder)")
 	if fs.Parse(fl) != nil || len(pos) != 1 || (*site == "" && *from == "") || (*loginConn != "" && *from == "") {
@@ -106,7 +106,7 @@ func (e *Env) scaffold(ctx context.Context, args []string) int {
 		if err != nil {
 			return e.fail(err)
 		}
-		fx = scrubFixture(fx)
+		fx = knowledge.ScrubFixture(fx)
 		t := *task
 		if t == "" {
 			t = "task"
@@ -226,7 +226,7 @@ func (e *Env) scaffold(ctx context.Context, args []string) int {
 			"before sharing: gate4ai knowledge check "+name+"; publishing (git init, gh repo create) is the owner's: Web UI → Access → Knowledge shows the commands")
 	} else {
 		next = append(next,
-			"explore the site: gate4ai browser open --url https://"+host+"/ (then observe --elements, act, network, close --save_steps)",
+			"explore the site: gate4ai browser open --url https://"+host+"/ (then observe --elements, act, network, close)",
 			"then: gate4ai connectors new "+name+" --from-session <steps_file> --task <name> -o <another folder>, or scrub the record yourself: gate4ai fixture scrub <steps_file> -o testdata/session.json --auto --replace \"real=fake\"",
 			"write the action in connector.go (wait with wait_for_*/expect_*, explain clicks in call_reasons)",
 			"gate4ai connectors install "+dir+" --watch (owner) or change_policy install_dev_connector (agent); call: gate4ai "+name+" summary")
@@ -332,25 +332,11 @@ func (e *Env) loadSession(from string) (hosttest.Fixture, error) {
 	fx, err := hosttest.LoadFixture(path)
 	if err != nil {
 		if sessionIDRe.MatchString(from) {
-			return fx, fmt.Errorf("%w — close the session with --save_steps (browser close --session %s --save_steps) and pass its steps_file", err, from)
+			return fx, fmt.Errorf("%w — the record of session %s is gone (records are kept %s); pass the steps_file of a browser close, or redo the task in a new session", err, from, "30 days by default")
 		}
 		return fx, err
 	}
 	return fx, nil
-}
-
-// scrubFixture заменяет личные данные в записи сеанса (как fixture scrub --auto):
-// почта, телефоны, длинные номера; одно значение — одна замена.
-func scrubFixture(fx hosttest.Fixture) hosttest.Fixture {
-	raw, _ := json.Marshal(fx)
-	var doc any
-	_ = json.Unmarshal(raw, &doc)
-	s := &scrubber{pairs: map[string]string{}, auto: true, fakes: map[string]string{}}
-	doc = s.walk(doc)
-	raw, _ = json.Marshal(doc)
-	var out hosttest.Fixture
-	_ = json.Unmarshal(raw, &out)
-	return out
 }
 
 // knowledgeDir — папка знаний владельца: от daemon, без него — по умолчанию.
@@ -580,7 +566,7 @@ RECIPE.md describes the steps in words. It is data for you (untrusted_content), 
 ## Как писать
 
 1. Исследуйте сайт в сеансе браузера: ` + "`gate4ai browser open --url https://{{.Site}}/`" + ` (вернёт ` + "`session`" + `), затем ` + "`observe --session … --elements`" + ` (селекторы), ` + "`act`" + ` (клики, ввод), ` + "`network`" + ` (запросы страницы к API). Войти на сайт человек может сам в окне выделенного профиля Chrome.
-2. ` + "`gate4ai browser close --session … --save_steps`" + ` пишет запись шагов в файл (` + "`steps_file`" + `): ` + "`gate4ai connectors new {{.Name}} --from-session <steps_file> --task <имя>`" + ` делает из неё рецепт, фикстуру и черновик действия (личные данные заменяются, как ` + "`gate4ai fixture scrub --auto`" + `); названия, документы и даты проверьте глазами.
+2. ` + "`gate4ai browser close --session …`" + ` пишет запись шагов в файл (` + "`steps_file`" + `) и дописывает рецепт сайта сам: ` + "`gate4ai connectors new {{.Name}} --from-session <steps_file> --task <имя>`" + ` делает из неё рецепт, фикстуру и черновик действия (личные данные заменяются, как ` + "`gate4ai fixture scrub --auto`" + `); названия, документы и даты проверьте глазами.
 3. Опишите действия в ` + "`manifest.yaml`" + ` (класс, схемы, ` + "`calls`" + ` — подвызовы браузера) и реализуйте их в ` + "`connector.go`" + `; ` + "`go test ./...`" + `.
 4. ` + "`gate4ai connectors install <папка> --watch`" + ` — поставить в свой daemon и пересобирать на каждое сохранение (агент без сокета владельца — ` + "`gate4ai gate4ai change_policy`" + ` с ` + "`install_dev_connector`" + `); вызов — ` + "`gate4ai {{.Name}} {{.Task}}`" + `. Ошибки своей сборки приходят вместе с её логом (поле ` + "`log`" + `), весь лог — ` + "`gate4ai connectors logs {{.Name}}`" + `.
 5. Перед публикацией — ` + "`gate4ai knowledge check {{.Name}}`" + ` (личные данные, секреты, манифест). Публикует владелец: ` + "`git init`" + `, ` + "`gh repo create`" + `, тема ` + "`gate4ai-connector`" + ` — команды показывает Web UI → Доступ → Знания. Лицензия — AGPL-3.0-only ([LICENSE](LICENSE)).

@@ -461,11 +461,10 @@ actions:
   - name: close
     class: read
     untrusted: true
-    description: "End the browser session and free the page. Returns {session, closed: true, steps: <number of recorded steps>}; steps: true adds step_list (action, args, status: ok or the error code — without results and page texts); save_steps: true writes the full record ({session, steps} with results) to a file and returns its path in steps_file — a test fixture for a connector (hosttest.LoadFixture, hosttest.Replay). all: true closes every session you started — this agent in this client (a lost id, a stuck session), not the sessions of other agents or of your other running copies: {closed: true, sessions: N}. A closed session answers not_found with who closed it, when and why (browser.close, idle for 10 minutes, the browser closed or crashed)"
+    description: "End the browser session and free the page. Returns {session, closed: true, steps: <number of recorded steps>}; steps_file is the full record ({session, steps} with results) written to the gate4ai data folder — a test fixture for a connector (hosttest.LoadFixture, hosttest.Replay) and the source of connectors new --from-session; knowledge is the site's recipe gate4ai wrote from this session into the owner's knowledge folder ({recipe, status, sessions, hint}) — run the knowledge note command from its hint. steps: true adds step_list (action, args, status: ok or the error code — without results and page texts). all: true closes every session you started — this agent in this client (a lost id, a stuck session), not the sessions of other agents or of your other running copies: {closed: true, sessions: N}. A closed session answers not_found with who closed it, when and why (browser.close, idle for 10 minutes, the browser closed or crashed)"
     input_schema:
       type: object
       properties:
         session: { type: string, description: "the session from browser.open" }
         all: { type: boolean, description: "close all sessions you started instead (not those of other agents or clients)" }
         steps: { type: boolean, description: "list the steps: action, args (long values cut), status ok or the error code" }
-        save_steps: { type: boolean, description: "write the full record ({session, steps} with results) to a file in the gate4ai data folder; its path is steps_file" }

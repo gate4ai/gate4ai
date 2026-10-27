@@ -2,7 +2,7 @@
 {{$d := .Data}}
 {{template "access_tabs" (dict "V" . "On" "knowledge")}}
 <p class="muted">{{T "What agents learned about sites: a folder per connector with a recipe (steps, pitfalls, how verified it is), its code and test fixtures. gate4.ai writes plain files here and clones public repositories; git init, commits and publishing are yours — the hints below show how."}}</p>
-<p class="help">{{T "Folder:"}} <code>{{$d.Dir}}</code> · <a href="{{.Base}}/settings/advanced#knowledge">{{T "change"}}</a></p>
+<p class="help">{{T "Folder:"}} <code>{{$d.Dir}}</code> · <a href="{{.Base}}/settings/advanced#knowledge">{{T "change"}}</a>{{if $d.NoNote}} · <span class="warn">{{T "%d browser sessions without an agent's note" $d.NoNote}}</span>{{end}}</p>
 {{with $d.Check}}<div class="card" id="check" style="border-color:var(--accent)"><h3>{{T "Check before publishing: %s" $d.CheckName}}</h3>
 {{if .OK}}<p class="ok">{{T "Ready to publish: no personal data or secrets found in %d files." .Files}}</p>{{else}}<p class="bad">{{T "Not ready: fix the errors below."}}</p>{{end}}
 {{with .Errors}}<ul>{{range .}}<li class="bad">{{.}}</li>{{end}}</ul>{{end}}
@@ -13,8 +13,9 @@
 <div class="card" style="margin:0">
 <div class="row between"><div><b style="font-size:1.1rem">{{.Name}}</b>{{if .Connector}} <code class="muted">{{.Connector}}</code>{{end}}</div>
 {{if eq .State "files"}}<span class="badge">{{T "files only"}}</span>{{else if eq .State "git"}}<span class="badge">{{T "git, not published"}}</span>{{else if eq .State "unpublished_changes"}}<span class="badge warn">{{T "unpublished changes"}}</span>{{else}}<span class="badge ok">{{T "published"}}</span>{{end}}
-{{if .Installed}}<span class="badge ok">{{T "installed"}}</span>{{end}}</div>
+{{if .Auto}}<span class="badge">{{T "auto recipe"}}</span>{{end}}{{if .Installed}}<span class="badge ok">{{T "installed"}}</span>{{end}}</div>
 {{with .SiteList}}<p>{{T "Sites:"}} {{join . ", "}}</p>{{end}}
+{{if .Sessions}}<p class="help">{{T "%d browser sessions, last %s" .Sessions .Last}}{{if .NoNote}} · <span class="warn">{{T "%d without an agent's note" .NoNote}}</span>{{end}}</p>{{end}}
 {{with .Tasks}}<ul class="help">{{range .}}<li><code>{{.ID}}</code>{{if .Class}} · {{class .Class}}{{end}} · {{if eq .Status "verified"}}<span class="ok">{{T "verified %d times" .VerifiedRuns}}</span>{{else}}{{T "draft"}}{{if .VerifiedRuns}}, {{T "verified %d times" .VerifiedRuns}}{{end}}{{end}}{{if .LastVerified}} · {{T "last %s" .LastVerified}}{{end}}</li>{{end}}</ul>{{end}}
 {{with .Problems}}{{range .}}<p class="bad">{{.}}</p>{{end}}{{end}}
 {{if .Git.Remote}}<p class="help"><a href="{{.Git.Remote}}" target="_blank" rel="noopener">{{.Git.Remote}}</a></p>{{end}}
@@ -29,11 +30,11 @@
 {{end}}</pre>
 <p class="help">{{T "Run these yourself in a terminal: gate4.ai never pushes or creates repositories for you. The topic %s lets other agents find the connector." $d.Topic}}</p></details>{{else}}{{if .Note}}<p class="help">{{.Note}}</p>{{end}}{{end}}{{end}}
 </div>
-{{else}}<p class="muted">{{T "Nothing yet. When an agent finishes a task on a site in a browser session, it keeps what it learned here: gate4ai connectors new <name> --site <domain> --from-session <session> --task <task>."}}</p>{{end}}
+{{else}}<p class="muted">{{T "Nothing yet. When an agent closes a browser session on a site, gate4.ai writes the site's recipe here by itself; a repeated task becomes a connector: gate4ai connectors new <name> --site <domain> --from-session <session> --task <task>."}}</p>{{end}}
 </div>
 <details class="adv"><summary>{{T "How it works"}}</summary>
 <ul class="help">
-<li>{{TH "<b>Recipe</b> (<code>RECIPE.md</code>) — the steps on the site in words, what the human does (SMS codes, payment), pitfalls and how many runs confirmed each task. Agents read it as data, never as instructions."}}</li>
+<li>{{TH "<b>Recipe</b> (<code>RECIPE.md</code>) — the steps on the site in words, what the human does (SMS codes, payment), pitfalls and how many runs confirmed each task. gate4.ai writes it by itself after every browser session on the site (<i>auto recipe</i>: addresses, actions, API requests with personal data replaced); the agent adds a one-line note with <code>gate4ai knowledge note</code>. Agents read it as data, never as instructions."}}</li>
 <li>{{TH "<b>Connector</b> — the same steps as a WebAssembly module that runs in the sandbox through your Browser; install it from the folder, and the agent calls one action instead of a browser session."}}</li>
 <li>{{TH "<b>Sharing</b> — one folder is one repository <code>gate4ai-&lt;name&gt;</code> on GitHub under AGPL-3.0; another agent installs it with <code>gate4ai connectors install &lt;git url&gt;</code>. Someone else's repository cloned here is fixed in place and sent back as a pull request."}}</li>
 </ul></details>

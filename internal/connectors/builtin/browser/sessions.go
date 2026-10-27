@@ -268,7 +268,7 @@ func (b *Browser) gone(as *agentSession, err error) error {
 		return nil
 	}
 	reason := "the browser was closed or crashed"
-	b.closeAgent(as, reason)
+	b.closeAgentKeep(as, reason)
 	return abi.Errorf(abi.CodeNotFound, "browser session %s is closed: %s (%v); start a new one with browser.open", as.id, reason, err)
 }
 
@@ -349,8 +349,19 @@ func (b *Browser) closeIdle(as *agentSession) {
 	}
 	b.mu.Unlock()
 	if !running {
-		b.closeAgent(as, fmt.Sprintf("closed after %s without actions (idle)", AgentIdle))
+		b.closeAgentKeep(as, fmt.Sprintf("closed after %s without actions (idle)", AgentIdle))
 	}
+}
+
+// closeAgentKeep — закрыть сеанс без агента (простой, падение Chrome) и
+// сохранить запись шагов, когда кончится идущее действие.
+func (b *Browser) closeAgentKeep(as *agentSession, reason string) {
+	b.closeAgent(as, reason)
+	go func() {
+		as.lock <- struct{}{}
+		as.keep(b, reason)
+		<-as.lock
+	}()
 }
 
 // closedErr — сеанса нет: закрыт (кем и почему — если его закрыли у этого
@@ -380,7 +391,7 @@ func (b *Browser) closeSession(as *agentSession, args map[string]any, reason str
 	select {
 	case as.lock <- struct{}{}:
 		b.closeAgent(as, reason)
-		res, err := as.closeResult(args)
+		res, err := as.closeResult(b, args, reason)
 		<-as.lock
 		return res, err
 	case <-t.C:
@@ -392,7 +403,7 @@ func (b *Browser) closeSession(as *agentSession, args map[string]any, reason str
 		as.s.Release()
 		<-as.lock
 	}()
-	return as.closeResult(args)
+	return as.closeResult(b, args, reason)
 }
 
 // closeAll закрывает сеансы вызывающего (ownedBy: этот экземпляр агента;

@@ -112,14 +112,14 @@ func TestConnectorsNewFromSession(t *testing.T) {
 	if rep := knowledge.Check(dir); !rep.OK {
 		t.Fatalf("%+v", rep)
 	}
-	// Id сеанса → файл в каталоге данных; нет файла — подсказка про --save_steps.
+	// Id сеанса → файл в каталоге данных; нет файла — подсказка: запись сеанса пропала.
 	os.MkdirAll(filepath.Join(home, "browser-steps"), 0o700)
 	os.WriteFile(filepath.Join(home, "browser-steps", "s-abc.json"), []byte(sessionRecord), 0o600)
 	t.Setenv("GATE4AI_HOME", home)
 	if code, out := run("connectors", "new", "ex2", "--from-session", "s-abc", "-o", filepath.Join(home, "ex2")); code != ExitOK || !strings.Contains(out, `"action": "task"`) {
 		t.Fatal(code, out)
 	}
-	if code, out := run("connectors", "new", "ex3", "--from-session", "s-none", "-o", filepath.Join(home, "ex3")); code == ExitOK || !strings.Contains(out, "--save_steps") {
+	if code, out := run("connectors", "new", "ex3", "--from-session", "s-none", "-o", filepath.Join(home, "ex3")); code == ExitOK || !strings.Contains(out, "record of session s-none is gone") {
 		t.Fatal(code, out)
 	}
 	// Без --site и без сеанса — usage.
@@ -164,7 +164,7 @@ func TestKnowledgeAndLookupCommands(t *testing.T) {
 		t.Fatalf("%s", out)
 	}
 	code, out = h.run(t, tok, "sites", "lookup", "https://other.example.org/x")
-	if code != ExitOK || !strings.Contains(out, "connectors new example --site other.example.org --from-session") {
+	if code != ExitOK || !strings.Contains(out, "knowledge note") || strings.Contains(out, "save_steps") {
 		t.Fatal(code, out)
 	}
 	// Агенту папка знаний и проверка недоступны (команды владельца, как connectors).

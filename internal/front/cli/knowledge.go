@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -15,8 +16,12 @@ const knowledgeUsage = `usage:
   gate4ai knowledge [list]            the knowledge folder: a folder per connector (recipe, code, fixtures), its state
                                       (files only · git · published · unpublished changes) and how to publish it yourself
   gate4ai knowledge check <name>      check a folder before publishing: personal data, secrets, manifest, recipe, LICENSE
+  gate4ai knowledge note <domain> --text "…"
+                                      a note in your words into the site's recipe (agents too: the same as
+                                      gate4ai gate4ai knowledge_note --domain … --text …) — what the task did, what tripped you
   gate4ai sites lookup <domain>       what is known about a site (the same as: gate4ai gate4ai sites_lookup --domain …)
 
+The recipe of a site (RECIPE.md) is written by gate4ai itself when a browser session on it is closed.
 gate4ai writes plain files into the folder and clones public repositories (connectors install <git url>);
 git init, commits, push and gh are yours — the commands are printed here and shown in Web UI → Access → Knowledge.`
 
@@ -25,6 +30,9 @@ func (e *Env) knowledgeCmd(ctx context.Context, args []string) int {
 	sub := "list"
 	if len(args) > 0 {
 		sub, args = args[0], args[1:]
+	}
+	if sub == "note" {
+		return e.knowledgeNote(ctx, args)
 	}
 	c := e.Client()
 	switch sub {
@@ -62,7 +70,7 @@ func (e *Env) knowledgeCmd(ctx context.Context, args []string) int {
 			} `json:"folders"`
 		}](raw)
 		if len(res.Folders) == 0 {
-			fmt.Fprintf(e.Stderr, "gate4ai: the knowledge folder %s is empty: gate4ai connectors new <name> --site <domain> [--from-session <steps_file> --task <name>]\n", res.Dir)
+			fmt.Fprintf(e.Stderr, "gate4ai: the knowledge folder %s is empty: it fills up by itself when agents close browser sessions on sites; a connector: gate4ai connectors new <name> --site <domain> [--from-session <steps_file> --task <name>]\n", res.Dir)
 		}
 		e.out(raw, func(w io.Writer) {
 			fmt.Fprintf(w, "knowledge folder: %s\n", res.Dir)
@@ -132,6 +140,24 @@ func (e *Env) knowledgeCmd(ctx context.Context, args []string) int {
 	}
 	fmt.Fprintln(e.Stderr, knowledgeUsage)
 	return ExitUsage
+}
+
+// knowledgeNote — заметка в рецепт сайта: агент — действие gate4ai.knowledge_note
+// под своим профилем; владелец — POST /v1/knowledge/note.
+func (e *Env) knowledgeNote(ctx context.Context, args []string) int {
+	pos, fl := splitFlags(args, map[string]bool{"text": true})
+	fs := flag.NewFlagSet("note", flag.ContinueOnError)
+	fs.SetOutput(e.Stderr)
+	text := fs.String("text", "", "the note")
+	if fs.Parse(fl) != nil || len(pos) != 1 || strings.TrimSpace(*text) == "" {
+		fmt.Fprintln(e.Stderr, knowledgeUsage)
+		return ExitUsage
+	}
+	if e.AgentMode() {
+		e.ownerCmd = false
+		return e.action(ctx, "gate4ai", []string{"knowledge_note", "--domain", pos[0], "--text", *text})
+	}
+	return e.call(ctx, e.Client(), "POST", "/v1/knowledge/note", map[string]any{"domain": pos[0], "text": *text})
 }
 
 func stateWord(s string) string {
