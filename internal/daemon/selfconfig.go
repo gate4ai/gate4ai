@@ -77,6 +77,13 @@ func (selfConnector) Manifest() manifest.Manifest {
 				  domain: { type: string, maxLength: 253, description: "the site: a domain (rzd.ru, pass.rzd.ru) or a page address" } },
 				  required: [domain] }`),
 				Example: `gate4ai sites lookup rzd.ru`},
+			{Name: "knowledge_note", Class: "read", Title: "A note to the site's recipe",
+				Description: "After browser.close: one line in your words into the recipe of the site that gate4ai wrote from your session — what the task was and what tripped you. The close answer (knowledge.hint) gives the exact command",
+				InputSchema: manifest.MustSchema(`{ type: object, properties: {
+				  domain: { type: string, maxLength: 253, description: "the site of the session (from the close answer: knowledge.site)" },
+				  text: { type: string, maxLength: 2000, description: "the note: what the task did, pitfalls, what the human had to do" } },
+				  required: [domain, text] }`),
+				Example: `gate4ai knowledge note habr.com --text "Checked the account status: kek/v2/me answers the alias; /ru/article/new/ opens the editor"`},
 		}}
 }
 
@@ -211,6 +218,17 @@ func (s selfConnector) Execute(ctx context.Context, r abi.ExecRequest) (abi.Exec
 			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "domain is required")
 		}
 		return abi.ExecResult{Structured: d.SitesLookup(dom, agent)}, nil
+	case "knowledge_note":
+		dom, _ := r.Args["domain"].(string)
+		text, _ := r.Args["text"].(string)
+		if strings.TrimSpace(dom) == "" || strings.TrimSpace(text) == "" {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeBadRequest, "domain and text are required")
+		}
+		out, err := d.KnowledgeNote(dom, text, agent)
+		if err != nil {
+			return abi.ExecResult{}, abi.Errorf(abi.CodeNotFound, "%v", err)
+		}
+		return abi.ExecResult{Structured: out}, nil
 	case "change_policy":
 		changes, err := changesOf(r.Args)
 		if err != nil {

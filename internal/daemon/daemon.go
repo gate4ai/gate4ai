@@ -138,10 +138,13 @@ func New(opt Options) (*Daemon, error) {
 	for _, c := range (store.Options{Dir: d.ConnectorsDir}).LoadAll(context.Background(), d.Wasm, d.Log) {
 		d.Registry.Add(c)
 	}
+	bw := browser.New()
+	bw.OnClose = d.sessionClosed
+	bw.StepsKeep = d.stepsKeep
 	for _, b := range []struct {
 		m manifest.Manifest
 		c connector.Connector
-	}{{files.Manifest(), files.Files{}}, {browser.Manifest(), browser.New()}} {
+	}{{files.Manifest(), files.Files{}}, {browser.Manifest(), bw}} {
 		bc, err := d.Wasm.Builtin(b.m, b.c)
 		if err != nil {
 			return nil, err

@@ -201,6 +201,7 @@ Owner commands (local socket):
   gate4ai connectors new <name> [--site <domain>] [--from-session <s-id | steps.json>] [--task <action>] [-o folder]   a connector in the knowledge folder; --from-session: recipe and draft from a recorded session
   gate4ai knowledge [list] | check <name>   the knowledge folder (recipes and connectors agents made) and the check before you publish a folder yourself
   gate4ai sites lookup <domain>           what is known about a site: connectors, store, knowledge folder, sign-in, next step (agents too)
+  gate4ai knowledge note <domain> --text "…"   a note in your words into the site's recipe, after browser close (agents too)
   gate4ai connectors pack <dir> [--wasm file] [--key file] [-o file.g4c] | verify <dir> <file.g4c> | keygen [-o key]   (publisher / registry review, offline)
   gate4ai registry check <index.json> [--key ed25519:…] [--fetch] | sign <index.json> --key file | add <index.json> <pack.json> --publisher name …   (registry)
   gate4ai fixture scrub <file.json> [-o out] [--replace "real=fake"]... [--auto]   personal data out of a recorded browser session

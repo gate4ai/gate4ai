@@ -52,8 +52,11 @@ type Config struct {
 }
 
 // Knowledge — папка знаний. Dir — путь ("~/…" допустим); пусто — ~/gate4ai-knowledge.
+// StepsKeepDays — сколько дней хранить записи шагов сеансов браузера
+// (browser-steps/*.json в каталоге данных); 0 — 30 дней.
 type Knowledge struct {
-	Dir string `yaml:"dir,omitempty" json:"dir,omitempty"`
+	Dir           string `yaml:"dir,omitempty" json:"dir,omitempty"`
+	StepsKeepDays int    `yaml:"steps_keep_days,omitempty" json:"steps_keep_days,omitempty"`
 }
 
 // Access — списки доступа Браузера и Файлов (общие для всех агентов).

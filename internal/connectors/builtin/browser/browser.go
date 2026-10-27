@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"regexp"
 	"sort"
@@ -60,6 +61,13 @@ type Browser struct {
 	create   sync.Mutex                  // страница корневого действия создаётся один раз
 	emit     func(kind string, data any) // события хосту (кадры просмотра); nil — некуда
 	events   chan event                  // очередь событий к emit (send)
+
+	// OnClose — хосту: сеанс агента закрыт (close, --all, простой, падение
+	// Chrome), запись шагов сохранена; ответ — блок knowledge для ответа close
+	// (рецепт сайта в папке знаний). nil — хосту не нужно.
+	OnClose func(Closed) map[string]any
+	// StepsKeep — срок хранения записей шагов (nil — StepsKeep пакета).
+	StepsKeep func() time.Duration
 }
 
 type callSession struct {
@@ -86,6 +94,8 @@ type agentSession struct {
 	steps     []map[string]any
 	truncated bool
 	lock      chan struct{} // действия сеанса — по одному (lockAgent)
+	keepOnce  sync.Once     // запись шагов сохраняется один раз (keep)
+	kept      map[string]any
 
 	// под Browser.mu
 	closed  bool               // страница освобождена
@@ -777,7 +787,7 @@ func (as *agentSession) record(r abi.ExecRequest, res abi.ExecResult, err error)
 		}
 		step["error"] = map[string]any{"code": ae.Code, "message": ae.Message}
 	} else if m, ok := res.Structured.(map[string]any); ok {
-		step["result"] = m
+		step["result"] = maps.Clone(m) // ответ ещё дополняется (session у open), а запись уже читает keep
 	}
 	as.steps = append(as.steps, step)
 }

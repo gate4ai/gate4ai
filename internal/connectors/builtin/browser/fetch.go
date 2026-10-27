@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gate4ai/gate4ai/sdk-go/abi"
@@ -90,11 +91,51 @@ func hasHeader(h map[string]string, name string) bool {
 // BriefArg — до стольких символов строковый аргумент виден в кратких шагах close --steps.
 const BriefArg = 200
 
-// closeResult — ответ close: по умолчанию коротко {session, closed, steps: N};
+// Closed — закрытый сеанс агента для хоста (Browser.OnClose): кто, почему,
+// запись шагов и файл с ней.
+type Closed struct {
+	Session   string
+	Agent     string
+	Instance  string
+	Reason    string
+	Steps     []map[string]any
+	StepsFile string
+	Truncated bool
+}
+
+// StepsKeep — сколько хранить записи шагов сеансов (browser-steps/*.json);
+// старше — удаляются при следующем сохранении.
+var StepsKeep = 30 * 24 * time.Hour
+
+// keep сохраняет запись шагов сеанса (всегда: файл browser-steps/<сеанс>.json
+// каталога данных gate4ai, путь — steps_file) и отдаёт её хосту (OnClose —
+// рецепт сайта в папке знаний). Один раз на сеанс, под as.lock.
+func (as *agentSession) keep(b *Browser, reason string) map[string]any {
+	as.keepOnce.Do(func() {
+		as.kept = map[string]any{}
+		keep := StepsKeep
+		if b.StepsKeep != nil {
+			keep = b.StepsKeep()
+		}
+		path, err := saveSteps(as.id, as.steps, keep)
+		if err != nil {
+			as.kept["steps_error"] = fmt.Sprintf("the steps were not saved: %v", err)
+		} else {
+			as.kept["steps_file"] = path
+		}
+		if b.OnClose != nil {
+			if k := b.OnClose(Closed{Session: as.id, Agent: as.agent, Instance: as.instance, Reason: reason, Steps: as.steps, StepsFile: path, Truncated: as.truncated}); k != nil {
+				as.kept["knowledge"] = k
+			}
+		}
+	})
+	return as.kept
+}
+
+// closeResult — ответ close: коротко {session, closed, steps: N, steps_file};
 // steps: true — шаги кратко (действие, аргументы, статус, без ответов и
-// текстов страниц); save_steps: true — полная запись (фикстура
-// hosttest.Replay) в файл каталога данных gate4ai, путь — steps_file.
-func (as *agentSession) closeResult(a map[string]any) (abi.ExecResult, error) {
+// текстов страниц); knowledge — рецепт сайта, который хост дописал из сеанса.
+func (as *agentSession) closeResult(b *Browser, a map[string]any, reason string) (abi.ExecResult, error) {
 	res := map[string]any{"session": as.id, "closed": true, "steps": len(as.steps)}
 	if as.truncated {
 		res["truncated"] = true
@@ -102,12 +143,8 @@ func (as *agentSession) closeResult(a map[string]any) (abi.ExecResult, error) {
 	if full, _ := a["steps"].(bool); full {
 		res["step_list"] = briefSteps(as.steps)
 	}
-	if save, _ := a["save_steps"].(bool); save {
-		path, err := saveSteps(as.id, as.steps)
-		if err != nil {
-			return abi.ExecResult{}, abi.Errorf(abi.CodeIO, "the session is closed, its steps were not saved: %v", err)
-		}
-		res["steps_file"] = path
+	for k, v := range as.keep(b, reason) {
+		res[k] = v
 	}
 	return abi.ExecResult{Structured: res, Source: "web:session:" + as.id}, nil
 }
@@ -160,8 +197,8 @@ func dataDir() string {
 }
 
 // saveSteps пишет шаги сеанса фикстурой ({session, steps}) в
-// <каталог данных>/browser-steps/<сеанс>.json (0600).
-func saveSteps(id string, steps []map[string]any) (string, error) {
+// <каталог данных>/browser-steps/<сеанс>.json (0600) и удаляет записи старше keep.
+func saveSteps(id string, steps []map[string]any, keep time.Duration) (string, error) {
 	dir := filepath.Join(dataDir(), "browser-steps")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
@@ -171,5 +208,28 @@ func saveSteps(id string, steps []map[string]any) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, id+".json")
-	return path, os.WriteFile(path, b, 0o600)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		return "", err
+	}
+	pruneSteps(dir, keep, time.Now())
+	return path, nil
+}
+
+// pruneSteps удаляет записи шагов старше keep (0 — не удалять).
+func pruneSteps(dir string, keep time.Duration, now time.Time) {
+	if keep <= 0 {
+		return
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > keep {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
 }

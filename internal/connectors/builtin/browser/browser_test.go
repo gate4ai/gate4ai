@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -401,10 +402,13 @@ func TestAgentSession(t *testing.T) {
 		t.Fatal("second session, with whose session it is and the alternatives:", err)
 	}
 
-	// close: по умолчанию коротко; --steps — шаги без ответов; save_steps —
-	// полная запись в файл каталога данных (фикстура hosttest.Replay).
+	// close: по умолчанию коротко; --steps — шаги без ответов; полная запись
+	// всегда пишется в файл каталога данных (фикстура hosttest.Replay) и
+	// отдаётся хосту (OnClose) — его ответ попадает в knowledge.
 	t.Setenv("GATE4AI_HOME", t.TempDir())
-	res, err = agentExec(t, b, "close", map[string]any{"session": id, "steps": true, "save_steps": true})
+	var closed Closed
+	b.OnClose = func(c Closed) map[string]any { closed = c; return map[string]any{"recipe": "/k/RECIPE.md"} }
+	res, err = agentExec(t, b, "close", map[string]any{"session": id, "steps": true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,6 +426,12 @@ func TestAgentSession(t *testing.T) {
 	fx, err := hosttest.LoadFixture(path)
 	if err != nil || len(fx.Steps) != 6 || fx.Steps[3].Error.Code != abi.CodeNotFound || fx.Steps[1].Result["text"] == nil {
 		t.Fatalf("fixture: %+v %v", fx, err)
+	}
+	if closed.Session != id || len(closed.Steps) != 6 || closed.StepsFile != path || closed.Reason != "closed by browser.close" {
+		t.Fatalf("OnClose: %+v", closed)
+	}
+	if k, _ := res["knowledge"].(map[string]any); k["recipe"] != "/k/RECIPE.md" {
+		t.Fatalf("knowledge in the close answer: %v", res)
 	}
 	if _, err := agentExec(t, b, "observe", map[string]any{"session": id}); err == nil || !strings.Contains(err.Error(), "was closed at") || !strings.Contains(err.Error(), "closed by browser.close") {
 		t.Fatal("closed session, who closed it:", err)
@@ -541,7 +551,10 @@ func TestAgentSessionIdle(t *testing.T) {
 	old := AgentIdle
 	AgentIdle = 50 * time.Millisecond
 	defer func() { AgentIdle = old }()
+	t.Setenv("GATE4AI_HOME", t.TempDir())
 	_, b, _ := setup(t, nil)
+	closed := make(chan Closed, 1)
+	b.OnClose = func(c Closed) map[string]any { closed <- c; return nil }
 	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"})
 	if err != nil {
 		t.Fatal(err)
@@ -553,10 +566,45 @@ func TestAgentSessionIdle(t *testing.T) {
 	if _, err := agentExec(t, b, "observe", map[string]any{"session": res["session"]}); err == nil {
 		t.Fatal("idle session is gone")
 	}
+	// Запись шагов сохраняется и без close: простой — тоже закрытие.
+	select {
+	case c := <-closed:
+		if c.Session != res["session"] || len(c.Steps) != 1 || !strings.Contains(c.Reason, "idle") {
+			t.Fatalf("%+v", c)
+		}
+		if _, err := hosttest.LoadFixture(c.StepsFile); err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the idle session's steps were not kept")
+	}
+}
+
+func TestStepsPruned(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "s-old.json")
+	os.WriteFile(old, []byte("{}"), 0o600)
+	os.Chtimes(old, time.Now().Add(-48*time.Hour), time.Now().Add(-48*time.Hour))
+	fresh := filepath.Join(dir, "s-new.json")
+	os.WriteFile(fresh, []byte("{}"), 0o600)
+	pruneSteps(dir, 24*time.Hour, time.Now())
+	if _, err := os.Stat(old); err == nil {
+		t.Fatal("old record kept")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatal("fresh record removed")
+	}
+	pruneSteps(dir, 0, time.Now()) // 0 — не удалять
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestAgentCloseAllAndCleanSteps(t *testing.T) {
+	t.Setenv("GATE4AI_HOME", t.TempDir())
 	_, b, _ := setup(t, nil)
+	var kept []Closed
+	b.OnClose = func(c Closed) map[string]any { kept = append(kept, c); return nil }
 	res, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/?code=one-time&x=1"})
 	if err != nil {
 		t.Fatal(err)
@@ -573,6 +621,10 @@ func TestAgentCloseAllAndCleanSteps(t *testing.T) {
 	res, err = agentExec(t, b, "close", map[string]any{"all": true})
 	if err != nil || res["sessions"] != 1 {
 		t.Fatal(res, err)
+	}
+	// close --all тоже сохраняет запись шагов.
+	if len(kept) != 1 || kept[0].Session != id || len(kept[0].Steps) != 2 || kept[0].StepsFile == "" {
+		t.Fatalf("steps of close --all: %+v", kept)
 	}
 	if _, err := agentExec(t, b, "open", map[string]any{"url": "https://a.example.com/"}); err != nil {
 		t.Fatal("the page is free:", err)

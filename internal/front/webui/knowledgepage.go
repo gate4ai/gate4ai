@@ -19,6 +19,12 @@ type knowledgeItem struct {
 	Publish   knowledge.Publish
 	Tasks     []knowledge.Task
 	SiteList  []string
+	// Auto — рецепт написан gate4ai из сеансов браузера, коннектора нет;
+	// Sessions — сколько сеансов в рецепте, NoNote — из них без заметки агента.
+	Auto     bool
+	Sessions int
+	NoNote   int
+	Last     string
 }
 
 func (u *UI) knowledgePage(r *http.Request) (string, map[string]any, error) {
@@ -28,6 +34,7 @@ func (u *UI) knowledgePage(r *http.Request) (string, map[string]any, error) {
 		return "knowledge", data, err
 	}
 	var items []knowledgeItem
+	noNote := 0
 	for _, f := range list {
 		it := knowledgeItem{Folder: f, Publish: knowledge.HowToPublish(f, ""), SiteList: f.Sites()}
 		if f.Connector != "" {
@@ -35,10 +42,14 @@ func (u *UI) knowledgePage(r *http.Request) (string, map[string]any, error) {
 		}
 		if f.Recipe != nil {
 			it.Tasks = f.Recipe.Tasks
+			it.Auto = f.Recipe.Overall() == knowledge.StatusAuto && f.Connector == ""
+			it.Sessions, it.NoNote, it.Last = len(f.Recipe.Sessions), f.Recipe.WithoutNote(), f.Recipe.LastSession()
+			noNote += it.NoNote
 		}
 		items = append(items, it)
 	}
 	data["Items"] = items
+	data["NoNote"] = noNote
 	if name := strings.TrimSpace(r.URL.Query().Get("check")); name != "" {
 		if f, ok := knowledge.Find(u.D.KnowledgeDir(), name); ok {
 			data["Check"] = knowledge.Check(f.Path)

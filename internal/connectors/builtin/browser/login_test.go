@@ -170,7 +170,7 @@ func TestAgentLogin(t *testing.T) {
 		t.Fatal(res, err)
 	}
 	t.Setenv("GATE4AI_HOME", t.TempDir())
-	res, err = h.ExecuteRequest(b, req("close", map[string]any{"session": session, "save_steps": true}, false))
+	res, err = h.ExecuteRequest(b, req("close", map[string]any{"session": session}, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestViaAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GATE4AI_HOME", t.TempDir())
-	res, err = h.ExecuteRequest(b, req("close", map[string]any{"session": session, "save_steps": true}, false))
+	res, err = h.ExecuteRequest(b, req("close", map[string]any{"session": session}, false))
 	if err != nil {
 		t.Fatal(err)
 	}

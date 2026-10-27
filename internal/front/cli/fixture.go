@@ -7,12 +7,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"maps"
 	"os"
-	"regexp"
-	"slices"
 	"sort"
 	"strings"
+
+	"github.com/gate4ai/gate4ai/internal/knowledge"
 )
 
 const fixtureUsage = `usage:
@@ -26,12 +25,6 @@ type multi []string
 
 func (m *multi) String() string     { return strings.Join(*m, ",") }
 func (m *multi) Set(v string) error { *m = append(*m, v); return nil }
-
-var (
-	emailRe = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
-	phoneRe = regexp.MustCompile(`(\+7|\b8)[\s\-(]*\d{3}[\s\-)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}\b`)
-	longRe  = regexp.MustCompile(`\b\d{8,}\b`)
-)
 
 // fixture — офлайн-команды для фикстур тестов коннекторов.
 func (e *Env) fixture(args []string) int {
@@ -66,12 +59,12 @@ func (e *Env) fixture(args []string) int {
 		}
 		pairs[real] = fake
 	}
-	s := &scrubber{pairs: pairs, auto: *auto, fakes: map[string]string{}}
-	doc = s.walk(doc)
+	s := knowledge.NewScrubber(pairs, *auto)
+	doc = s.Walk(doc)
 	b, _ := json.MarshalIndent(doc, "", "  ")
 	// Проверка: ни одно исходное значение не осталось.
 	var left []string
-	for real := range s.seen() {
+	for real := range s.Seen() {
 		if strings.Contains(string(b), real) {
 			left = append(left, real)
 		}
@@ -87,77 +80,7 @@ func (e *Env) fixture(args []string) int {
 	if err := os.WriteFile(dst, append(b, '\n'), 0o600); err != nil {
 		return e.fail(err)
 	}
-	e.printJSON(map[string]any{"status": "ok", "file": dst, "replaced": s.count,
+	e.printJSON(map[string]any{"status": "ok", "file": dst, "replaced": s.Count,
 		"next": "check the file by eye: names of doctors, clinics, diagnoses and dates are not found automatically"})
 	return ExitOK
-}
-
-type scrubber struct {
-	pairs map[string]string
-	auto  bool
-	fakes map[string]string // найденное автоматически → замена
-	count int
-}
-
-func (s *scrubber) seen() map[string]bool {
-	out := map[string]bool{}
-	for k := range s.pairs {
-		out[k] = true
-	}
-	for k := range s.fakes {
-		out[k] = true
-	}
-	return out
-}
-
-func (s *scrubber) walk(v any) any {
-	switch t := v.(type) {
-	case string:
-		return s.text(t)
-	case map[string]any:
-		// По порядку ключей: одинаковые замены при каждом запуске.
-		out := map[string]any{}
-		for _, k := range slices.Sorted(maps.Keys(t)) {
-			out[s.text(k)] = s.walk(t[k])
-		}
-		return out
-	case []any:
-		for i := range t {
-			t[i] = s.walk(t[i])
-		}
-	}
-	return v
-}
-
-func (s *scrubber) text(t string) string {
-	// Сначала длинные значения: «Иванов Иван» раньше «Иван».
-	keys := slices.Collect(maps.Keys(s.pairs))
-	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
-	for _, k := range keys {
-		if n := strings.Count(t, k); n > 0 {
-			t, s.count = strings.ReplaceAll(t, k, s.pairs[k]), s.count+n
-		}
-	}
-	if !s.auto {
-		return t
-	}
-	t = emailRe.ReplaceAllStringFunc(t, func(m string) string { return s.fake(m, "user%d@example.com") })
-	t = phoneRe.ReplaceAllStringFunc(t, func(m string) string { return s.fake(m, "+7 900 000-00-%02d") })
-	return longRe.ReplaceAllStringFunc(t, func(m string) string {
-		if strings.Trim(m, "0") == "" || len(strings.TrimLeft(m, "0")) <= 2 {
-			return m // уже замена
-		}
-		return s.fake(m, "%0"+fmt.Sprint(len(m))+"d")
-	})
-}
-
-// fake — одна и та же замена для одного значения.
-func (s *scrubber) fake(real, format string) string {
-	if f, ok := s.fakes[real]; ok {
-		return f
-	}
-	f := fmt.Sprintf(format, len(s.fakes)+1)
-	s.fakes[real] = f
-	s.count++
-	return f
 }
