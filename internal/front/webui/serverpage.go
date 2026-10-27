@@ -214,6 +214,9 @@ func (u *UI) serverChecks(ctx context.Context) []ServerCheck {
 			add(ServerCheck{ID: "chrome", Title: M("Chrome"), Status: "ok", Detail: M("%s", strings.TrimSpace(ck.Chrome+" "+ck.Version))})
 		}
 		if ck.OS != "darwin" && ck.OS != "windows" {
+			if ck.Chrome != "" && (ck.Sandbox == "blocked" || bs.Sandbox == "off") {
+				add(ServerCheck{ID: "sandbox", Title: M("Chrome sandbox: off (--no-sandbox)"), Status: "warn", Detail: M("the kernel does not let this Chrome create user namespaces (AppArmor): it runs without its sandbox; keep it updated"), Cmd: "gate4ai browser setup --user"})
+			}
 			switch {
 			case ck.Screen:
 				add(ServerCheck{ID: "screen", Title: M("Screen for the browser"), Status: "ok", Detail: M("this computer's")})

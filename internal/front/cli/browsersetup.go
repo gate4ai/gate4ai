@@ -19,10 +19,13 @@ import (
 // пароль спросить некому, и команда сразу отвечает, что нужен root, а не висит.
 
 // setupSysFn — окружение для команды (тесты подменяют); userInstallFn —
-// загрузка Chrome for Testing в каталог данных (без root).
+// загрузка Chrome for Testing в каталог данных (без root), userLibsFn и
+// userFontsFn — его библиотеки и шрифты туда же (Debian / Ubuntu, без root).
 var (
 	setupSysFn    = browserenv.System
 	userInstallFn = browserenv.InstallUserChrome
+	userLibsFn    = browserenv.InstallUserLibraries
+	userFontsFn   = browserenv.InstallUserFonts
 )
 
 func (e *Env) browserSetup(ctx context.Context, args []string) int {
@@ -30,7 +33,7 @@ func (e *Env) browserSetup(ctx context.Context, args []string) int {
 	fs.SetOutput(e.Stderr)
 	yes := fs.Bool("yes", false, "install what is missing without asking (runs the commands, with sudo where needed)")
 	dry := fs.Bool("dry-run", false, "only check and print the commands")
-	user := fs.Bool("user", false, "no root: download Chrome for Testing into gate4ai's data folder (its system libraries still come from packages)")
+	user := fs.Bool("user", false, "no root: download Chrome for Testing into gate4ai's data folder; on Debian / Ubuntu also its libraries and fonts (apt-get download) next to it")
 	asJSON := fs.Bool("json", false, "JSON output")
 	if fs.Parse(args) != nil || fs.NArg() != 0 {
 		return ExitUsage
@@ -40,10 +43,13 @@ func (e *Env) browserSetup(ctx context.Context, args []string) int {
 	}
 	s := setupSysFn()
 	c := browserenv.CheckBrowser(s)
-	if *user && c.Chrome == "" {
-		if c = e.userChrome(ctx, s); c.Chrome == "" {
-			return ExitError
+	if *user && !*dry {
+		if c.Chrome == "" {
+			if c = e.userChrome(ctx, s); c.Chrome == "" {
+				return ExitError
+			}
 		}
+		c = e.userLibs(ctx, s, c)
 	}
 	e.printCheck(c)
 	if len(c.Commands) == 0 || *dry || !e.human() && !*yes {
@@ -60,13 +66,17 @@ func (e *Env) browserSetup(ctx context.Context, args []string) int {
 		e.say("Nothing installed. Run the commands above, or gate4ai browser setup --yes.")
 		return setupExit(c)
 	}
-	// Chrome нет, а root взять негде (не root, sudo без пароля не проходит):
-	// сам бинарник ставится без root — Chrome for Testing в каталог данных;
-	// библиотеки к нему всё равно из пакетов (команда ниже скажет, какие).
-	if c.Chrome == "" && c.NeedsRoot && !s.Root && !canSudo(s) && browserenv.UserInstallAvailable(s) {
-		if c = e.userChrome(ctx, s); c.Chrome == "" {
-			return ExitError
+	// Root взять негде (не root, sudo без пароля не проходит): что можно —
+	// без root. Chrome for Testing в каталог данных; на Debian / Ubuntu туда
+	// же его библиотеки и шрифты (apt-get download); иначе библиотеки из
+	// пакетов (команда ниже скажет, какие).
+	if c.NeedsRoot && !s.Root && !canSudo(s) {
+		if c.Chrome == "" && browserenv.UserInstallAvailable(s) {
+			if c = e.userChrome(ctx, s); c.Chrome == "" {
+				return ExitError
+			}
 		}
+		c = e.userLibs(ctx, s, c)
 		e.printCheck(c)
 		if len(c.Commands) == 0 {
 			return setupExit(c)
@@ -103,6 +113,34 @@ func (e *Env) userChrome(ctx context.Context, s browserenv.Sys) browserenv.Brows
 	return browserenv.CheckBrowser(s)
 }
 
+// userLibs кладёт библиотеки и шрифты Chrome в каталог данных без root
+// (только то, чего не хватает, и только где это возможно) и проверяет заново.
+func (e *Env) userLibs(ctx context.Context, s browserenv.Sys, c browserenv.BrowserCheck) browserenv.BrowserCheck {
+	if c.Chrome == "" || !browserenv.UserLibrariesAvailable(s) {
+		return c
+	}
+	if len(c.Libraries) > 0 {
+		if left, err := userLibsFn(ctx, s, s.DataDir, c.Chrome, e.Stderr); err != nil {
+			fmt.Fprintln(e.Stderr, "gate4ai: libraries without root: "+err.Error())
+			if len(left) > 0 {
+				fmt.Fprintln(e.Stderr, "gate4ai: still missing: "+strings.Join(left, ", "))
+			}
+		} else {
+			fmt.Fprintln(e.Stderr, "Libraries: "+browserenv.UserLibDir(s.DataDir))
+		}
+	}
+	for _, m := range c.Missing {
+		if m == "fonts" {
+			if n, err := userFontsFn(ctx, s, s.DataDir, e.Stderr); err != nil {
+				fmt.Fprintln(e.Stderr, "gate4ai: fonts without root: "+err.Error())
+			} else {
+				fmt.Fprintf(e.Stderr, "Fonts: %d in %s\n", n, browserenv.UserFontsDir(s.DataDir))
+			}
+		}
+	}
+	return browserenv.CheckBrowser(s)
+}
+
 // canSudo — sudo работает без пароля (или его не спросят).
 func canSudo(s browserenv.Sys) bool {
 	if _, err := s.LookPath("sudo"); err != nil {
@@ -134,6 +172,12 @@ func (e *Env) printCheck(c browserenv.BrowserCheck) {
 		fmt.Fprintln(w, mark(false)+"Chrome: "+c.Chrome+" "+c.Version+" — does not start: missing libraries "+strings.Join(c.Libraries, ", "))
 	default:
 		fmt.Fprintln(w, mark(true)+"Chrome: "+c.Chrome+" "+c.Version)
+	}
+	if c.LibDir != "" {
+		fmt.Fprintln(w, mark(true)+"Libraries: "+c.LibDir+" (no root)")
+	}
+	if c.Sandbox == "blocked" {
+		fmt.Fprintln(w, mark(false)+"Sandbox: the kernel forbids user namespaces to this Chrome (AppArmor) — it runs with --no-sandbox (sandbox: auto)")
 	}
 	if c.OS != "darwin" && c.OS != "windows" {
 		switch {
@@ -179,6 +223,9 @@ func (e *Env) browserChecks(ctx context.Context) []sandbox.Check {
 		out = append(out, sandbox.Check{ID: "browser_chrome", Status: "fail", Detail: strings.TrimSpace(c.Chrome+" "+c.Version) + " does not start: missing libraries " + strings.Join(c.Libraries, ", ") + ". " + c.Summary, Fix: fix})
 	default:
 		out = append(out, sandbox.Check{ID: "browser_chrome", Status: "ok", Detail: strings.TrimSpace(c.Chrome + " " + c.Version)})
+	}
+	if c.Sandbox == "blocked" {
+		out = append(out, sandbox.Check{ID: "browser_sandbox", Status: "warn", Detail: "the kernel does not let this Chrome create user namespaces (AppArmor): it runs without its sandbox (--no-sandbox); keep it updated", Fix: "gate4ai browser setup --user"})
 	}
 	switch c.Display {
 	case "headless":

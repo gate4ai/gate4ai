@@ -195,7 +195,7 @@ Owner commands (local socket):
   gate4ai vault status <@account> [--wait 10m]   are the account's secrets set (no values; agents may ask and wait for the owner)
   gate4ai access [sites | folders [set <site|folder> <access> | remove <site|folder>]]   the Browser and Files access lists
   gate4ai browser sessions [close <id>] | watch <id> [--remote]   browser sessions of agents: list, live view, close
-  gate4ai browser setup [--yes] [--dry-run]   check Chrome, the virtual screen (Xvfb) and fonts; install what is missing (asks first)
+  gate4ai browser setup [--yes] [--dry-run] [--user]   check Chrome, the virtual screen (Xvfb) and fonts; install what is missing (asks first); --user — without root
   gate4ai relay status | off | on | register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed]   internet access (relay.gate4.ai): state, turn off / on, own relay
   gate4ai connectors list | install <file.g4c | name[@version] | source folder | git url> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | logs <name> [--limit n] [--since 10m] | refresh
   gate4ai connectors new <name> [--site <domain>] [--from-session <s-id | steps.json>] [--task <action>] [-o folder]   a connector in the knowledge folder; --from-session: recipe and draft from a recorded session

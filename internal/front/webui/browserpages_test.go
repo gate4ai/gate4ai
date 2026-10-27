@@ -133,6 +133,33 @@ func TestBrowserPages(t *testing.T) {
 	if p := get("/browser"); !strings.Contains(p, "не установлен Chrome") || !strings.Contains(p, "google-chrome-stable_current_amd64.deb") {
 		t.Fatal("no Chrome: what to install", p)
 	}
+	// Chrome есть (Chrome for Testing без root), но без библиотек: страница называет их, а не «не установлен».
+	u.BrowserEnv = func() browserenv.Sys {
+		return browserenv.Sys{GOOS: "linux", GOARCH: "amd64", Getenv: func(k string) string { return map[string]string{"GATE4AI_CHROME": "/home/u/chrome/chrome"}[k] },
+			LookPath: func(n string) (string, error) {
+				if n == "apt-get" || n == "dpkg-deb" {
+					return "/usr/bin/" + n, nil
+				}
+				return "", errors.New("no")
+			},
+			ReadFile: func(p string) ([]byte, error) {
+				if p == "/proc/sys/kernel/apparmor_restrict_unprivileged_userns" {
+					return []byte("1\n"), nil
+				}
+				return []byte("ID=debian\n"), nil
+			},
+			Exists: func(p string) bool { return p == "/home/u/chrome/chrome" },
+			Output: func(name string, _ ...string) (string, error) {
+				if name == "ldd" {
+					return "\tlibatk-1.0.so.0 => not found\n\tlibgbm.so.1 => not found\n", nil
+				}
+				return "Google Chrome for Testing 156.0.1", nil
+			}}
+	}
+	if p := get("/browser"); strings.Contains(p, "не установлен Chrome") || !strings.Contains(p, "/home/u/chrome/chrome не запускается, нет библиотек libatk-1.0.so.0, libgbm.so.1") ||
+		!strings.Contains(p, "apt-get install -y --no-install-recommends libatk1.0-0 libgbm1") || !strings.Contains(p, "gate4ai browser setup --user puts the libraries") {
+		t.Fatal("Chrome without libraries: which ones", p)
+	}
 	u.BrowserEnv = nil
 	if p := get("/"); !strings.Contains(p, "Сейчас в браузере") {
 		t.Fatal("the home page shows open sessions", p)

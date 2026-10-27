@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -261,7 +262,8 @@ func TestBrowserSetupUserChrome(t *testing.T) {
 	if code, out := run("--dry-run"); code != ExitError || installs != 0 || !strings.Contains(out, "gate4ai browser setup --user") {
 		t.Fatal(code, out)
 	}
-	// --yes без терминала и без root: Chrome for Testing ставится сам, библиотеки — командой для root.
+	// --yes без терминала и без root: Chrome for Testing ставится сам, библиотеки — командой для root
+	// (Debian без apt-get в PATH — как не Debian: без root их не положить).
 	if code, out := run("--yes"); installs != 1 || code != ExitError || !strings.Contains(out, "Chrome for Testing: /data/chrome/131.0.1/chrome-linux64/chrome") ||
 		!strings.Contains(out, "To run Chrome, install: libnss3.") || !strings.Contains(out, "Run as root (or with sudo):") {
 		t.Fatal(code, installs, out)
@@ -269,5 +271,77 @@ func TestBrowserSetupUserChrome(t *testing.T) {
 	// --user явно, Chrome уже есть: повторной установки нет.
 	if code, out := run("--user", "--dry-run"); installs != 1 || code != ExitError || !strings.Contains(out, "missing libraries libnss3.so") {
 		t.Fatal(code, installs, out)
+	}
+	// Debian / Ubuntu с apt-get и dpkg-deb: библиотеки и шрифты кладутся в каталог данных без root.
+	have["apt-get"], have["dpkg-deb"] = "/usr/bin/apt-get", "/usr/bin/dpkg-deb"
+	have["fc-list-out"] = ""
+	libs, fontsN := 0, 0
+	oldLibs, oldFonts := userLibsFn, userFontsFn
+	userLibsFn = func(_ context.Context, s browserenv.Sys, dataDir, chrome string, _ io.Writer) ([]string, error) {
+		libs++
+		if dataDir != "/data" || chrome != "/data/chrome/131.0.1/chrome-linux64/chrome" {
+			t.Fatal(dataDir, chrome)
+		}
+		have["ldd-out"] = "\tlibnss3.so => /data/chrome/lib/libnss3.so (0x0)\n"
+		return nil, nil
+	}
+	userFontsFn = func(_ context.Context, s browserenv.Sys, dataDir string, _ io.Writer) (int, error) {
+		fontsN++
+		have["fc-list-out"] = fonts
+		return 6, nil
+	}
+	defer func() { userLibsFn, userFontsFn = oldLibs, oldFonts }()
+	if code, out := run("--yes"); libs != 1 || fontsN != 1 || code != ExitOK || !strings.Contains(out, "Libraries: /data/chrome/lib") || !strings.Contains(out, "Fonts: 6 in /data/chrome/fonts") ||
+		strings.Contains(out, "Run as root") {
+		t.Fatal(code, libs, fontsN, out)
+	}
+	// Всё на месте: --user ничего не ставит заново.
+	if code, out := run("--user"); libs != 1 || fontsN != 1 || code != ExitOK {
+		t.Fatal(code, libs, fontsN, out)
+	}
+}
+
+func TestCheckBrowserSandboxAndUserLibs(t *testing.T) {
+	have := map[string]string{"/data/chrome/156.0.1/chrome-linux64/chrome": "", "/data/chrome/lib/libnss3.so": "", "fc-list-out": fonts,
+		"ldd-out": "\tlibnss3.so => /data/chrome/lib/libnss3.so (0x0)\n"}
+	sys := fakeSys("linux", "amd64", "ID=ubuntu\n", have, map[string]string{"HOME": "/home/u"})
+	sys.DataDir = "/data"
+	sys.ReadFile = func(p string) ([]byte, error) {
+		switch p {
+		case "/etc/os-release":
+			return []byte("ID=ubuntu\n"), nil
+		case "/proc/sys/kernel/apparmor_restrict_unprivileged_userns":
+			return []byte("1\n"), nil
+		}
+		return nil, errors.New("no")
+	}
+	var envSeen []string
+	sys.OutputEnv = func(env []string, name string, args ...string) (string, error) {
+		envSeen = env
+		return have["ldd-out"], nil
+	}
+	c := browserenv.CheckBrowser(sys)
+	if !c.OK || c.Sandbox != "blocked" || c.LibDir != "/data/chrome/lib" || strings.Join(envSeen, " ") != "LD_LIBRARY_PATH=/data/chrome/lib" {
+		t.Fatalf("%+v %v", c, envSeen)
+	}
+	oldSys := setupSysFn
+	setupSysFn = func() browserenv.Sys { return sys }
+	defer func() { setupSysFn = oldSys }()
+	var out, errb bytes.Buffer
+	e := &Env{Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, Getenv: func(string) string { return "" }, StdoutTTY: true}
+	if code := Run(context.Background(), e, []string{"browser", "setup", "--dry-run"}); code != ExitOK || !strings.Contains(out.String(), "Libraries: /data/chrome/lib (no root)") ||
+		!strings.Contains(out.String(), "Sandbox: the kernel forbids") {
+		t.Fatal(code, out.String(), errb.String())
+	}
+	// gate4ai doctor: песочница — предупреждение (daemon не нужен: GATE4AI_URL на пустой адрес).
+	e.Getenv = func(k string) string { return map[string]string{"GATE4AI_TOKEN": "x"}[k] }
+	e.Connect = func(string) *Client { return &Client{HTTP: http.DefaultClient, Base: "http://127.0.0.1:1"} }
+	checks := e.browserChecks(context.Background())
+	found := false
+	for _, ch := range checks {
+		found = found || ch.ID == "browser_sandbox" && ch.Status == "warn"
+	}
+	if !found {
+		t.Fatalf("%+v", checks)
 	}
 }

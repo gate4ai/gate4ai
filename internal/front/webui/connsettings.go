@@ -60,6 +60,7 @@ var settingHints = map[string]map[string]fieldHint{
 		"chrome_path":        {Label: "Path to Chrome", Kind: fieldText, Help: "Empty — find the installed Chrome.", Advanced: true},
 		"cdp_url":            {Label: "CDP address", Kind: fieldText, Help: "An already running Chrome; empty — the package starts it.", Advanced: true},
 		"display":            {Label: "Screen", Kind: fieldChoice, Choices: []string{"auto", "virtual", "headless", "host"}, Help: "auto (default): your screen; on a server without one — a virtual screen (Xvfb), without Xvfb — no screen (headless, sites see it more often). You watch the sessions in Browser either way.", Advanced: true},
+		"sandbox":            {Label: "Chrome sandbox", Kind: fieldChoice, Choices: []string{"auto", "on", "off"}, Help: "auto (default): on, except when the kernel forbids it to this Chrome (Ubuntu 24.04+ with AppArmor and a Chrome outside the distribution packages, such as Chrome for Testing from gate4ai browser setup --user) — then Chrome starts with --no-sandbox and Browser shows a warning. on: never without the sandbox (Chrome does not start when it is forbidden). off: always without it.", Advanced: true},
 		"download_types":     {Label: "File types agents may download", Kind: fieldList, Help: "browser.download returns only these: application/pdf, image/*, .csv. Empty — any type.", Placeholder: "application/pdf", Advanced: true},
 		"max_download_bytes": {Label: "Largest file to download, bytes", Kind: fieldNumber, Help: "20 MiB at most (the default).", Placeholder: "20971520", Advanced: true},
 		"download_dir":       {Label: "Downloads folder", Kind: fieldText, Help: "Where Chrome saves files downloaded in its window, without a Save as dialog; empty — your Downloads folder.", Placeholder: "~/Downloads", Advanced: true},
@@ -168,7 +169,7 @@ func settingFields(m manifest.Manifest, cur map[string]any) []SettingField {
 
 var hintOrder = map[string][]string{
 	"files":   {"allow_hidden", "allow_paths", "max_bytes"},
-	"browser": {"max_text_chars", "redact_params", "profile_dir", "chrome_path", "cdp_url", "display", "download_types", "max_download_bytes", "download_dir"},
+	"browser": {"max_text_chars", "redact_params", "profile_dir", "chrome_path", "cdp_url", "display", "sandbox", "download_types", "max_download_bytes", "download_dir"},
 }
 
 // getPath — значение по ключу с точками (imap.host → settings["imap"]["host"]).
