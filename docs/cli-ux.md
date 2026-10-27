@@ -22,7 +22,7 @@
 | Команда | Кто | Нужен daemon |
 |---|---|---|
 | `help`, `version` | все | нет |
-| `ui [--print] [--remote] [--start\|--no-start]` | владелец | да (в терминале запускает его сам) |
+| `ui [--print] [--remote] [--start\|--no-start]` | владелец; `--print` — и агент (адреса и пароль, которым ещё не входили, для установщика) | да (в терминале запускает его сам) |
 | `status` / `status <id> [--wait 10m] [--out f]` | владелец / агент | да |
 | `daemon [флаги]`, `daemon start \| stop \| restart \| status` | владелец | — |
 | `service install [--no-tray] [-- флаги daemon] \| uninstall \| status` | владелец | нет |

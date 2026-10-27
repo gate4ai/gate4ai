@@ -24,6 +24,7 @@ import (
 	"github.com/gate4ai/gate4ai/internal/front/cli"
 	"github.com/gate4ai/gate4ai/internal/front/tray"
 	"github.com/gate4ai/gate4ai/internal/pipeline"
+	"github.com/gate4ai/gate4ai/internal/platform/agentid"
 	"github.com/gate4ai/gate4ai/internal/platform/ipc"
 	"github.com/gate4ai/gate4ai/internal/secrets/keys"
 	"github.com/gate4ai/gate4ai/sdk-go/manifest"
@@ -258,6 +259,21 @@ func TestOwnerRoutesOnSocket(t *testing.T) {
 	if p := body(t, r); r.StatusCode != 200 || strings.Contains(p, pw) || !strings.Contains(p, `"password":"`) {
 		t.Fatal(r.StatusCode, p)
 	}
+	// Опознанный агент без ключа на сокете владельца (установщик под OpenClaw)
+	// адрес и пароль получает; пароль при этом помечен прошедшим через чат.
+	pw, _ = u.ResetLogin()
+	d.Callers = func(int) agentid.Caller { return agentid.Caller{Agent: "openclaw", Dir: "/home/openclaw"} }
+	r, _ = owner.Post("http://gate4ai/v1/ui/url", "application/json", nil)
+	if p := body(t, r); r.StatusCode != 200 || !strings.Contains(p, `"password":"`+pw+`"`) || !u.Protection().Relayed {
+		t.Fatal("local agent:", r.StatusCode, p, u.Protection().Relayed)
+	}
+	if r, _ = owner.Post("http://gate4ai/v1/ui/reset-login", "application/json", nil); r.StatusCode != 403 {
+		t.Fatal("local agent reset the Web UI login", r.StatusCode)
+	}
+	if r, _ = owner.Get("http://gate4ai/v1/tray/state"); r.StatusCode != 403 {
+		t.Fatal("local agent got the tray state", r.StatusCode)
+	}
+	d.Callers = nil
 	// Агент с токеном адрес Web UI не получает.
 	tok, _ := d.State.IssueToken("bot", "", "")
 	req, _ := http.NewRequest("POST", "http://gate4ai/v1/ui/url", nil)

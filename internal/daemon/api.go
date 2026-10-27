@@ -118,6 +118,9 @@ func (d *Daemon) identify(r *http.Request, ownerSock bool) (auth.Principal, *aud
 	if ownerSock {
 		if _, ok := ipc.PeerFrom(r.Context()); ok {
 			if known && who.IsAgent() {
+				if localAgentRoutes[r.Method+" "+r.URL.Path] {
+					return auth.LocalAgent(who.Agent), callerOf(who, known), nil
+				}
 				return auth.Principal{}, nil, &authError{http.StatusForbidden, "agent_required", fmt.Sprintf(
 					"this socket is the owner's, and gate4ai is called by an agent (%s in %s): an agent calls gate4ai with its own key — gate4ai connects it by itself (the command shows a code, the owner approves it in the Web UI); owner commands are for the owner's own terminal",
 					who.Agent, who.Dir)}
@@ -127,6 +130,14 @@ func (d *Daemon) identify(r *http.Request, ownerSock bool) (auth.Principal, *aud
 	}
 	return auth.Principal{}, nil, errors.New("authentication required: an agent connects with its own key (gate4ai pair) or token (GATE4AI_TOKEN)")
 }
+
+// localAgentRoutes — запросы сокета владельца, на которые опознанный агент
+// (без ключа) получает ответ вместо agent_required: адрес Web UI и
+// сгенерированный пароль, которым ещё не входили (`gate4ai ui --print` у
+// агента-установщика — он передаёт их пользователю в чат, пароль при этом
+// считается прошедшим через чат). Всё остальное агенту на сокете владельца
+// закрыто.
+var localAgentRoutes = map[string]bool{"POST /v1/ui/url": true}
 
 // authError — отказ опознания со своим кодом и статусом.
 type authError struct {

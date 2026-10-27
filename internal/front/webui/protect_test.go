@@ -3,6 +3,7 @@
 package webui
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/cookiejar"
@@ -541,5 +542,63 @@ func TestRelayedPasswordNotice(t *testing.T) {
 	// Пароль уже использован (вошли): пометка больше не ставится.
 	if err := u.MarkRelayed(); err != nil || u.Protection().Relayed {
 		t.Fatal("relayed after the password was used", err)
+	}
+}
+
+// Перезапуск daemon до первого входа: открытый текст утерян, и ShownPassword
+// (`gate4ai ui --print`, установщик) генерирует новый — прежний перестаёт
+// действовать; после входа или смены пароля новый не генерируется, а у
+// установок без признака fresh (до его появления) пароль не трогается.
+func TestPasswordRegeneratedUntilFirstSignIn(t *testing.T) {
+	u, d, _, base := setup(t)
+	pw, _ := u.EnsurePassword()
+	if shown, err := u.ShownPassword(); err != nil || shown != pw {
+		t.Fatal("shown while in memory", shown, err)
+	}
+	u.MarkRelayed()
+	// «Перезапуск»: новый UI над тем же State Store.
+	u2 := New(d)
+	if again, _ := u2.EnsurePassword(); again != "" || u2.InitialPassword() != "" {
+		t.Fatal("restart must not generate at start", again)
+	}
+	pw2, err := u2.ShownPassword()
+	if err != nil || pw2 == "" || pw2 == pw || u2.InitialPassword() != pw2 || !u2.Protection().Relayed || !u2.Protection().Fresh {
+		t.Fatal("regenerate after restart", pw2, err, u2.Protection())
+	}
+	if again, _ := u2.ShownPassword(); again != pw2 {
+		t.Fatal("must not regenerate while in memory")
+	}
+	b := newBrowser(t, base)
+	if st, _ := b.signInWith(pw); st != 401 || b.loggedIn() {
+		t.Fatal("the previous password still works")
+	}
+	if st, _ := b.signInWith(pw2); st != 200 || !b.loggedIn() {
+		t.Fatal("new password", st)
+	}
+	// Вошли: признак снят, после перезапуска показать нечего и генерировать не надо.
+	if p := u.Protection(); p.Fresh || !checkPassword(p.Password, pw2) {
+		t.Fatal("fresh after sign-in", p)
+	}
+	u3 := New(d)
+	if shown, err := u3.ShownPassword(); err != nil || shown != "" || !checkPassword(u3.Protection().Password, pw2) {
+		t.Fatal("regenerated after the first sign-in", shown, err)
+	}
+	// Смена пароля в настройках тоже снимает признак.
+	pw3, _ := u.ResetLogin()
+	_, _, post := protectedSession(t, u, base, pw3)
+	u.mu.Lock()
+	p := u.Protection()
+	p.Fresh = true
+	bb, _ := json.Marshal(p)
+	d.State.Set(protectionKey, string(bb))
+	u.mu.Unlock()
+	post("/settings/login/password", url.Values{"current": {pw3}, "password": {"correct horse"}, "repeat": {"correct horse"}})
+	if p := u.Protection(); p.Fresh || !checkPassword(p.Password, "correct horse") {
+		t.Fatal("fresh after a password change", p)
+	}
+	// Запись прежней версии без признака: пароль не трогается.
+	d.State.Set(protectionKey, `{"password":"`+u.Protection().Password+`"}`)
+	if shown, err := New(d).ShownPassword(); err != nil || shown != "" || !checkPassword(u.Protection().Password, "correct horse") {
+		t.Fatal("legacy record regenerated", shown, err)
 	}
 }

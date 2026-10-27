@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,13 @@ func startPairing(t *testing.T) (*Daemon, *fakeCallers, client, client) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Close() })
+	// Маршрут Web UI в миниатюре: отвечает, кем daemon счёл собеседника.
+	d.AddRoutes(func(mux *http.ServeMux) {
+		mux.HandleFunc("POST /v1/ui/url", func(w http.ResponseWriter, r *http.Request) {
+			p := PrincipalFrom(r.Context())
+			WriteJSON(w, 200, map[string]any{"owner": p.IsOwner(), "local_agent": p.IsLocalAgent(), "agent": p.Agent, "via": p.Via})
+		})
+	})
 	fc := &fakeCallers{}
 	d.Callers = fc.get
 	ownerSock, agentSock := filepath.Join(home, "run", "o.sock"), filepath.Join(home, "run", "a.sock")
@@ -76,6 +84,19 @@ func TestOwnerSocketRefusesAgents(t *testing.T) {
 	}
 	if code := owner.do(t, "POST", "/v1/shutdown", nil, &res); code != 403 {
 		t.Fatalf("agent stops the daemon: %d", code)
+	}
+	// Исключение одно: адрес Web UI и пароль для установщика (`gate4ai ui
+	// --print`) — опознанный агент без ключа, не владелец.
+	if code := owner.do(t, "POST", "/v1/ui/url", nil, &res); code != 200 || res["owner"] != false || res["local_agent"] != true ||
+		res["agent"] != "claude-code" || res["via"] != auth.LocalAgentVia {
+		t.Fatalf("agent asks the Web UI address: %d %v", code, res)
+	}
+	if code := owner.do(t, "GET", "/v1/ui/url", nil, &res); code != 403 || errOf(res)["code"] != "agent_required" {
+		t.Fatalf("other method on the same path: %d %v", code, res)
+	}
+	fc.set(agentid.Caller{Dir: "/home/u"})
+	if code := owner.do(t, "POST", "/v1/ui/url", nil, &res); code != 200 || res["owner"] != true || res["local_agent"] != false {
+		t.Fatalf("owner asks the Web UI address: %d %v", code, res)
 	}
 	// health — без опознания (daemon status работает у всех).
 	if code := owner.do(t, "GET", "/v1/health", nil, nil); code != 200 {
