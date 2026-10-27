@@ -1413,7 +1413,14 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 		e.ForceJSON = true
 	}
 	var res uiAddress
+	// Всегда сокет владельца, и у агента тоже (а не его ключ): адреса и
+	// сгенерированный пароль daemon отдаёт опознанному агенту именно там —
+	// агент-установщик передаёт их пользователю в чат. Остальное (сброс
+	// пароля) агенту отвечает agent_required.
 	c := e.Client()
+	if e.Getenv("GATE4AI_TOKEN") == "" {
+		c = e.Connect("")
+	}
 	session := func() error {
 		if *reset {
 			if err := c.Do(ctx, "POST", "/v1/ui/reset-login", nil, nil); err != nil {

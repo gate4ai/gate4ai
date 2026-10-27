@@ -297,8 +297,13 @@ func (u *UI) Listen(addr string) (net.Listener, error) {
 
 // OwnerRoutes — маршрут сокета владельца, выдающий адрес Web UI (трей, `gate4ai ui`).
 func (u *UI) OwnerRoutes(mux *http.ServeMux) {
+	// Единственный запрос сокета владельца, на который отвечает и опознанный
+	// агент без ключа (установка через OpenClaw: установщик и агент передают
+	// адреса и пароль пользователю в чат) — daemon пускает его сюда сам
+	// (localAgentRoutes); пароль у него считается прошедшим через чат.
 	mux.HandleFunc("POST /v1/ui/url", func(w http.ResponseWriter, r *http.Request) {
-		if !daemon.PrincipalFrom(r.Context()).IsOwner() {
+		who := daemon.PrincipalFrom(r.Context())
+		if !who.IsOwner() && !who.IsLocalAgent() {
 			http.Error(w, `{"error":{"code":"owner_only","message":"owner only"}}`, 403)
 			return
 		}
@@ -309,7 +314,14 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 			Relayed bool   `json:"relayed"` // читает не человек в терминале, а скрипт или агент
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		if req.Relayed {
+		// Пароль, которым ещё не входили: после перезапуска daemon открытый
+		// текст утерян — генерируется новый (прежний перестаёт действовать).
+		pw, err := u.ShownPassword()
+		if err != nil {
+			http.Error(w, `{"error":{"code":"internal","message":"`+err.Error()+`"}}`, 500)
+			return
+		}
+		if req.Relayed || who.IsLocalAgent() {
 			_ = u.MarkRelayed()
 		}
 		link := u.URL(req.Next)
@@ -330,7 +342,7 @@ func (u *UI) OwnerRoutes(mux *http.ServeMux) {
 		// на сокете владельца: его показывают установщик, gate4ai ui и трей).
 		// remote_* — адрес из интернета и его состояние: установщик и агент
 		// отдают пользователю https-адрес, а не проброс порта по ssh.
-		out := map[string]any{"url": link, "requires": u.Protection().Requires(), "password": u.InitialPassword()}
+		out := map[string]any{"url": link, "requires": u.Protection().Requires(), "password": pw}
 		for k, v := range u.remoteState(req.Next) {
 			out[k] = v
 		}

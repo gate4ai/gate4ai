@@ -64,6 +64,7 @@ func startPair(t *testing.T) *pairHarness {
 	}
 	p := &pairHarness{d: d, keys: filepath.Join(home, "agents")}
 	d.Callers = func(int) agentid.Caller { p.mu.Lock(); defer p.mu.Unlock(); return p.agent }
+	d.AddRoutes(fakeUIRoutes)
 	ctx, cancel := context.WithCancel(context.Background())
 	p.harness = &harness{owner: filepath.Join(home, "o.sock"), agentSock: filepath.Join(home, "a.sock")}
 	go d.Serve(ctx, p.owner, p.agentSock)
@@ -140,9 +141,23 @@ func TestAgentPairsItself(t *testing.T) {
 		t.Fatalf("owner command: %d %s", code, out)
 	}
 
+	// Адреса и сгенерированный пароль агент получает (установщик под OpenClaw
+	// передаёт их пользователю в чат); сброс пароля — только владельцу.
+	if code, out := p.run(t, "ui", "--print", "--wait", "0"); code != ExitOK || jsonOf(t, out)["password"] != fakeUIPassword.Load().(string) {
+		t.Fatalf("ui --print by an agent: %d %s", code, out)
+	}
+	if code, out := p.run(t, "ui", "--reset-password"); code != ExitAuth || errOf(jsonOf(t, out))["code"] != "agent_required" ||
+		!strings.Contains(errOf(jsonOf(t, out))["hint"].(string), "gate4ai ui --reset-password") {
+		t.Fatalf("ui --reset-password by an agent: %d %s", code, out)
+	}
+
 	// Владелец подтвердил (Web UI): агент работает со своим ключом без перезапуска.
 	if _, err := p.d.DecidePairing(context.Background(), ps[0].ID, true, "assistant", "webui"); err != nil {
 		t.Fatal(err)
+	}
+	// С ключом gate4ai ui --print идёт всё равно на сокет владельца, не с ключом.
+	if code, out := p.run(t, "ui", "--print", "--wait", "0"); code != ExitOK || jsonOf(t, out)["password"] == "" {
+		t.Fatalf("ui --print by a paired agent: %d %s", code, out)
 	}
 	code, out = p.run(t, "email", "send", "--to", "landlord@example.com", "--subject", "rent")
 	if code != ExitOK {

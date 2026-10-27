@@ -24,6 +24,10 @@ type Principal struct {
 	Via   string // канал: "socket", "agent-socket", "webui", "mcp-http", "mcp-stdio", "https" (API агента на публичном адресе)
 }
 
+// LocalAgentVia — канал опознанного агента на сокете владельца без ключа
+// (не "socket": так приходит владелец, в том числе с --as <agent>).
+const LocalAgentVia = "socket-unpaired"
+
 // ErrNotOwner — операция доступна только владельцу.
 var ErrNotOwner = errors.New("owner authentication required")
 
@@ -43,3 +47,11 @@ func OwnerVia(via string) Principal { return Principal{Kind: Owner, Via: via} }
 
 // AgentVia — агент name, пришедший по каналу via.
 func AgentVia(name, via string) Principal { return Principal{Kind: Agent, Agent: name, Via: via} }
+
+// LocalAgent — агент name, опознанный по процессу на сокете владельца, без
+// ключа: прав владельца нет, daemon отвечает ему только на то, что сам
+// разрешил такому собеседнику (адрес Web UI и пароль для установщика).
+func LocalAgent(name string) Principal { return AgentVia(name, LocalAgentVia) }
+
+// IsLocalAgent — опознанный агент на сокете владельца (см. LocalAgent).
+func (p Principal) IsLocalAgent() bool { return p.Kind == Agent && p.Via == LocalAgentVia }

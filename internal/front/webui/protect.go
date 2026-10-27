@@ -43,6 +43,12 @@ type Protection struct {
 	// или агенту (установка через OpenClaw): он прошёл через чат, и пока владелец
 	// не сменит пароль или не включит Telegram, Web UI напоминает об этом.
 	Relayed bool `json:"relayed,omitempty"`
+	// Fresh — сгенерированным паролем ещё не входили: после перезапуска daemon
+	// (открытый текст утерян) `gate4ai ui --print` генерирует новый, чтобы
+	// установщик и владелец не остались без пароля. Первый вход или смена
+	// пароля снимают признак; у установок до его появления признака нет —
+	// их пароль не трогается.
+	Fresh bool `json:"fresh,omitempty"`
 }
 
 // Set — пароль задан. "" бывает только до EnsurePassword при старте daemon:
@@ -72,23 +78,43 @@ func generatePassword() string {
 // EnsurePassword — пароль Web UI есть с первой секунды: если его нет (свежая
 // установка, сброс), daemon генерирует его сам. В State Store — только хэш;
 // открытый текст возвращается и хранится в памяти (InitialPassword) до первого
-// входа или смены пароля. Пароль уже есть — "" (перезапуск: показать нечего,
-// забытый пароль сбрасывает ResetLogin).
+// входа или смены пароля. Пароль уже есть — "" (перезапуск: показать нечего;
+// пока им не входили, новый генерирует ShownPassword, забытый сбрасывает
+// ResetLogin).
 func (u *UI) EnsurePassword() (string, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	p := u.Protection()
-	if p.Set() {
+	if u.Protection().Set() {
 		return "", nil
 	}
+	return u.regenerate()
+}
+
+// regenerate — новый сгенерированный пароль вместо текущего (под u.mu):
+// хэш и признак Fresh в State Store, открытый текст — в памяти.
+func (u *UI) regenerate() (string, error) {
+	p := u.Protection()
 	pw := generatePassword()
-	p.Password = hashPassword(pw)
+	p.Password, p.Fresh = hashPassword(pw), true
 	b, _ := json.Marshal(p)
 	if err := u.D.State.Set(protectionKey, string(b)); err != nil {
 		return "", err
 	}
 	u.initial = pw
 	return pw, nil
+}
+
+// ShownPassword — пароль для `gate4ai ui --print`, установщика и трея: тот же,
+// что InitialPassword, но если сгенерированным паролем ещё не входили (Fresh),
+// а открытый текст утерян (daemon перезапускался), генерирует новый — прежний
+// перестаёт действовать. Паролем вошли или сменили — "".
+func (u *UI) ShownPassword() (string, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.initial != "" || !u.Protection().Fresh {
+		return u.initial, nil
+	}
+	return u.regenerate()
 }
 
 // InitialPassword — сгенерированный пароль, которым ещё не входили; "" — его
@@ -100,8 +126,16 @@ func (u *UI) InitialPassword() string {
 	return u.initial
 }
 
-// forgetInitial — пароль использован или сменён: показывать больше нечего (под u.mu).
-func (u *UI) forgetInitial() { u.initial = "" }
+// forgetInitial — пароль использован или сменён: показывать больше нечего, и
+// после перезапуска новый не нужен (Fresh снимается; под u.mu).
+func (u *UI) forgetInitial() {
+	u.initial = ""
+	if p := u.Protection(); p.Fresh {
+		p.Fresh = false
+		b, _ := json.Marshal(p)
+		_ = u.D.State.Set(protectionKey, string(b))
+	}
+}
 
 // MarkRelayed — сгенерированный пароль отдан скрипту или агенту (gate4ai ui без
 // терминала): запомнить, чтобы после входа напомнить о смене пароля.
