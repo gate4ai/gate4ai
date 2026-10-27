@@ -113,6 +113,12 @@ jobs:
           build-args: VERSION=${{ github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Кэш слоёв — в ghcr.io (тег buildcache): apt-слой с Chromium под arm64 (QEMU,
+          # ~7 минут) и go mod download берутся из кэша, пока не изменились они или базовый
+          # образ. Кэш Actions (type=gha) не подошёл бы: он изолирован по ref, а каждый
+          # тег релиза — свой ref, и следующий релиз его не видит.
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
       - run: cosign sign --yes "ghcr.io/${GITHUB_REPOSITORY}@${DIGEST}"
         env:
           DIGEST: ${{ steps.build.outputs.digest }}

@@ -9,18 +9,25 @@
 #
 # Web UI слушает только loopback контейнера: с этого компьютера он доступен при
 # --network host, с любого устройства — по адресу из интернета (relay).
-FROM golang:1.27-bookworm AS build
+#
+# Go-стадия идёт на платформе сборщика (--platform=$BUILDPLATFORM) и кросс-компилирует
+# под целевую: иначе при multi-platform сборке arm64-бинарник компилируется под QEMU —
+# это 12 минут вместо двух (release.yml, job docker).
+FROM --platform=$BUILDPLATFORM golang:1.27-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/gate4ai/gate4ai/internal/platform/version.Version=${VERSION}" -o /out/gate4ai ./cmd/gate4ai
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X github.com/gate4ai/gate4ai/internal/platform/version.Version=${VERSION}" -o /out/gate4ai ./cmd/gate4ai
 
 FROM debian:bookworm-slim
 ARG TARGETARCH
 # Chrome: Google Chrome под amd64 (deb тянет свои библиотеки), Chromium под arm64;
-# Xvfb — виртуальный экран, Noto — шрифты.
+# Xvfb — виртуальный экран, Noto — шрифты. Под arm64 этот слой ставится под QEMU
+# (~7 минут), поэтому release.yml держит кэш слоёв в ghcr.io (тег buildcache): слой
+# пересобирается, только когда меняется он сам или базовый образ.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl xvfb fonts-noto-core fonts-noto-color-emoji; \
