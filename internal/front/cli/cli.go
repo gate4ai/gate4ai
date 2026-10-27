@@ -196,7 +196,7 @@ Owner commands (local socket):
   gate4ai access [sites | folders [set <site|folder> <access> | remove <site|folder>]]   the Browser and Files access lists
   gate4ai browser sessions [close <id>] | watch <id> [--remote]   browser sessions of agents: list, live view, close
   gate4ai browser setup [--yes] [--dry-run]   check Chrome, the virtual screen (Xvfb) and fonts; install what is missing (asks first)
-  gate4ai relay register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed] | status
+  gate4ai relay status | off | on | register [--url https://relay.gate4.ai] [--ca-file pem] [--self-signed]   internet access (relay.gate4.ai): state, turn off / on, own relay
   gate4ai connectors list | install <file.g4c | name[@version] | source folder | git url> [--dev] [--yes] [--watch] | update <name> [--yes] [--watch] | remove <name> | logs <name> [--limit n] [--since 10m] | refresh
   gate4ai connectors new <name> [--site <domain>] [--from-session <s-id | steps.json>] [--task <action>] [-o folder]   a connector in the knowledge folder; --from-session: recipe and draft from a recorded session
   gate4ai knowledge [list] | check <name>   the knowledge folder (recipes and connectors agents made) and the check before you publish a folder yourself
@@ -1384,8 +1384,14 @@ func (e *Env) relay(ctx context.Context, args []string) int {
 			return ExitUsage
 		}
 		return e.call(ctx, e.Client(), "POST", "/v1/relay/register", map[string]any{"url": *u, "ca_file": *ca, "self_signed": *self})
+	case "off":
+		// Выключатель рядом с адресом: туннель закрывается, адрес устройства
+		// сохраняется (повторное включение не тратит сертификат).
+		return e.call(ctx, e.Client(), "POST", "/v1/relay/off", nil)
+	case "on":
+		return e.call(ctx, e.Client(), "POST", "/v1/relay/on", nil)
 	}
-	fmt.Fprintln(e.Stderr, "usage: gate4ai relay register --url https://relay.gate4.ai | status")
+	fmt.Fprintln(e.Stderr, "usage: gate4ai relay status | off | on | register --url https://relay.gate4.ai")
 	return ExitUsage
 }
 
@@ -1485,7 +1491,7 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 	case res.RemoteURL != "":
 		fmt.Fprintln(w, "From the internet: "+res.RemoteURL)
 	case res.RemoteDisabled:
-		fmt.Fprintln(w, "From the internet: off (Settings → Internet access)")
+		fmt.Fprintln(w, "From the internet: off (gate4ai relay on, or Settings → Internet access)")
 	case res.RemotePhase == "failed":
 		fmt.Fprintln(w, "From the internet: not yet — "+res.RemoteError+"; gate4ai retries by itself (gate4ai relay status)")
 	case res.RemotePhase != "":
@@ -1495,8 +1501,17 @@ func (e *Env) ui(ctx context.Context, args []string) int {
 		}
 		fmt.Fprintln(w, msg+"; usually a few minutes: gate4ai ui --print")
 	}
+	if res.RemotePhase != "" || res.RemoteURL != "" {
+		// Ответ на два вопроса того, кто видит адрес впервые (чаще агент,
+		// ставивший gate4ai): что уходит с компьютера и как выключить.
+		fmt.Fprintln(w, "  "+RelayNote)
+	}
 	return ExitOK
 }
+
+// RelayNote — что видит relay и как выключить доступ из интернета: одна и та
+// же фраза в выводе установщика, `gate4ai ui --print`, SKILL.md и install.md.
+const RelayNote = "The relay sees only a random device id and encrypted traffic (TLS passthrough), no data, no account; nothing else leaves this computer. Turn it off: gate4ai relay off (at install: GATE4AI_NO_RELAY=1); on again: gate4ai relay on."
 
 // uiAddress — ответ /v1/ui/url.
 type uiAddress struct {

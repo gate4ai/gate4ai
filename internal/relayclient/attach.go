@@ -263,6 +263,30 @@ func Attach(ctx context.Context, d *daemon.Daemon, auto bool) func() Status {
 			}
 			daemon.WriteJSON(w, http.StatusOK, res)
 		})
+		// Выключатель рядом с адресом: `gate4ai relay off | on` (владелец).
+		// off записывает relay.disabled (адрес устройства сохраняется), on —
+		// снимает запрет или регистрирует устройство, если адреса ещё нет.
+		mux.HandleFunc("POST /v1/relay/off", func(w http.ResponseWriter, r *http.Request) {
+			p := daemon.PrincipalFrom(r.Context())
+			if err := SetDisabled(d, p, true); err != nil {
+				daemon.WriteError(w, http.StatusForbidden, "owner_only", err.Error())
+				return
+			}
+			daemon.WriteJSON(w, http.StatusOK, map[string]any{"disabled": true})
+		})
+		mux.HandleFunc("POST /v1/relay/on", func(w http.ResponseWriter, r *http.Request) {
+			p := daemon.PrincipalFrom(r.Context())
+			if !p.IsOwner() {
+				daemon.WriteError(w, http.StatusForbidden, "owner_only", "owner only")
+				return
+			}
+			res, err := EnsureRegistered(r.Context(), d, p)
+			if err != nil {
+				daemon.WriteError(w, http.StatusBadRequest, "relay", err.Error())
+				return
+			}
+			daemon.WriteJSON(w, http.StatusOK, res)
+		})
 		mux.HandleFunc("GET /v1/relay/status", func(w http.ResponseWriter, r *http.Request) {
 			st := status()
 			out := map[string]any{"configured": st.Configured, "online": st.Online}

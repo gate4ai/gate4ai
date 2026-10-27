@@ -71,7 +71,8 @@
 {{template "cloud_addr" (dict "Addr" $d.Relay.MCPURL "Base" .Base)}}
 <details><summary>{{T "Technical details"}}</summary><p class="help">
 {{T "Relay:"}} <code>{{$d.Relay.URL}}</code><br>{{T "Device ID:"}} <code>{{$d.Relay.DeviceID}}</code><br>
-{{TH "MCP answers at the root of the address. The Web UI for the phone is <code>%s/ui/</code>." $d.Relay.MCPURL}}</p>
+{{TH "MCP answers at the root of the address. The Web UI for the phone is <code>%s/ui/</code>." $d.Relay.MCPURL}}<br>
+{{T "The relay sees only this random device id and encrypted traffic (TLS passthrough); nothing else leaves this computer — no telemetry, no update check. From the terminal: gate4ai relay off | on."}}</p>
 <form method="post" action="{{.Base}}/settings/relay/toggle"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="on" value="0"><button class="small">{{T "Turn off"}}</button> <span class="help">{{T "Stops the connection and the attempts; the address is kept."}}</span></form></details>
 {{else if eq $d.Relay.Phase "registering"}}<p>{{T "State:"}} <b class="warn">{{T "turning on"}}</b> — {{T "registering this computer on %s (usually a few seconds)…" $d.RelayHost}}</p>
 <p class="help">{{T "The computer gets an address like <id>.%s, no ports to open. Traffic is encrypted all the way to this computer: the relay sees only encrypted data." $d.RelayHost}}</p>
