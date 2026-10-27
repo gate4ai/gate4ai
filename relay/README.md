@@ -33,7 +33,22 @@ gate4ai-relay --domain relay.example.org --listen :443 --dns :53 --ipv4 203.0.11
 
 Каждый релиз gate4ai (тег `v*`) выкладывается на сервер relay.gate4.ai: задача `deploy-relay` в [release.yml](../.github/workflows/release.yml) берёт `gate4ai-relay` linux/amd64 из опубликованного релиза, копирует его по SSH и запускает [deploy/remote-install.sh](deploy/remote-install.sh). Скрипт заменяет только бинарник: unit systemd и `/etc/gate4ai-relay/env` (сертификат, `--route` сайта) остаются как настроены на сервере. Если после перезапуска API relay не отвечает, возвращается прежний бинарник. Перезапуск обрывает туннели устройств на пару секунд, устройства переподключаются сами.
 
-Настройки — в окружении `production` репозитория: переменная `DEPLOY_HOST`, секреты `DEPLOY_SSH_KEY` (ключ, открытая часть которого — в `authorized_keys` root на сервере) и `DEPLOY_KNOWN_HOSTS`. Без `DEPLOY_HOST` задача пропускается. Архивы `gate4ai-relay` для self-hosted — в том же релизе.
+Настройки — в окружении `production` репозитория: переменная `DEPLOY_HOST`, секреты `DEPLOY_SSH_KEY` (ключ, открытая часть которого — в `authorized_keys` root на сервере) и `DEPLOY_KNOWN_HOSTS`. **Без `DEPLOY_HOST` задача пропускается молча**, релиз при этом зелёный, а на сервере остаётся старый relay (так в октябре 2026 устройства неделю не получали сертификаты: старый relay отдавал SOA у каждого имени, и certmagic не находил NS зоны). Архивы `gate4ai-relay` для self-hosted — в том же релизе.
+
+Проверка после релиза: в прогоне workflow `release` задача `deploy-relay` должна быть `success`, а не `skipped`; на сервере `gate4ai-relay --version` равна тегу. Настройка окружения (один раз):
+
+```sh
+ssh-keygen -t ed25519 -N '' -C 'github-actions deploy-relay' -f id_deploy
+ssh root@relay.gate4.ai 'cat >> /root/.ssh/authorized_keys' < id_deploy.pub
+gh variable set DEPLOY_HOST --env production --body relay.gate4.ai
+gh secret set DEPLOY_SSH_KEY --env production < id_deploy
+ssh-keyscan -t ed25519 relay.gate4.ai | gh secret set DEPLOY_KNOWN_HOSTS --env production
+gh variable list --env production   # DEPLOY_HOST есть
+```
+
+Вручную (например, пока окружение не настроено) выкладывается так же, как в CI: скачать `gate4ai-relay_<версия>_linux_amd64.tar.gz` из релиза, `scp` бинарник в каталог `mktemp -d` на сервере и выполнить `ssh root@relay.gate4.ai "sh -s -- <каталог>/gate4ai-relay.new" < relay/deploy/remote-install.sh`.
+
+Признак отставшего relay на сервере: `dig NS relay.gate4.ai @relay.gate4.ai` пустой или `dig SOA _acme-challenge.x.relay.gate4.ai @relay.gate4.ai` отдаёт SOA в answer (а не NODATA с SOA зоны в authority) — устройства тогда сидят на временном самоподписанном сертификате с ошибкой `could not determine authoritative nameservers`.
 
 ## Лицензия
 
