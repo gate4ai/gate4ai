@@ -321,7 +321,7 @@ func (u *UI) loginPageErr(w http.ResponseWriter, r *http.Request, m mount, errMs
 
 // login401 — страница входа name с кодом 401: вход ещё не выполнен.
 func (u *UI) login401(w http.ResponseWriter, r *http.Request, m mount, name string, v view) {
-	v.Base, v.Remote, v.Lang = m.base, m.remote, u.lang(r)
+	v.Base, v.Lang = m.base, u.lang(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(401)
 	_ = tplIn(v.Lang).ExecuteTemplate(w, name, v)
@@ -604,14 +604,14 @@ func (u *UI) loginStep(w http.ResponseWriter, r *http.Request, m mount, id, errM
 // ---- Настройки → Защита входа ----
 
 // authorizeProtection — менять защиту можно только из сессии и с вводом
-// текущего пароля.
-func (u *UI) authorizeProtection(r *http.Request, p Protection) (string, error) {
-	sid, _, ok := u.session(local, r)
+// текущего пароля; локально и удалённо одинаково.
+func (u *UI) authorizeProtection(m mount, r *http.Request, p Protection) (string, error) {
+	sid, _, ok := u.session(m, r)
 	if !ok {
 		return "", errors.New("login required")
 	}
 	if p.Set() {
-		if err := u.verifyPassword(local, p.Password, r.PostForm.Get("current")); err != nil {
+		if err := u.verifyPassword(m, p.Password, r.PostForm.Get("current")); err != nil {
 			if errors.Is(err, errWrongPassword) {
 				return "", errors.New("the current password is wrong")
 			}
@@ -638,43 +638,47 @@ func (u *UI) saveProtection(sid string, p Protection) error {
 	return nil
 }
 
-func (u *UI) setLoginPassword(w http.ResponseWriter, r *http.Request) map[string]any {
-	p := u.Protection()
-	sid, err := u.authorizeProtection(r, p)
-	if err != nil {
-		return redirectErr("/settings/login", err)
+func (u *UI) setLoginPassword(m mount) func(w http.ResponseWriter, r *http.Request) map[string]any {
+	return func(w http.ResponseWriter, r *http.Request) map[string]any {
+		p := u.Protection()
+		sid, err := u.authorizeProtection(m, r, p)
+		if err != nil {
+			return redirectErr("/settings/login", err)
+		}
+		f := r.PostForm
+		if err := newPassword(f.Get("password"), f.Get("repeat")); err != nil {
+			return redirectErr("/settings/login", err)
+		}
+		p.Password = hashPassword(f.Get("password"))
+		p.Relayed = false // новый пароль через агента не проходил
+		if err := u.saveProtection(sid, p); err != nil {
+			return redirectErr("/settings/login", err)
+		}
+		return redirect("/settings/login", "The password is changed. Other sessions are closed.")
 	}
-	f := r.PostForm
-	if err := newPassword(f.Get("password"), f.Get("repeat")); err != nil {
-		return redirectErr("/settings/login", err)
-	}
-	p.Password = hashPassword(f.Get("password"))
-	p.Relayed = false // новый пароль через агента не проходил
-	if err := u.saveProtection(sid, p); err != nil {
-		return redirectErr("/settings/login", err)
-	}
-	return redirect("/settings/login", "The password is changed. Other sessions are closed.")
 }
 
-func (u *UI) setLoginTelegram(w http.ResponseWriter, r *http.Request) map[string]any {
-	// Из мастера подключения бота — обратно в мастер.
-	back := "/settings/login"
-	if r.PostForm.Get("from") == "telegram" {
-		back = "/approvals/telegram?for=login#done"
+func (u *UI) setLoginTelegram(m mount) func(w http.ResponseWriter, r *http.Request) map[string]any {
+	return func(w http.ResponseWriter, r *http.Request) map[string]any {
+		// Из мастера подключения бота — обратно в мастер.
+		back := "/settings/login"
+		if r.PostForm.Get("from") == "telegram" {
+			back = "/approvals/telegram?for=login#done"
+		}
+		p := u.Protection()
+		sid, err := u.authorizeProtection(m, r, p)
+		if err != nil {
+			return redirectErr(back, err)
+		}
+		on := r.PostForm.Get("on") == "1"
+		if on && u.confirmer() == nil {
+			return redirectErr(back, errors.New("connect a Telegram bot first: Settings → Notifications → Telegram"))
+		}
+		p.Telegram = on
+		if err := u.saveProtection(sid, p); err != nil {
+			return redirectErr(back, err)
+		}
+		return redirect(back, map[bool]string{true: "Signing in to the Web UI is now confirmed in Telegram. Other sessions are closed.",
+			false: "Sign-in confirmation in Telegram is off."}[on])
 	}
-	p := u.Protection()
-	sid, err := u.authorizeProtection(r, p)
-	if err != nil {
-		return redirectErr(back, err)
-	}
-	on := r.PostForm.Get("on") == "1"
-	if on && u.confirmer() == nil {
-		return redirectErr(back, errors.New("connect a Telegram bot first: Settings → Notifications → Telegram"))
-	}
-	p.Telegram = on
-	if err := u.saveProtection(sid, p); err != nil {
-		return redirectErr(back, err)
-	}
-	return redirect(back, map[bool]string{true: "Signing in to the Web UI is now confirmed in Telegram. Other sessions are closed.",
-		false: "Sign-in confirmation in Telegram is off."}[on])
 }

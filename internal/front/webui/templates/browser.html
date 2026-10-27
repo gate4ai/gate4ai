@@ -8,7 +8,7 @@
 {{with $ck.Commands}}<pre class="box">{{range .}}{{.}}
 {{end}}</pre>{{end}}</div>{{end}}
 {{with $st.Warning}}<div class="note warn">{{T "The browser runs without a screen (headless): sites with bot protection ask for a captcha or block more often. Install Xvfb for a virtual screen — see gate4ai browser setup."}}</div>{{end}}
-{{if $st.Missing}}<div class="card"><p>{{T "The browser package is not installed."}}</p>{{if not .Remote}}<a class="btn" href="{{.Base}}/connectors">{{T "Access"}}</a>{{end}}</div>
+{{if $st.Missing}}<div class="card"><p>{{T "The browser package is not installed."}}</p><a class="btn" href="{{.Base}}/connectors">{{T "Access"}}</a></div>
 {{else}}
 <p class="help">{{T "The sessions agents have open in the gate4ai browser. Watch one live; take control to click and type yourself — the agent waits until you give it back."}}</p>
 <div class="card" style="padding:.3rem 1rem"><table>

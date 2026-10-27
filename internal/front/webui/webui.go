@@ -98,7 +98,7 @@ func tplIn(l string) *template.Template {
 var titles = map[string]string{"overview": "Home", "approvals": "Approvals", "telegram": "Telegram", "agents": "Agents", "agent": "Agent",
 	"agent_new": "New agent", "setup": "Getting started", "connectors": "Access", "connector": "Connector", "knowledge": "Knowledge", "policy": "Rules", "rule": "Rule", "templates": "Ready-made rules",
 	"policy_yaml": "YAML", "journal": "Journal", "receipt": "Journal entry", "vault": "Passwords and accounts", "settings": "Settings", "relay": "Internet access",
-	"remote_only": "Only on this computer", "browser": "Browser", "browser_view": "Browser session", "server": "Server"}
+	"browser": "Browser", "browser_view": "Browser session", "server": "Server"}
 
 // or — первое непустое.
 var or = cmp.Or[string]
@@ -429,10 +429,6 @@ func (u *UI) handler(m mount) http.Handler {
 	post := func(path string, f func(w http.ResponseWriter, r *http.Request) map[string]any) {
 		mux.HandleFunc("POST "+b+path, u.post(m, f))
 	}
-	// Изменения конфигурации, агентов, секретов и коннекторов — только локально.
-	change := func(path string, f func(w http.ResponseWriter, r *http.Request) map[string]any) {
-		post(path, localOnly(m, f))
-	}
 	mux.HandleFunc("GET "+b+"/login", u.login(m))
 	mux.HandleFunc("POST "+b+"/login", u.loginPost(m))
 	mux.Handle("GET "+b+"/static/", http.StripPrefix(b, http.FileServerFS(staticFS)))
@@ -464,105 +460,81 @@ func (u *UI) handler(m mount) http.Handler {
 		return map[string]any{"redirect": "/login"}
 	})
 
-	// Только на этом компьютере: страницы настройки показываются, изменения — нет.
-	localPage := func(path string, f func(r *http.Request) (string, map[string]any, error)) {
-		if m.remote {
-			get(path, func(*http.Request) (string, map[string]any, error) {
-				return "remote_only", nil, nil
-			})
-			return
-		}
-		get(path, f)
-	}
-	localPage("/agents", u.agents)
-	localPage("/agents/{name}", u.agentPage)
-	localPage("/access/browser", u.builtinPage("browser"))
-	localPage("/access/files", u.builtinPage("files"))
-	localPage("/connectors", u.connectorsPage)
-	localPage("/connectors/{name}", u.connectorPage)
-	localPage("/knowledge", u.knowledgePage)
-	localPage("/policy", u.policyPage)
-	localPage("/policy/rule", u.rulePage)
-	localPage("/policy/templates", u.templatesPage)
-	localPage("/policy/yaml", u.yamlPage)
-	localPage("/vault", u.vaultPage)
-	localPage("/settings", u.settingsPage)
-	localPage("/settings/relay", u.relayPage)
-	localPage("/settings/notifications", u.notificationsPage)
-	localPage("/settings/login", u.loginSettingsPage)
-	localPage("/settings/internet", u.internetPage)
-	localPage("/settings/advanced", u.advancedPage)
-	localPage("/approvals/telegram", u.telegramPage)
-	localPage("/setup", u.setupPage)
-	localPage("/setup/access", u.setupAccessPage)
-	localPage("/setup/check", u.setupCheck)
-	if !m.remote {
-		mux.HandleFunc("GET "+b+"/setup/feed", u.setupFeedPart(m))
-		mux.HandleFunc("GET "+b+"/setup/skip", u.setupSkip(m))
-	}
+	get("/agents", u.agents)
+	get("/agents/{name}", u.agentPage)
+	get("/access/browser", u.builtinPage("browser"))
+	get("/access/files", u.builtinPage("files"))
+	get("/connectors", u.connectorsPage)
+	get("/connectors/{name}", u.connectorPage)
+	get("/knowledge", u.knowledgePage)
+	get("/policy", u.policyPage)
+	get("/policy/rule", u.rulePage)
+	get("/policy/templates", u.templatesPage)
+	get("/policy/yaml", u.yamlPage)
+	get("/vault", u.vaultPage)
+	get("/settings", u.settingsPage)
+	get("/settings/relay", u.relayPage)
+	get("/settings/notifications", u.notificationsPage)
+	get("/settings/login", u.loginSettingsPage)
+	get("/settings/internet", u.internetPage)
+	get("/settings/advanced", u.advancedPage)
+	get("/approvals/telegram", u.telegramPage)
+	get("/setup", u.setupPage)
+	get("/setup/access", u.setupAccessPage)
+	get("/setup/check", u.setupCheck)
+	mux.HandleFunc("GET "+b+"/setup/feed", u.setupFeedPart(m))
+	mux.HandleFunc("GET "+b+"/setup/skip", u.setupSkip(m))
 
-	change("/setup", u.setupSave)
-	change("/setup/code", u.setupCode)
-	change("/access/group", u.setGroup)
-	change("/access/sites", u.setAccess("sites"))
-	change("/access/folders", u.setAccess("folders"))
-	change("/connectors/{name}/sites", u.setConnectorAccess("sites"))
-	change("/connectors/{name}/folders", u.setConnectorAccess("folders"))
-	change("/vault/account/edit", u.editAccount)
-	change("/vault/account/delete", u.deleteAccount)
-	change("/settings/self", u.saveSelfConfig)
-	change("/agents", u.createAgent)
-	change("/pairings/{id}", u.decidePairing)
-	change("/agents/{name}/token", u.token)
-	change("/agents/{name}/connect", u.connect)
-	change("/agents/{name}/revoke", u.revoke)
-	change("/agents/{name}/delete", u.deleteAgent)
-	change("/agents/{name}/profile", u.setAgentProfile)
-	change("/agents/{name}/client", u.connectClient)
-	change("/agents/{name}/client/remove", u.disconnectClient)
-	change("/connectors/install", u.installConnector)
-	change("/connectors/refresh", u.refreshIndex)
-	change("/knowledge/check", u.checkKnowledge)
-	change("/connectors/{name}/settings", u.saveConnectorSettings)
-	change("/connectors/{name}/remove", u.removeConnector)
-	change("/connectors/{name}/reinstall", u.reinstallConnector)
-	change("/connectors/{name}/decision", u.saveActionDecision)
-	change("/policy", u.savePolicy)
-	change("/policy/rollback", u.rollback)
-	change("/policy/simulate", u.simulate)
-	change("/policy/rule", u.saveRule)
-	change("/policy/rule/delete", u.deleteRule)
-	change("/policy/rule/move", u.moveRule)
-	change("/policy/template", u.applyTemplate)
-	change("/policy/profile", u.createProfile)
-	change("/policy/profile/connectors", u.saveProfileConnectors)
-	change("/policy/lists", u.saveList)
-	change("/vault", u.setSecret)
-	change("/vault/delete", u.deleteSecret)
-	change("/channels/{name}/toggle", u.toggleChannel)
-	change("/channels/{name}/test", u.testChannel)
-	change("/channels/telegram", u.telegramStep)
-	change("/settings/approvals", u.saveApprovalSettings)
-	change("/settings/relay", u.registerRelay)
-	change("/settings/relay/toggle", u.toggleRelay)
-	change("/settings/autostart", u.toggleAutostart)
-	change("/settings/general", u.saveGeneral)
-	change("/settings/remote-link", u.remoteLink)
-	change("/settings/login/password", u.setLoginPassword)
-	change("/settings/login/telegram", u.setLoginTelegram)
+	post("/setup", u.setupSave)
+	post("/setup/code", u.setupCode)
+	post("/access/group", u.setGroup)
+	post("/access/sites", u.setAccess("sites"))
+	post("/access/folders", u.setAccess("folders"))
+	post("/connectors/{name}/sites", u.setConnectorAccess("sites"))
+	post("/connectors/{name}/folders", u.setConnectorAccess("folders"))
+	post("/vault/account/edit", u.editAccount)
+	post("/vault/account/delete", u.deleteAccount)
+	post("/settings/self", u.saveSelfConfig)
+	post("/agents", u.createAgent)
+	post("/pairings/{id}", u.decidePairing)
+	post("/agents/{name}/token", u.token)
+	post("/agents/{name}/connect", u.connect)
+	post("/agents/{name}/revoke", u.revoke)
+	post("/agents/{name}/delete", u.deleteAgent)
+	post("/agents/{name}/profile", u.setAgentProfile)
+	post("/agents/{name}/client", u.connectClient)
+	post("/agents/{name}/client/remove", u.disconnectClient)
+	post("/connectors/install", u.installConnector)
+	post("/connectors/refresh", u.refreshIndex)
+	post("/knowledge/check", u.checkKnowledge)
+	post("/connectors/{name}/settings", u.saveConnectorSettings)
+	post("/connectors/{name}/remove", u.removeConnector)
+	post("/connectors/{name}/reinstall", u.reinstallConnector)
+	post("/connectors/{name}/decision", u.saveActionDecision)
+	post("/policy", u.savePolicy)
+	post("/policy/rollback", u.rollback)
+	post("/policy/simulate", u.simulate)
+	post("/policy/rule", u.saveRule)
+	post("/policy/rule/delete", u.deleteRule)
+	post("/policy/rule/move", u.moveRule)
+	post("/policy/template", u.applyTemplate)
+	post("/policy/profile", u.createProfile)
+	post("/policy/profile/connectors", u.saveProfileConnectors)
+	post("/policy/lists", u.saveList)
+	post("/vault", u.setSecret)
+	post("/vault/delete", u.deleteSecret)
+	post("/channels/{name}/toggle", u.toggleChannel)
+	post("/channels/{name}/test", u.testChannel)
+	post("/channels/telegram", u.telegramStep)
+	post("/settings/approvals", u.saveApprovalSettings)
+	post("/settings/relay", u.registerRelay)
+	post("/settings/relay/toggle", u.toggleRelay)
+	post("/settings/autostart", u.toggleAutostart)
+	post("/settings/general", u.saveGeneral)
+	post("/settings/remote-link", u.remoteLink)
+	post("/settings/login/password", u.setLoginPassword(m))
+	post("/settings/login/telegram", u.setLoginTelegram(m))
 	return u.guard(m, mux)
-}
-
-// errLocalOnly — действие запрещено в удалённой сессии.
-const errLocalOnly = "local_only"
-
-func localOnly(m mount, f func(w http.ResponseWriter, r *http.Request) map[string]any) func(w http.ResponseWriter, r *http.Request) map[string]any {
-	if !m.remote {
-		return f
-	}
-	return func(w http.ResponseWriter, r *http.Request) map[string]any {
-		return map[string]any{"status": http.StatusForbidden, "page": "remote_only", "error": errLocalOnly + ": this change is allowed only on this computer"}
-	}
 }
 
 // host — ожидаемый Host запроса.
@@ -658,13 +630,12 @@ func (u *UI) login(m mount) http.HandlerFunc {
 
 type view struct {
 	Base             string // "" или "/ui"
-	Remote           bool
 	Lang             string // язык страницы (en, ru)
 	Path             string // адрес страницы (переключатель языка возвращает сюда)
 	Title, Nav, CSRF string
 	Flash, Error     string
-	Detail           string // подробности сообщения (пути, исходный текст ошибки)
-	Notice           string // напоминание на каждой странице (пароль прошёл через агента)
+	Detail           string        // подробности сообщения (пути, исходный текст ошибки)
+	Notice           template.HTML // напоминание на каждой странице (пароль прошёл через агента), со ссылкой на Настройки → Вход
 	Data             map[string]any
 	// Счётчик в меню.
 	Pending int
@@ -724,7 +695,8 @@ func (u *UI) render(w http.ResponseWriter, r *http.Request, name string, v view,
 	}
 	u.counts(&v)
 	if v.CSRF != "" && u.relayedNotice() {
-		v.Notice = tr(v.Lang, "The Web UI password was handed to a script or an agent that installed gate4.ai, so it passed through a chat. Change it in Settings → Signing in, or turn on confirmation in Telegram there.")
+		// Ссылка в тексте: html/template не трогает template.HTML, Base — "" или "/ui".
+		v.Notice = template.HTML(fmt.Sprintf(tr(v.Lang, "The Web UI password was handed to a script or an agent that installed gate4.ai, so it passed through a chat. Change it in <a href=\"%s/settings/login\">Settings → Signing in</a>, or turn on confirmation in Telegram there."), v.Base))
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if status != 0 {
@@ -762,7 +734,7 @@ func (u *UI) page(m mount, f func(r *http.Request) (string, map[string]any, erro
 			http.Redirect(w, r, m.base+red, http.StatusSeeOther)
 			return
 		}
-		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: data}
+		v := view{Base: m.base, Nav: name, CSRF: s.csrf, Data: data}
 		u.fill(&v, r, sid)
 		if err != nil {
 			v.Error = say(u.lang(r), err)
@@ -806,7 +778,7 @@ func (u *UI) post(m mount, f func(w http.ResponseWriter, r *http.Request) map[st
 		}
 		name, _ := res["page"].(string)
 		l := u.lang(r)
-		v := view{Base: m.base, Remote: m.remote, Nav: name, CSRF: s.csrf, Data: res, Detail: detail}
+		v := view{Base: m.base, Nav: name, CSRF: s.csrf, Data: res, Detail: detail}
 		if e, ok := res["error"]; ok && e != nil {
 			v.Error = say(l, e)
 		}

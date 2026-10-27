@@ -97,19 +97,18 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
 {{$s := .Section}}
 <nav class="main" aria-label="{{T "Sections"}}">
 <a href="{{.Base}}/" class="{{if eq $s "home"}}on{{end}}"{{if eq $s "home"}} aria-current="page"{{end}}>{{T "Home"}}<span class="count" data-pending-count{{if not .Pending}} hidden{{end}} aria-label="{{T "waiting for you"}}">{{.Pending}}</span></a>
-{{if not .Remote}}<a href="{{.Base}}/agents" class="{{if eq $s "agents"}}on{{end}}"{{if eq $s "agents"}} aria-current="page"{{end}}>{{T "Agents"}}</a>
-<a href="{{.Base}}/access/browser" class="{{if eq $s "access"}}on{{end}}"{{if eq $s "access"}} aria-current="page"{{end}}>{{T "Access"}}</a>{{end}}
+<a href="{{.Base}}/agents" class="{{if eq $s "agents"}}on{{end}}"{{if eq $s "agents"}} aria-current="page"{{end}}>{{T "Agents"}}</a>
+<a href="{{.Base}}/access/browser" class="{{if eq $s "access"}}on{{end}}"{{if eq $s "access"}} aria-current="page"{{end}}>{{T "Access"}}</a>
 <a href="{{.Base}}/browser" class="{{if eq $s "browser"}}on{{end}}"{{if eq $s "browser"}} aria-current="page"{{end}}>{{T "Browser"}}</a>
-{{if not .Remote}}<a href="{{.Base}}/vault" class="{{if eq $s "vault"}}on{{end}}"{{if eq $s "vault"}} aria-current="page"{{end}}>{{T "Passwords and accounts"}}</a>{{end}}
+<a href="{{.Base}}/vault" class="{{if eq $s "vault"}}on{{end}}"{{if eq $s "vault"}} aria-current="page"{{end}}>{{T "Passwords and accounts"}}</a>
 <a href="{{.Base}}/journal" class="{{if eq $s "journal"}}on{{end}}"{{if eq $s "journal"}} aria-current="page"{{end}}>{{T "Journal"}}</a>
-{{if not .Remote}}<a href="{{.Base}}/settings" class="{{if eq $s "settings"}}on{{end}}"{{if eq $s "settings"}} aria-current="page"{{end}}>{{T "Settings"}}</a>{{end}}
+<a href="{{.Base}}/settings" class="{{if eq $s "settings"}}on{{end}}"{{if eq $s "settings"}} aria-current="page"{{end}}>{{T "Settings"}}</a>
 </nav>
 <span class="sp"></span>
 <span class="lang" aria-label="{{T "Language"}}">{{$p := .Path}}{{$b := .Base}}{{range langs}}<a href="{{$b}}/lang?l={{.Code}}&amp;back={{$p}}" class="{{if eq .Code Lang}}on{{end}}" lang="{{.Code}}">{{.Code | printf "%s"}}</a> {{end}}</span>
 <form method="post" action="{{$.Base}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">{{T "Sign out"}}</button></form>
 </header><main id="main">
-{{if .Remote}}<div class="note">{{T "Remote access: approvals, the browser, the journal and the server status."}} <a href="{{.Base}}/settings/server">{{T "Server"}}</a>. {{T "Agents, access rules and settings change only on the computer itself."}}</div>{{end}}
-{{if .Notice}}<div class="flash" role="status" data-notice>{{.Notice}} <a href="{{.Base}}/settings/login">{{T "Signing in"}}</a></div>{{end}}
+{{if .Notice}}<div class="flash" role="status" data-notice>{{.Notice}}</div>{{end}}
 {{if .Flash}}<div class="flash" role="status" data-flash>{{.Flash}}{{with .Detail}}<details><summary>{{T "Details"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}
 {{if .Error}}{{with errView .Error}}<div class="error" role="alert" data-error>{{.Text}}{{with .Detail}}<details><summary>{{T "Details"}}</summary><code>{{.}}</code></details>{{end}}</div>{{end}}{{end}}
 {{end}}
@@ -132,15 +131,15 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
   <form method="post" action="{{$v.Base}}/approvals/{{.ID}}" class="row" style="margin-top:.5rem" data-decide data-busy="{{T "Sending…"}}">
     <input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}">
     <button class="primary" name="decision" value="approve">{{T "Allow"}}</button>
-    {{if and (not $v.Remote) .Always}}<button name="decision" value="approve_always">{{.Always}}</button>{{end}}
-    {{if and (not $v.Remote) .AddAllow}}<button name="decision" value="approve_access">{{.AddAllow}}</button>{{end}}
+    {{if .Always}}<button name="decision" value="approve_always">{{.Always}}</button>{{end}}
+    {{if .AddAllow}}<button name="decision" value="approve_access">{{.AddAllow}}</button>{{end}}
     <span class="sp"></span>
     <button class="danger" name="decision" value="reject">{{T "Deny"}}</button>
-    {{if and (not $v.Remote) .AddDeny}}<button class="danger" name="decision" value="reject_access">{{.AddDeny}}</button>{{end}}
+    {{if .AddDeny}}<button class="danger" name="decision" value="reject_access">{{.AddDeny}}</button>{{end}}
   </form>
   <details><summary>{{T "Technical details"}}</summary><p class="help"><code>{{.Action}}</code> · {{class .Class}} · #{{short .PreviewHash}} · {{T "until"}} {{ts .Expires}}{{if .Decision.RuleIDs}} · {{T "rule"}} {{join .Decision.RuleIDs ", "}}{{end}}</p>
   {{with .Desc}}<p class="help">{{.}}</p>{{end}}
-  {{if not $v.Remote}}<form method="post" action="{{$v.Base}}/approvals/{{.ID}}" data-decide data-busy="{{T "Sending…"}}"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}"><button class="small" name="decision" value="approve_rule">{{T "Allow and write a custom rule…"}}</button></form>{{end}}</details>
+  <form method="post" action="{{$v.Base}}/approvals/{{.ID}}" data-decide data-busy="{{T "Sending…"}}"><input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$.Back}}"><button class="small" name="decision" value="approve_rule">{{T "Allow and write a custom rule…"}}</button></form></details>
 </div>
 {{end}}{{end}}
 
@@ -154,7 +153,6 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
   {{if .Revoked}}<p class="warn">{{T "You revoked the access of %s before." .Agent}}</p>{{end}}
   {{with .Dir}}<p>{{TH "The key works only for the agent started in <code>%s</code>." .}}</p>{{else}}<p class="help">{{T "The key works for this agent from any folder."}}</p>{{end}}
   {{if .Chain}}<p class="help">{{T "Processes:"}} <code>{{.Chain}}</code>{{if .Session}} · {{T "session"}} <code>{{.Session}}</code>{{end}}</p>{{end}}
-  {{if $v.Remote}}<p class="help">{{T "Approve on the computer itself or in the Telegram bot."}}</p>{{else}}
   <form method="post" action="{{$v.Base}}/pairings/{{.ID}}" class="row" style="margin-top:.5rem">
     <input type="hidden" name="csrf" value="{{$v.CSRF}}"><input type="hidden" name="back" value="{{$back}}">
     {{if .Exists}}<span class="help">{{T "Permissions:"}} <b>{{.Profile}}</b></span>{{else}}
@@ -164,7 +162,7 @@ details.adv{margin-top:1rem}details.adv>summary{color:var(--muted);font-weight:6
     <button class="primary" name="decision" value="approve">{{T "Allow the connection"}}</button>
     <span class="sp"></span>
     <button class="danger" name="decision" value="reject">{{T "Deny"}}</button>
-  </form>{{end}}
+  </form>
 </div>{{end}}{{end}}{{end}}
 
 {{/* entry_line — действие из журнала одной строкой. */}}

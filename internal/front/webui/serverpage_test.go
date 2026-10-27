@@ -71,7 +71,7 @@ func TestServerPage(t *testing.T) {
 	}
 }
 
-// Удалённо страница доступна только для чтения: без кнопок настроек.
+// Удалённо страница «Сервер» — та же, что локально: с меню настроек и кнопками.
 func TestServerPageRemote(t *testing.T) {
 	u, d, _, _ := browserUI(t)
 	u.Autostart = &fakeAutostart{}
@@ -88,16 +88,8 @@ func TestServerPageRemote(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	p := rec.Body.String()
-	if rec.Code != 200 || !strings.Contains(p, "loginctl enable-linger") || strings.Contains(p, `href="/ui/settings/login"`) || strings.Contains(p, `class="side"`) {
+	if rec.Code != 200 || !strings.Contains(p, "loginctl enable-linger") || !strings.Contains(p, `href="/ui/settings/login"`) || !strings.Contains(p, `class="side"`) {
 		t.Fatal(rec.Code, p)
-	}
-	req = httptest.NewRequest("GET", "https://dev.example/ui/", nil)
-	req.Host = "dev.example"
-	req.AddCookie(&http.Cookie{Name: "g4a_rsession", Value: sid})
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if !strings.Contains(rec.Body.String(), `href="/ui/settings/server"`) {
-		t.Fatal("the remote note links to the server page")
 	}
 }
 

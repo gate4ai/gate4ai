@@ -138,7 +138,6 @@ var ru = map[string]string{
 	"Connection lost, reconnecting…":                                           "Связь потеряна, подключаюсь снова…",
 	"Do it right here: click and type in the page below. The agent continues when the page changes. Never give passwords to the agent in chat.": "Сделайте это прямо здесь: нажимайте и печатайте на странице ниже. Агент продолжит, когда страница сменится. Никогда не сообщайте агенту пароли в чате.",
 	"Do it yourself in the page: the agent continues when the page changes. Never give passwords to the agent in chat.":                         "Сделайте это сами на странице: агент продолжит, когда она сменится. Никогда не сообщайте агенту пароли в чате.",
-	"From another device you take control with a confirmation in Telegram.":                                                                     "С другого устройства управление берётся с подтверждением в Telegram.",
 	"Give back to the agent":                "Вернуть агенту",
 	"I will not do it":                      "Не буду",
 	"No agent has the browser open now.":    "Сейчас ни у одного агента нет открытого браузера.",
@@ -163,10 +162,9 @@ var ru = map[string]string{
 	"Type into the page": "Ввод на страницу",
 	"Watch":              "Смотреть",
 	"You are watching. Take control to click and type yourself.": "Вы смотрите. Возьмите управление, чтобы нажимать и печатать самим.",
-	"closes if idle %s": "закроется при простое: %s",
-	"idle":              "простаивает",
-	"none (headless)":   "нет (headless)",
-	"taking control from another device needs a Telegram bot: connect one in Settings → Notifications on the computer, or wait until the agent hands the page over to you": "чтобы взять управление с другого устройства, нужен Telegram-бот: подключите его в Настройках → Уведомления на компьютере или дождитесь, пока агент сам передаст вам страницу",
+	"closes if idle %s":    "закроется при простое: %s",
+	"idle":                 "простаивает",
+	"none (headless)":      "нет (headless)",
 	"the agent is working": "агент работает",
 	"this computer's":      "этого компьютера",
 	"under your control":   "у вас",
@@ -236,7 +234,6 @@ var ru = map[string]string{
 	// Заголовки страниц
 	"Approvals": "Подтверждения", "New agent": "Новый агент", "Getting started": "Начало работы", "Ready-made rules": "Готовые правила",
 	"Journal entry": "Запись журнала", "Passwords and accounts": "Пароли и учётки", "Internet access": "Доступ из интернета",
-	"Only on this computer": "Только на этом компьютере",
 
 	// Главная
 	"Waiting for your decision": "Ждёт вашего решения", "Nothing is waiting for your decision.": "Ничего не ждёт вашего решения.",
@@ -646,7 +643,7 @@ var ru = map[string]string{
 	"connected": "подключён", "connecting": "подключаемся",
 	"%s does not start: missing libraries %s": "%s не запускается: нет библиотек %s",
 	"Install them (asks first): %s":           "Поставить их (спросит): %s",
-	"The Web UI password was handed to a script or an agent that installed gate4.ai, so it passed through a chat. Change it in Settings → Signing in, or turn on confirmation in Telegram there.": "Пароль Web UI был отдан скрипту или агенту, который ставил gate4.ai, то есть прошёл через чат. Смените его в «Настройки → Вход» или включите там подтверждение в Telegram.",
+	"The Web UI password was handed to a script or an agent that installed gate4.ai, so it passed through a chat. Change it in <a href=\"%s/settings/login\">Settings → Signing in</a>, or turn on confirmation in Telegram there.": "Пароль Web UI был отдан скрипту или агенту, который ставил gate4.ai, то есть прошёл через чат. Смените его в «<a href=\"%s/settings/login\">Настройки → Вход</a>» или включите там подтверждение в Telegram.",
 	"connected on a temporary certificate": "подключено на временном сертификате",
 	"the certificate for the device address is not issued yet: the Web UI opens from the phone, but the browser warns about the certificate, and cloud assistants do not connect yet. gate4.ai keeps trying.": "сертификат для адреса устройства ещё не выпущен: Web UI с телефона открывается, но браузер предупреждает о сертификате, а облачные ассистенты пока не подключаются. gate4.ai продолжает попытки.",
 	"Next attempt at %s. Last error:": "Следующая попытка в %s. Последняя ошибка:",
@@ -728,8 +725,6 @@ var ru = map[string]string{
 	"the device is not connected to the relay, the address would not open":              "устройство не подключено к relay, адрес не откроется",
 
 	// Удалённо
-	"Remote access: approvals, the browser, the journal and the server status.": "Удалённый вход: подтверждения, браузер, журнал и состояние сервера.", "Agents, access rules and settings change only on the computer itself.": "Агенты, правила доступа и настройки меняются только на самом компьютере.",
-	"Agents, access, rules, passwords and settings change only in the Web UI on the computer with gate4.ai — so an agent or a stranger with remote access cannot widen the permissions.": "Агенты, доступ, правила, пароли и настройки меняются только в Web UI на компьютере с gate4.ai — так агент или посторонний с удалённым доступом не сможет расширить права.",
 
 	// Ошибки сети
 	"No connection to %s: the address was not found (DNS did not answer). Check the internet connection and the address.": "Нет связи с %s: адрес не найден (DNS не ответил). Проверьте подключение к интернету и адрес.",
@@ -752,7 +747,6 @@ var ru = map[string]string{
 	"You revoked the access of %s before.":                                                                             "Раньше вы отзывали доступ %s.",
 	"The key works only for the agent started in <code>%s</code>.":                                                     "Ключ работает только для агента, запущенного в <code>%s</code>.",
 	"The key works for this agent from any folder.":                                                                    "Ключ работает для этого агента из любой папки.",
-	"Approve on the computer itself or in the Telegram bot.":                                                           "Подтвердите на самом компьютере или в Telegram-боте.",
 	"new — nothing allowed yet":                                                                                        "новые — пока ничего не разрешено",
 	"Connection of %s rejected":                                                                                        "Подключение %s отклонено",
 	"The request expired: the agent asks again with a new code":                                                        "Срок запроса истёк: агент попросит снова, с новым кодом",

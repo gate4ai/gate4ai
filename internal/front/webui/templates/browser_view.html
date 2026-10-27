@@ -12,7 +12,6 @@
 {{if eq .State "user"}}<button name="on" value="0" class="primary">{{T "Give back to the agent"}}</button>{{else if ne .State "waiting"}}<button name="on" value="1">{{T "Take control"}}</button>{{end}}</form>
 <form method="post" action="{{$.Base}}/browser/{{$d.ID}}/close" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">{{T "Close the session"}}</button></form>
 </div>
-{{if and $d.NeedTelegram (ne .State "user")}}<p class="help">{{T "From another device you take control with a confirmation in Telegram."}}</p>{{end}}
 <div class="card" style="padding:.4rem;text-align:center" data-browser-view="{{$.Base}}/browser/{{$d.ID}}/ws" data-state="{{.State}}" data-control="{{if or (eq .State "user") (eq .State "waiting")}}1{{end}}"
  data-msg-lost="{{T "Connection lost, reconnecting…"}}" data-msg-closed="{{T "The session is closed."}}"
  data-msg-state-working="{{T "the agent is working"}}" data-msg-state-idle="{{T "idle"}}">

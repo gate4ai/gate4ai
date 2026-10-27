@@ -251,7 +251,8 @@ func TestChangePolicyApproval(t *testing.T) {
 	}
 }
 
-func TestRemoteUIIsLimited(t *testing.T) {
+// Удалённый Web UI (/ui/) — тот же, что локальный: те же разделы и действия.
+func TestRemoteUISameAsLocal(t *testing.T) {
 	u, d, _, _ := setup(t)
 	d.AddPublicURL(func() string { return "https://dev.example" })
 	h := u.RemoteHandler()
@@ -284,18 +285,35 @@ func TestRemoteUIIsLimited(t *testing.T) {
 		t.Fatal("no remote session")
 	}
 	p := body(t, do("GET", "/ui/", ck, nil))
-	if strings.Contains(p, `href="/ui/agents"`) || !strings.Contains(p, "Удалённый вход") || !strings.Contains(p, `href="/ui/journal"`) {
-		t.Fatal("remote nav", p)
+	for _, href := range []string{"/ui/agents", "/ui/access/browser", "/ui/browser", "/ui/vault", "/ui/journal", "/ui/settings"} {
+		if !strings.Contains(p, `href="`+href+`"`) {
+			t.Fatal("remote nav lacks", href, p)
+		}
 	}
-	if p := body(t, do("GET", "/ui/settings", ck, nil)); !strings.Contains(p, "Только на этом компьютере") {
-		t.Fatal("settings remotely", p)
+	if strings.Contains(p, "Удалённый вход") || strings.Contains(p, "Только на этом компьютере") {
+		t.Fatal("remote-only note", p)
+	}
+	p = body(t, do("GET", "/ui/settings/login", ck, nil))
+	if !strings.Contains(p, `action="/ui/settings/login/password"`) || !strings.Contains(p, `class="side"`) {
+		t.Fatal("login settings remotely", p)
 	}
 	csrf := csrfRe.FindStringSubmatch(p)[1]
-	if r := do("POST", "/ui/agents", ck, url.Values{"csrf": {csrf}, "name": {"evil"}, "profile": {"p"}}); r.StatusCode != 403 {
-		t.Fatal("remote change", r.StatusCode)
+	if r := do("POST", "/ui/agents", ck, url.Values{"csrf": {csrf}, "name": {"phone"}, "profile": {"p"}}); r.StatusCode != 303 {
+		t.Fatal("remote change", r.StatusCode, body(t, r))
 	}
-	if _, ok := d.Config.Current().Agents["evil"]; ok {
-		t.Fatal("agent added remotely")
+	if _, ok := d.Config.Current().Agents["phone"]; !ok {
+		t.Fatal("agent not added remotely")
+	}
+	// Смена пароля удалённо — с текущим паролем, как локально: своя сессия остаётся, новый пароль действует.
+	r = do("POST", "/ui/settings/login/password", ck, url.Values{"csrf": {csrf}, "current": {testPassword}, "password": {"correct horse"}, "repeat": {"correct horse"}})
+	if r.StatusCode != 303 || !checkPassword(u.Protection().Password, "correct horse") {
+		t.Fatal("remote password change", r.StatusCode, body(t, r))
+	}
+	if r := do("GET", "/ui/settings/login", ck, nil); r.StatusCode != 200 {
+		t.Fatal("own session after the password change", r.StatusCode)
+	}
+	if r := do("POST", "/ui/login", nil, url.Values{"start": {"1"}, "password": {testPassword}}); r.StatusCode != 401 {
+		t.Fatal("old password still works remotely", r.StatusCode)
 	}
 }
 
