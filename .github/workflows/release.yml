@@ -5,6 +5,11 @@ name: release
 on:
   push:
     tags: ["v*"]
+# Один прогон на тег: GitHub иногда регистрирует один push как два события (v0.1.1, v0.7.20) и
+# запускает два релиза сразу — второй отменяет первый, а не гонится с ним за одни и те же ассеты.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -68,7 +73,9 @@ jobs:
           cd out
           shasum -a 256 gate4ai-tray_*_darwin_*.tar.gz > tray-darwin-checksums.txt
           cosign sign-blob --yes --output-signature=tray-darwin-checksums.txt.sig --output-certificate=tray-darwin-checksums.txt.pem tray-darwin-checksums.txt
-          gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" gate4ai-tray_*_darwin_*.tar.gz tray-darwin-checksums.txt*
+          # --clobber: повтор job после частичной загрузки (или второй прогон на том же теге)
+          # заменяет ассеты, а не падает на «asset under the same name already exists».
+          gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --clobber gate4ai-tray_*_darwin_*.tar.gz tray-darwin-checksums.txt*
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   # Образ с Chrome для серверов без root: ghcr.io/gate4ai/gate4ai:<версия>, подпись cosign.
