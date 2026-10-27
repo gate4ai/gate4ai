@@ -155,7 +155,7 @@ func (d *Device) once(ctx context.Context) error {
 		}
 		sess.Close()
 	}()
-	err = srv.Serve(tls.NewListener(sess, d.ServerTLS))
+	err = srv.Serve(tls.NewListener(yamuxListener{sess}, d.ServerTLS))
 	sess.Close()
 	return err
 }

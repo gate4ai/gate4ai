@@ -23,6 +23,10 @@ import (
 // browserTimeout — сколько ждать ответа пакета для страницы.
 const browserTimeout = 10 * time.Second
 
+// wsPingEvery — как часто просмотр сеанса шлёт ping (relay закрывает
+// соединение без данных через 10 минут).
+const wsPingEvery = 30 * time.Second
+
 func (u *UI) browserList(r *http.Request) (string, map[string]any, error) {
 	ctx, cancel := context.WithTimeout(r.Context(), browserTimeout)
 	defer cancel()
@@ -119,11 +123,23 @@ func (u *UI) browserWS(m mount) http.HandlerFunc {
 			return
 		}
 		id := r.PathValue("id")
+		// Лог просмотра: почему соединение оборвалось — иначе страница показывает
+		// только «Связь потеряна», а причина (отказ Accept, ошибка чтения после
+		// Hijack, обрыв записи кадра) видна лишь здесь.
+		log := u.D.Log.With("session", id, "remote", m.remote, "ua", r.UserAgent())
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
+			log.Warn("browser view: websocket accept failed", "err", err)
 			return
 		}
 		defer c.CloseNow()
+		start := time.Now()
+		var frames int
+		why := "viewer gone"
+		defer func() {
+			log.Info("browser view ended", "why", why, "frames", frames, "dur", time.Since(start).Round(time.Millisecond))
+		}()
+		log.Info("browser view started")
 		c.SetReadLimit(256 << 10)
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
@@ -135,6 +151,7 @@ func (u *UI) browserWS(m mount) http.HandlerFunc {
 		}
 		ch, stop, err := u.D.WatchBrowser(ctx, id)
 		if err != nil {
+			why = "watch: " + err.Error()
 			_ = send(wsMeta{Type: "error", Message: err.Error()})
 			c.Close(websocket.StatusNormalClosure, "")
 			return
@@ -145,9 +162,13 @@ func (u *UI) browserWS(m mount) http.HandlerFunc {
 			for {
 				_, b, err := c.Read(ctx)
 				if err != nil {
+					if ctx.Err() == nil {
+						why = "read: " + err.Error()
+					}
 					return
 				}
 				if !u.sessionAlive(m, r) {
+					why = "web UI session expired"
 					return
 				}
 				ictx, icancel := context.WithTimeout(ctx, browserTimeout)
@@ -158,18 +179,33 @@ func (u *UI) browserWS(m mount) http.HandlerFunc {
 				}
 			}
 		}()
+		// Кадры идут только при изменении страницы; relay закрывает
+		// passthrough без данных дольше 10 минут — ping держит просмотр
+		// тихой страницы живым.
+		ping := time.NewTicker(wsPingEvery)
+		defer ping.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-ping.C:
+				pctx, pcancel := context.WithTimeout(ctx, 10*time.Second)
+				err := c.Ping(pctx)
+				pcancel()
+				if err != nil {
+					why = "ping: " + err.Error()
+					return
+				}
 			case e, ok := <-ch:
 				if !ok {
+					why = "session closed"
 					c.Close(websocket.StatusNormalClosure, "")
 					return
 				}
 				var err error
 				switch e.Kind {
 				case "frame":
+					frames++
 					if err = send(wsMeta{Type: "frame", Width: e.Width, Height: e.Height, URL: e.URL, State: e.State}); err == nil {
 						wctx, wcancel := context.WithTimeout(ctx, 10*time.Second)
 						err = c.Write(wctx, websocket.MessageBinary, e.JPEG)
@@ -181,6 +217,7 @@ func (u *UI) browserWS(m mount) http.HandlerFunc {
 					err = send(wsMeta{Type: "closed", Message: e.Reason})
 				}
 				if err != nil {
+					why = "write " + e.Kind + ": " + err.Error()
 					return
 				}
 			}
