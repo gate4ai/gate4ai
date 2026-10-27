@@ -270,6 +270,6 @@ func (u *UI) serverPage(m mount) func(r *http.Request) (string, map[string]any, 
 				warn++
 			}
 		}
-		return "server", map[string]any{"Checks": checks, "Warn": warn, "Headless": u.serverEnv().headless(), "Remote": m.remote}, nil
+		return "server", map[string]any{"Checks": checks, "Warn": warn, "Headless": u.serverEnv().headless()}, nil
 	}
 }

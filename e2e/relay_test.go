@@ -243,7 +243,7 @@ func TestRemoteLinkThroughRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if code, p := get(t, phone, l); code != 200 || !strings.Contains(p, "Remote access") {
+	if code, p := get(t, phone, l); code != 200 || !strings.Contains(p, `action="/ui/logout"`) || !strings.Contains(p, `href="/ui/settings"`) {
 		t.Fatalf("password did not sign in through the relay: %d %s", code, p)
 	}
 }

@@ -167,7 +167,7 @@ func (u *UI) overview(m mount) func(r *http.Request) (string, map[string]any, er
 		l := u.lang(r)
 		cfg := u.D.Config.Current()
 		// Свежая установка: агентов нет — мастер первого запуска (пока его не пропустили).
-		if !m.remote && len(cfg.Agents) == 0 && !setupSkipped(r) {
+		if len(cfg.Agents) == 0 && !setupSkipped(r) {
 			return "", map[string]any{"redirect": "/setup"}, nil
 		}
 		pend, err := u.D.State.ListApprovals(state.Pending, 50)
@@ -179,9 +179,6 @@ func (u *UI) overview(m mount) func(r *http.Request) (string, map[string]any, er
 			data["Browser"] = bs
 		}
 		bcancel()
-		if m.remote {
-			return "overview", data, err
-		}
 		data["Agents"] = u.agentRows(l)
 		anySeen := false
 		for a := range cfg.Agents {

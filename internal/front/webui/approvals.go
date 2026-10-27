@@ -242,7 +242,7 @@ func (u *UI) decide(m mount) func(w http.ResponseWriter, r *http.Request) map[st
 		approve := dec == "approve" || dec == "approve_rule" || dec == "approve_always" || dec == "approve_access"
 		a, _ := u.D.State.GetApproval(r.PathValue("id"))
 		added := ""
-		if a != nil && !m.remote && (dec == "approve_access" || dec == "reject_access") {
+		if a != nil && (dec == "approve_access" || dec == "reject_access") {
 			// Сначала строка в списке доступа, потом решение: исполнение видит новый список.
 			var aerr error
 			if added, aerr = u.D.AddAccess(a, approve); aerr != nil {
@@ -277,7 +277,7 @@ func (u *UI) decide(m mount) func(w http.ResponseWriter, r *http.Request) map[st
 		if res.Receipt != "" {
 			detail = "#" + audit.Short(res.Receipt)
 		}
-		if a == nil || m.remote {
+		if a == nil {
 			return redirectDetail(back, msg, detail)
 		}
 		switch dec {
@@ -399,7 +399,7 @@ func (u *UI) livePending(m mount) http.HandlerFunc {
 			back = b
 		}
 		l := u.lang(r)
-		v := view{Base: m.base, Remote: m.remote, CSRF: s.csrf, Lang: l}
+		v := view{Base: m.base, CSRF: s.csrf, Lang: l}
 		out := struct {
 			Count    int    `json:"count"`
 			Pending  []card `json:"pending"`
@@ -473,7 +473,7 @@ func (u *UI) pushSubscribe(m mount) func(w http.ResponseWriter, r *http.Request)
 			return nil
 		}
 		enabled := u.D.Config.Current().ChannelOn("webpush")
-		if !enabled && !m.remote {
+		if !enabled {
 			enabled = u.edit("enable browser push", func(c *config.Config) error { c.SetChannel("webpush", true); return nil }) == nil
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "channel_on": enabled})

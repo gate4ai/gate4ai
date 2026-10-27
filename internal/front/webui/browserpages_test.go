@@ -194,8 +194,8 @@ func TestBrowserPages(t *testing.T) {
 	}
 }
 
-// Удалённо: просмотр есть; управление вне handoff без входа через Telegram —
-// с подтверждением в Telegram, без бота — отказ.
+// Удалённо управление сеансом — такое же, как локально: сразу, без
+// отдельного подтверждения в Telegram.
 func TestBrowserRemoteControl(t *testing.T) {
 	u, d, fb, _ := browserUI(t)
 	d.AddPublicURL(func() string { return "https://dev.example" })
@@ -225,36 +225,15 @@ func TestBrowserRemoteControl(t *testing.T) {
 	if r := do("GET", "/ui/browser", nil); r.Code != 200 || !strings.Contains(r.Body.String(), `href="/ui/browser/s-1"`) {
 		t.Fatal(r.Code, r.Body.String())
 	}
-	if r := do("GET", "/ui/browser/s-1", nil); !strings.Contains(r.Body.String(), "подтверждением в Telegram") {
+	if r := do("GET", "/ui/browser/s-1", nil); strings.Contains(r.Body.String(), "подтверждением в Telegram") || !strings.Contains(r.Body.String(), `name="on" value="1"`) {
 		t.Fatal(r.Body.String())
-	}
-	// Бота нет — отказ, сеанс у агента.
-	do("POST", "/ui/browser/s-1/control", url.Values{"on": {"1"}})
-	if strings.Contains(fb.seen(), "control") {
-		t.Fatal("remote control without Telegram:", fb.seen())
 	}
 	f := &fakeConfirm{}
 	u.Confirm = f
 	do("POST", "/ui/browser/s-1/control", url.Values{"on": {"1"}})
-	if f.n() != 1 || !strings.Contains(f.reqs[0], "Взять управление браузером") || strings.Contains(fb.seen(), "control") {
-		t.Fatal(f.reqs, fb.seen())
+	if f.n() != 0 || !strings.Contains(fb.seen(), "control") {
+		t.Fatal("remote control must work at once:", f.n(), fb.seen())
 	}
-	f.press(0, true)
-	if !strings.Contains(fb.seen(), "control") {
-		t.Fatal("control after the Telegram confirmation:", fb.seen())
-	}
-	// Вход с подтверждением в Telegram — управление сразу.
-	fb.Owner(context.Background(), "control", map[string]any{"on": false}, nil)
-	u.mu.Lock()
-	s := u.sessions[sid]
-	s.telegram = true
-	u.sessions[sid] = s
-	u.mu.Unlock()
-	do("POST", "/ui/browser/s-1/control", url.Values{"on": {"1"}})
-	if f.n() != 1 || strings.Count(fb.seen(), "control") != 3 {
-		t.Fatal(f.n(), fb.seen())
-	}
-
 }
 
 // Ссылка на сеанс без входа: после входа — сразу на сеанс; чужой адрес возврата не принимается.

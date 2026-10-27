@@ -306,8 +306,8 @@ func TestPublicIsolation(t *testing.T) {
 	}
 }
 
-// TestPublicRemoteUI — удалённая сессия: подтверждения и журнал — да, изменения
-// политик, агентов и секретов — нет; чужой Host и чужой Origin отклоняются;
+// TestPublicRemoteUI — удалённая сессия /ui/: те же права, что у локальной
+// (изменения агентов проходят); чужой Host и чужой Origin отклоняются;
 // ссылки входа не взаимозаменяемы.
 func TestPublicRemoteUI(t *testing.T) {
 	e := newEnv(t)
@@ -329,13 +329,12 @@ func TestPublicRemoteUI(t *testing.T) {
 		resp.Body.Close()
 		return resp
 	}
-	for _, p := range []string{"/ui/policy", "/ui/policy/rollback", "/ui/vault", "/ui/agents/bot/token", "/ui/agents/bot/connect", "/ui/agents/bot/revoke"} {
-		if r := do("POST", p, "csrf="+csrf+"&yaml=x&alias=@a&value=v&version=1", publicHost, ""); r.StatusCode != http.StatusForbidden {
-			t.Errorf("remote %s: %d, want 403", p, r.StatusCode)
-		}
+	// Удалённый Web UI — тот же, что локальный: изменения из сессии /ui/ проходят.
+	if r := do("POST", "/ui/agents/bot/token", "csrf="+csrf, publicHost, ""); r.StatusCode != http.StatusOK {
+		t.Errorf("remote token: %d, want 200", r.StatusCode)
 	}
-	if toks, _ := e.d.State.Tokens(); len(toks) != 0 {
-		t.Fatalf("remote session issued tokens: %v", toks)
+	if toks, _ := e.d.State.Tokens(); len(toks) != 1 {
+		t.Fatalf("remote session must issue a token like the local one: %v", toks)
 	}
 	if r := do("GET", "/ui/", "", "evil.test", ""); r.StatusCode != http.StatusMisdirectedRequest {
 		t.Errorf("foreign Host: %d", r.StatusCode)

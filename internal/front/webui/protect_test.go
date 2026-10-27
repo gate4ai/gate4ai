@@ -112,7 +112,34 @@ func (b *browser) signInWith(pw string) (int, string) {
 	return b.post("/login", url.Values{"start": {"1"}, "password": {pw}})
 }
 
-// remoteSession — удалённый запрос; ok — выдана cookie сессии /ui/.
+// remoteLogin — вход по паролю удалённо: cookie сессии /ui/.
+func remoteLogin(t *testing.T, u *UI, pw string) *http.Cookie {
+	t.Helper()
+	rq, _ := http.NewRequest("POST", "https://dev.example/ui/login", strings.NewReader(url.Values{"start": {"1"}, "password": {pw}}.Encode()))
+	rq.Host = "dev.example"
+	rq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := &recorder{h: http.Header{}}
+	u.RemoteHandler().ServeHTTP(rec, rq)
+	for _, c := range (&http.Response{Header: rec.h}).Cookies() {
+		if c.Name == "g4a_rsession" && c.Value != "" {
+			return c
+		}
+	}
+	t.Fatal("no remote session", rec.buf.String())
+	return nil
+}
+
+// remoteGet — страница удалённого Web UI в сессии ck.
+func remoteGet(u *UI, ck *http.Cookie, path string) string {
+	rq, _ := http.NewRequest("GET", "https://dev.example"+path, nil)
+	rq.Host = "dev.example"
+	rq.AddCookie(ck)
+	rec := &recorder{h: http.Header{}}
+	u.RemoteHandler().ServeHTTP(rec, rq)
+	return rec.buf.String()
+}
+
+// remoteDo — удалённый запрос; ok — выдана cookie сессии /ui/.
 func remoteDo(u *UI, method, path string, form url.Values) (string, bool) {
 	var rd *strings.Reader
 	if form != nil {
@@ -520,7 +547,7 @@ func TestPasswordLimiterParallel(t *testing.T) {
 // Пароль, отданный скрипту или агенту (gate4ai ui без терминала), после входа
 // напоминает о себе на каждой странице, пока его не сменят или не включат Telegram.
 func TestRelayedPasswordNotice(t *testing.T) {
-	u, _, _, base := setup(t)
+	u, d, _, base := setup(t)
 	pw, _ := u.EnsurePassword()
 	// Человек в терминале: без пометки.
 	if err := u.MarkRelayed(); err != nil || !u.Protection().Relayed {
@@ -531,8 +558,18 @@ func TestRelayedPasswordNotice(t *testing.T) {
 	if !strings.Contains(page, "data-notice") || !strings.Contains(page, "прошёл через чат") {
 		t.Fatal("no notice after signing in with a relayed password", page)
 	}
+	// «Настройки → Вход» — ссылка на раздел; отдельного хвоста «Вход» после текста нет.
+	notice := regexp.MustCompile(`(?s)<div class="flash" role="status" data-notice>(.*?)</div>`).FindStringSubmatch(page)
+	if notice == nil || !strings.Contains(notice[1], `<a href="/settings/login">Настройки → Вход</a>`) || strings.HasSuffix(strings.TrimSpace(notice[1]), "Вход</a>") {
+		t.Fatal("the notice must link Settings → Signing in inside the text:", notice)
+	}
 	if _, page := b.get("/journal"); !strings.Contains(page, "data-notice") {
 		t.Fatal("the notice must be on every page")
+	}
+	// Удалённо — та же плашка со ссылкой на тот же раздел под /ui/.
+	d.AddPublicURL(func() string { return "https://dev.example" })
+	if page := remoteGet(u, remoteLogin(t, u, pw), "/ui/journal"); !strings.Contains(page, `<a href="/ui/settings/login">Настройки → Вход</a>`) {
+		t.Fatal("remote notice", page)
 	}
 	post("/settings/login/password", url.Values{"current": {pw}, "password": {"correct horse"}, "repeat": {"correct horse"}})
 	b2, _, _ := protectedSession(t, u, base, "correct horse")

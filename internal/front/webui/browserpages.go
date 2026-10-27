@@ -5,9 +5,7 @@ package webui
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -49,10 +47,6 @@ func (u *UI) browserView(m mount) func(r *http.Request) (string, map[string]any,
 				data["Handoff"] = h
 			}
 		}
-		if s != nil && m.remote {
-			_, sess, _ := u.session(m, r)
-			data["NeedTelegram"] = !sess.telegram && s.State != "waiting"
-		}
 		return "browser_view", data, err
 	}
 }
@@ -65,16 +59,6 @@ func (u *UI) browserControl(m mount) func(w http.ResponseWriter, r *http.Request
 		on := r.PostForm.Get("on") == "1"
 		ctx, cancel := context.WithTimeout(r.Context(), browserTimeout)
 		defer cancel()
-		if on && m.remote {
-			_, sess, _ := u.session(m, r)
-			s, err := u.D.BrowserSession(ctx, id)
-			if err != nil || s == nil {
-				return redirectErr("/browser", M("The browser session %s is closed", id))
-			}
-			if !sess.telegram && s.State != "waiting" {
-				return u.confirmControl(r, id, s)
-			}
-		}
 		if err := u.D.BrowserControl(ctx, id, on); err != nil {
 			return redirectErr(back, err)
 		}
@@ -83,38 +67,6 @@ func (u *UI) browserControl(m mount) func(w http.ResponseWriter, r *http.Request
 		}
 		return redirect(back, M("The session is given back to the agent."))
 	}
-}
-
-// confirmControl — удалённое управление вне handoff без входа через Telegram:
-// подтверждение в Telegram-боте, потом сеанс переходит владельцу.
-func (u *UI) confirmControl(r *http.Request, id string, s *daemon.BrowserSession) map[string]any {
-	back := "/browser/" + id
-	c := u.confirmer()
-	if c == nil {
-		return redirectErr(back, errors.New("taking control from another device needs a Telegram bot: connect one in Settings → Notifications on the computer, or wait until the agent hands the page over to you"))
-	}
-	text := "Взять управление браузером? Сеанс " + s.Who + " на " + hostOf(s.URL) + " — запрос с другого устройства (" + r.Header.Get("User-Agent") + ")."
-	err := c.ConfirmLogin("bc_"+random()[:12], text, func(ok bool) {
-		if !ok {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), browserTimeout)
-		defer cancel()
-		_ = u.D.BrowserControl(ctx, id, true)
-	})
-	if err != nil {
-		return redirectErr(back, err)
-	}
-	return redirect(back, M("Confirm in Telegram: the session becomes yours after you allow it there."))
-}
-
-func hostOf(u string) string {
-	s := strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://")
-	h, _, _ := strings.Cut(s, "/")
-	if h == "" {
-		return "?"
-	}
-	return h
 }
 
 func (u *UI) browserClose(w http.ResponseWriter, r *http.Request) map[string]any {
