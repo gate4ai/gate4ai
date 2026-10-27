@@ -48,6 +48,7 @@ type SessionInfo struct {
 type BrowserStatus struct {
 	Sessions []SessionInfo `json:"sessions"`
 	Display  string        `json:"display,omitempty"` // режим Chrome, который запустил пакет ("" — не запускал)
+	Sandbox  string        `json:"sandbox,omitempty"` // off — Chrome запущен с --no-sandbox (ядро запрещает ему песочницу)
 	Warning  string        `json:"warning,omitempty"`
 }
 
@@ -219,6 +220,13 @@ func (b *Browser) status() BrowserStatus {
 	out.Display = b.W.DisplayMode()
 	if out.Display == worker.DisplayHeadless {
 		out.Warning = worker.HeadlessWarning
+	}
+	if b.W.SandboxOff() {
+		out.Sandbox = "off"
+		if out.Warning != "" {
+			out.Warning += ". "
+		}
+		out.Warning += worker.SandboxWarning
 	}
 	return out
 }

@@ -24,6 +24,7 @@ type Settings struct {
 	RedactParams []string // параметры адресов и поля JSON, скрытые в network
 	DownloadDir  string   // куда Chrome молча сохраняет обычные загрузки (по умолчанию — папка загрузок пользователя)
 	Display      string   // auto (по умолчанию) | virtual | headless | host — см. ResolveDisplay
+	Sandbox      string   // auto (по умолчанию) | on | off — см. ResolveSandbox
 }
 
 // EngineFactory создаёт движок (подменяется в тестах).
@@ -82,7 +83,7 @@ func normalize(st Settings) Settings {
 
 // settingsKey — настройки, при смене которых движок и Chrome пересоздаются.
 func settingsKey(st Settings) string {
-	return fmt.Sprint(st.CDPURL, st.ChromePath, st.ProfileDir, st.Display)
+	return fmt.Sprint(st.CDPURL, st.ChromePath, st.ProfileDir, st.Display, st.Sandbox)
 }
 
 // ErrSettingsChanged — настройки браузера сменили, пока открыты сессии или
@@ -137,7 +138,7 @@ func (s *Service) executor(ctx context.Context, st Settings, others bool) (*Exec
 		if env.Getenv == nil {
 			env = SystemDisplayEnv()
 		}
-		_, denv, flags, err := s.disp.prepare(ctx, st.Display, filepath.Join(filepath.Dir(st.ProfileDir), ".gate4ai-display"), env)
+		denv, flags, err := s.disp.launchEnv(ctx, st, chrome, filepath.Join(filepath.Dir(st.ProfileDir), ".gate4ai-display"), env)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
@@ -411,6 +412,14 @@ func (s *Service) DisplayMode() string {
 		return ""
 	}
 	return s.disp.current()
+}
+
+// SandboxOff — Chrome, который воркер запустил, работает без песочницы (--no-sandbox).
+func (s *Service) SandboxOff() bool {
+	s.mu.Lock()
+	own := s.proc != nil
+	s.mu.Unlock()
+	return own && s.disp.sandboxOff()
 }
 
 // Вид страницы сессии.

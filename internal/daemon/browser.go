@@ -40,6 +40,7 @@ type BrowserSession struct {
 type BrowserStatus struct {
 	Sessions []BrowserSession `json:"sessions"`
 	Display  string           `json:"display,omitempty"` // virtual | headless | host ("" — Chrome не запущен)
+	Sandbox  string           `json:"sandbox,omitempty"` // off — Chrome работает без песочницы (--no-sandbox)
 	Warning  string           `json:"warning,omitempty"`
 	Running  bool             `json:"running"` // браузер отвечает (встроен: всегда, когда есть)
 	Missing  bool             `json:"missing,omitempty"`

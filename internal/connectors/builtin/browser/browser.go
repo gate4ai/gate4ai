@@ -170,6 +170,7 @@ func settings(r abi.ExecRequest) worker.Settings {
 	st.RedactParams = strs(s["redact_params"])
 	st.DownloadDir = str(s, "download_dir")
 	st.Display = str(s, "display")
+	st.Sandbox = str(s, "sandbox")
 	return st
 }
 

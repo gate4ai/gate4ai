@@ -5,6 +5,8 @@
 // без него Chrome работает headless) и шрифты (иначе на страницах
 // «квадраты»), и команды установки недостающего под ОС и дистрибутив.
 // Пользуются gate4ai browser setup, gate4ai doctor и Web UI («Браузер»).
+// Без root: Chrome for Testing (userchrome.go), его библиотеки и шрифты на
+// Debian / Ubuntu и состояние песочницы (userlibs.go).
 package browserenv
 
 import (
@@ -26,8 +28,9 @@ type Sys struct {
 	LookPath     func(string) (string, error)
 	ReadFile     func(string) ([]byte, error)
 	Exists       func(string) bool
-	Glob         func(pattern string) []string                     // Chrome из кешей Playwright и Puppeteer
-	Output       func(name string, args ...string) (string, error) // версия Chrome, fc-list, ldd
+	Glob         func(pattern string) []string                                   // Chrome из кешей Playwright и Puppeteer
+	Output       func(name string, args ...string) (string, error)               // версия Chrome, fc-list, ldd
+	OutputEnv    func(env []string, name string, args ...string) (string, error) // то же с переменными окружения (ldd с LD_LIBRARY_PATH; nil — Output)
 	Run          func(ctx context.Context, cmd string, out io.Writer) error
 	Root         bool
 	Home         string // домашний каталог (кеши Playwright, Puppeteer, flatpak)
@@ -42,6 +45,12 @@ func System() Sys {
 		DataDir: paths.Home(),
 		Output: func(name string, args ...string) (string, error) {
 			b, err := exec.Command(name, args...).Output()
+			return string(b), err
+		},
+		OutputEnv: func(env []string, name string, args ...string) (string, error) {
+			c := exec.Command(name, args...)
+			c.Env = append(os.Environ(), env...)
+			b, err := c.Output()
 			return string(b), err
 		},
 		Run: func(ctx context.Context, cmd string, out io.Writer) error {
@@ -73,6 +82,8 @@ type BrowserCheck struct {
 	Display   string   `json:"display"`        // режим, в котором запустится браузер: host | virtual | headless | none
 	Fonts     int      `json:"fonts,omitempty"`
 	Libraries []string `json:"missing_libraries,omitempty"` // разделяемые библиотеки, которых Chrome не находит (ldd: not found)
+	LibDir    string   `json:"lib_dir,omitempty"`           // библиотеки Chrome из каталога данных (gate4ai browser setup --user без root)
+	Sandbox   string   `json:"sandbox,omitempty"`           // песочница Chrome: ok | blocked (ядро запрещает user namespaces этому Chrome: он запустится с --no-sandbox)
 	Missing   []string `json:"missing"`                     // chrome, libraries, xvfb, fonts
 	Needs     []Need   `json:"needs"`                       // то же подробно: зачем, обязательно ли, пакеты и команда
 	Commands  []string `json:"commands"`                    // как поставить недостающее (все команды, по порядку)
@@ -224,9 +235,17 @@ func CheckBrowser(s Sys) BrowserCheck {
 		c.Missing = append(c.Missing, "chrome")
 	} else if linux {
 		// Chromium из кеша Playwright или скачанный пакет не тянет зависимости:
-		// без системных библиотек он не запустится — ldd называет их точно.
+		// без системных библиотек он не запустится — ldd называет их точно
+		// (библиотеки из каталога данных — через LD_LIBRARY_PATH, как при запуске).
+		if env := userLibEnv(s); len(env) > 0 {
+			c.LibDir = UserLibDir(s.DataDir)
+		}
 		if c.Libraries = missingLibraries(s, c.Chrome); len(c.Libraries) > 0 {
 			c.Missing = append(c.Missing, "libraries")
+		}
+		c.Sandbox = "ok"
+		if SandboxBlocked(s, c.Chrome) {
+			c.Sandbox = "blocked"
 		}
 	}
 	if linux && !c.Screen && c.Xvfb == "" {
@@ -238,6 +257,9 @@ func CheckBrowser(s Sys) BrowserCheck {
 			if strings.TrimSpace(out) == "" {
 				c.Fonts = 0
 			}
+		}
+		if n := userFontCount(s); n > c.Fonts {
+			c.Fonts = n // шрифты в каталоге данных: fc-list их не видит без FONTCONFIG_FILE
 		}
 		if c.Fonts < 5 {
 			c.Missing = append(c.Missing, "fonts")
@@ -297,7 +319,13 @@ func missingLibraries(s Sys, chrome string) []string {
 			return nil
 		}
 	}
-	out, err := s.Output("ldd", bin)
+	var out string
+	var err error
+	if env := userLibEnv(s); len(env) > 0 && s.OutputEnv != nil {
+		out, err = s.OutputEnv(env, "ldd", bin)
+	} else {
+		out, err = s.Output("ldd", bin)
+	}
 	if err != nil && out == "" {
 		return nil
 	}
@@ -361,6 +389,28 @@ var libPackages = map[string]map[string]string{
 	"libgraphene-1.0.so":   {"debian": "libgraphene-1.0-0", "fedora": "graphene", "suse": "libgraphene-1_0-0", "arch": "graphene", "alpine": "graphene"},
 	"libepoxy.so":          {"debian": "libepoxy0", "fedora": "libepoxy", "suse": "libepoxy0", "arch": "libepoxy", "alpine": "libepoxy"},
 	"libgstreamer-1.0.so":  {"debian": "libgstreamer1.0-0", "fedora": "gstreamer1", "suse": "libgstreamer-1_0-0", "arch": "gstreamer", "alpine": "gstreamer"},
+	// Зависимости библиотек выше — всплывают, когда библиотеки кладутся в каталог
+	// данных без root (InstallUserLibraries), на сервере без графики их тоже нет.
+	"libavahi-client.so":   {"debian": "libavahi-client3", "fedora": "avahi-libs", "suse": "libavahi-client3", "arch": "avahi", "alpine": "avahi-libs"},
+	"libavahi-common.so":   {"debian": "libavahi-common3", "fedora": "avahi-libs", "suse": "libavahi-common3", "arch": "avahi", "alpine": "avahi-libs"},
+	"libxcb-render.so":     {"debian": "libxcb-render0", "fedora": "libxcb", "suse": "libxcb-render0", "arch": "libxcb", "alpine": "libxcb"},
+	"libxcb-shm.so":        {"debian": "libxcb-shm0", "fedora": "libxcb", "suse": "libxcb-shm0", "arch": "libxcb", "alpine": "libxcb"},
+	"libpixman-1.so":       {"debian": "libpixman-1-0", "fedora": "pixman", "suse": "libpixman-1-0", "arch": "pixman", "alpine": "pixman"},
+	"libthai.so":           {"debian": "libthai0", "fedora": "libthai", "suse": "libthai0", "arch": "libthai", "alpine": "libthai"},
+	"libdatrie.so":         {"debian": "libdatrie1", "fedora": "libdatrie", "suse": "libdatrie1", "arch": "libdatrie", "alpine": "libdatrie"},
+	"libgraphite2.so":      {"debian": "libgraphite2-3", "fedora": "graphite2", "suse": "libgraphite2-3", "arch": "graphite", "alpine": "graphite2"},
+	"libXRes.so":           {"debian": "libxres1", "fedora": "libXres", "suse": "libXres1", "arch": "libxres", "alpine": "libxres"},
+	"libpng16.so":          {"debian": "libpng16-16", "fedora": "libpng", "suse": "libpng16-16", "arch": "libpng", "alpine": "libpng"},
+	"libfribidi.so":        {"debian": "libfribidi0", "fedora": "fribidi", "suse": "libfribidi0", "arch": "fribidi", "alpine": "fribidi"},
+	"libbrotlidec.so":      {"debian": "libbrotli1", "fedora": "brotli", "suse": "libbrotlidec1", "arch": "brotli", "alpine": "brotli-libs"},
+	"libbrotlicommon.so":   {"debian": "libbrotli1", "fedora": "brotli", "suse": "libbrotlicommon1", "arch": "brotli", "alpine": "brotli-libs"},
+	"libbz2.so":            {"debian": "libbz2-1.0", "fedora": "bzip2-libs", "suse": "libbz2-1", "arch": "bzip2", "alpine": "libbz2"},
+	"libxcb-dri3.so":       {"debian": "libxcb-dri3-0", "fedora": "libxcb", "suse": "libxcb-dri3-0", "arch": "libxcb", "alpine": "libxcb"},
+	"libxcb-randr.so":      {"debian": "libxcb-randr0", "fedora": "libxcb", "suse": "libxcb-randr0", "arch": "libxcb", "alpine": "libxcb"},
+	"libxcb-sync.so":       {"debian": "libxcb-sync1", "fedora": "libxcb", "suse": "libxcb-sync1", "arch": "libxcb", "alpine": "libxcb"},
+	"libxcb-present.so":    {"debian": "libxcb-present0", "fedora": "libxcb", "suse": "libxcb-present0", "arch": "libxcb", "alpine": "libxcb"},
+	"libxcb-xfixes.so":     {"debian": "libxcb-xfixes0", "fedora": "libxcb", "suse": "libxcb-xfixes0", "arch": "libxcb", "alpine": "libxcb"},
+	"libwayland-server.so": {"debian": "libwayland-server0", "fedora": "libwayland-server", "suse": "libwayland-server0", "arch": "wayland", "alpine": "wayland-libs-server"},
 }
 
 // soname — имя библиотеки без версии: libnss3.so, libatk-1.0.so.0 → libatk-1.0.so.
@@ -512,7 +562,15 @@ func planInstall(s Sys, missing, libs []string) (needs []Need, cmds, notes []str
 		cmds = append(cmds, c)
 	}
 	if need["chrome"] && UserInstallAvailable(s) {
-		notes = append(notes, "without root: gate4ai browser setup --user downloads Chrome for Testing into "+UserChromeDir(s.DataDir)+" (its system libraries still come from packages)")
+		n := "without root: gate4ai browser setup --user downloads Chrome for Testing into " + UserChromeDir(s.DataDir)
+		if UserLibrariesAvailable(s) {
+			n += " and puts its libraries and fonts next to it (apt-get download, no root)"
+		} else {
+			n += " (its system libraries still come from packages)"
+		}
+		notes = append(notes, n)
+	} else if (need["libraries"] || need["fonts"]) && UserLibrariesAvailable(s) {
+		notes = append(notes, "without root: gate4ai browser setup --user puts the libraries and fonts into "+UserChromeDir(s.DataDir)+" (apt-get download, no root)")
 	}
 	if sudo != "" && len(cmds) > 0 {
 		root = true

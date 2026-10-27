@@ -196,3 +196,43 @@ func TestVirtualDisplayRealChrome(t *testing.T) {
 		t.Fatal("Xvfb outlived the worker")
 	}
 }
+
+func TestResolveSandbox(t *testing.T) {
+	blocked := func(chrome string) bool { return strings.HasPrefix(chrome, "/home/") }
+	e := DisplayEnv{GOOS: "linux", Getenv: func(string) string { return "" }, Look: func(string) (string, error) { return "", exec.ErrNotFound }, SandboxBlocked: blocked}
+	for _, c := range []struct {
+		mode, chrome string
+		want         bool
+		err          string
+	}{
+		{"", "/opt/google/chrome/chrome", true, ""},
+		{"auto", "/opt/google/chrome/chrome", true, ""},
+		{"auto", "/home/u/.local/state/gate4ai/chrome/156/chrome-linux64/chrome", false, ""},
+		{"on", "/home/u/chrome", true, ""},
+		{"off", "/opt/google/chrome/chrome", false, ""},
+		{"maybe", "/opt/google/chrome/chrome", false, "must be one of"},
+	} {
+		got, err := ResolveSandbox(c.mode, c.chrome, e)
+		if got != c.want || (c.err == "") != (err == nil) || err != nil && !strings.Contains(err.Error(), c.err) {
+			t.Errorf("%s %s: %v %v", c.mode, c.chrome, got, err)
+		}
+	}
+	// Без SandboxBlocked (тесты, не Linux) auto — песочница включена.
+	if on, _ := ResolveSandbox("auto", "/home/u/chrome", DisplayEnv{GOOS: "linux"}); !on {
+		t.Fatal("auto without a check must keep the sandbox")
+	}
+	// launchEnv: флаги режима плюс --no-sandbox, окружение — библиотеки из каталога данных.
+	e.ChromeEnv = func() []string { return []string{"LD_LIBRARY_PATH=/data/chrome/lib"} }
+	d := &display{}
+	env, flags, err := d.launchEnv(context.Background(), Settings{Display: "headless", Sandbox: "auto"}, "/home/u/chrome", t.TempDir(), e)
+	if err != nil || strings.Join(flags, " ") != "--headless=new --window-size="+WindowSize+" --no-sandbox" || strings.Join(env, " ") != "LD_LIBRARY_PATH=/data/chrome/lib" || !d.sandboxOff() {
+		t.Fatal(env, flags, err)
+	}
+	env, flags, err = d.launchEnv(context.Background(), Settings{Display: "headless"}, "/opt/google/chrome/chrome", t.TempDir(), e)
+	if err != nil || strings.Contains(strings.Join(flags, " "), "no-sandbox") || d.sandboxOff() || len(env) != 1 {
+		t.Fatal(env, flags, err)
+	}
+	if _, _, err = d.launchEnv(context.Background(), Settings{Display: "headless", Sandbox: "no"}, "/opt/google/chrome/chrome", t.TempDir(), e); err == nil {
+		t.Fatal("bad sandbox mode")
+	}
+}

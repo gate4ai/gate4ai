@@ -21,7 +21,7 @@ const browserUsage = `usage:
   gate4ai browser sessions [--json]       browser sessions of agents: who, which page, what is going on, the link to watch
   gate4ai browser sessions close <id>     close a session of an agent
   gate4ai browser watch <id>              open the live view of a session (on a server without a screen: print its link)
-  gate4ai browser setup [--yes] [--dry-run] [--json]
+  gate4ai browser setup [--yes] [--dry-run] [--user] [--json]
                                           check Chrome, the virtual screen (Xvfb) and fonts; offer the commands that install what is missing`
 
 // browserOwnerCmds — подкоманды владельца (не действия коннектора).

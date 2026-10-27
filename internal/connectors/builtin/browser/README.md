@@ -17,7 +17,7 @@
 
 Устанавливать нечего: компонент встроен в `gate4ai`. Прежний пакет `browser` из магазина daemon удаляет при старте, а его `allowed_domains` / `blocked` / `mode` переносит в список доступа (`internal/daemon/migrate.go`).
 
-Настройки — `connectors.browser` в конфигурации gate4ai: `cdp_url`, `chrome_path`, `profile_dir`, `max_text_chars` (предел текста страницы и ответов агенту, 30000), `redact_params` (параметры адресов и поля JSON с личными идентификаторами сайта — `network` их скрывает), `download_dir`, `download_types`, `max_download_bytes`. Сайты — не настройка, а список доступа (`access.sites`).
+Настройки — `connectors.browser` в конфигурации gate4ai: `cdp_url`, `chrome_path`, `profile_dir`, `display` (экран: `auto`, `virtual`, `headless`, `host`), `sandbox` (песочница Chrome: `auto` — выключается только когда ядро запрещает ей user namespaces этому Chrome, `on`, `off`), `max_text_chars` (предел текста страницы и ответов агенту, 30000), `redact_params` (параметры адресов и поля JSON с личными идентификаторами сайта — `network` их скрывает), `download_dir`, `download_types`, `max_download_bytes`. Сайты — не настройка, а список доступа (`access.sites`).
 
 Chrome запускается с `--disable-blink-features=AutomationControlled` (иначе с портом отладки `navigator.webdriver = true`, и антифрод сайтов видит автоматизацию) и `--test-type` (без него Chrome весь сеанс показывает инфобар «unsupported command-line flag» про первый флаг), одной вкладкой (вкладки сеансов открываются от неё). Если окно Chrome закрыли, следующий вызов подключается заново или запускает Chrome; при остановке пакета запущенный им Chrome закрывается.
 

@@ -1,13 +1,14 @@
 {{template "head" .}}
 {{$d := .Data}}{{$st := $d.Status}}{{$ck := $d.Check}}
 <h2>{{T "Browser"}}</h2>
-{{if not $ck.OK}}<div class="error">{{T "The browser is not available on this computer: Chrome is not installed. Agents get browser_unavailable until it is."}}
+{{if not $ck.OK}}<div class="error">{{if $ck.Chrome}}{{T "The browser is not available on this computer: %s does not start, it misses the libraries %s. Agents get browser_unavailable until they are installed." $ck.Chrome (join $ck.Libraries ", ")}}{{else}}{{T "The browser is not available on this computer: Chrome is not installed. Agents get browser_unavailable until it is."}}{{end}}
 {{with $ck.Commands}}<pre class="box">{{range .}}{{.}}
 {{end}}</pre>{{end}}<p class="help">{{T "Or run gate4ai browser setup in a terminal: it checks and installs what is missing (it asks first)."}}{{range $ck.Notes}} {{.}}{{end}}</p></div>
 {{else if and (eq $ck.Display "headless") (not $st.Warning)}}<div class="note warn">{{T "No screen and no Xvfb here: the browser will run without a screen (headless), and sites with bot protection ask for a captcha or block more often."}}
 {{with $ck.Commands}}<pre class="box">{{range .}}{{.}}
 {{end}}</pre>{{end}}</div>{{end}}
-{{with $st.Warning}}<div class="note warn">{{T "The browser runs without a screen (headless): sites with bot protection ask for a captcha or block more often. Install Xvfb for a virtual screen — see gate4ai browser setup."}}</div>{{end}}
+{{if and $st.Warning (eq $st.Display "headless")}}<div class="note warn">{{T "The browser runs without a screen (headless): sites with bot protection ask for a captcha or block more often. Install Xvfb for a virtual screen — see gate4ai browser setup."}}</div>{{end}}
+{{if or (eq $st.Sandbox "off") (and $ck.OK (eq $ck.Sandbox "blocked"))}}<div class="note warn">{{T "Chrome runs without its sandbox (--no-sandbox): the kernel does not let this Chrome create user namespaces (AppArmor). A page that exploits a Chrome bug is not contained by Chrome itself; keep Chrome updated (gate4ai browser setup --user). Chrome from a distribution package keeps the sandbox."}}</div>{{end}}
 {{if $st.Missing}}<div class="card"><p>{{T "The browser package is not installed."}}</p><a class="btn" href="{{.Base}}/connectors">{{T "Access"}}</a></div>
 {{else}}
 <p class="help">{{T "The sessions agents have open in the gate4ai browser. Watch one live; take control to click and type yourself — the agent waits until you give it back."}}</p>

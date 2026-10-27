@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/gate4ai/gate4ai/internal/platform/browserenv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,11 +39,49 @@ type DisplayEnv struct {
 	GOOS   string
 	Getenv func(string) string
 	Look   func(string) (string, error) // exec.LookPath
+	// SandboxBlocked — ядро запрещает песочницу этому Chrome (browserenv.SandboxBlocked; nil — нет).
+	SandboxBlocked func(chrome string) bool
+	// ChromeEnv — переменные запуска Chrome с библиотеками и шрифтами из каталога
+	// данных (browserenv.UserChromeEnv; nil — нет).
+	ChromeEnv func() []string
 }
 
 // SystemDisplayEnv — окружение этого процесса.
 func SystemDisplayEnv() DisplayEnv {
-	return DisplayEnv{GOOS: runtime.GOOS, Getenv: os.Getenv, Look: exec.LookPath}
+	sys := browserenv.System()
+	return DisplayEnv{GOOS: runtime.GOOS, Getenv: os.Getenv, Look: exec.LookPath,
+		SandboxBlocked: func(chrome string) bool { return browserenv.SandboxBlocked(sys, chrome) },
+		ChromeEnv:      func() []string { return browserenv.UserChromeEnv(sys.DataDir, os.Getenv) }}
+}
+
+// Песочница Chrome (настройка sandbox): auto — включена, кроме случая, когда
+// ядро запрещает ей user namespaces (Ubuntu 24.04+ с AppArmor — Chrome не из
+// пакета, например Chrome for Testing из каталога данных, иначе не стартует);
+// on — всегда (Chrome не запустится, если запрещено); off — всегда --no-sandbox.
+const (
+	SandboxAuto = "auto"
+	SandboxOn   = "on"
+	SandboxOff  = "off"
+)
+
+var SandboxModes = []string{SandboxAuto, SandboxOn, SandboxOff}
+
+// SandboxWarning — что сказать владельцу о Chrome без песочницы.
+const SandboxWarning = "Chrome runs without its sandbox (--no-sandbox): the kernel does not let this Chrome create user namespaces (AppArmor). " +
+	"A page that exploits a Chrome bug is not contained by Chrome itself; keep Chrome updated (gate4ai browser setup --user). " +
+	"Chrome from a distribution package has its own AppArmor profile and keeps the sandbox"
+
+// ResolveSandbox — включать ли песочницу: true — обычный запуск, false — --no-sandbox.
+func ResolveSandbox(mode, chrome string, e DisplayEnv) (bool, error) {
+	switch mode {
+	case "", SandboxAuto:
+		return e.SandboxBlocked == nil || !e.SandboxBlocked(chrome), nil
+	case SandboxOn:
+		return true, nil
+	case SandboxOff:
+		return false, nil
+	}
+	return false, fmt.Errorf("sandbox %q must be one of %s", mode, strings.Join(SandboxModes, ", "))
 }
 
 // hasScreen — у процесса есть графический сеанс: macOS и Windows — всегда
@@ -220,9 +259,40 @@ func XauthEntry(cookie []byte) []byte {
 
 // display — дисплей Chrome воркера: режим и Xvfb, если он нужен.
 type display struct {
-	mu   sync.Mutex
-	mode string // решённый режим последнего запуска
-	x    *Xvfb
+	mu        sync.Mutex
+	mode      string // решённый режим последнего запуска
+	noSandbox bool   // последний запуск — с --no-sandbox
+	x         *Xvfb
+}
+
+// launchEnv — окружение и флаги запуска Chrome: режим экрана (prepare) плюс
+// песочница (ResolveSandbox) и библиотеки из каталога данных (ChromeEnv).
+func (d *display) launchEnv(ctx context.Context, st Settings, chrome, dir string, e DisplayEnv) (env, flags []string, err error) {
+	_, env, flags, err = d.prepare(ctx, st.Display, dir, e)
+	if err != nil {
+		return nil, nil, err
+	}
+	sandbox, err := ResolveSandbox(st.Sandbox, chrome, e)
+	if err != nil {
+		return nil, nil, err
+	}
+	d.mu.Lock()
+	d.noSandbox = !sandbox
+	d.mu.Unlock()
+	if !sandbox {
+		flags = append(flags, "--no-sandbox")
+	}
+	if e.ChromeEnv != nil {
+		env = append(env, e.ChromeEnv()...)
+	}
+	return env, flags, nil
+}
+
+// sandboxOff — последний запуск Chrome был без песочницы.
+func (d *display) sandboxOff() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.noSandbox
 }
 
 // prepare решает режим и, для virtual, поднимает Xvfb (или берёт живой);
